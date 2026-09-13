@@ -1,6 +1,6 @@
 # Example ReRDMFT input file: water molecule
 NELEC 10
-BASIS sto-3g.gbs
+BASIS water-sto-3g.gbs
 
 GEOMETRY
 O   0.000000   0.000000   0.000000

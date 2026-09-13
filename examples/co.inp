@@ -1,8 +1,8 @@
 # Example ReRDMFT input file: carbon monoxide, using the cc-pVTZ basis
 # (downloaded from https://www.basissetexchange.org/), which includes D and
-# F shells for both atoms (see cc-pvtz.gbs).
+# F shells for both atoms (see co-cc-pvtz.gbs).
 NELEC 14
-BASIS cc-pvtz.gbs
+BASIS co-cc-pvtz.gbs
 
 GEOMETRY
 C   0.000000   0.000000   0.000000
