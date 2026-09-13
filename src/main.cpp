@@ -110,6 +110,29 @@ void printWelcomeBanner() {
   std::cout << border << "\n\n";
 }
 
+void printFarewell() {
+  static const char* kArt = R"(
+                     \|/   \\|//   \|/
+                      \     |     /
+                   ,--_.\   |   /,_--,
+                  /    _.-'''-._    \
+                 /   ,'         ',   \
+                |   /    .---.    \   |
+                |  |    ( x x )    |  |
+                |  |     '---'     |  |
+                 \  \      |      /  /
+                  \  '.   /=\   .'  /
+                   '-._'.|===|.'_.-'
+                       | |===| |
+                       | |===| |
+                        '.===.'
+                          '-'
+)";
+  std::cout << kArt << "\n";
+  std::cout << "\"At last we will reveal ourselves to the Jedi.\n"
+                " At last we will have revenge.\"\n\n";
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -118,6 +141,7 @@ int main(int argc, char** argv) {
 
   if (argc != 2) {
     std::cerr << "Usage: " << argv[0] << " <input file>\n";
+    printFarewell();
     return 1;
   }
 
@@ -183,6 +207,7 @@ int main(int argc, char** argv) {
         h_rkb_ortho_eig.eigenvectors, rkb_coefficients, x_full, s_large, s_small_ukb);
   } catch (const std::exception& e) {
     std::cerr << "Error: " << e.what() << "\n";
+    printFarewell();
     return 1;
   }
 
@@ -377,5 +402,6 @@ int main(int argc, char** argv) {
   std::cout << "Max Kramers eigenvector-partner deviation, 1-|<odd|Theta even>_S| (expect ~0): "
              << max_kramers_partner_deviation << "\n";
 
+  printFarewell();
   return 0;
 }
