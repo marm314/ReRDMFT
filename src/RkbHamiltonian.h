@@ -31,6 +31,16 @@ Matrix<std::complex<double>> rkbHamiltonianMatrix(
     const Matrix<std::complex<double>>& h_ukb,
     const Matrix<std::complex<double>>& rkb_coefficients);
 
+// Builds W = [[I, 0], [0, C^T]] on its own (see rkbHamiltonianMatrix for
+// the full derivation): the ((2*nLarge + 2*nSmall) x 4*nLarge) embedding
+// of the RKB core Hamiltonian's basis back into the original
+// [Large-alpha, Large-beta, uKB-Small-alpha, uKB-Small-beta] spinor-AO
+// basis. Used both by rkbHamiltonianMatrix and by anything that needs to
+// map an RKB-basis vector back to that original representation (e.g. a
+// Kramers-symmetry check).
+Matrix<std::complex<double>> rkbEmbeddingMatrix(
+    const Matrix<std::complex<double>>& rkb_coefficients);
+
 }  // namespace rerdmft
 
 #endif  // RERDMFT_RKBHAMILTONIAN_H

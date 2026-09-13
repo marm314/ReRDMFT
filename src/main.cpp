@@ -9,6 +9,7 @@
 #include "DiracKinetic.h"
 #include "Input.h"
 #include "Integrals.h"
+#include "KramersSymmetry.h"
 #include "LinearAlgebra.h"
 #include "MolecularBasis.h"
 #include "RkbHamiltonian.h"
@@ -104,12 +105,15 @@ int main(int argc, char** argv) {
   rerdmft::Matrix<std::complex<double>> h_ukb;
   rerdmft::Matrix<std::complex<double>> rkb_coefficients;
   rerdmft::Matrix<std::complex<double>> h_rkb;
+  rerdmft::Matrix<double> s_large;
   rerdmft::Matrix<double> x_large;
+  rerdmft::Matrix<double> s_small_ukb;
   rerdmft::Matrix<std::complex<double>> s_small;
   rerdmft::Matrix<std::complex<double>> x_small;
   rerdmft::Matrix<std::complex<double>> x_full;
   rerdmft::Matrix<std::complex<double>> h_rkb_ortho;
   rerdmft::HermitianEigenResult h_rkb_ortho_eig;
+  double max_kramers_partner_deviation = 0.0;
   try {
     input.read(argv[1]);
     basis_set.read(input.basis_file());
@@ -134,8 +138,10 @@ int main(int argc, char** argv) {
         rerdmft::rkbCoefficients(large_basis.functions(), small_basis.functions());
     h_rkb = rerdmft::rkbHamiltonianMatrix(h_ukb, rkb_coefficients);
 
-    x_large = rerdmft::inverseSqrt(rerdmft::overlapMatrix(large_basis.functions()));
+    s_large = rerdmft::overlapMatrix(large_basis.functions());
+    x_large = rerdmft::inverseSqrt(s_large);
 
+    s_small_ukb = rerdmft::overlapMatrix(small_basis.functions());
     s_small = rerdmft::rkbSmallOverlapMatrix(small_basis.functions(), rkb_coefficients);
     x_small = rerdmft::inverseSqrtHermitian(s_small);
 
@@ -143,6 +149,9 @@ int main(int argc, char** argv) {
     h_rkb_ortho = rerdmft::hRkbOrthoMatrix(h_rkb, x_full);
 
     h_rkb_ortho_eig = rerdmft::diagonalizeHermitian(h_rkb_ortho);
+
+    max_kramers_partner_deviation = rerdmft::maxKramersPartnerDeviation(
+        h_rkb_ortho_eig.eigenvectors, rkb_coefficients, x_full, s_large, s_small_ukb);
   } catch (const std::exception& e) {
     std::cerr << "Error: " << e.what() << "\n";
     return 1;
@@ -336,6 +345,8 @@ int main(int argc, char** argv) {
   }
   std::cout << "Max |E(even) - E(odd)| Kramers-pair splitting (expect ~0): " << max_kramers_splitting
              << "\n";
+  std::cout << "Max Kramers eigenvector-partner deviation, 1-|<odd|Theta even>_S| (expect ~0): "
+             << max_kramers_partner_deviation << "\n";
 
   return 0;
 }
