@@ -96,45 +96,60 @@ Matrix<double> inverseSqrt(const Matrix<double>& s) {
   return x;
 }
 
-Matrix<std::complex<double>> inverseSqrtHermitian(const Matrix<std::complex<double>>& s) {
-  if (s.rows() != s.cols()) {
-    throw std::runtime_error("inverseSqrtHermitian: matrix is not square");
+HermitianEigenResult diagonalizeHermitian(const Matrix<std::complex<double>>& a_in) {
+  if (a_in.rows() != a_in.cols()) {
+    throw std::runtime_error("diagonalizeHermitian: matrix is not square");
   }
-  const lapack_int n = static_cast<lapack_int>(s.rows());
+  const lapack_int n = static_cast<lapack_int>(a_in.rows());
   const std::size_t un = static_cast<std::size_t>(n);
 
   std::vector<std::complex<double>> a(un * un);
   for (std::size_t i = 0; i < un; ++i) {
     for (std::size_t j = 0; j < un; ++j) {
-      a[i * un + j] = s(i, j);
+      a[i * un + j] = a_in(i, j);
     }
   }
 
   std::vector<double> w(un);
   const lapack_int info = LAPACKE_zheev(LAPACK_ROW_MAJOR, 'V', 'U', n, a.data(), n, w.data());
   if (info != 0) {
-    throw std::runtime_error("inverseSqrtHermitian: LAPACKE_zheev failed to converge");
+    throw std::runtime_error("diagonalizeHermitian: LAPACKE_zheev failed to converge");
   }
+
+  HermitianEigenResult result;
+  result.eigenvalues.assign(w.begin(), w.end());
+  result.eigenvectors = Matrix<std::complex<double>>(un, un);
+  for (std::size_t i = 0; i < un; ++i) {
+    for (std::size_t k = 0; k < un; ++k) {
+      result.eigenvectors(i, k) = a[i * un + k];
+    }
+  }
+  return result;
+}
+
+Matrix<std::complex<double>> inverseSqrtHermitian(const Matrix<std::complex<double>>& s) {
+  const HermitianEigenResult eig = diagonalizeHermitian(s);
+  const std::size_t un = eig.eigenvalues.size();
 
   constexpr double kMinEigenvalue = 1e-10;
   std::vector<double> inv_sqrt_w(un);
   for (std::size_t i = 0; i < un; ++i) {
-    if (w[i] <= kMinEigenvalue) {
+    if (eig.eigenvalues[i] <= kMinEigenvalue) {
       throw std::runtime_error(
           "inverseSqrtHermitian: matrix is not safely positive definite (eigenvalue " +
-          std::to_string(w[i]) + " <= " + std::to_string(kMinEigenvalue) + ")");
+          std::to_string(eig.eigenvalues[i]) + " <= " + std::to_string(kMinEigenvalue) + ")");
     }
-    inv_sqrt_w[i] = 1.0 / std::sqrt(w[i]);
+    inv_sqrt_w[i] = 1.0 / std::sqrt(eig.eigenvalues[i]);
   }
 
-  // a(i,k) is now the i-th component of the k-th eigenvector. Build
   // S^-1/2 = U diag(1/sqrt(w)) U^dagger: X(i,j) = sum_k U(i,k) (1/sqrt(w_k)) conj(U(j,k)).
+  const Matrix<std::complex<double>>& u = eig.eigenvectors;
   Matrix<std::complex<double>> x(un, un, std::complex<double>(0.0, 0.0));
   for (std::size_t i = 0; i < un; ++i) {
     for (std::size_t j = 0; j < un; ++j) {
       std::complex<double> sum(0.0, 0.0);
       for (std::size_t k = 0; k < un; ++k) {
-        sum += a[i * un + k] * inv_sqrt_w[k] * std::conj(a[j * un + k]);
+        sum += u(i, k) * inv_sqrt_w[k] * std::conj(u(j, k));
       }
       x(i, j) = sum;
     }

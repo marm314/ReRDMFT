@@ -109,6 +109,7 @@ int main(int argc, char** argv) {
   rerdmft::Matrix<std::complex<double>> x_small;
   rerdmft::Matrix<std::complex<double>> x_full;
   rerdmft::Matrix<std::complex<double>> h_rkb_ortho;
+  rerdmft::HermitianEigenResult h_rkb_ortho_eig;
   try {
     input.read(argv[1]);
     basis_set.read(input.basis_file());
@@ -139,6 +140,8 @@ int main(int argc, char** argv) {
 
     x_full = rerdmft::xFullMatrix(x_large, x_small);
     h_rkb_ortho = rerdmft::hRkbOrthoMatrix(h_rkb, x_full);
+
+    h_rkb_ortho_eig = rerdmft::diagonalizeHermitian(h_rkb_ortho);
   } catch (const std::exception& e) {
     std::cerr << "Error: " << e.what() << "\n";
     return 1;
@@ -317,6 +320,19 @@ int main(int argc, char** argv) {
   std::cout << "X_small dimensions: " << x_small.rows() << " x " << x_small.cols() << "\n";
   std::cout << "X_full dimensions: " << x_full.rows() << " x " << x_full.cols() << "\n";
   std::cout << "H_RKB_ortho dimensions: " << h_rkb_ortho.rows() << " x " << h_rkb_ortho.cols()
+             << "\n";
+
+  std::cout << "\nEigenvalues of H_RKB_ortho (Kramers pairs, even/odd indices side by side):\n";
+  std::cout << "  " << std::setw(6) << "index" << std::setw(20) << "E (even)" << std::setw(10)
+             << "index" << std::setw(20) << "E (odd)" << "\n";
+  const auto& eigenvalues = h_rkb_ortho_eig.eigenvalues;
+  double max_kramers_splitting = 0.0;
+  for (std::size_t i = 0; i + 1 < eigenvalues.size(); i += 2) {
+    std::cout << "  " << std::setw(6) << i << std::setw(20) << eigenvalues[i] << std::setw(10)
+               << (i + 1) << std::setw(20) << eigenvalues[i + 1] << "\n";
+    max_kramers_splitting = std::max(max_kramers_splitting, std::abs(eigenvalues[i] - eigenvalues[i + 1]));
+  }
+  std::cout << "Max |E(even) - E(odd)| Kramers-pair splitting (expect ~0): " << max_kramers_splitting
              << "\n";
 
   return 0;
