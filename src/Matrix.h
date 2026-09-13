@@ -1,6 +1,7 @@
 #ifndef RERDMFT_MATRIX_H
 #define RERDMFT_MATRIX_H
 
+#include <complex>
 #include <cstddef>
 #include <vector>
 
@@ -49,6 +50,17 @@ Matrix<T> operator*(const Matrix<T>& a, const Matrix<T>& b) {
       for (std::size_t j = 0; j < b.cols(); ++j) {
         result(i, j) += a_ik * b(k, j);
       }
+    }
+  }
+  return result;
+}
+
+// Hermitian adjoint: conjugate and transpose.
+inline Matrix<std::complex<double>> dagger(const Matrix<std::complex<double>>& a) {
+  Matrix<std::complex<double>> result(a.cols(), a.rows());
+  for (std::size_t i = 0; i < a.rows(); ++i) {
+    for (std::size_t j = 0; j < a.cols(); ++j) {
+      result(j, i) = std::conj(a(i, j));
     }
   }
   return result;

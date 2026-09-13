@@ -4,27 +4,6 @@
 
 namespace rerdmft {
 
-namespace {
-
-// Hermitian adjoint: conjugate AND transpose. C is complex (it carries the
-// i from sigma_y and from p = -i grad_r), so this matters -- applied to
-// the whole assembled W below, it correctly turns the C^T block into
-// conj(C), which is exactly the C^dagger-derived factor the H_RKB formula
-// needs (verified independently: rebuilding H_RKB's Small-Small block
-// from scratch as conj(C) * H_UKB_SS * C^T reproduces rkbHamiltonianMatrix's
-// result to 0.000e+00, not just to floating-point tolerance).
-Matrix<std::complex<double>> daggerOf(const Matrix<std::complex<double>>& a) {
-  Matrix<std::complex<double>> result(a.cols(), a.rows());
-  for (std::size_t i = 0; i < a.rows(); ++i) {
-    for (std::size_t j = 0; j < a.cols(); ++j) {
-      result(j, i) = std::conj(a(i, j));
-    }
-  }
-  return result;
-}
-
-}  // namespace
-
 Matrix<std::complex<double>> rkbHamiltonianMatrix(
     const Matrix<std::complex<double>>& h_ukb,
     const Matrix<std::complex<double>>& rkb_coefficients) {
@@ -52,8 +31,13 @@ Matrix<std::complex<double>> rkbHamiltonianMatrix(
     }
   }
 
-  const Matrix<std::complex<double>> w_dagger = daggerOf(w);
-  return w_dagger * (h_ukb * w);
+  // dagger(w) conjugates AND transposes the whole matrix, so it correctly
+  // turns w's C^T block into conj(C) -- the C^dagger-derived factor this
+  // formula needs, since C is complex (it carries the i from sigma_y and
+  // from p = -i grad_r). Verified independently: rebuilding H_RKB's
+  // Small-Small block from scratch as conj(C) * H_UKB_SS * C^T reproduces
+  // this function's result to 0.000e+00, not just floating-point tolerance.
+  return dagger(w) * (h_ukb * w);
 }
 
 }  // namespace rerdmft

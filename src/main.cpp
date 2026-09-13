@@ -12,6 +12,7 @@
 #include "LinearAlgebra.h"
 #include "MolecularBasis.h"
 #include "RkbHamiltonian.h"
+#include "RkbOrthogonalization.h"
 #include "RkbOverlap.h"
 #include "RkbTransformation.h"
 #include "Shell.h"
@@ -106,6 +107,8 @@ int main(int argc, char** argv) {
   rerdmft::Matrix<double> x_large;
   rerdmft::Matrix<std::complex<double>> s_small;
   rerdmft::Matrix<std::complex<double>> x_small;
+  rerdmft::Matrix<std::complex<double>> x_full;
+  rerdmft::Matrix<std::complex<double>> h_rkb_ortho;
   try {
     input.read(argv[1]);
     basis_set.read(input.basis_file());
@@ -133,6 +136,9 @@ int main(int argc, char** argv) {
 
     s_small = rerdmft::rkbSmallOverlapMatrix(small_basis.functions(), rkb_coefficients);
     x_small = rerdmft::inverseSqrtHermitian(s_small);
+
+    x_full = rerdmft::xFullMatrix(x_large, x_small);
+    h_rkb_ortho = rerdmft::hRkbOrthoMatrix(h_rkb, x_full);
   } catch (const std::exception& e) {
     std::cerr << "Error: " << e.what() << "\n";
     return 1;
@@ -294,6 +300,12 @@ int main(int argc, char** argv) {
                << "\n";
     std::cout << "  Max |X_small S_small X_small - I| (Loewdin identity check): "
                << max_small_lowdin_error << "\n";
+
+    std::cout << "\nX_full = diag(X_Large, X_Large, X_small):\n";
+    std::cout << "  Dimensions: " << x_full.rows() << " x " << x_full.cols() << "\n";
+
+    printMatrixDiagnostics("Orthonormalized RKB Hamiltonian H_RKB_ortho = X_full^dagger H_RKB X_full",
+                            h_rkb_ortho, rkb_coefficients.rows());
   }
 
   std::cout << "\nH_UKB dimensions: " << h_ukb.rows() << " x " << h_ukb.cols() << "\n";
@@ -303,6 +315,9 @@ int main(int argc, char** argv) {
   std::cout << "X_Large dimensions: " << x_large.rows() << " x " << x_large.cols() << "\n";
   std::cout << "S_small dimensions: " << s_small.rows() << " x " << s_small.cols() << "\n";
   std::cout << "X_small dimensions: " << x_small.rows() << " x " << x_small.cols() << "\n";
+  std::cout << "X_full dimensions: " << x_full.rows() << " x " << x_full.cols() << "\n";
+  std::cout << "H_RKB_ortho dimensions: " << h_rkb_ortho.rows() << " x " << h_rkb_ortho.cols()
+             << "\n";
 
   return 0;
 }
