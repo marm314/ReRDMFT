@@ -617,18 +617,10 @@ int main(int argc, char** argv) {
     std::cout << std::setprecision(6);
 
     std::cout << "\nConverged one-body (Fock_ortho) orbital energies:\n";
-    std::cout << "  " << std::setw(6) << "index" << std::setw(20) << "E" << std::setw(10)
-               << "index" << std::setw(20) << "E" << "\n";
+    std::cout << "  " << std::setw(6) << "index" << std::setw(20) << "E" << "\n";
     const auto& nonrel_oe = nonrel_hf_result.orbital_energies;
-    std::size_t nonrel_i = 0;
-    for (; nonrel_i + 1 < nonrel_oe.size(); nonrel_i += 2) {
-      std::cout << "  " << std::setw(6) << nonrel_i << std::setw(20) << nonrel_oe[nonrel_i]
-                 << std::setw(10) << (nonrel_i + 1) << std::setw(20) << nonrel_oe[nonrel_i + 1]
-                 << "\n";
-    }
-    if (nonrel_i < nonrel_oe.size()) {
-      std::cout << "  " << std::setw(6) << nonrel_i << std::setw(20) << nonrel_oe[nonrel_i]
-                 << "\n";
+    for (std::size_t i = 0; i < nonrel_oe.size(); ++i) {
+      std::cout << "  " << std::setw(6) << i << std::setw(20) << nonrel_oe[i] << "\n";
     }
   }
 
