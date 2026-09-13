@@ -11,6 +11,7 @@
 # perfect (~1e-6 and ~1e-16 respectively). This is a numerical-precision
 # limitation of testing literal c -> infinity for a larger, more
 # ill-conditioned basis, not a sign of a bug in the physics.
+NON_RELATIVISTIC TRUE
 SPEED_OF_LIGHT = 10000000
 NELEC 2
 BASIS h2-cc-pvtz.gbs
