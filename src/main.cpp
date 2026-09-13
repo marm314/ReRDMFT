@@ -12,6 +12,7 @@
 #include "LinearAlgebra.h"
 #include "MolecularBasis.h"
 #include "RkbHamiltonian.h"
+#include "RkbOverlap.h"
 #include "RkbTransformation.h"
 #include "Shell.h"
 #include "SmallComponentBasis.h"
@@ -103,6 +104,8 @@ int main(int argc, char** argv) {
   rerdmft::Matrix<std::complex<double>> rkb_coefficients;
   rerdmft::Matrix<std::complex<double>> h_rkb;
   rerdmft::Matrix<double> x_large;
+  rerdmft::Matrix<std::complex<double>> s_small;
+  rerdmft::Matrix<std::complex<double>> x_small;
   try {
     input.read(argv[1]);
     basis_set.read(input.basis_file());
@@ -127,6 +130,9 @@ int main(int argc, char** argv) {
     h_rkb = rerdmft::rkbHamiltonianMatrix(h_ukb, rkb_coefficients);
 
     x_large = rerdmft::inverseSqrt(rerdmft::overlapMatrix(large_basis.functions()));
+
+    s_small = rerdmft::rkbSmallOverlapMatrix(small_basis.functions(), rkb_coefficients);
+    x_small = rerdmft::inverseSqrtHermitian(s_small);
   } catch (const std::exception& e) {
     std::cerr << "Error: " << e.what() << "\n";
     return 1;
@@ -260,6 +266,34 @@ int main(int argc, char** argv) {
     std::cout << "  Max |X_Large - X_Large^T| (symmetry check): " << max_asymmetry << "\n";
     std::cout << "  Max |X_Large S_Large X_Large - I| (Loewdin identity check): "
                << max_lowdin_error << "\n";
+
+    std::cout << "\nRKB Small-component overlap S_small = C^dagger S_uKB C:\n";
+    std::cout << "  Dimensions: " << s_small.rows() << " x " << s_small.cols() << "\n";
+    double max_s_herm_err = 0.0;
+    for (std::size_t i = 0; i < s_small.rows(); ++i) {
+      for (std::size_t j = 0; j < s_small.cols(); ++j) {
+        max_s_herm_err = std::max(max_s_herm_err, std::abs(s_small(i, j) - std::conj(s_small(j, i))));
+      }
+    }
+    std::cout << "  Max |S_small - S_small^dagger| (Hermiticity check): " << max_s_herm_err << "\n";
+
+    std::cout << "\nLoewdin orthonormalization matrix X_small = S_small^-1/2:\n";
+    std::cout << "  Dimensions: " << x_small.rows() << " x " << x_small.cols() << "\n";
+    const auto xsx_small = x_small * (s_small * x_small);
+    double max_x_small_herm_err = 0.0;
+    double max_small_lowdin_error = 0.0;
+    for (std::size_t i = 0; i < x_small.rows(); ++i) {
+      for (std::size_t j = 0; j < x_small.cols(); ++j) {
+        max_x_small_herm_err =
+            std::max(max_x_small_herm_err, std::abs(x_small(i, j) - std::conj(x_small(j, i))));
+        const double expected = (i == j) ? 1.0 : 0.0;
+        max_small_lowdin_error = std::max(max_small_lowdin_error, std::abs(xsx_small(i, j) - expected));
+      }
+    }
+    std::cout << "  Max |X_small - X_small^dagger| (Hermiticity check): " << max_x_small_herm_err
+               << "\n";
+    std::cout << "  Max |X_small S_small X_small - I| (Loewdin identity check): "
+               << max_small_lowdin_error << "\n";
   }
 
   std::cout << "\nH_UKB dimensions: " << h_ukb.rows() << " x " << h_ukb.cols() << "\n";
@@ -267,6 +301,8 @@ int main(int argc, char** argv) {
              << rkb_coefficients.cols() << "\n";
   std::cout << "H_RKB dimensions: " << h_rkb.rows() << " x " << h_rkb.cols() << "\n";
   std::cout << "X_Large dimensions: " << x_large.rows() << " x " << x_large.cols() << "\n";
+  std::cout << "S_small dimensions: " << s_small.rows() << " x " << s_small.cols() << "\n";
+  std::cout << "X_small dimensions: " << x_small.rows() << " x " << x_small.cols() << "\n";
 
   return 0;
 }
