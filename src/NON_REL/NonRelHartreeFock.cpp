@@ -63,27 +63,31 @@ Matrix<double> nonRelDensityMatrix(const Matrix<double>& c, int n_electrons) {
   return p;
 }
 
-Matrix<double> nonRelFockMatrix(const Matrix<double>& h_core, const Tensor4<double>& eri,
+Matrix<double> nonRelFockMatrix(const Matrix<double>& h_core, const PackedTwoElectronTensor& eri,
                                  const Matrix<double>& density_matrix) {
   const std::size_t n = h_core.rows();
   if (h_core.cols() != n) {
     throw std::runtime_error("nonRelFockMatrix: H_core is not square");
   }
-  if (eri.dim0() != n || eri.dim1() != n || eri.dim2() != n || eri.dim3() != n) {
-    throw std::runtime_error("nonRelFockMatrix: ERI tensor dimensions are inconsistent with H_core");
+  if (eri.dim() != n) {
+    throw std::runtime_error("nonRelFockMatrix: ERI tensor dimension is inconsistent with H_core");
   }
   if (density_matrix.rows() != n || density_matrix.cols() != n) {
     throw std::runtime_error(
         "nonRelFockMatrix: density matrix dimensions are inconsistent with H_core");
   }
 
-  // `eri` is ElectronRepulsion.h's twoElectronIntegrals result, which is
-  // CHEMIST notation (pq|rs) directly (p,q electron-1 pair; r,s electron-2
-  // pair) -- NOT physics notation. Physics <A B|C D> = chemist(A,C,B,D)
-  // (RkbTwoElectron.h uses the same relation), so <p q|r s> = eri(p,r,q,s)
-  // and <p q|s r> = eri(p,s,q,r); using eri(p,q,r,s)/eri(p,q,s,r) directly
-  // would silently compute a different (and wrong) pair of integrals.
+  // `eri` is ElectronRepulsion.h's twoElectronIntegralsPacked result, which
+  // is CHEMIST notation (pq|rs) directly (p,q electron-1 pair; r,s
+  // electron-2 pair) -- NOT physics notation. Physics <A B|C D> =
+  // chemist(A,C,B,D) (RkbTwoElectron.h uses the same relation), so
+  // <p q|r s> = eri(p,r,q,s) and <p q|s r> = eri(p,s,q,r); using
+  // eri(p,q,r,s)/eri(p,q,s,r) directly would silently compute a different
+  // (and wrong) pair of integrals.
   Matrix<double> fock(n, n, 0.0);
+  // Each (p,r) owns its own disjoint output position and only reads the
+  // shared, const `eri`/`density_matrix` -- safe to parallelize.
+#pragma omp parallel for collapse(2)
   for (std::size_t p = 0; p < n; ++p) {
     for (std::size_t r = 0; r < n; ++r) {
       double hartree = 0.0;
@@ -110,9 +114,12 @@ NonRelHartreeFockResult runNonRelativisticHartreeFock(
   NonRelHartreeFockResult result;
   result.nuclear_repulsion_energy = nuclearRepulsionEnergy(geometry);
 
-  // (Large,Large|Large,Large) real two-electron tensor: no restricted-
-  // kinetic-balance small component involved at all.
-  const Tensor4<double> eri = twoElectronIntegrals(large_basis);
+  // (Large,Large|Large,Large) real two-electron tensor, packed to store
+  // only the unique values under the full 8-fold real-orbital symmetry: no
+  // restricted-kinetic-balance small component involved at all, and no
+  // leg-transform (unlike RkbTwoElectron.cpp) that would need a dense,
+  // strided intermediate.
+  const PackedTwoElectronTensor eri = twoElectronIntegralsPacked(large_basis);
 
   Matrix<double> p_current = initial_density;
   double previous_energy = 0.0;

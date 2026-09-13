@@ -3,10 +3,10 @@
 
 #include <vector>
 
+#include "ElectronRepulsion.h"
 #include "Input.h"
 #include "Matrix.h"
 #include "MolecularBasis.h"
-#include "Tensor4.h"
 
 namespace rerdmft {
 
@@ -51,9 +51,11 @@ Matrix<double> nonRelDensityMatrix(const Matrix<double>& c, int n_electrons);
 //   F(p,r) = H_core(p,r) + J(p,r) - (1/2) K(p,r)
 //   J(p,r) = sum_{q,s} P(s,q) <p q|r s>   (Hartree/Coulomb)
 //   K(p,r) = sum_{q,s} P(s,q) <p q|s r>   (exchange)
-// `eri` (ElectronRepulsion.h's twoElectronIntegrals) is CHEMIST notation
-// (pq|rs) directly, not physics notation -- <A B|C D> = chemist(A,C,B,D)
-// (see .cpp), so <p q|r s> is eri(p,r,q,s), not eri(p,q,r,s).
+// `eri` (ElectronRepulsion.h's twoElectronIntegralsPacked -- storing only
+// the unique values, unlike twoElectronIntegrals' dense form used
+// internally by RkbTwoElectron.cpp) is CHEMIST notation (pq|rs) directly,
+// not physics notation -- <A B|C D> = chemist(A,C,B,D) (see .cpp), so
+// <p q|r s> is eri(p,r,q,s), not eri(p,q,r,s).
 // The 1/2 on K (absent from C4_DHF/RkbFockMatrix.h's spinor-basis
 // formula) is exactly the standard closed-shell RHF factor: with P the
 // TOTAL density (already including the factor of 2 for double
@@ -64,14 +66,15 @@ Matrix<double> nonRelDensityMatrix(const Matrix<double>& c, int n_electrons);
 // spin-block-diagonal with IDENTICAL alpha and beta blocks by
 // construction (real, nonrelativistic, spin is a good quantum number),
 // so that contribution is identically zero and is not computed at all.
-Matrix<double> nonRelFockMatrix(const Matrix<double>& h_core, const Tensor4<double>& eri,
+Matrix<double> nonRelFockMatrix(const Matrix<double>& h_core, const PackedTwoElectronTensor& eri,
                                  const Matrix<double>& density_matrix);
 
 // Runs the standard nonrelativistic (restricted, closed-shell) Hartree-
 // Fock SCF procedure in the Large-component AO basis. Builds the
 // (Large,Large|Large,Large) two-electron repulsion tensor internally
-// (ElectronRepulsion.h's twoElectronIntegrals -- real, no restricted-
-// kinetic-balance small component involved at all), then starting from
+// (ElectronRepulsion.h's twoElectronIntegralsPacked -- real, no
+// restricted-kinetic-balance small component involved at all, storing only
+// the unique values), then starting from
 // `initial_density` (typically the core-Hamiltonian-guess density built
 // from H_core's own eigenvectors in main.cpp), mirrors C4_DHF.h's
 // runDiracHartreeFockScf exactly (same linear-mixing and OR-combined

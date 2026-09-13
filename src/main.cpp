@@ -588,6 +588,17 @@ int main(int argc, char** argv) {
                  << "\n";
     }
 
+    {
+      const std::size_t n_large = large_basis.functions().size();
+      const std::size_t pairs = n_large * (n_large + 1) / 2;
+      const std::size_t stored = pairs * (pairs + 1) / 2;
+      std::cout << "\nTwo-electron Coulomb repulsion tensor (pq|rs), Large-component AO basis "
+                   "(chemist notation, full real-orbital 8-fold symmetry):\n";
+      std::cout << "  Dimensions: " << n_large << " x " << n_large << " x " << n_large << " x "
+                 << n_large << "\n";
+      std::cout << "  Stored values (real-orbital 8-fold-unique): " << stored << " (dense would be "
+                 << n_large * n_large * n_large * n_large << ")\n";
+    }
     std::cout << "\nNonrelativistic (restricted, closed-shell) Hartree-Fock SCF (NON_REL, linear "
                  "density mixing = "
                << input.mixing() << "):\n";

@@ -37,6 +37,9 @@ Matrix<std::complex<double>> rkbFockMatrix(const Matrix<std::complex<double>>& h
 
   Matrix<std::complex<double>> fock(n, n, std::complex<double>(0.0, 0.0));
 
+  // Each (p,r) owns its own disjoint output position and only reads the
+  // shared, const `eri`/`density_matrix` -- safe to parallelize.
+#pragma omp parallel for collapse(2)
   for (std::size_t p = 0; p < n; ++p) {
     for (std::size_t r = 0; r < n; ++r) {
       std::complex<double> hartree(0.0, 0.0);

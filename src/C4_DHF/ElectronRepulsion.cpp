@@ -127,6 +127,34 @@ Tensor4<double> twoElectronIntegrals(const std::vector<BasisFunction>& basis) {
   return result;
 }
 
+PackedTwoElectronTensor twoElectronIntegralsPacked(const std::vector<BasisFunction>& basis) {
+  const std::size_t n = basis.size();
+  PackedTwoElectronTensor result(n);
+
+  // Same reasoning as twoElectronIntegrals: each canonical (p,q,r,s) with
+  // p<=q, r<=s, (pq)<=(rs) maps to exactly one triangular slot (no two
+  // canonical representatives ever collide), so parallelizing over (p,q)
+  // is safe -- and here there is no redundant write-out to 8 positions at
+  // all, since PackedTwoElectronTensor::set already resolves any of the
+  // 8 equivalent argument orders to that same slot.
+#pragma omp parallel for schedule(dynamic)
+  for (std::size_t p = 0; p < n; ++p) {
+    for (std::size_t q = p; q < n; ++q) {
+      for (std::size_t r = 0; r < n; ++r) {
+        for (std::size_t s = r; s < n; ++s) {
+          const std::size_t pq = p * n + q;
+          const std::size_t rs = r * n + s;
+          if (rs < pq) continue;  // (pq|rs) == (rs|pq); do the (pq)<=(rs) half.
+
+          const double value = twoElectronQuadruplet(basis[p], basis[q], basis[r], basis[s]);
+          result.set(p, q, r, s, value);
+        }
+      }
+    }
+  }
+  return result;
+}
+
 Tensor4<double> twoElectronIntegralsCross(const std::vector<BasisFunction>& basis_pq,
                                            const std::vector<BasisFunction>& basis_rs) {
   const std::size_t n_pq = basis_pq.size();
