@@ -13,6 +13,7 @@
 #include "Shell.h"
 #include "SmallComponentBasis.h"
 #include "SpinorBasis.h"
+#include "UkbHamiltonian.h"
 #include "Vext.h"
 
 namespace {
@@ -95,6 +96,7 @@ int main(int argc, char** argv) {
   rerdmft::Matrix<std::complex<double>> dirac_kinetic;
   rerdmft::Matrix<std::complex<double>> dirac_rest_energy;
   rerdmft::Matrix<std::complex<double>> vext;
+  rerdmft::Matrix<std::complex<double>> h_ukb;
   try {
     input.read(argv[1]);
     basis_set.read(input.basis_file());
@@ -112,6 +114,8 @@ int main(int argc, char** argv) {
         rerdmft::diracRestEnergyMatrix(large_basis.functions(), small_basis.functions());
     vext = rerdmft::vextMatrix(large_basis.functions(), small_basis.functions(),
                                 input.geometry());
+    h_ukb = rerdmft::ukbHamiltonianMatrix(large_basis.functions(), small_basis.functions(),
+                                           input.geometry());
   } catch (const std::exception& e) {
     std::cerr << "Error: " << e.what() << "\n";
     return 1;
@@ -205,7 +209,6 @@ int main(int argc, char** argv) {
                << vext(idx, idx).real() << "\n";
   }
 
-  const auto h_ukb = dirac_kinetic + dirac_rest_energy + vext;
   printMatrixDiagnostics(
       "Unrestricted kinetic balance Hamiltonian H_UKB = T_kinetic + rest-energy alignment + Vext",
       h_ukb, 2 * n_large);
