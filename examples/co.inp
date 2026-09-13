@@ -1,0 +1,9 @@
+# Example ReRDMFT input file: carbon monoxide, using a basis with D and F
+# polarization shells (see polarized-example.gbs).
+NELEC 14
+BASIS polarized-example.gbs
+
+GEOMETRY
+C   0.000000   0.000000   0.000000
+O   0.000000   0.000000   1.128000
+END
