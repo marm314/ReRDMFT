@@ -1,7 +1,8 @@
-# Example ReRDMFT input file: carbon monoxide, using a basis with D and F
-# polarization shells (see polarized-example.gbs).
+# Example ReRDMFT input file: carbon monoxide, using the cc-pVTZ basis
+# (downloaded from https://www.basissetexchange.org/), which includes D and
+# F shells for both atoms (see cc-pvtz.gbs).
 NELEC 14
-BASIS polarized-example.gbs
+BASIS cc-pvtz.gbs
 
 GEOMETRY
 C   0.000000   0.000000   0.000000
