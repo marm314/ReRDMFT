@@ -465,24 +465,26 @@ int main(int argc, char** argv) {
   std::cout << "Max Kramers eigenvector-partner deviation, 1-|<odd|Theta even>_S| (expect ~0): "
              << max_kramers_partner_deviation << "\n";
 
-  std::cout << "\nPositive-energy eigenvalues (exact Feshbach reduction of H_RKB's Small-Small\n"
-                "block -- unlike H_RKB_ortho above, this never sums a -2c^2 term against an\n"
-                "O(1) one in floating point, so it stays accurate and exactly Kramers-paired\n"
-                "at any SPEED_OF_LIGHT, including the c -> infinity nonrelativistic limit):\n";
-  std::cout << "  " << std::setw(6) << "index" << std::setw(20) << "E (even)" << std::setw(10)
-             << "index" << std::setw(20) << "E (odd)" << "\n";
-  const auto& positive_energy_eigenvalues = h_positive_energy_eig.eigenvalues;
-  double max_positive_energy_kramers_splitting = 0.0;
-  for (std::size_t i = 0; i + 1 < positive_energy_eigenvalues.size(); i += 2) {
-    std::cout << "  " << std::setw(6) << i << std::setw(20) << positive_energy_eigenvalues[i]
-               << std::setw(10) << (i + 1) << std::setw(20) << positive_energy_eigenvalues[i + 1]
-               << "\n";
-    max_positive_energy_kramers_splitting = std::max(
-        max_positive_energy_kramers_splitting,
-        std::abs(positive_energy_eigenvalues[i] - positive_energy_eigenvalues[i + 1]));
+  if (input.debug()) {
+    std::cout << "\nPositive-energy eigenvalues (exact Feshbach reduction of H_RKB's Small-Small\n"
+                  "block -- unlike H_RKB_ortho above, this never sums a -2c^2 term against an\n"
+                  "O(1) one in floating point, so it stays accurate and exactly Kramers-paired\n"
+                  "at any SPEED_OF_LIGHT, including the c -> infinity nonrelativistic limit):\n";
+    std::cout << "  " << std::setw(6) << "index" << std::setw(20) << "E (even)" << std::setw(10)
+               << "index" << std::setw(20) << "E (odd)" << "\n";
+    const auto& positive_energy_eigenvalues = h_positive_energy_eig.eigenvalues;
+    double max_positive_energy_kramers_splitting = 0.0;
+    for (std::size_t i = 0; i + 1 < positive_energy_eigenvalues.size(); i += 2) {
+      std::cout << "  " << std::setw(6) << i << std::setw(20) << positive_energy_eigenvalues[i]
+                 << std::setw(10) << (i + 1) << std::setw(20) << positive_energy_eigenvalues[i + 1]
+                 << "\n";
+      max_positive_energy_kramers_splitting = std::max(
+          max_positive_energy_kramers_splitting,
+          std::abs(positive_energy_eigenvalues[i] - positive_energy_eigenvalues[i + 1]));
+    }
+    std::cout << "Max |E(even) - E(odd)| Kramers-pair splitting, positive-energy branch (expect ~0): "
+               << max_positive_energy_kramers_splitting << "\n";
   }
-  std::cout << "Max |E(even) - E(odd)| Kramers-pair splitting, positive-energy branch (expect ~0): "
-             << max_positive_energy_kramers_splitting << "\n";
 
   if (input.non_relativistic()) {
     std::cout << "\nNonrelativistic (Schrodinger) core Hamiltonian eigenvalues:\n";
