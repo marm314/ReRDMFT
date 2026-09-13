@@ -193,13 +193,23 @@ RkbTwoElectronTensor rkbTwoElectronIntegrals(const std::vector<BasisFunction>& l
     for (std::size_t c = 0; c < n_large; ++c) {
       for (std::size_t b = 0; b < n_large; ++b) {
         for (std::size_t d = 0; d < n_large; ++d) {
-          // electron-1 = Large (alpha or beta slot; identical values, since
-          // 1/r12 does not depend on spin).
+          // electron-1 = Large, electron-2 = Large: identical values for
+          // ALL FOUR alpha/beta slot combinations (not just matching
+          // alpha-alpha/beta-beta), since 1/r12 does not depend on spin --
+          // electron-1's own bra,ket must share ONE spin slot and
+          // electron-2's own bra,ket must share ONE spin slot, but those
+          // two slots are otherwise independent of each other (e.g.
+          // electron-1 = Large-alpha with electron-2 = Large-beta is a
+          // perfectly ordinary, generally nonzero Coulomb integral).
           const std::complex<double> ll_ll_val(ll_ll(a, c, b, d), 0.0);
           result.set(off_large_alpha + a, off_large_alpha + b, off_large_alpha + c,
                      off_large_alpha + d, ll_ll_val);
           result.set(off_large_beta + a, off_large_beta + b, off_large_beta + c,
                      off_large_beta + d, ll_ll_val);
+          result.set(off_large_alpha + a, off_large_beta + b, off_large_alpha + c,
+                     off_large_beta + d, ll_ll_val);
+          result.set(off_large_beta + a, off_large_alpha + b, off_large_beta + c,
+                     off_large_alpha + d, ll_ll_val);
 
           for (std::size_t y2 = 0; y2 < 2; ++y2) {
             const std::size_t off_e2 = off_small[y2];
