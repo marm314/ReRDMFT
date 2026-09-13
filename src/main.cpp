@@ -15,6 +15,7 @@
 #include "MolecularBasis.h"
 #include "NuclearAttraction.h"
 #include "RkbDensityMatrix.h"
+#include "RkbFockMatrix.h"
 #include "RkbHamiltonian.h"
 #include "RkbOrthogonalization.h"
 #include "RkbOverlap.h"
@@ -218,6 +219,7 @@ int main(int argc, char** argv) {
   rerdmft::Matrix<std::complex<double>> c_dhf;
   rerdmft::Matrix<std::complex<double>> density_matrix;
   rerdmft::RkbTwoElectronTensor c4_spinor_eri;
+  rerdmft::Matrix<std::complex<double>> fock_matrix;
   try {
     input.read(argv[1]);
     basis_set.read(input.basis_file());
@@ -281,6 +283,7 @@ int main(int argc, char** argv) {
       c4_spinor_eri = rerdmft::rkbTwoElectronIntegrals(large_basis.functions(),
                                                             small_basis.functions(),
                                                             rkb_coefficients);
+      fock_matrix = rerdmft::rkbFockMatrix(h_rkb, c4_spinor_eri, density_matrix);
     }
   } catch (const std::exception& e) {
     std::cerr << "Error: " << e.what() << "\n";
@@ -569,6 +572,19 @@ int main(int argc, char** argv) {
                  << max_exchange_err << "\n";
       std::cout << "  Max |<AB|CD> - conj(<CD|AB>)| (Hermiticity, expect ~0): " << max_herm_err
                  << "\n";
+    }
+
+    std::cout << "\nFock matrix F = H_RKB + J - K_same - K_opposite (RKB spinor AO basis):\n";
+    std::cout << "  Dimensions: " << fock_matrix.rows() << " x " << fock_matrix.cols() << "\n";
+    if (input.debug()) {
+      double max_herm_err = 0.0;
+      for (std::size_t p = 0; p < fock_matrix.rows(); ++p) {
+        for (std::size_t r = 0; r < fock_matrix.cols(); ++r) {
+          max_herm_err =
+              std::max(max_herm_err, std::abs(fock_matrix(p, r) - std::conj(fock_matrix(r, p))));
+        }
+      }
+      std::cout << "  Max |F - F^dagger| (Hermiticity check): " << max_herm_err << "\n";
     }
   }
 
