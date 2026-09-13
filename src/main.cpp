@@ -286,9 +286,6 @@ int main(int argc, char** argv) {
     max_kramers_partner_deviation = rerdmft::maxKramersPartnerDeviation(
         h_rkb_ortho_eig.eigenvectors, rkb_coefficients, x_full, s_large, s_small_ukb);
 
-    c_dhf = rerdmft::rkbCoefficientMatrix(x_full, h_rkb_ortho_eig.eigenvectors);
-    density_matrix = rerdmft::rkbDensityMatrix(c_dhf, input.n_electrons());
-
     f_small = rerdmft::rkbSmallVextMatrix(small_basis.functions(), rkb_coefficients,
                                            input.geometry());
     h_positive_energy = rerdmft::rkbPositiveEnergyHamiltonian(h_rkb, s_small, f_small,
@@ -307,6 +304,9 @@ int main(int argc, char** argv) {
     }
 
     if (input.c4_spinor()) {
+      c_dhf = rerdmft::rkbCoefficientMatrix(x_full, h_rkb_ortho_eig.eigenvectors);
+      density_matrix = rerdmft::rkbDensityMatrix(c_dhf, input.n_electrons());
+
       c4_spinor_eri = rerdmft::rkbTwoElectronIntegrals(large_basis.functions(),
                                                             small_basis.functions(),
                                                             rkb_coefficients);
@@ -517,7 +517,7 @@ int main(int argc, char** argv) {
   std::cout << "Max Kramers eigenvector-partner deviation, 1-|<odd|Theta even>_S| (expect ~0): "
              << max_kramers_partner_deviation << "\n";
 
-  {
+  if (input.c4_spinor()) {
     const std::size_t n_rkb = h_rkb_ortho.rows();
     const std::size_t occ_start = n_rkb / 2;
     const std::size_t occ_end = occ_start + static_cast<std::size_t>(input.n_electrons());
