@@ -335,10 +335,10 @@ int main(int argc, char** argv) {
     }
 
     printMatrixDiagnostics(
-        "Dirac rest-energy alignment matrix diag(I_2, -2c^2 I_2) (metric-weighted)",
+        "Dirac rest-energy alignment matrix diag(0_2, -2c^2 I_2) (metric-weighted)",
         dirac_rest_energy, 2 * n_large);
     if (n_large > 0) {
-      std::cout << "  M[0,0] (Large-alpha[0] self, expect 1): " << dirac_rest_energy(0, 0).real()
+      std::cout << "  M[0,0] (Large-alpha[0] self, expect 0): " << dirac_rest_energy(0, 0).real()
                  << "\n";
     }
     if (n_small > 0) {

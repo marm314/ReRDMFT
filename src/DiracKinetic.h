@@ -28,13 +28,16 @@ Matrix<std::complex<double>> diracKineticMatrix(
     double speed_of_light = kSpeedOfLight);
 
 // Builds the rest-energy-alignment matrix
-//   spinor_a^dagger [[I_2, 0_2], [0_2, -2 c^2 I_2]] spinor_b
-// in the same 4-component spinor basis: +1 * <AO_i|AO_j> within the
-// Large-Large block (both spin blocks alike), -2c^2 * <AO_i|AO_j> within
-// the Small-Small block, and zero Large-Small coupling (block-diagonal,
-// like the standard Dirac beta matrix). This is not the bare beta*m*c^2
-// rest-mass term; it is a convention chosen to align the resulting energy
-// scale with the nonrelativistic one.
+//   spinor_a^dagger [[0_2, 0_2], [0_2, -2 c^2 I_2]] spinor_b
+// in the same 4-component spinor basis: zero within the Large-Large block,
+// -2c^2 * <AO_i|AO_j> within the Small-Small block (both spin blocks
+// alike), and zero Large-Small coupling (block-diagonal, like the
+// standard Dirac beta matrix). This is the standard beta*m*c^2 rest-mass
+// term with a global -c^2 shift applied (i.e. diag(+c^2,-c^2) shifted by
+// -c^2), chosen to align the resulting positive-energy branch with the
+// nonrelativistic energy scale. Verified against an independent reference
+// implementation (M. Rodriguez-Mayorga's m_relativistic.f90, MOLGW): its
+// H4c_me only adds Vext (no additional +1*S) to the Large-Large block.
 Matrix<std::complex<double>> diracRestEnergyMatrix(
     const std::vector<BasisFunction>& large_basis,
     const std::vector<BasisFunction>& small_basis,

@@ -75,11 +75,19 @@ Matrix<std::complex<double>> rkbCoefficients(const std::vector<BasisFunction>& l
   const std::size_t off_large_beta = n_large;
   const std::size_t off_small_alpha = 0;
   const std::size_t off_small_beta = n_small;
+  // m_alpha_beta/m_beta_alpha are the (row=Small-spin, col=Large-spin)
+  // off-diagonal entries of the 2x2 sigma.p matrix (m_alpha_beta's row is
+  // Small-alpha, column Large-beta; m_beta_alpha's row is Small-beta,
+  // column Large-alpha) -- so, in the assembled C matrix (rows=Large spin,
+  // cols=Small spin), m_alpha_beta belongs at (Large-beta, Small-alpha)
+  // and m_beta_alpha at (Large-alpha, Small-beta). Cross-checked against
+  // an independent reference implementation's MpSqL_me (M. Rodriguez-
+  // Mayorga's m_relativistic.f90, MOLGW).
   for (std::size_t p = 0; p < n_large; ++p) {
     for (std::size_t t = 0; t < n_small; ++t) {
       c(off_large_alpha + p, off_small_alpha + t) = c_alpha_alpha(p, t);
-      c(off_large_alpha + p, off_small_beta + t) = c_alpha_beta(p, t);
-      c(off_large_beta + p, off_small_alpha + t) = c_beta_alpha(p, t);
+      c(off_large_alpha + p, off_small_beta + t) = c_beta_alpha(p, t);
+      c(off_large_beta + p, off_small_alpha + t) = c_alpha_beta(p, t);
       c(off_large_beta + p, off_small_beta + t) = c_beta_beta(p, t);
     }
   }
