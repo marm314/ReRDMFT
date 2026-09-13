@@ -27,7 +27,9 @@ SRCS := $(wildcard $(SRC_DIR)/*.cpp)
 OBJS := $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(SRCS))
 
 CPPFLAGS := -I$(LIBCINT_INC)
-LDLIBS   := $(LIBCINT) -lquadmath -lm
+# LAPACKE (the C interface to LAPACK) is used for the RKB transformation's
+# overlap-matrix inverse; installed system-wide via liblapacke-dev.
+LDLIBS   := $(LIBCINT) -llapacke -llapack -lblas -lquadmath -lm
 
 .PHONY: all clean
 

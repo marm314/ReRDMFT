@@ -39,6 +39,21 @@ Matrix<T> operator+(const Matrix<T>& a, const Matrix<T>& b) {
   return result;
 }
 
+// Requires a.cols() == b.rows().
+template <typename T>
+Matrix<T> operator*(const Matrix<T>& a, const Matrix<T>& b) {
+  Matrix<T> result(a.rows(), b.cols(), T{});
+  for (std::size_t i = 0; i < a.rows(); ++i) {
+    for (std::size_t k = 0; k < a.cols(); ++k) {
+      const T a_ik = a(i, k);
+      for (std::size_t j = 0; j < b.cols(); ++j) {
+        result(i, j) += a_ik * b(k, j);
+      }
+    }
+  }
+  return result;
+}
+
 }  // namespace rerdmft
 
 #endif  // RERDMFT_MATRIX_H

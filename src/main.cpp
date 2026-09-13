@@ -10,6 +10,7 @@
 #include "Input.h"
 #include "Integrals.h"
 #include "MolecularBasis.h"
+#include "RkbTransformation.h"
 #include "Shell.h"
 #include "SmallComponentBasis.h"
 #include "SpinorBasis.h"
@@ -97,6 +98,7 @@ int main(int argc, char** argv) {
   rerdmft::Matrix<std::complex<double>> dirac_rest_energy;
   rerdmft::Matrix<std::complex<double>> vext;
   rerdmft::Matrix<std::complex<double>> h_ukb;
+  rerdmft::Matrix<std::complex<double>> rkb_coefficients;
   try {
     input.read(argv[1]);
     basis_set.read(input.basis_file());
@@ -116,6 +118,8 @@ int main(int argc, char** argv) {
                                 input.geometry());
     h_ukb = rerdmft::ukbHamiltonianMatrix(large_basis.functions(), small_basis.functions(),
                                            input.geometry());
+    rkb_coefficients =
+        rerdmft::rkbCoefficients(large_basis.functions(), small_basis.functions());
   } catch (const std::exception& e) {
     std::cerr << "Error: " << e.what() << "\n";
     return 1;
@@ -214,9 +218,15 @@ int main(int argc, char** argv) {
     printMatrixDiagnostics(
         "Unrestricted kinetic balance Hamiltonian H_UKB = T_kinetic + rest-energy alignment + Vext",
         h_ukb, 2 * n_large);
+
+    std::cout << "\nRKB transformation coefficients C (sigma.p |Large_p> = sum_q C_pq |Small_q>):\n";
+    std::cout << "  Dimensions: " << rkb_coefficients.rows() << " x " << rkb_coefficients.cols()
+               << " (rows: Large-alpha/beta spin-orbitals; cols: Small-alpha/beta spin-orbitals)\n";
   }
 
   std::cout << "\nH_UKB dimensions: " << h_ukb.rows() << " x " << h_ukb.cols() << "\n";
+  std::cout << "RKB coefficients C dimensions: " << rkb_coefficients.rows() << " x "
+             << rkb_coefficients.cols() << "\n";
 
   return 0;
 }
