@@ -1,0 +1,21 @@
+# Same molecule/basis as h2.inp, but with an extreme speed of light. Unlike
+# water-c10000000.inp (STO-3G, a small/minimal basis), this combination
+# hits a much more severe numerical breakdown at the same c: cc-pVTZ's
+# larger, more flexible Small-component basis leaves S_small's inverse
+# square root far worse conditioned, so by c=1e7 the Kramers-pair
+# splitting check reaches ~140 hartree (not just small rounding noise) and
+# the eigenvector-level Kramers check reaches ~1 (complete failure, not a
+# tiny deviation). At this basis size, c=1e7 is simply too extreme to
+# probe the nonrelativistic limit meaningfully; compare against a more
+# moderate value (e.g. 1000), where both checks come out essentially
+# perfect (~1e-6 and ~1e-16 respectively). This is a numerical-precision
+# limitation of testing literal c -> infinity for a larger, more
+# ill-conditioned basis, not a sign of a bug in the physics.
+SPEED_OF_LIGHT = 10000000
+NELEC 2
+BASIS h2-cc-pvtz.gbs
+
+GEOMETRY
+H   0.000000   0.000000   0.000000
+H   0.000000   0.000000   0.741400
+END
