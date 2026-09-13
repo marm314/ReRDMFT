@@ -214,7 +214,7 @@ int main(int argc, char** argv) {
   rerdmft::HermitianEigenResult h_positive_energy_eig;
   rerdmft::Matrix<double> h_core_nonrel_ortho;
   rerdmft::SymmetricEigenResult h_core_nonrel_eig;
-  rerdmft::Tensor4<std::complex<double>> c4_spinor_eri;
+  rerdmft::RkbTwoElectronTensor c4_spinor_eri;
   try {
     input.read(argv[1]);
     basis_set.read(input.basis_file());
@@ -503,12 +503,14 @@ int main(int argc, char** argv) {
   }
 
   if (input.c4_spinor()) {
-    const std::size_t n_spinor = c4_spinor_eri.dim0();
+    const std::size_t n_spinor = c4_spinor_eri.dim();
     std::cout << "\nTwo-electron Coulomb repulsion tensor <Spinor_A Spinor_B|Spinor_C Spinor_D>,\n"
                  "restricted kinetic balance basis (physics notation; A,C on electron 1, B,D on\n"
                  "electron 2):\n";
     std::cout << "  Dimensions: " << n_spinor << " x " << n_spinor << " x " << n_spinor << " x "
                << n_spinor << "\n";
+    std::cout << "  Stored values (electron-exchange-unique half): " << c4_spinor_eri.storedCount()
+               << " (dense would be " << n_spinor * n_spinor * n_spinor * n_spinor << ")\n";
     if (input.debug()) {
       double max_exchange_err = 0.0;
       double max_herm_err = 0.0;
