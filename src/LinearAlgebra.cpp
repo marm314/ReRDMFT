@@ -171,4 +171,35 @@ Matrix<std::complex<double>> inverseSqrtHermitian(const Matrix<std::complex<doub
   return x;
 }
 
+Matrix<std::complex<double>> invertHermitian(const Matrix<std::complex<double>>& s) {
+  const HermitianEigenResult eig = diagonalizeHermitian(s);
+  const std::size_t un = eig.eigenvalues.size();
+
+  constexpr double kMinAbsEigenvalue = 1e-10;
+  std::vector<double> inv_w(un);
+  for (std::size_t i = 0; i < un; ++i) {
+    if (std::abs(eig.eigenvalues[i]) <= kMinAbsEigenvalue) {
+      throw std::runtime_error(
+          "invertHermitian: matrix is too close to singular (|eigenvalue| " +
+          std::to_string(std::abs(eig.eigenvalues[i])) +
+          " <= " + std::to_string(kMinAbsEigenvalue) + ")");
+    }
+    inv_w[i] = 1.0 / eig.eigenvalues[i];
+  }
+
+  // S^-1 = U diag(1/w) U^dagger: X(i,j) = sum_k U(i,k) (1/w_k) conj(U(j,k)).
+  const Matrix<std::complex<double>>& u = eig.eigenvectors;
+  Matrix<std::complex<double>> x(un, un, std::complex<double>(0.0, 0.0));
+  for (std::size_t i = 0; i < un; ++i) {
+    for (std::size_t j = 0; j < un; ++j) {
+      std::complex<double> sum(0.0, 0.0);
+      for (std::size_t k = 0; k < un; ++k) {
+        sum += u(i, k) * inv_w[k] * std::conj(u(j, k));
+      }
+      x(i, j) = sum;
+    }
+  }
+  return x;
+}
+
 }  // namespace rerdmft

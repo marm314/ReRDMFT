@@ -17,6 +17,7 @@
 #include "RkbHamiltonian.h"
 #include "RkbOrthogonalization.h"
 #include "RkbOverlap.h"
+#include "RkbPositiveEnergyHamiltonian.h"
 #include "RkbTransformation.h"
 #include "SchrodingerKinetic.h"
 #include "Shell.h"
@@ -206,6 +207,10 @@ int main(int argc, char** argv) {
   rerdmft::Matrix<std::complex<double>> h_rkb_ortho;
   rerdmft::HermitianEigenResult h_rkb_ortho_eig;
   double max_kramers_partner_deviation = 0.0;
+  rerdmft::Matrix<std::complex<double>> f_small;
+  rerdmft::Matrix<std::complex<double>> h_positive_energy;
+  rerdmft::Matrix<std::complex<double>> h_positive_energy_ortho;
+  rerdmft::HermitianEigenResult h_positive_energy_eig;
   rerdmft::Matrix<double> h_core_nonrel_ortho;
   rerdmft::SymmetricEigenResult h_core_nonrel_eig;
   try {
@@ -246,6 +251,14 @@ int main(int argc, char** argv) {
 
     max_kramers_partner_deviation = rerdmft::maxKramersPartnerDeviation(
         h_rkb_ortho_eig.eigenvectors, rkb_coefficients, x_full, s_large, s_small_ukb);
+
+    f_small = rerdmft::rkbSmallVextMatrix(small_basis.functions(), rkb_coefficients,
+                                           input.geometry());
+    h_positive_energy = rerdmft::rkbPositiveEnergyHamiltonian(h_rkb, s_small, f_small,
+                                                               input.speed_of_light());
+    h_positive_energy_ortho =
+        rerdmft::positiveEnergyOrthoHamiltonian(h_positive_energy, x_large);
+    h_positive_energy_eig = rerdmft::diagonalizeHermitian(h_positive_energy_ortho);
 
     if (input.non_relativistic()) {
       const auto schrodinger_kinetic = rerdmft::schrodingerKineticMatrix(large_basis.functions());
@@ -451,6 +464,25 @@ int main(int argc, char** argv) {
              << "\n";
   std::cout << "Max Kramers eigenvector-partner deviation, 1-|<odd|Theta even>_S| (expect ~0): "
              << max_kramers_partner_deviation << "\n";
+
+  std::cout << "\nPositive-energy eigenvalues (exact Feshbach reduction of H_RKB's Small-Small\n"
+                "block -- unlike H_RKB_ortho above, this never sums a -2c^2 term against an\n"
+                "O(1) one in floating point, so it stays accurate and exactly Kramers-paired\n"
+                "at any SPEED_OF_LIGHT, including the c -> infinity nonrelativistic limit):\n";
+  std::cout << "  " << std::setw(6) << "index" << std::setw(20) << "E (even)" << std::setw(10)
+             << "index" << std::setw(20) << "E (odd)" << "\n";
+  const auto& positive_energy_eigenvalues = h_positive_energy_eig.eigenvalues;
+  double max_positive_energy_kramers_splitting = 0.0;
+  for (std::size_t i = 0; i + 1 < positive_energy_eigenvalues.size(); i += 2) {
+    std::cout << "  " << std::setw(6) << i << std::setw(20) << positive_energy_eigenvalues[i]
+               << std::setw(10) << (i + 1) << std::setw(20) << positive_energy_eigenvalues[i + 1]
+               << "\n";
+    max_positive_energy_kramers_splitting = std::max(
+        max_positive_energy_kramers_splitting,
+        std::abs(positive_energy_eigenvalues[i] - positive_energy_eigenvalues[i + 1]));
+  }
+  std::cout << "Max |E(even) - E(odd)| Kramers-pair splitting, positive-energy branch (expect ~0): "
+             << max_positive_energy_kramers_splitting << "\n";
 
   if (input.non_relativistic()) {
     std::cout << "\nNonrelativistic (Schrodinger) core Hamiltonian eigenvalues:\n";

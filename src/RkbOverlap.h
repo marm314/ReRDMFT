@@ -4,6 +4,7 @@
 #include <complex>
 #include <vector>
 
+#include "Input.h"
 #include "Matrix.h"
 #include "MolecularBasis.h"
 
@@ -33,6 +34,19 @@ namespace rerdmft {
 Matrix<std::complex<double>> rkbSmallOverlapMatrix(
     const std::vector<BasisFunction>& small_basis,
     const Matrix<std::complex<double>>& rkb_coefficients);
+
+// Same construction as rkbSmallOverlapMatrix, but for the nuclear-electron
+// attraction matrix instead of the overlap: F_small = C^dagger V_uKB C,
+// where V_uKB is the block-diagonal repeat (across the alpha/beta spin
+// blocks) of nuclearAttractionMatrix(small_basis, geometry)
+// (NuclearAttraction.h). Both this and S_small (rkbSmallOverlapMatrix) are
+// entirely independent of the speed of light, which is what lets
+// RkbPositiveEnergyHamiltonian.h reconstruct the RKB Small-Small
+// Hamiltonian block's exact -2c^2*S_small + F_small structure without ever
+// forming that (badly cancelling, for large c) sum in floating point.
+Matrix<std::complex<double>> rkbSmallVextMatrix(const std::vector<BasisFunction>& small_basis,
+                                                 const Matrix<std::complex<double>>& rkb_coefficients,
+                                                 const std::vector<Atom>& geometry);
 
 }  // namespace rerdmft
 

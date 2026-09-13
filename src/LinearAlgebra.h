@@ -49,6 +49,14 @@ Matrix<std::complex<double>> inverseSqrtHermitian(const Matrix<std::complex<doub
 // converge.
 HermitianEigenResult diagonalizeHermitian(const Matrix<std::complex<double>>& a);
 
+// Inverts a complex Hermitian matrix via eigendecomposition,
+// S^-1 = U diag(1/w) U^dagger (LAPACKE_zheev). Unlike inverseSqrtHermitian,
+// this only requires each eigenvalue to be safely nonzero (not positive),
+// since a Hermitian matrix being inverted here need not be positive
+// definite. Throws std::runtime_error if `s` is not square, or has an
+// eigenvalue with |w| at or below 1e-10 (too close to singular).
+Matrix<std::complex<double>> invertHermitian(const Matrix<std::complex<double>>& s);
+
 }  // namespace rerdmft
 
 #endif  // RERDMFT_LINEARALGEBRA_H
