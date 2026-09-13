@@ -1,0 +1,17 @@
+# Same molecule/basis as water.inp, with an extreme speed of light. By
+# this point the Kramers-pair splitting check (see main.cpp's printed
+# "Max |E(even) - E(odd)|") shows clearly visible floating-point rounding
+# noise, since eigenvalue magnitudes near -2c^2 ~ -2e14 leave double
+# precision's ~16 significant digits unable to fully resolve a splitting
+# many orders of magnitude smaller. The "positive energy" eigenvalues
+# remain reasonably accurate even here; only the tiny splitting on top of
+# the huge negative-energy cluster is affected.
+SPEED_OF_LIGHT = 10000000
+NELEC 10
+BASIS water-sto-3g.gbs
+
+GEOMETRY
+O   0.000000   0.000000   0.000000
+H   0.000000   0.757000   0.586000
+H   0.000000  -0.757000   0.586000
+END

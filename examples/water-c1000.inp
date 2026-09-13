@@ -1,0 +1,15 @@
+# Same molecule/basis as water.inp, but with the speed of light set well
+# above its physical value (137.036 a.u.) to start probing the
+# nonrelativistic limit (c -> infinity). Compare this run's "positive
+# energy" (core-Hamiltonian) eigenvalues against water.inp's: they should
+# already be close, since relativistic effects are O(1/c^2)-suppressed.
+# The "negative energy" (RKB-small-dominated) cluster scales as -2c^2.
+SPEED_OF_LIGHT = 1000
+NELEC 10
+BASIS water-sto-3g.gbs
+
+GEOMETRY
+O   0.000000   0.000000   0.000000
+H   0.000000   0.757000   0.586000
+H   0.000000  -0.757000   0.586000
+END

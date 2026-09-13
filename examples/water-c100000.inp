@@ -1,0 +1,18 @@
+# Same molecule/basis as water.inp, pushed further toward the
+# nonrelativistic limit (c -> infinity) than water-c1000.inp. The
+# "positive energy" eigenvalues should be nearly indistinguishable from
+# water-c1000.inp's now. This is also roughly where floating-point
+# rounding starts to show up in the Kramers-pair splitting check (the
+# eigenvalues' magnitude, ~-2c^2, has grown large enough that double
+# precision's ~16 significant digits can no longer fully resolve a tiny
+# splitting riding on top of it) -- an inherent numerical limitation of
+# testing literal c -> infinity this way, not a sign of a bug.
+SPEED_OF_LIGHT = 100000
+NELEC 10
+BASIS water-sto-3g.gbs
+
+GEOMETRY
+O   0.000000   0.000000   0.000000
+H   0.000000   0.757000   0.586000
+H   0.000000  -0.757000   0.586000
+END
