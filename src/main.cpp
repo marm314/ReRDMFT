@@ -4,6 +4,7 @@
 #include <ctime>
 #include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -35,24 +36,52 @@
 
 namespace {
 
-// Prints a wall-clock timestamp plus the elapsed time since `since` (the
-// previous checkpoint) and since `start` (program start), then updates
-// `since` to now -- so a sequence of calls gives a running per-phase
-// breakdown (e.g. "how long did just the two-electron integrals take")
-// without needing to store each duration separately at the call site.
+// One recorded checkpoint from logTiming below -- kept instead of printed
+// immediately, so every checkpoint from a run can be shown together in
+// one summary at the very end (printTimings), after all the physics
+// output, rather than interleaved before it.
+struct TimingRecord {
+  std::string label;
+  std::string timestamp;
+  double phase_seconds = 0.0;
+  double total_seconds = 0.0;
+};
+
+// Records a wall-clock timestamp plus the elapsed time since `since` (the
+// previous checkpoint) and since `start` (program start) into `records`,
+// then updates `since` to now -- so a sequence of calls builds up a
+// running per-phase breakdown (e.g. "how long did just the two-electron
+// integrals take") without needing to store each duration separately at
+// the call site.
 void logTiming(const std::string& label, std::chrono::steady_clock::time_point start,
-                std::chrono::steady_clock::time_point& since) {
+                std::chrono::steady_clock::time_point& since,
+                std::vector<TimingRecord>& records) {
   const auto now_steady = std::chrono::steady_clock::now();
   const auto now_wall = std::chrono::system_clock::now();
   const std::time_t now_time_t = std::chrono::system_clock::to_time_t(now_wall);
-  const double since_previous =
-      std::chrono::duration<double>(now_steady - since).count();
-  const double since_start = std::chrono::duration<double>(now_steady - start).count();
-  std::cout << label << ": " << std::put_time(std::localtime(&now_time_t), "%Y-%m-%d %H:%M:%S")
-             << "  (+" << std::fixed << std::setprecision(3) << since_previous
-             << " s this phase, " << since_start << " s total)\n";
-  std::cout << std::setprecision(6);
+  std::ostringstream timestamp;
+  timestamp << std::put_time(std::localtime(&now_time_t), "%Y-%m-%d %H:%M:%S");
+  TimingRecord record;
+  record.label = label;
+  record.timestamp = timestamp.str();
+  record.phase_seconds = std::chrono::duration<double>(now_steady - since).count();
+  record.total_seconds = std::chrono::duration<double>(now_steady - start).count();
+  records.push_back(record);
   since = now_steady;
+}
+
+// Prints every checkpoint recorded by logTiming, in order, as one summary
+// block. Called at the very end of a run (success or failure) instead of
+// each logTiming call printing as it happens.
+void printTimings(const std::vector<TimingRecord>& records) {
+  if (records.empty()) return;
+  std::cout << "\nTimings:\n";
+  for (const auto& record : records) {
+    std::cout << "  " << record.label << ": " << record.timestamp << "  (+" << std::fixed
+               << std::setprecision(3) << record.phase_seconds << " s this phase, "
+               << record.total_seconds << " s total)\n";
+  }
+  std::cout << std::setprecision(6);
 }
 
 // Prints one "  <label>: <value> Hartree" energy summary line with the
@@ -213,6 +242,7 @@ int main(int argc, char** argv) {
   rerdmft::DiracHartreeFockResult dhf_result;
   const auto t_start = std::chrono::steady_clock::now();
   auto t_checkpoint = t_start;
+  std::vector<TimingRecord> timing_records;
   try {
     input.read(argv[1]);
     basis_set.read(input.basis_file());
@@ -236,7 +266,7 @@ int main(int argc, char** argv) {
     rkb_coefficients =
         rerdmft::rkbCoefficients(large_basis.functions(), small_basis.functions());
     h_rkb = rerdmft::rkbHamiltonianMatrix(h_ukb, rkb_coefficients);
-    logTiming("H_RKB built", t_start, t_checkpoint);
+    logTiming("H_RKB built", t_start, t_checkpoint, timing_records);
 
     s_large = rerdmft::overlapMatrix(large_basis.functions());
     x_large = rerdmft::inverseSqrt(s_large);
@@ -276,7 +306,7 @@ int main(int argc, char** argv) {
           large_basis.functions(), h_core_nonrel, x_large, nonrel_density_initial,
           input.n_electrons(), input.geometry(), input.mixing(), input.max_iterations(),
           input.energy_tolerance(), input.density_tolerance());
-      logTiming("Nonrelativistic HF SCF complete", t_start, t_checkpoint);
+      logTiming("Nonrelativistic HF SCF complete", t_start, t_checkpoint, timing_records);
     }
 
     if (input.c4_spinor()) {
@@ -286,7 +316,7 @@ int main(int argc, char** argv) {
       c4_spinor_eri = rerdmft::rkbTwoElectronIntegrals(large_basis.functions(),
                                                             small_basis.functions(),
                                                             rkb_coefficients);
-      logTiming("Two-electron integrals built", t_start, t_checkpoint);
+      logTiming("Two-electron integrals built", t_start, t_checkpoint, timing_records);
 
       fock_matrix = rerdmft::rkbFockMatrix(h_rkb, c4_spinor_eri, density_matrix);
 
@@ -294,10 +324,11 @@ int main(int argc, char** argv) {
           h_rkb, c4_spinor_eri, x_full, density_matrix, input.n_electrons(), input.geometry(),
           input.mixing(), input.max_iterations(), input.energy_tolerance(),
           input.density_tolerance());
-      logTiming("SCF loop complete", t_start, t_checkpoint);
+      logTiming("SCF loop complete", t_start, t_checkpoint, timing_records);
     }
   } catch (const std::exception& e) {
     std::cerr << "Error: " << e.what() << "\n";
+    printTimings(timing_records);
     printFarewell();
     return 1;
   }
@@ -690,6 +721,7 @@ int main(int argc, char** argv) {
                << fock_kramers_partner_deviation << "\n";
   }
 
+  printTimings(timing_records);
   printFarewell();
   return 0;
 }
