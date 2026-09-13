@@ -4,16 +4,7 @@
 #include "BasisSet.h"
 #include "Input.h"
 #include "MolecularBasis.h"
-
-namespace {
-
-char angularMomentumLabel(int l) {
-  static const char labels[] = {'S', 'P', 'D', 'F', 'G', 'H', 'I'};
-  if (l < 0 || l >= static_cast<int>(sizeof(labels))) return '?';
-  return labels[l];
-}
-
-}  // namespace
+#include "Shell.h"
 
 int main(int argc, char** argv) {
   if (argc != 2) {
@@ -47,7 +38,7 @@ int main(int argc, char** argv) {
              << " total):\n";
   for (const auto& fn : molecular_basis.functions()) {
     std::cout << "  " << std::setw(2) << fn.element << "  "
-               << angularMomentumLabel(fn.l) << "(" << fn.cartesian.lx
+               << rerdmft::angularMomentumLabel(fn.l) << "(" << fn.cartesian.lx
                << fn.cartesian.ly << fn.cartesian.lz << ")  "
                << "center=(" << fn.x << ", " << fn.y << ", " << fn.z << ")  "
                << "nprim=" << fn.exponents.size() << "\n";

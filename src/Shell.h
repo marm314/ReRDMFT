@@ -25,6 +25,10 @@ struct CartesianExponents {
 // the standard order (S: 1; P: x,y,z; D: xx,xy,xz,yy,yz,zz; ...).
 std::vector<CartesianExponents> cartesianComponents(int l);
 
+// Conventional single-letter label for a shell's angular momentum
+// (S, P, D, F, G, H, I, ...); '?' if l is out of the supported range.
+char angularMomentumLabel(int l);
+
 }  // namespace rerdmft
 
 #endif  // RERDMFT_SHELL_H

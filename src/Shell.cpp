@@ -13,4 +13,10 @@ std::vector<CartesianExponents> cartesianComponents(int l) {
   return components;
 }
 
+char angularMomentumLabel(int l) {
+  static const char labels[] = {'S', 'P', 'D', 'F', 'G', 'H', 'I'};
+  if (l < 0 || l >= static_cast<int>(sizeof(labels))) return '?';
+  return labels[l];
+}
+
 }  // namespace rerdmft
