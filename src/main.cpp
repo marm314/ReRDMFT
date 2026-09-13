@@ -615,6 +615,21 @@ int main(int argc, char** argv) {
     std::cout << "  Total nonrelativistic HF energy: " << nonrel_hf_result.total_energy
                << " Hartree\n";
     std::cout << std::setprecision(6);
+
+    std::cout << "\nConverged one-body (Fock_ortho) orbital energies:\n";
+    std::cout << "  " << std::setw(6) << "index" << std::setw(20) << "E" << std::setw(10)
+               << "index" << std::setw(20) << "E" << "\n";
+    const auto& nonrel_oe = nonrel_hf_result.orbital_energies;
+    std::size_t nonrel_i = 0;
+    for (; nonrel_i + 1 < nonrel_oe.size(); nonrel_i += 2) {
+      std::cout << "  " << std::setw(6) << nonrel_i << std::setw(20) << nonrel_oe[nonrel_i]
+                 << std::setw(10) << (nonrel_i + 1) << std::setw(20) << nonrel_oe[nonrel_i + 1]
+                 << "\n";
+    }
+    if (nonrel_i < nonrel_oe.size()) {
+      std::cout << "  " << std::setw(6) << nonrel_i << std::setw(20) << nonrel_oe[nonrel_i]
+                 << "\n";
+    }
   }
 
   if (input.c4_spinor()) {
@@ -689,9 +704,15 @@ int main(int argc, char** argv) {
     std::cout << "  Total DHF (4C) energy:      " << dhf_result.total_energy << " Hartree\n";
     std::cout << std::setprecision(6);
 
+    std::cout << "\nConverged one-body (Fock_ortho) state energies (Kramers pairs, even/odd "
+                 "side by side):\n";
+    std::cout << "  " << std::setw(6) << "index" << std::setw(20) << "E (even)" << std::setw(10)
+               << "index" << std::setw(20) << "E (odd)" << "\n";
     double max_fock_kramers_splitting = 0.0;
     const auto& final_oe = dhf_result.orbital_energies;
     for (std::size_t i = 0; i + 1 < final_oe.size(); i += 2) {
+      std::cout << "  " << std::setw(6) << i << std::setw(20) << final_oe[i] << std::setw(10)
+                 << (i + 1) << std::setw(20) << final_oe[i + 1] << "\n";
       max_fock_kramers_splitting =
           std::max(max_fock_kramers_splitting, std::abs(final_oe[i] - final_oe[i + 1]));
     }
