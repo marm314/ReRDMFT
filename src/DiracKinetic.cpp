@@ -3,6 +3,8 @@
 #include <array>
 #include <cstddef>
 
+#include "Integrals.h"
+
 // libcint is a C library and its headers do not guard themselves with
 // `extern "C"`, so that is done here to get correct (unmangled) linkage.
 extern "C" {
@@ -22,21 +24,6 @@ extern "C" FINT cint1e_ipovlp_cart(double* out, FINT* shls, FINT* atm,
                                     FINT natm, FINT* bas, FINT nbas,
                                     double* env);
 
-// Finds a cartesian AO's index within its own shell's cartesianComponents()
-// listing (i.e. libcint's own cartesian component ordering, verified to
-// match ours -- see Integrals.cpp's docs/program_ref.txt cross-check).
-int cartesianIndex(const BasisFunction& fn) {
-  const std::vector<CartesianExponents> carts = cartesianComponents(fn.l);
-  for (std::size_t i = 0; i < carts.size(); ++i) {
-    if (carts[i].lx == fn.cartesian.lx && carts[i].ly == fn.cartesian.ly &&
-        carts[i].lz == fn.cartesian.lz) {
-      return static_cast<int>(i);
-    }
-  }
-  return -1;  // unreachable: every BasisFunction's cartesian tag comes from
-              // cartesianComponents() in the first place.
-}
-
 // <bra|d/dx_k|ket> for k=0(x),1(y),2(z), for one specific pair of
 // individually-normalized cartesian AOs placed at their real atomic
 // centers. Built as a minimal, independent 2-shell/2-atom libcint system
@@ -48,8 +35,8 @@ int cartesianIndex(const BasisFunction& fn) {
 // the entry matching its own (lx,ly,lz) is read out of the full shell block
 // libcint returns.
 std::array<double, 3> nablaKet(const BasisFunction& bra, const BasisFunction& ket) {
-  const int bra_index = cartesianIndex(bra);
-  const int ket_index = cartesianIndex(ket);
+  const int bra_index = cartesianComponentIndex(bra.l, bra.cartesian);
+  const int ket_index = cartesianComponentIndex(ket.l, ket.cartesian);
 
   const FINT n_bra_prim = static_cast<FINT>(bra.exponents.size());
   const FINT n_ket_prim = static_cast<FINT>(ket.exponents.size());
@@ -163,6 +150,42 @@ Matrix<std::complex<double>> diracKineticMatrix(
   }
 
   return T;
+}
+
+Matrix<std::complex<double>> diracRestEnergyMatrix(
+    const std::vector<BasisFunction>& large_basis,
+    const std::vector<BasisFunction>& small_basis, double speed_of_light) {
+  const std::size_t n_large = large_basis.size();
+  const std::size_t n_small = small_basis.size();
+  const std::size_t n = 2 * n_large + 2 * n_small;
+
+  Matrix<std::complex<double>> m(n, n, std::complex<double>(0.0, 0.0));
+
+  const Matrix<double> s_large = overlapMatrix(large_basis);
+  const Matrix<double> s_small = overlapMatrix(small_basis);
+  const double minus_two_c2 = -2.0 * speed_of_light * speed_of_light;
+
+  const std::size_t off_large_alpha = 0;
+  const std::size_t off_large_beta = n_large;
+  const std::size_t off_small_alpha = 2 * n_large;
+  const std::size_t off_small_beta = 2 * n_large + n_small;
+
+  for (std::size_t a = 0; a < n_large; ++a) {
+    for (std::size_t b = 0; b < n_large; ++b) {
+      const std::complex<double> value(s_large(a, b), 0.0);
+      m(off_large_alpha + a, off_large_alpha + b) = value;
+      m(off_large_beta + a, off_large_beta + b) = value;
+    }
+  }
+  for (std::size_t a = 0; a < n_small; ++a) {
+    for (std::size_t b = 0; b < n_small; ++b) {
+      const std::complex<double> value(minus_two_c2 * s_small(a, b), 0.0);
+      m(off_small_alpha + a, off_small_alpha + b) = value;
+      m(off_small_beta + a, off_small_beta + b) = value;
+    }
+  }
+
+  return m;
 }
 
 }  // namespace rerdmft

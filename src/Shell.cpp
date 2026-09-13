@@ -13,6 +13,16 @@ std::vector<CartesianExponents> cartesianComponents(int l) {
   return components;
 }
 
+int cartesianComponentIndex(int l, const CartesianExponents& c) {
+  const std::vector<CartesianExponents> comps = cartesianComponents(l);
+  for (std::size_t i = 0; i < comps.size(); ++i) {
+    if (comps[i].lx == c.lx && comps[i].ly == c.ly && comps[i].lz == c.lz) {
+      return static_cast<int>(i);
+    }
+  }
+  return -1;
+}
+
 char angularMomentumLabel(int l) {
   static const char labels[] = {'S', 'P', 'D', 'F', 'G', 'H', 'I'};
   if (l < 0 || l >= static_cast<int>(sizeof(labels))) return '?';

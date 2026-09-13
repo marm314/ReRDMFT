@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "Matrix.h"
 #include "MolecularBasis.h"
 
 namespace rerdmft {
@@ -29,6 +30,12 @@ struct NormalizationCheck {
 // order as `functions`.
 std::vector<NormalizationCheck> normalizeCartesianBasis(
     std::vector<BasisFunction>& functions, double tolerance = 1e-8);
+
+// Computes the full (real, symmetric) AO overlap matrix <AO_i|AO_j> for an
+// already-normalized cartesian AO basis, via libcint. Diagonal entries
+// should come out as 1 (up to floating-point round-off), which also serves
+// as an ongoing check on normalizeCartesianBasis's result.
+Matrix<double> overlapMatrix(const std::vector<BasisFunction>& basis);
 
 }  // namespace rerdmft
 

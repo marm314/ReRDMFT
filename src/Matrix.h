@@ -28,6 +28,17 @@ class Matrix {
   std::vector<T> data_;
 };
 
+template <typename T>
+Matrix<T> operator+(const Matrix<T>& a, const Matrix<T>& b) {
+  Matrix<T> result(a.rows(), a.cols());
+  for (std::size_t i = 0; i < a.rows(); ++i) {
+    for (std::size_t j = 0; j < a.cols(); ++j) {
+      result(i, j) = a(i, j) + b(i, j);
+    }
+  }
+  return result;
+}
+
 }  // namespace rerdmft
 
 #endif  // RERDMFT_MATRIX_H

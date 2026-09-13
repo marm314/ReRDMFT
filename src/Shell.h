@@ -25,6 +25,12 @@ struct CartesianExponents {
 // the standard order (S: 1; P: x,y,z; D: xx,xy,xz,yy,yz,zz; ...).
 std::vector<CartesianExponents> cartesianComponents(int l);
 
+// Index of a specific cartesian component within cartesianComponents(l)'s
+// ordering (which matches libcint's own cartesian ordering). Returns -1 if
+// not found, which should not happen for a (l, cartesian) pair that came
+// from cartesianComponents(l) in the first place.
+int cartesianComponentIndex(int l, const CartesianExponents& c);
+
 // Conventional single-letter label for a shell's angular momentum
 // (S, P, D, F, G, H, I, ...); '?' if l is out of the supported range.
 char angularMomentumLabel(int l);
