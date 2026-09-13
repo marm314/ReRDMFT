@@ -10,6 +10,7 @@
 #include "Input.h"
 #include "Integrals.h"
 #include "MolecularBasis.h"
+#include "RkbHamiltonian.h"
 #include "RkbTransformation.h"
 #include "Shell.h"
 #include "SmallComponentBasis.h"
@@ -99,6 +100,7 @@ int main(int argc, char** argv) {
   rerdmft::Matrix<std::complex<double>> vext;
   rerdmft::Matrix<std::complex<double>> h_ukb;
   rerdmft::Matrix<std::complex<double>> rkb_coefficients;
+  rerdmft::Matrix<std::complex<double>> h_rkb;
   try {
     input.read(argv[1]);
     basis_set.read(input.basis_file());
@@ -120,6 +122,7 @@ int main(int argc, char** argv) {
                                            input.geometry());
     rkb_coefficients =
         rerdmft::rkbCoefficients(large_basis.functions(), small_basis.functions());
+    h_rkb = rerdmft::rkbHamiltonianMatrix(h_ukb, rkb_coefficients);
   } catch (const std::exception& e) {
     std::cerr << "Error: " << e.what() << "\n";
     return 1;
@@ -222,11 +225,26 @@ int main(int argc, char** argv) {
     std::cout << "\nRKB transformation coefficients C (sigma.p |Large_p> = sum_q C_pq |Small_q>):\n";
     std::cout << "  Dimensions: " << rkb_coefficients.rows() << " x " << rkb_coefficients.cols()
                << " (rows: Large-alpha/beta spin-orbitals; cols: Small-alpha/beta spin-orbitals)\n";
+
+    printMatrixDiagnostics(
+        "Restricted kinetic balance Hamiltonian H_RKB = W^dagger H_UKB W, W=[[I,0],[0,C^T]]",
+        h_rkb, rkb_coefficients.rows());
+    // W's top rows are just the identity on the Large block, so H_RKB's
+    // Large-Large block must be byte-for-byte the same as H_UKB's.
+    double max_large_block_change = 0.0;
+    for (std::size_t p = 0; p < 2 * n_large; ++p) {
+      for (std::size_t q = 0; q < 2 * n_large; ++q) {
+        max_large_block_change = std::max(max_large_block_change, std::abs(h_rkb(p, q) - h_ukb(p, q)));
+      }
+    }
+    std::cout << "  Max |H_RKB - H_UKB| within Large-Large block (expect exactly 0): "
+               << max_large_block_change << "\n";
   }
 
   std::cout << "\nH_UKB dimensions: " << h_ukb.rows() << " x " << h_ukb.cols() << "\n";
   std::cout << "RKB coefficients C dimensions: " << rkb_coefficients.rows() << " x "
              << rkb_coefficients.cols() << "\n";
+  std::cout << "H_RKB dimensions: " << h_rkb.rows() << " x " << h_rkb.cols() << "\n";
 
   return 0;
 }
