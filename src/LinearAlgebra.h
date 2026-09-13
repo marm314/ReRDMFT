@@ -10,6 +10,14 @@ namespace rerdmft {
 // `a` is singular (or not square).
 Matrix<double> invert(const Matrix<double>& a);
 
+// Computes S^-1/2 (the symmetric/Loewdin inverse square root) of a
+// symmetric positive-definite matrix, via eigendecomposition S = U diag(w) U^T
+// (LAPACKE_dsyev) and S^-1/2 = U diag(1/sqrt(w)) U^T. Throws
+// std::runtime_error if `s` is not square, or has an eigenvalue at or
+// below 1e-10 (not positive definite, or too close to linearly dependent
+// to safely invert its square root).
+Matrix<double> inverseSqrt(const Matrix<double>& s);
+
 }  // namespace rerdmft
 
 #endif  // RERDMFT_LINEARALGEBRA_H

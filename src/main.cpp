@@ -9,6 +9,7 @@
 #include "DiracKinetic.h"
 #include "Input.h"
 #include "Integrals.h"
+#include "LinearAlgebra.h"
 #include "MolecularBasis.h"
 #include "RkbHamiltonian.h"
 #include "RkbTransformation.h"
@@ -101,6 +102,7 @@ int main(int argc, char** argv) {
   rerdmft::Matrix<std::complex<double>> h_ukb;
   rerdmft::Matrix<std::complex<double>> rkb_coefficients;
   rerdmft::Matrix<std::complex<double>> h_rkb;
+  rerdmft::Matrix<double> x_large;
   try {
     input.read(argv[1]);
     basis_set.read(input.basis_file());
@@ -123,6 +125,8 @@ int main(int argc, char** argv) {
     rkb_coefficients =
         rerdmft::rkbCoefficients(large_basis.functions(), small_basis.functions());
     h_rkb = rerdmft::rkbHamiltonianMatrix(h_ukb, rkb_coefficients);
+
+    x_large = rerdmft::inverseSqrt(rerdmft::overlapMatrix(large_basis.functions()));
   } catch (const std::exception& e) {
     std::cerr << "Error: " << e.what() << "\n";
     return 1;
@@ -239,12 +243,30 @@ int main(int argc, char** argv) {
     }
     std::cout << "  Max |H_RKB - H_UKB| within Large-Large block (expect exactly 0): "
                << max_large_block_change << "\n";
+
+    std::cout << "\nLoewdin orthonormalization matrix X_Large = S_Large^-1/2:\n";
+    std::cout << "  Dimensions: " << x_large.rows() << " x " << x_large.cols() << "\n";
+    const auto s_large_check = rerdmft::overlapMatrix(large_basis.functions());
+    double max_asymmetry = 0.0;
+    double max_lowdin_error = 0.0;
+    const auto xsx = x_large * (s_large_check * x_large);
+    for (std::size_t i = 0; i < x_large.rows(); ++i) {
+      for (std::size_t j = 0; j < x_large.cols(); ++j) {
+        max_asymmetry = std::max(max_asymmetry, std::abs(x_large(i, j) - x_large(j, i)));
+        const double expected = (i == j) ? 1.0 : 0.0;
+        max_lowdin_error = std::max(max_lowdin_error, std::abs(xsx(i, j) - expected));
+      }
+    }
+    std::cout << "  Max |X_Large - X_Large^T| (symmetry check): " << max_asymmetry << "\n";
+    std::cout << "  Max |X_Large S_Large X_Large - I| (Loewdin identity check): "
+               << max_lowdin_error << "\n";
   }
 
   std::cout << "\nH_UKB dimensions: " << h_ukb.rows() << " x " << h_ukb.cols() << "\n";
   std::cout << "RKB coefficients C dimensions: " << rkb_coefficients.rows() << " x "
              << rkb_coefficients.cols() << "\n";
   std::cout << "H_RKB dimensions: " << h_rkb.rows() << " x " << h_rkb.cols() << "\n";
+  std::cout << "X_Large dimensions: " << x_large.rows() << " x " << x_large.cols() << "\n";
 
   return 0;
 }
