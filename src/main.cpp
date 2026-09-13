@@ -14,6 +14,7 @@
 #include "LinearAlgebra.h"
 #include "MolecularBasis.h"
 #include "NuclearAttraction.h"
+#include "C4_DHF.h"
 #include "RkbDensityMatrix.h"
 #include "RkbFockMatrix.h"
 #include "RkbHamiltonian.h"
@@ -220,6 +221,7 @@ int main(int argc, char** argv) {
   rerdmft::Matrix<std::complex<double>> density_matrix;
   rerdmft::RkbTwoElectronTensor c4_spinor_eri;
   rerdmft::Matrix<std::complex<double>> fock_matrix;
+  rerdmft::DiracHartreeFockResult dhf_result;
   try {
     input.read(argv[1]);
     basis_set.read(input.basis_file());
@@ -284,6 +286,10 @@ int main(int argc, char** argv) {
                                                             small_basis.functions(),
                                                             rkb_coefficients);
       fock_matrix = rerdmft::rkbFockMatrix(h_rkb, c4_spinor_eri, density_matrix);
+
+      dhf_result = rerdmft::runDiracHartreeFockScf(h_rkb, c4_spinor_eri, x_full, density_matrix,
+                                                    input.n_electrons(), input.geometry(),
+                                                    input.mixing());
     }
   } catch (const std::exception& e) {
     std::cerr << "Error: " << e.what() << "\n";
@@ -586,6 +592,48 @@ int main(int argc, char** argv) {
       }
       std::cout << "  Max |F - F^dagger| (Hermiticity check): " << max_herm_err << "\n";
     }
+
+    std::cout << "\n4-component Dirac-Hartree-Fock SCF (linear density mixing = "
+               << input.mixing() << "):\n";
+    for (const auto& it : dhf_result.history) {
+      std::cout << "  Iteration " << std::setw(3) << it.iteration << "  E = " << std::setw(16)
+                 << std::setprecision(10) << it.energy << std::setprecision(6);
+      if (it.iteration > 1) {
+        std::cout << "  dE = " << it.energy_change << "  dP = " << it.density_change;
+      }
+      std::cout << "\n";
+      if (input.debug()) {
+        std::cout << "    One-body (Fock_ortho) state energies (Kramers pairs, even/odd side by "
+                     "side):\n";
+        const auto& oe = it.orbital_energies;
+        for (std::size_t i = 0; i + 1 < oe.size(); i += 2) {
+          std::cout << "      " << std::setw(6) << i << std::setw(20) << oe[i] << std::setw(10)
+                     << (i + 1) << std::setw(20) << oe[i + 1] << "\n";
+        }
+      }
+    }
+    std::cout << "  " << (dhf_result.converged ? "Converged" : "Did NOT converge") << " after "
+               << dhf_result.iterations << " iteration(s)\n";
+    std::cout << "  Electronic energy:          " << std::setprecision(10)
+               << dhf_result.electronic_energy << " Hartree\n";
+    std::cout << "  Nuclear repulsion energy:   " << dhf_result.nuclear_repulsion_energy
+               << " Hartree\n";
+    std::cout << "  Total DHF (4C) energy:      " << dhf_result.total_energy << " Hartree\n";
+    std::cout << std::setprecision(6);
+
+    double max_fock_kramers_splitting = 0.0;
+    const auto& final_oe = dhf_result.orbital_energies;
+    for (std::size_t i = 0; i + 1 < final_oe.size(); i += 2) {
+      max_fock_kramers_splitting =
+          std::max(max_fock_kramers_splitting, std::abs(final_oe[i] - final_oe[i + 1]));
+    }
+    const double fock_kramers_partner_deviation = rerdmft::maxKramersPartnerDeviation(
+        dhf_result.fock_ortho_eigenvectors, rkb_coefficients, x_full, s_large, s_small_ukb);
+    std::cout << "  Fock_ortho Max |E(even) - E(odd)| Kramers-pair splitting (expect ~0): "
+               << max_fock_kramers_splitting << "\n";
+    std::cout << "  Fock_ortho Max Kramers eigenvector-partner deviation, "
+                 "1-|<odd|Theta even>_S| (expect ~0): "
+               << fock_kramers_partner_deviation << "\n";
   }
 
   printFarewell();

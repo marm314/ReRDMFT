@@ -48,6 +48,11 @@ class Input {
   // (C4_DHF/RkbTwoElectron.h) -- opt-in since both its time and memory
   // cost scale steeply with basis size.
   bool c4_spinor() const { return c4_spinor_; }
+  // Optional; defaults to 0.4 when the MIXING keyword is absent. Linear
+  // density-matrix mixing weight for the C4_DHF SCF loop (C4_DHF/C4_DHF.h):
+  // the density fed into the next iteration's Fock build is
+  // mixing*P_new + (1-mixing)*P_current. Must be in (0, 1].
+  double mixing() const { return mixing_; }
 
  private:
   int n_electrons_ = 0;
@@ -57,6 +62,7 @@ class Input {
   double speed_of_light_ = kSpeedOfLight;
   bool non_relativistic_ = false;
   bool c4_spinor_ = false;
+  double mixing_ = 0.4;
 };
 
 }  // namespace rerdmft

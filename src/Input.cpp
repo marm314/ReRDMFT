@@ -104,6 +104,12 @@ void Input::read(const std::string& filename) {
       non_relativistic_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "C4_SPINOR") {
       c4_spinor_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "MIXING") {
+      mixing_ = parseDouble(iss, line_number, keyword);
+      if (!(mixing_ > 0.0 && mixing_ <= 1.0)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": MIXING must be in (0, 1]");
+      }
     } else if (keyword == "SPEED_OF_LIGHT") {
       speed_of_light_ = parseDouble(iss, line_number, keyword);
       if (!(speed_of_light_ > 0.0)) {
