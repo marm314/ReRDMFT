@@ -42,6 +42,11 @@ class Input {
   // basis (SchrodingerKinetic.h), printing its eigenvalues for comparison
   // against the relativistic ones.
   bool non_relativistic() const { return non_relativistic_; }
+  // Optional; defaults to false when the TWO_ELECTRON keyword is absent.
+  // When true, additionally builds the full two-electron Coulomb
+  // repulsion tensor in the RKB spinor basis (RkbTwoElectron.h) -- opt-in
+  // since both its time and memory cost scale steeply with basis size.
+  bool two_electron() const { return two_electron_; }
 
  private:
   int n_electrons_ = 0;
@@ -50,6 +55,7 @@ class Input {
   bool debug_ = false;
   double speed_of_light_ = kSpeedOfLight;
   bool non_relativistic_ = false;
+  bool two_electron_ = false;
 };
 
 }  // namespace rerdmft

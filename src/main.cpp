@@ -19,6 +19,7 @@
 #include "RkbOverlap.h"
 #include "RkbPositiveEnergyHamiltonian.h"
 #include "RkbTransformation.h"
+#include "RkbTwoElectron.h"
 #include "SchrodingerKinetic.h"
 #include "Shell.h"
 #include "SmallComponentBasis.h"
@@ -213,6 +214,7 @@ int main(int argc, char** argv) {
   rerdmft::HermitianEigenResult h_positive_energy_eig;
   rerdmft::Matrix<double> h_core_nonrel_ortho;
   rerdmft::SymmetricEigenResult h_core_nonrel_eig;
+  rerdmft::Tensor4<std::complex<double>> two_electron_eri;
   try {
     input.read(argv[1]);
     basis_set.read(input.basis_file());
@@ -267,6 +269,12 @@ int main(int argc, char** argv) {
       const auto h_core_nonrel = schrodinger_kinetic + vext_large;
       h_core_nonrel_ortho = x_large * (h_core_nonrel * x_large);
       h_core_nonrel_eig = rerdmft::diagonalizeSymmetric(h_core_nonrel_ortho);
+    }
+
+    if (input.two_electron()) {
+      two_electron_eri = rerdmft::rkbTwoElectronIntegrals(large_basis.functions(),
+                                                            small_basis.functions(),
+                                                            rkb_coefficients);
     }
   } catch (const std::exception& e) {
     std::cerr << "Error: " << e.what() << "\n";
@@ -490,6 +498,36 @@ int main(int argc, char** argv) {
     std::cout << "\nNonrelativistic (Schrodinger) core Hamiltonian eigenvalues:\n";
     for (std::size_t i = 0; i < h_core_nonrel_eig.eigenvalues.size(); ++i) {
       std::cout << "  " << std::setw(6) << i << std::setw(20) << h_core_nonrel_eig.eigenvalues[i]
+                 << "\n";
+    }
+  }
+
+  if (input.two_electron()) {
+    const std::size_t n_spinor = two_electron_eri.dim0();
+    std::cout << "\nTwo-electron Coulomb repulsion tensor <Spinor_A Spinor_B|Spinor_C Spinor_D>,\n"
+                 "restricted kinetic balance basis (physics notation; A,C on electron 1, B,D on\n"
+                 "electron 2):\n";
+    std::cout << "  Dimensions: " << n_spinor << " x " << n_spinor << " x " << n_spinor << " x "
+               << n_spinor << "\n";
+    if (input.debug()) {
+      double max_exchange_err = 0.0;
+      double max_herm_err = 0.0;
+      for (std::size_t a = 0; a < n_spinor; ++a) {
+        for (std::size_t b = 0; b < n_spinor; ++b) {
+          for (std::size_t c = 0; c < n_spinor; ++c) {
+            for (std::size_t d = 0; d < n_spinor; ++d) {
+              const auto v_abcd = two_electron_eri(a, b, c, d);
+              max_exchange_err =
+                  std::max(max_exchange_err, std::abs(v_abcd - two_electron_eri(b, a, d, c)));
+              max_herm_err = std::max(
+                  max_herm_err, std::abs(v_abcd - std::conj(two_electron_eri(c, d, a, b))));
+            }
+          }
+        }
+      }
+      std::cout << "  Max |<AB|CD> - <BA|DC>| (electron-exchange symmetry, expect ~0): "
+                 << max_exchange_err << "\n";
+      std::cout << "  Max |<AB|CD> - conj(<CD|AB>)| (Hermiticity, expect ~0): " << max_herm_err
                  << "\n";
     }
   }
