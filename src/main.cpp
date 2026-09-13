@@ -13,6 +13,7 @@
 #include "Shell.h"
 #include "SmallComponentBasis.h"
 #include "SpinorBasis.h"
+#include "Vext.h"
 
 namespace {
 
