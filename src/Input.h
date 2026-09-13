@@ -25,11 +25,16 @@ class Input {
   int n_electrons() const { return n_electrons_; }
   const std::string& basis_file() const { return basis_file_; }
   const std::vector<Atom>& geometry() const { return geometry_; }
+  // Optional; defaults to false when the DEBUG keyword is absent from the
+  // input file. When true, the program prints detailed basis and matrix
+  // diagnostics; otherwise it only prints a concise summary.
+  bool debug() const { return debug_; }
 
  private:
   int n_electrons_ = 0;
   std::string basis_file_;
   std::vector<Atom> geometry_;
+  bool debug_ = false;
 };
 
 }  // namespace rerdmft

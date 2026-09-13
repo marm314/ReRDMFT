@@ -17,6 +17,29 @@ namespace {
 // stored (and used everywhere else in the program) in Bohr.
 constexpr double kAngstromToBohr = 1.0 / 0.52917721067;
 
+// Parses a boolean value token, accepting an optional '=' before it (with
+// or without surrounding whitespace, e.g. "DEBUG True", "DEBUG = True",
+// "DEBUG=True") since that reads naturally for a flag like DEBUG.
+bool parseBool(std::istringstream& stream, int line_number, const std::string& keyword) {
+  std::string token;
+  if (!(stream >> token)) {
+    throw std::runtime_error("line " + std::to_string(line_number) + ": expected a value after " +
+                              keyword);
+  }
+  if (!token.empty() && token[0] == '=') {
+    token.erase(0, 1);
+    if (token.empty() && !(stream >> token)) {
+      throw std::runtime_error("line " + std::to_string(line_number) +
+                                ": expected a value after " + keyword + " =");
+    }
+  }
+  const std::string upper = toUpper(token);
+  if (upper == "TRUE" || upper == "1" || upper == "YES") return true;
+  if (upper == "FALSE" || upper == "0" || upper == "NO") return false;
+  throw std::runtime_error("line " + std::to_string(line_number) + ": invalid boolean value '" +
+                            token + "' for " + keyword);
+}
+
 }  // namespace
 
 void Input::read(const std::string& filename) {
@@ -52,6 +75,8 @@ void Input::read(const std::string& filename) {
                                   ": expected a file name after BASIS");
       }
       has_basis_file = true;
+    } else if (keyword == "DEBUG") {
+      debug_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "GEOMETRY") {
       geometry_.clear();
       while (std::getline(file, raw_line)) {

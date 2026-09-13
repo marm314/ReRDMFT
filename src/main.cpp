@@ -131,87 +131,92 @@ int main(int argc, char** argv) {
                << std::setw(12) << atom.z << "\n";
   }
 
-  printAoList("Large-component cartesian atomic orbitals", large_basis.functions(),
-              large_normalization);
-  printAoList("Small-component cartesian atomic orbitals (unrestricted kinetic balance)",
-              small_basis.functions(), small_normalization);
-
-  std::cout << "\nFour-component spinor basis:\n";
-  std::cout << "  Large-component AOs per spin block: " << spinor_basis.nLarge() << "\n";
-  std::cout << "  Small-component AOs per spin block: " << spinor_basis.nSmall() << "\n";
-  std::cout << "  Total spinor basis functions: " << spinor_basis.size()
-             << " (Large-alpha, Large-beta, Small-alpha, Small-beta)\n";
-  const auto describeSpinor = [&](std::size_t index) {
-    const auto& ao = spinor_basis.ao(index);
-    std::cout << "    index " << index << "  "
-               << rerdmft::spinBlockLabel(spinor_basis.block(index)) << "  ao="
-               << spinor_basis.aoIndex(index) << "  " << ao.element << "  "
-               << rerdmft::angularMomentumLabel(ao.l) << "(" << ao.cartesian.lx
-               << ao.cartesian.ly << ao.cartesian.lz << ")\n";
-  };
   const std::size_t n_large = spinor_basis.nLarge();
   const std::size_t n_small = spinor_basis.nSmall();
-  if (n_large > 0) {
-    describeSpinor(0);
-    describeSpinor(n_large - 1);
-    describeSpinor(n_large);
-    describeSpinor(2 * n_large - 1);
-  }
-  if (n_small > 0) {
-    describeSpinor(2 * n_large);
-    describeSpinor(2 * n_large + n_small - 1);
-    describeSpinor(2 * n_large + n_small);
-    describeSpinor(spinor_basis.size() - 1);
+
+  if (input.debug()) {
+    printAoList("Large-component cartesian atomic orbitals", large_basis.functions(),
+                large_normalization);
+    printAoList("Small-component cartesian atomic orbitals (unrestricted kinetic balance)",
+                small_basis.functions(), small_normalization);
+
+    std::cout << "\nFour-component spinor basis:\n";
+    std::cout << "  Large-component AOs per spin block: " << spinor_basis.nLarge() << "\n";
+    std::cout << "  Small-component AOs per spin block: " << spinor_basis.nSmall() << "\n";
+    std::cout << "  Total spinor basis functions: " << spinor_basis.size()
+               << " (Large-alpha, Large-beta, Small-alpha, Small-beta)\n";
+    const auto describeSpinor = [&](std::size_t index) {
+      const auto& ao = spinor_basis.ao(index);
+      std::cout << "    index " << index << "  "
+                 << rerdmft::spinBlockLabel(spinor_basis.block(index)) << "  ao="
+                 << spinor_basis.aoIndex(index) << "  " << ao.element << "  "
+                 << rerdmft::angularMomentumLabel(ao.l) << "(" << ao.cartesian.lx
+                 << ao.cartesian.ly << ao.cartesian.lz << ")\n";
+    };
+    if (n_large > 0) {
+      describeSpinor(0);
+      describeSpinor(n_large - 1);
+      describeSpinor(n_large);
+      describeSpinor(2 * n_large - 1);
+    }
+    if (n_small > 0) {
+      describeSpinor(2 * n_large);
+      describeSpinor(2 * n_large + n_small - 1);
+      describeSpinor(2 * n_large + n_small);
+      describeSpinor(spinor_basis.size() - 1);
+    }
+
+    printMatrixDiagnostics("Dirac kinetic energy matrix T = -i c (alpha . grad_r)", dirac_kinetic,
+                            2 * n_large);
+    if (n_large > 0 && n_small > 0) {
+      // Large-alpha[0] paired with Small-beta[0], i.e. the alpha-beta spin
+      // block -c*i*(Dx - i*Dy): typically nonzero and illustrates that the
+      // matrix is genuinely complex (from the sigma_y contribution), unlike
+      // e.g. the alpha-alpha block for an S/p_z pair on the same center,
+      // which vanishes exactly by parity.
+      const std::size_t col = 2 * n_large + n_small;
+      const auto& sample = dirac_kinetic(0, col);
+      std::cout << "  T[0, " << col << "] (Large-alpha[0], Small-beta[0]) = " << sample.real()
+                 << (sample.imag() >= 0 ? " + " : " - ") << std::abs(sample.imag()) << "i\n";
+    }
+
+    printMatrixDiagnostics(
+        "Dirac rest-energy alignment matrix diag(I_2, -2c^2 I_2) (metric-weighted)",
+        dirac_rest_energy, 2 * n_large);
+    if (n_large > 0) {
+      std::cout << "  M[0,0] (Large-alpha[0] self, expect 1): " << dirac_rest_energy(0, 0).real()
+                 << "\n";
+    }
+    if (n_small > 0) {
+      const std::size_t idx = 2 * n_large;
+      std::cout << "  M[" << idx << "," << idx << "] (Small-alpha[0] self, expect -2c^2 = "
+                 << -2.0 * rerdmft::kSpeedOfLight * rerdmft::kSpeedOfLight
+                 << "): " << dirac_rest_energy(idx, idx).real() << "\n";
+    }
+
+    const auto dirac_core = dirac_kinetic + dirac_rest_energy;
+    printMatrixDiagnostics("Dirac core matrix T_D = kinetic + rest-energy alignment", dirac_core,
+                            2 * n_large);
+
+    printMatrixDiagnostics("Vext matrix: spinor_a^dagger Vext(r) I_4x4 spinor_b", vext,
+                            2 * n_large);
+    if (n_large > 0) {
+      std::cout << "  Vext[0,0] (Large-alpha[0] self, expect large and negative): "
+                 << vext(0, 0).real() << "\n";
+    }
+    if (n_small > 0) {
+      const std::size_t idx = 2 * n_large;
+      std::cout << "  Vext[" << idx << "," << idx
+                 << "] (Small-alpha[0] self, expect large and negative): "
+                 << vext(idx, idx).real() << "\n";
+    }
+
+    printMatrixDiagnostics(
+        "Unrestricted kinetic balance Hamiltonian H_UKB = T_kinetic + rest-energy alignment + Vext",
+        h_ukb, 2 * n_large);
   }
 
-  printMatrixDiagnostics("Dirac kinetic energy matrix T = -i c (alpha . grad_r)", dirac_kinetic,
-                          2 * n_large);
-  if (n_large > 0 && n_small > 0) {
-    // Large-alpha[0] paired with Small-beta[0], i.e. the alpha-beta spin
-    // block -c*i*(Dx - i*Dy): typically nonzero and illustrates that the
-    // matrix is genuinely complex (from the sigma_y contribution), unlike
-    // e.g. the alpha-alpha block for an S/p_z pair on the same center,
-    // which vanishes exactly by parity.
-    const std::size_t col = 2 * n_large + n_small;
-    const auto& sample = dirac_kinetic(0, col);
-    std::cout << "  T[0, " << col << "] (Large-alpha[0], Small-beta[0]) = " << sample.real()
-               << (sample.imag() >= 0 ? " + " : " - ") << std::abs(sample.imag()) << "i\n";
-  }
-
-  printMatrixDiagnostics(
-      "Dirac rest-energy alignment matrix diag(I_2, -2c^2 I_2) (metric-weighted)",
-      dirac_rest_energy, 2 * n_large);
-  if (n_large > 0) {
-    std::cout << "  M[0,0] (Large-alpha[0] self, expect 1): " << dirac_rest_energy(0, 0).real()
-               << "\n";
-  }
-  if (n_small > 0) {
-    const std::size_t idx = 2 * n_large;
-    std::cout << "  M[" << idx << "," << idx << "] (Small-alpha[0] self, expect -2c^2 = "
-               << -2.0 * rerdmft::kSpeedOfLight * rerdmft::kSpeedOfLight
-               << "): " << dirac_rest_energy(idx, idx).real() << "\n";
-  }
-
-  const auto dirac_core = dirac_kinetic + dirac_rest_energy;
-  printMatrixDiagnostics("Dirac core matrix T_D = kinetic + rest-energy alignment", dirac_core,
-                          2 * n_large);
-
-  printMatrixDiagnostics("Vext matrix: spinor_a^dagger Vext(r) I_4x4 spinor_b", vext,
-                          2 * n_large);
-  if (n_large > 0) {
-    std::cout << "  Vext[0,0] (Large-alpha[0] self, expect large and negative): "
-               << vext(0, 0).real() << "\n";
-  }
-  if (n_small > 0) {
-    const std::size_t idx = 2 * n_large;
-    std::cout << "  Vext[" << idx << "," << idx
-               << "] (Small-alpha[0] self, expect large and negative): "
-               << vext(idx, idx).real() << "\n";
-  }
-
-  printMatrixDiagnostics(
-      "Unrestricted kinetic balance Hamiltonian H_UKB = T_kinetic + rest-energy alignment + Vext",
-      h_ukb, 2 * n_large);
+  std::cout << "\nH_UKB dimensions: " << h_ukb.rows() << " x " << h_ukb.cols() << "\n";
 
   return 0;
 }
