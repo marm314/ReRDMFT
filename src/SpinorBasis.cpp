@@ -8,30 +8,45 @@ const char* spinBlockLabel(SpinBlock block) {
   switch (block) {
     case SpinBlock::LargeAlpha: return "Large-alpha";
     case SpinBlock::LargeBeta: return "Large-beta";
+    case SpinBlock::SmallAlpha: return "Small-alpha";
+    case SpinBlock::SmallBeta: return "Small-beta";
   }
   return "?";
 }
 
-void SpinorBasis::build(const std::vector<BasisFunction>& scalar_basis) {
-  scalar_basis_ = scalar_basis;
+void SpinorBasis::build(const std::vector<BasisFunction>& large_basis,
+                         const std::vector<BasisFunction>& small_basis) {
+  large_basis_ = large_basis;
+  small_basis_ = small_basis;
 }
 
-SpinBlock SpinorBasis::block(std::size_t index) const {
-  if (index >= size()) {
+std::pair<SpinBlock, std::size_t> SpinorBasis::locate(std::size_t index) const {
+  const std::size_t n_large = nLarge();
+  const std::size_t n_small = nSmall();
+  if (index >= 2 * n_large + 2 * n_small) {
     throw std::out_of_range("spinor basis index out of range");
   }
-  return index < nao() ? SpinBlock::LargeAlpha : SpinBlock::LargeBeta;
-}
 
-std::size_t SpinorBasis::aoIndex(std::size_t index) const {
-  if (index >= size()) {
-    throw std::out_of_range("spinor basis index out of range");
-  }
-  return index < nao() ? index : index - nao();
+  if (index < n_large) return {SpinBlock::LargeAlpha, index};
+  index -= n_large;
+  if (index < n_large) return {SpinBlock::LargeBeta, index};
+  index -= n_large;
+  if (index < n_small) return {SpinBlock::SmallAlpha, index};
+  index -= n_small;
+  return {SpinBlock::SmallBeta, index};
 }
 
 const BasisFunction& SpinorBasis::ao(std::size_t index) const {
-  return scalar_basis_[aoIndex(index)];
+  const auto [blk, ao_index] = locate(index);
+  switch (blk) {
+    case SpinBlock::LargeAlpha:
+    case SpinBlock::LargeBeta:
+      return large_basis_[ao_index];
+    case SpinBlock::SmallAlpha:
+    case SpinBlock::SmallBeta:
+      return small_basis_[ao_index];
+  }
+  throw std::logic_error("unreachable spin block");
 }
 
 }  // namespace rerdmft

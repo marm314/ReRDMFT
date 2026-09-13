@@ -2,6 +2,8 @@
 
 #include <cmath>
 #include <cstddef>
+#include <stdexcept>
+#include <string>
 
 // libcint is a C library and its headers do not guard themselves with
 // `extern "C"`, so that is done here to get correct (unmangled) linkage.
@@ -64,6 +66,13 @@ std::vector<NormalizationCheck> normalizeCartesianBasis(
   std::size_t i = 0;
   while (i < functions.size()) {
     const int l = functions[i].l;
+    if (l > 6) {
+      // libcint's cartesian integrals only support angular momentum up to
+      // l=6 (i-type); see doc/program_ref.txt.
+      throw std::runtime_error(
+          "angular momentum l=" + std::to_string(l) +
+          " exceeds libcint's supported maximum (l=6, i-type)");
+    }
     const int nf = static_cast<int>(cartesianComponents(l).size());
 
     // Primitive normalization: basis-set-file coefficients are defined for
