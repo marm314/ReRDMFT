@@ -1,9 +1,12 @@
+#include <algorithm>
+#include <complex>
 #include <iomanip>
 #include <iostream>
 #include <string>
 #include <vector>
 
 #include "BasisSet.h"
+#include "DiracKinetic.h"
 #include "Input.h"
 #include "Integrals.h"
 #include "MolecularBasis.h"
@@ -47,6 +50,7 @@ int main(int argc, char** argv) {
   rerdmft::SpinorBasis spinor_basis;
   std::vector<rerdmft::NormalizationCheck> large_normalization;
   std::vector<rerdmft::NormalizationCheck> small_normalization;
+  rerdmft::Matrix<std::complex<double>> dirac_kinetic;
   try {
     input.read(argv[1]);
     basis_set.read(input.basis_file());
@@ -58,6 +62,8 @@ int main(int argc, char** argv) {
     small_normalization = rerdmft::normalizeCartesianBasis(small_basis.functions());
 
     spinor_basis.build(large_basis.functions(), small_basis.functions());
+
+    dirac_kinetic = rerdmft::diracKineticMatrix(large_basis.functions(), small_basis.functions());
   } catch (const std::exception& e) {
     std::cerr << "Error: " << e.what() << "\n";
     return 1;
@@ -104,6 +110,41 @@ int main(int argc, char** argv) {
     describeSpinor(2 * n_large + n_small - 1);
     describeSpinor(2 * n_large + n_small);
     describeSpinor(spinor_basis.size() - 1);
+  }
+
+  std::cout << "\nDirac kinetic energy matrix T = -i c (alpha . grad_r):\n";
+  std::cout << "  Dimensions: " << dirac_kinetic.rows() << " x " << dirac_kinetic.cols()
+             << "\n";
+
+  double max_hermiticity_error = 0.0;
+  double max_large_large = 0.0;
+  double max_small_small = 0.0;
+  for (std::size_t p = 0; p < dirac_kinetic.rows(); ++p) {
+    for (std::size_t q = 0; q < dirac_kinetic.cols(); ++q) {
+      const double herm_err = std::abs(dirac_kinetic(p, q) - std::conj(dirac_kinetic(q, p)));
+      max_hermiticity_error = std::max(max_hermiticity_error, herm_err);
+      const bool p_large = p < 2 * n_large;
+      const bool q_large = q < 2 * n_large;
+      if (p_large && q_large) {
+        max_large_large = std::max(max_large_large, std::abs(dirac_kinetic(p, q)));
+      } else if (!p_large && !q_large) {
+        max_small_small = std::max(max_small_small, std::abs(dirac_kinetic(p, q)));
+      }
+    }
+  }
+  std::cout << "  Max |T - T^dagger| (Hermiticity check): " << max_hermiticity_error << "\n";
+  std::cout << "  Max |T| within Large-Large block (expect 0): " << max_large_large << "\n";
+  std::cout << "  Max |T| within Small-Small block (expect 0): " << max_small_small << "\n";
+  if (n_large > 0 && n_small > 0) {
+    // Large-alpha[0] paired with Small-beta[0], i.e. the alpha-beta spin
+    // block -c*i*(Dx - i*Dy): typically nonzero and illustrates that the
+    // matrix is genuinely complex (from the sigma_y contribution), unlike
+    // e.g. the alpha-alpha block for an S/p_z pair on the same center,
+    // which vanishes exactly by parity.
+    const std::size_t col = 2 * n_large + n_small;
+    const auto& sample = dirac_kinetic(0, col);
+    std::cout << "  T[0, " << col << "] (Large-alpha[0], Small-beta[0]) = " << sample.real()
+               << (sample.imag() >= 0 ? " + " : " - ") << std::abs(sample.imag()) << "i\n";
   }
 
   return 0;

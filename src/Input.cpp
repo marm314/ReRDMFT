@@ -8,6 +8,17 @@
 
 namespace rerdmft {
 
+namespace {
+
+// CODATA Bohr radius: 1 Bohr = 0.52917721067 Angstrom. Geometries in the
+// input file are given in Angstrom (the common convention for a readable
+// input format) but integral evaluation requires atomic units, so atomic
+// coordinates are converted to Bohr immediately after parsing and are
+// stored (and used everywhere else in the program) in Bohr.
+constexpr double kAngstromToBohr = 1.0 / 0.52917721067;
+
+}  // namespace
+
 void Input::read(const std::string& filename) {
   std::ifstream file(filename);
   if (!file.is_open()) {
@@ -56,6 +67,9 @@ void Input::read(const std::string& filename) {
               "line " + std::to_string(line_number) +
               ": expected '<symbol> <x> <y> <z>' in GEOMETRY block");
         }
+        atom.x *= kAngstromToBohr;
+        atom.y *= kAngstromToBohr;
+        atom.z *= kAngstromToBohr;
         geometry_.push_back(atom);
       }
     } else {

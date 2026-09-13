@@ -6,6 +6,8 @@
 
 namespace rerdmft {
 
+// Coordinates are in Bohr (atomic units), regardless of the input file's
+// units (see Input::read).
 struct Atom {
   std::string symbol;
   double x = 0.0;
@@ -13,8 +15,9 @@ struct Atom {
   double z = 0.0;
 };
 
-// Parses the ReRDMFT input file and stores the run parameters:
-// number of electrons, gaussian basis set file name, and molecular geometry.
+// Parses the ReRDMFT input file and stores the run parameters: number of
+// electrons, gaussian basis set file name, and molecular geometry. The
+// input file's geometry is in Angstrom; it is converted to Bohr on read.
 class Input {
  public:
   void read(const std::string& filename);
