@@ -60,10 +60,10 @@ double nuclearRepulsionEnergy(const std::vector<Atom>& geometry);
 //   4. Evaluates the SCF energy with the density that actually built F:
 //      E = (1/2) Re Tr[P_current (H_RKB + F)] -- the standard
 //      self-consistent-pair HF energy expression.
-//   5. Checks convergence: both the density change |P_new - P_current|
-//      and the energy change from the previous iteration must fall below
-//      their tolerances (skipped on the first iteration, which has no
-//      previous energy to compare against).
+//   5. Checks convergence: EITHER the density change |P_new - P_current|
+//      or the energy change from the previous iteration falling below
+//      its own tolerance is enough (OR, not AND) -- skipped on the first
+//      iteration, which has no previous energy to compare against.
 //   6. If not converged, linearly mixes the density fed into the next
 //      iteration: P_current <- mixing*P_new + (1-mixing)*P_current
 //      (`mixing`, e.g. Input::mixing(), is a damping aid for convergence

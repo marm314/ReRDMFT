@@ -55,6 +55,12 @@ Tensor4<std::complex<double>> transformLeg(const Tensor4<SrcT>& src, int leg,
 
   const SrcT* src_data = src.data();
   std::complex<double>* out_data = result.data();
+  // Every (o,j) pair owns a disjoint, non-overlapping `inner`-sized output
+  // slice and only reads from src -- never from `result` -- so looping
+  // over the combined (o,j) space in parallel is safe regardless of which
+  // leg this is (leg 0/2 calls have outer==1, so collapsing onto j alone
+  // still gives new_dim-way parallelism instead of none).
+#pragma omp parallel for collapse(2)
   for (std::size_t o = 0; o < outer; ++o) {
     for (std::size_t j = 0; j < new_dim; ++j) {
       std::complex<double>* out = out_data + (o * new_dim + j) * inner;

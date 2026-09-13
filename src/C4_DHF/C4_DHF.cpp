@@ -93,8 +93,10 @@ DiracHartreeFockResult runDiracHartreeFockScf(
     record.orbital_energies = eig.eigenvalues;
     result.history.push_back(std::move(record));
 
-    const bool converged = iteration > 1 && density_change < density_tolerance &&
-                            energy_change < energy_tolerance;
+    // Converged as soon as EITHER metric is satisfied (OR, not AND) --
+    // see the header's note.
+    const bool converged = iteration > 1 && (density_change < density_tolerance ||
+                                              energy_change < energy_tolerance);
     previous_energy = energy;
     if (converged) {
       result.converged = true;

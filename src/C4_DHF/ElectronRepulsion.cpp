@@ -93,6 +93,15 @@ Tensor4<double> twoElectronIntegrals(const std::vector<BasisFunction>& basis) {
   const std::size_t n = basis.size();
   Tensor4<double> result(n, n, n, n);
 
+  // Each (p,q) with p<=q owns a disjoint set of 8 output positions (the
+  // canonical-representative selection below never revisits a symmetry
+  // class), and twoElectronQuadruplet builds an entirely local libcint
+  // system per call (no shared, mutably-touched state, and `opt` is
+  // nullptr) -- so different threads handling different p's never race,
+  // either on reads or on Tensor4 writes. schedule(dynamic) balances the
+  // shrinking q-range (and, within it, the libcint cost, which grows with
+  // angular momentum) across threads.
+#pragma omp parallel for schedule(dynamic)
   for (std::size_t p = 0; p < n; ++p) {
     for (std::size_t q = p; q < n; ++q) {
       for (std::size_t r = 0; r < n; ++r) {
@@ -124,6 +133,9 @@ Tensor4<double> twoElectronIntegralsCross(const std::vector<BasisFunction>& basi
   const std::size_t n_rs = basis_rs.size();
   Tensor4<double> result(n_pq, n_pq, n_rs, n_rs);
 
+  // Same reasoning as twoElectronIntegrals: each (p,q) with p<=q owns a
+  // disjoint set of output positions, so parallelizing over it is safe.
+#pragma omp parallel for schedule(dynamic)
   for (std::size_t p = 0; p < n_pq; ++p) {
     for (std::size_t q = p; q < n_pq; ++q) {
       for (std::size_t r = 0; r < n_rs; ++r) {

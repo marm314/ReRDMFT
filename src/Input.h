@@ -53,6 +53,22 @@ class Input {
   // the density fed into the next iteration's Fock build is
   // mixing*P_new + (1-mixing)*P_current. Must be in (0, 1].
   double mixing() const { return mixing_; }
+  // Optional; defaults to 100 when MAX_ITERATIONS is absent. Maximum
+  // number of C4_DHF SCF cycles (C4_DHF/C4_DHF.h) before giving up
+  // (converged is false in that case, but the last cycle's results are
+  // still returned). Must be positive.
+  int max_iterations() const { return max_iterations_; }
+  // Optional; defaults to 1e-8 Hartree when ENERGY_TOLERANCE is absent.
+  // The C4_DHF SCF loop's energy-change convergence threshold. Combined
+  // with density_tolerance() by OR (see its note): converged as soon as
+  // EITHER one is satisfied, not only when both are. Must be positive.
+  double energy_tolerance() const { return energy_tolerance_; }
+  // Optional; defaults to 1e-6 when DENSITY_TOLERANCE is absent. The
+  // C4_DHF SCF loop's density-change convergence threshold. Combined with
+  // energy_tolerance() by OR: the SCF loop calls itself converged (after
+  // at least one iteration) as soon as EITHER the density change or the
+  // energy change falls below its own tolerance. Must be positive.
+  double density_tolerance() const { return density_tolerance_; }
 
  private:
   int n_electrons_ = 0;
@@ -63,6 +79,9 @@ class Input {
   bool non_relativistic_ = false;
   bool c4_spinor_ = false;
   double mixing_ = 0.4;
+  int max_iterations_ = 100;
+  double energy_tolerance_ = 1e-8;
+  double density_tolerance_ = 1e-6;
 };
 
 }  // namespace rerdmft

@@ -63,6 +63,29 @@ double parseDouble(std::istringstream& stream, int line_number, const std::strin
   }
 }
 
+// Parses an integer value token, accepting an optional '=' before it (with
+// or without surrounding whitespace), same as parseBool/parseDouble.
+int parseInt(std::istringstream& stream, int line_number, const std::string& keyword) {
+  std::string token;
+  if (!(stream >> token)) {
+    throw std::runtime_error("line " + std::to_string(line_number) + ": expected a value after " +
+                              keyword);
+  }
+  if (!token.empty() && token[0] == '=') {
+    token.erase(0, 1);
+    if (token.empty() && !(stream >> token)) {
+      throw std::runtime_error("line " + std::to_string(line_number) +
+                                ": expected a value after " + keyword + " =");
+    }
+  }
+  try {
+    return std::stoi(token);
+  } catch (const std::exception&) {
+    throw std::runtime_error("line " + std::to_string(line_number) + ": invalid integer value '" +
+                              token + "' for " + keyword);
+  }
+}
+
 }  // namespace
 
 void Input::read(const std::string& filename) {
@@ -109,6 +132,24 @@ void Input::read(const std::string& filename) {
       if (!(mixing_ > 0.0 && mixing_ <= 1.0)) {
         throw std::runtime_error("line " + std::to_string(line_number) +
                                   ": MIXING must be in (0, 1]");
+      }
+    } else if (keyword == "MAX_ITERATIONS") {
+      max_iterations_ = parseInt(iss, line_number, keyword);
+      if (!(max_iterations_ > 0)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": MAX_ITERATIONS must be positive");
+      }
+    } else if (keyword == "ENERGY_TOLERANCE") {
+      energy_tolerance_ = parseDouble(iss, line_number, keyword);
+      if (!(energy_tolerance_ > 0.0)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": ENERGY_TOLERANCE must be positive");
+      }
+    } else if (keyword == "DENSITY_TOLERANCE") {
+      density_tolerance_ = parseDouble(iss, line_number, keyword);
+      if (!(density_tolerance_ > 0.0)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": DENSITY_TOLERANCE must be positive");
       }
     } else if (keyword == "SPEED_OF_LIGHT") {
       speed_of_light_ = parseDouble(iss, line_number, keyword);

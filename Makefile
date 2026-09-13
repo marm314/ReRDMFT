@@ -1,5 +1,10 @@
 CXX      := g++
-CXXFLAGS := -std=c++17 -Wall -Wextra -O2
+# -fopenmp: used by C4_DHF/ElectronRepulsion.cpp and RkbTwoElectron.cpp to
+# parallelize the two-electron integral construction (both the raw libcint
+# evaluation and the RKB-basis leg transforms are embarrassingly parallel
+# over disjoint output blocks). Affects both compilation (pragma
+# recognition) and linking (libgomp), since CXXFLAGS is used for both.
+CXXFLAGS := -std=c++17 -Wall -Wextra -O2 -fopenmp
 SRC_DIR  := src
 # 4-component Dirac-Hartree-Fock two-electron integrals (restricted
 # kinetic balance spinor basis): kept in their own subdirectory since they
