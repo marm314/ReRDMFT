@@ -1,7 +1,19 @@
 #include <iomanip>
 #include <iostream>
 
+#include "BasisSet.h"
 #include "Input.h"
+#include "MolecularBasis.h"
+
+namespace {
+
+char angularMomentumLabel(int l) {
+  static const char labels[] = {'S', 'P', 'D', 'F', 'G', 'H', 'I'};
+  if (l < 0 || l >= static_cast<int>(sizeof(labels))) return '?';
+  return labels[l];
+}
+
+}  // namespace
 
 int main(int argc, char** argv) {
   if (argc != 2) {
@@ -10,10 +22,14 @@ int main(int argc, char** argv) {
   }
 
   rerdmft::Input input;
+  rerdmft::BasisSet basis_set;
+  rerdmft::MolecularBasis molecular_basis;
   try {
     input.read(argv[1]);
+    basis_set.read(input.basis_file());
+    molecular_basis.build(input.geometry(), basis_set);
   } catch (const std::exception& e) {
-    std::cerr << "Error reading input file: " << e.what() << "\n";
+    std::cerr << "Error: " << e.what() << "\n";
     return 1;
   }
 
@@ -25,6 +41,16 @@ int main(int argc, char** argv) {
     std::cout << "  " << std::setw(2) << atom.symbol << "  " << std::setw(12)
                << atom.x << "  " << std::setw(12) << atom.y << "  "
                << std::setw(12) << atom.z << "\n";
+  }
+
+  std::cout << "\nCartesian atomic orbitals (" << molecular_basis.functions().size()
+             << " total):\n";
+  for (const auto& fn : molecular_basis.functions()) {
+    std::cout << "  " << std::setw(2) << fn.element << "  "
+               << angularMomentumLabel(fn.l) << "(" << fn.cartesian.lx
+               << fn.cartesian.ly << fn.cartesian.lz << ")  "
+               << "center=(" << fn.x << ", " << fn.y << ", " << fn.z << ")  "
+               << "nprim=" << fn.exponents.size() << "\n";
   }
 
   return 0;

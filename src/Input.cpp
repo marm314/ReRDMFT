@@ -1,31 +1,12 @@
 #include "Input.h"
 
-#include <algorithm>
-#include <cctype>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
 
+#include "StringUtils.h"
+
 namespace rerdmft {
-
-namespace {
-
-std::string toUpper(std::string s) {
-  std::transform(s.begin(), s.end(), s.begin(),
-                  [](unsigned char c) { return std::toupper(c); });
-  return s;
-}
-
-// Strips a trailing '#' comment and surrounding whitespace from a line.
-std::string stripComment(const std::string& line) {
-  std::string result = line.substr(0, line.find('#'));
-  const auto begin = result.find_first_not_of(" \t\r\n");
-  if (begin == std::string::npos) return "";
-  const auto end = result.find_last_not_of(" \t\r\n");
-  return result.substr(begin, end - begin + 1);
-}
-
-}  // namespace
 
 void Input::read(const std::string& filename) {
   std::ifstream file(filename);
