@@ -8,6 +8,7 @@
 # the huge negative-energy cluster is affected.
 SPEED_OF_LIGHT = 10000000
 NON_RELATIVISTIC = true
+C4_SPINOR TRUE
 NELEC 10
 BASIS water-sto-3g.gbs
 

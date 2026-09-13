@@ -1,0 +1,14 @@
+# Example ReRDMFT input file: carbon monoxide, using the cc-pVTZ basis
+# (downloaded from https://www.basissetexchange.org/), which includes D and
+# F shells for both atoms (see co-cc-pvtz.gbs). NON_RELATIVISTIC only --
+# no C4_SPINOR here, since this basis is far too large for the RKB
+# two-electron tensor (nLarge=70, nSmall=224; see co-cc-pvdz.inp and
+# co-sto-3g.inp for C4_SPINOR examples instead).
+NELEC 14
+BASIS co-cc-pvtz.gbs
+NON_RELATIVISTIC TRUE
+
+GEOMETRY
+C   0.000000   0.000000   0.000000
+O   0.000000   0.000000   1.128000
+END

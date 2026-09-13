@@ -3,6 +3,7 @@
 # https://www.basissetexchange.org/), which includes P and D shells for
 # each hydrogen (see h2-cc-pvtz.gbs).
 NON_RELATIVISTIC TRUE
+C4_SPINOR TRUE
 NELEC 2
 BASIS h2-cc-pvtz.gbs
 

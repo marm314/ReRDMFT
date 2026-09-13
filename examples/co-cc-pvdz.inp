@@ -3,12 +3,13 @@
 # shells for both atoms (see co-cc-pvdz.gbs). Small enough (nLarge=30,
 # nSmall=136) to actually build the RKB two-electron Coulomb repulsion
 # tensor (C4_SPINOR): measured peak RSS ~5.0 GB, ~5.5 minutes wall clock
-# -- unlike co.inp's cc-pVTZ basis (nLarge=70, nSmall=224), whose tensor
-# would need ~82 GB of peak memory even with the electron-exchange-
-# symmetry packing (RkbTwoElectron.h).
+# -- unlike co-cc-pvtz.inp's cc-pVTZ basis (nLarge=70, nSmall=224), whose
+# tensor would need ~82 GB of peak memory even with the electron-
+# exchange-symmetry packing (RkbTwoElectron.h).
 NELEC 14
 BASIS co-cc-pvdz.gbs
 C4_SPINOR TRUE
+NON_RELATIVISTIC TRUE
 DEBUG TRUE
 
 GEOMETRY
