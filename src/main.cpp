@@ -93,6 +93,7 @@ int main(int argc, char** argv) {
   std::vector<rerdmft::NormalizationCheck> small_normalization;
   rerdmft::Matrix<std::complex<double>> dirac_kinetic;
   rerdmft::Matrix<std::complex<double>> dirac_rest_energy;
+  rerdmft::Matrix<std::complex<double>> vext;
   try {
     input.read(argv[1]);
     basis_set.read(input.basis_file());
@@ -108,6 +109,8 @@ int main(int argc, char** argv) {
     dirac_kinetic = rerdmft::diracKineticMatrix(large_basis.functions(), small_basis.functions());
     dirac_rest_energy =
         rerdmft::diracRestEnergyMatrix(large_basis.functions(), small_basis.functions());
+    vext = rerdmft::vextMatrix(large_basis.functions(), small_basis.functions(),
+                                input.geometry());
   } catch (const std::exception& e) {
     std::cerr << "Error: " << e.what() << "\n";
     return 1;
@@ -187,6 +190,24 @@ int main(int argc, char** argv) {
   const auto dirac_core = dirac_kinetic + dirac_rest_energy;
   printMatrixDiagnostics("Dirac core matrix T_D = kinetic + rest-energy alignment", dirac_core,
                           2 * n_large);
+
+  printMatrixDiagnostics("Vext matrix: spinor_a^dagger Vext(r) I_4x4 spinor_b", vext,
+                          2 * n_large);
+  if (n_large > 0) {
+    std::cout << "  Vext[0,0] (Large-alpha[0] self, expect large and negative): "
+               << vext(0, 0).real() << "\n";
+  }
+  if (n_small > 0) {
+    const std::size_t idx = 2 * n_large;
+    std::cout << "  Vext[" << idx << "," << idx
+               << "] (Small-alpha[0] self, expect large and negative): "
+               << vext(idx, idx).real() << "\n";
+  }
+
+  const auto h_ukb = dirac_kinetic + dirac_rest_energy + vext;
+  printMatrixDiagnostics(
+      "Unrestricted kinetic balance Hamiltonian H_UKB = T_kinetic + rest-energy alignment + Vext",
+      h_ukb, 2 * n_large);
 
   return 0;
 }
