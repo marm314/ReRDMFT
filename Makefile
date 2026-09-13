@@ -11,6 +11,11 @@ SRC_DIR  := src
 # are a distinct, self-contained piece of the physics (RkbTwoElectron.h,
 # ElectronRepulsion.h, Tensor4.h), built into the same binary.
 C4_DIR   := $(SRC_DIR)/C4_DHF
+# Nonrelativistic (Large-component-only) Hartree-Fock: its own
+# subdirectory for the same reason as C4_DIR, and reuses C4_DIR's
+# ElectronRepulsion.h/Tensor4.h (both basis-agnostic) via the shared
+# include path below rather than duplicating them.
+NON_REL_DIR := $(SRC_DIR)/NON_REL
 BUILD_DIR:= build
 BIN      := rerdmft
 
@@ -33,14 +38,16 @@ $(error LIBCINT is not set. Build with: make LIBCINT=/path/to/libcint.a)
 endif
 endif
 
-SRCS     := $(wildcard $(SRC_DIR)/*.cpp)
-C4_SRCS  := $(wildcard $(C4_DIR)/*.cpp)
-OBJS     := $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(SRCS)) \
-            $(patsubst $(C4_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(C4_SRCS))
+SRCS        := $(wildcard $(SRC_DIR)/*.cpp)
+C4_SRCS     := $(wildcard $(C4_DIR)/*.cpp)
+NON_REL_SRCS:= $(wildcard $(NON_REL_DIR)/*.cpp)
+OBJS        := $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(SRCS)) \
+               $(patsubst $(C4_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(C4_SRCS)) \
+               $(patsubst $(NON_REL_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(NON_REL_SRCS))
 
-# Both directories are on the quoted-include search path, so files in
-# either one can #include headers from the other without a path prefix.
-CPPFLAGS := -I$(LIBCINT_INC) -I$(SRC_DIR) -I$(C4_DIR)
+# All three directories are on the quoted-include search path, so files
+# in any one can #include headers from the others without a path prefix.
+CPPFLAGS := -I$(LIBCINT_INC) -I$(SRC_DIR) -I$(C4_DIR) -I$(NON_REL_DIR)
 # LAPACKE (the C interface to LAPACK) is used for the RKB transformation's
 # overlap-matrix inverse; installed system-wide via liblapacke-dev.
 LDLIBS   := $(LIBCINT) -llapacke -llapack -lblas -lquadmath -lm
@@ -58,6 +65,9 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/%.o: $(C4_DIR)/%.cpp | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/%.o: $(NON_REL_DIR)/%.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
 # main.cpp prints the current commit SHA at startup, so it needs to be

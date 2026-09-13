@@ -16,6 +16,7 @@
 #include "KramersSymmetry.h"
 #include "LinearAlgebra.h"
 #include "MolecularBasis.h"
+#include "NonRelHartreeFock.h"
 #include "NuclearAttraction.h"
 #include "RkbDensityMatrix.h"
 #include "RkbFockMatrix.h"
@@ -239,6 +240,7 @@ int main(int argc, char** argv) {
   rerdmft::HermitianEigenResult h_positive_energy_eig;
   rerdmft::Matrix<double> h_core_nonrel_ortho;
   rerdmft::SymmetricEigenResult h_core_nonrel_eig;
+  rerdmft::NonRelHartreeFockResult nonrel_hf_result;
   rerdmft::Matrix<std::complex<double>> c_dhf;
   rerdmft::Matrix<std::complex<double>> density_matrix;
   rerdmft::RkbTwoElectronTensor c4_spinor_eri;
@@ -301,6 +303,15 @@ int main(int argc, char** argv) {
       const auto h_core_nonrel = schrodinger_kinetic + vext_large;
       h_core_nonrel_ortho = x_large * (h_core_nonrel * x_large);
       h_core_nonrel_eig = rerdmft::diagonalizeSymmetric(h_core_nonrel_ortho);
+
+      const auto nonrel_c_initial = x_large * h_core_nonrel_eig.eigenvectors;
+      const auto nonrel_density_initial =
+          rerdmft::nonRelDensityMatrix(nonrel_c_initial, input.n_electrons());
+      nonrel_hf_result = rerdmft::runNonRelativisticHartreeFock(
+          large_basis.functions(), h_core_nonrel, x_large, nonrel_density_initial,
+          input.n_electrons(), input.geometry(), input.mixing(), input.max_iterations(),
+          input.energy_tolerance(), input.density_tolerance());
+      logTiming("Nonrelativistic HF SCF complete", t_start, t_checkpoint);
     }
 
     if (input.c4_spinor()) {
@@ -576,6 +587,34 @@ int main(int argc, char** argv) {
       std::cout << "  " << std::setw(6) << i << std::setw(20) << h_core_nonrel_eig.eigenvalues[i]
                  << "\n";
     }
+
+    std::cout << "\nNonrelativistic (restricted, closed-shell) Hartree-Fock SCF (NON_REL, linear "
+                 "density mixing = "
+               << input.mixing() << "):\n";
+    for (const auto& it : nonrel_hf_result.history) {
+      std::cout << "  Iteration " << std::setw(3) << it.iteration << "  E = " << std::setw(16)
+                 << std::setprecision(10) << it.energy << std::setprecision(6);
+      if (it.iteration > 1) {
+        std::cout << "  dE = " << it.energy_change << "  dP = " << it.density_change;
+      }
+      std::cout << "\n";
+      if (input.debug()) {
+        std::cout << "    Orbital energies:\n";
+        for (std::size_t i = 0; i < it.orbital_energies.size(); ++i) {
+          std::cout << "      " << std::setw(6) << i << std::setw(20) << it.orbital_energies[i]
+                     << "\n";
+        }
+      }
+    }
+    std::cout << "  " << (nonrel_hf_result.converged ? "Converged" : "Did NOT converge")
+               << " after " << nonrel_hf_result.iterations << " iteration(s)\n";
+    std::cout << "  Electronic energy:          " << std::setprecision(10)
+               << nonrel_hf_result.electronic_energy << " Hartree\n";
+    std::cout << "  Nuclear repulsion energy:   " << nonrel_hf_result.nuclear_repulsion_energy
+               << " Hartree\n";
+    std::cout << "  Total nonrelativistic HF energy: " << nonrel_hf_result.total_energy
+               << " Hartree\n";
+    std::cout << std::setprecision(6);
   }
 
   if (input.c4_spinor()) {

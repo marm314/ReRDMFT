@@ -41,11 +41,6 @@ struct DiracHartreeFockResult {
   std::vector<ScfIteration> history;  // one entry per iteration, in order
 };
 
-// Sum_{A<B} Z_A*Z_B / |R_A - R_B| -- the classical nucleus-nucleus Coulomb
-// repulsion energy, constant for a fixed geometry (Bohr, as stored in
-// Input::geometry()). Z_A from Element.h's atomicNumber.
-double nuclearRepulsionEnergy(const std::vector<Atom>& geometry);
-
 // Runs the 4-component Dirac-Hartree-Fock (DHF) self-consistent field
 // procedure in the restricted-kinetic-balance (RKB) spinor AO basis,
 // starting from `initial_density` (typically the core-Hamiltonian-guess
