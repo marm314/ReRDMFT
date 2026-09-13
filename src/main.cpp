@@ -1,8 +1,10 @@
 #include <iomanip>
 #include <iostream>
+#include <vector>
 
 #include "BasisSet.h"
 #include "Input.h"
+#include "Integrals.h"
 #include "MolecularBasis.h"
 #include "Shell.h"
 
@@ -15,10 +17,12 @@ int main(int argc, char** argv) {
   rerdmft::Input input;
   rerdmft::BasisSet basis_set;
   rerdmft::MolecularBasis molecular_basis;
+  std::vector<rerdmft::NormalizationCheck> normalization;
   try {
     input.read(argv[1]);
     basis_set.read(input.basis_file());
     molecular_basis.build(input.geometry(), basis_set);
+    normalization = rerdmft::normalizeCartesianBasis(molecular_basis.functions());
   } catch (const std::exception& e) {
     std::cerr << "Error: " << e.what() << "\n";
     return 1;
@@ -35,13 +39,18 @@ int main(int argc, char** argv) {
   }
 
   std::cout << "\nCartesian atomic orbitals (" << molecular_basis.functions().size()
-             << " total):\n";
-  for (const auto& fn : molecular_basis.functions()) {
+             << " total), normalized via libcint overlap integrals:\n";
+  for (std::size_t i = 0; i < molecular_basis.functions().size(); ++i) {
+    const auto& fn = molecular_basis.functions()[i];
+    const auto& check = normalization[i];
     std::cout << "  " << std::setw(2) << fn.element << "  "
                << rerdmft::angularMomentumLabel(fn.l) << "(" << fn.cartesian.lx
                << fn.cartesian.ly << fn.cartesian.lz << ")  "
                << "center=(" << fn.x << ", " << fn.y << ", " << fn.z << ")  "
-               << "nprim=" << fn.exponents.size() << "\n";
+               << "nprim=" << fn.exponents.size() << "  "
+               << "S_self(before)=" << check.self_overlap_before << "  "
+               << (check.was_renormalized ? "renormalized" : "already normalized")
+               << "\n";
   }
 
   return 0;

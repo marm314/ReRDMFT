@@ -30,6 +30,7 @@ class MolecularBasis {
   void build(const std::vector<Atom>& geometry, const BasisSet& basis_set);
 
   const std::vector<BasisFunction>& functions() const { return functions_; }
+  std::vector<BasisFunction>& functions() { return functions_; }
 
  private:
   std::vector<BasisFunction> functions_;
