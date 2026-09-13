@@ -36,6 +36,12 @@ class Input {
   // very large number) lets you probe the nonrelativistic limit
   // (c -> infinity) or otherwise vary relativistic effects.
   double speed_of_light() const { return speed_of_light_; }
+  // Optional; defaults to false when the NON_RELATIVISTIC keyword is
+  // absent. When true, additionally builds and diagonalizes the
+  // nonrelativistic Schrodinger core Hamiltonian in the Large-component AO
+  // basis (SchrodingerKinetic.h), printing its eigenvalues for comparison
+  // against the relativistic ones.
+  bool non_relativistic() const { return non_relativistic_; }
 
  private:
   int n_electrons_ = 0;
@@ -43,6 +49,7 @@ class Input {
   std::vector<Atom> geometry_;
   bool debug_ = false;
   double speed_of_light_ = kSpeedOfLight;
+  bool non_relativistic_ = false;
 };
 
 }  // namespace rerdmft

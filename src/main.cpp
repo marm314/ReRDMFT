@@ -13,10 +13,12 @@
 #include "KramersSymmetry.h"
 #include "LinearAlgebra.h"
 #include "MolecularBasis.h"
+#include "NuclearAttraction.h"
 #include "RkbHamiltonian.h"
 #include "RkbOrthogonalization.h"
 #include "RkbOverlap.h"
 #include "RkbTransformation.h"
+#include "SchrodingerKinetic.h"
 #include "Shell.h"
 #include "SmallComponentBasis.h"
 #include "SpinorBasis.h"
@@ -204,6 +206,8 @@ int main(int argc, char** argv) {
   rerdmft::Matrix<std::complex<double>> h_rkb_ortho;
   rerdmft::HermitianEigenResult h_rkb_ortho_eig;
   double max_kramers_partner_deviation = 0.0;
+  rerdmft::Matrix<double> h_core_nonrel_ortho;
+  rerdmft::SymmetricEigenResult h_core_nonrel_eig;
   try {
     input.read(argv[1]);
     basis_set.read(input.basis_file());
@@ -242,6 +246,15 @@ int main(int argc, char** argv) {
 
     max_kramers_partner_deviation = rerdmft::maxKramersPartnerDeviation(
         h_rkb_ortho_eig.eigenvectors, rkb_coefficients, x_full, s_large, s_small_ukb);
+
+    if (input.non_relativistic()) {
+      const auto schrodinger_kinetic = rerdmft::schrodingerKineticMatrix(large_basis.functions());
+      const auto vext_large =
+          rerdmft::nuclearAttractionMatrix(large_basis.functions(), input.geometry());
+      const auto h_core_nonrel = schrodinger_kinetic + vext_large;
+      h_core_nonrel_ortho = x_large * (h_core_nonrel * x_large);
+      h_core_nonrel_eig = rerdmft::diagonalizeSymmetric(h_core_nonrel_ortho);
+    }
   } catch (const std::exception& e) {
     std::cerr << "Error: " << e.what() << "\n";
     printFarewell();
@@ -438,6 +451,14 @@ int main(int argc, char** argv) {
              << "\n";
   std::cout << "Max Kramers eigenvector-partner deviation, 1-|<odd|Theta even>_S| (expect ~0): "
              << max_kramers_partner_deviation << "\n";
+
+  if (input.non_relativistic()) {
+    std::cout << "\nNonrelativistic (Schrodinger) core Hamiltonian eigenvalues:\n";
+    for (std::size_t i = 0; i < h_core_nonrel_eig.eigenvalues.size(); ++i) {
+      std::cout << "  " << std::setw(6) << i << std::setw(20) << h_core_nonrel_eig.eigenvalues[i]
+                 << "\n";
+    }
+  }
 
   printFarewell();
   return 0;

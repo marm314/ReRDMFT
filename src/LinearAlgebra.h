@@ -15,6 +15,12 @@ struct HermitianEigenResult {
   Matrix<std::complex<double>> eigenvectors;
 };
 
+// Same, for a real symmetric matrix.
+struct SymmetricEigenResult {
+  std::vector<double> eigenvalues;
+  Matrix<double> eigenvectors;
+};
+
 // Inverts a square, nonsingular real matrix via LAPACK (LU factorization
 // with LAPACKE_dgetrf, then LAPACKE_dgetri). Throws std::runtime_error if
 // `a` is singular (or not square).
@@ -27,6 +33,10 @@ Matrix<double> invert(const Matrix<double>& a);
 // below 1e-10 (not positive definite, or too close to linearly dependent
 // to safely invert its square root).
 Matrix<double> inverseSqrt(const Matrix<double>& s);
+
+// Diagonalizes a real symmetric matrix via LAPACK (LAPACKE_dsyev). Throws
+// std::runtime_error if `a` is not square, or LAPACK fails to converge.
+SymmetricEigenResult diagonalizeSymmetric(const Matrix<double>& a);
 
 // Same as inverseSqrt, but for a complex Hermitian positive-definite
 // matrix: S = U diag(w) U^dagger (LAPACKE_zheev, w real) and
