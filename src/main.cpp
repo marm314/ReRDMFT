@@ -55,6 +55,19 @@ void logTiming(const std::string& label, std::chrono::steady_clock::time_point s
   since = now_steady;
 }
 
+// Prints one "  <label>: <value> Hartree" energy summary line with the
+// decimal point aligned against sibling lines printed the same way,
+// regardless of label length or the value's sign/integer-digit count.
+// This works because the stream stays in std::fixed mode throughout
+// main() (set once, near the top) -- so the number of digits after the
+// decimal point is constant -- and because a common (left-justified
+// label, right-justified value) field width then makes each value's
+// right edge (and therefore its decimal point) land in the same column.
+void printEnergyLine(const std::string& label, double value) {
+  std::cout << "  " << std::setw(35) << std::left << (label + ":") << std::right
+             << std::setw(20) << value << " Hartree\n";
+}
+
 void printAoList(const std::string& label,
                   const std::vector<rerdmft::BasisFunction>& functions,
                   const std::vector<rerdmft::NormalizationCheck>& normalization) {
@@ -142,62 +155,14 @@ void printWelcomeBanner() {
 
 void printFarewell() {
   static const char* kArt = R"(
-                                                                ███
-                                                             ██████████
-                                                            ██████████████████
-                                         ████              ██████      █████████
-                                       ████████           ██████          █████      ███
-                                        ████████         ██████             ██     ████
-                                        ██████████     ███████       ██          ██████
-                             ███         ██████████    ██████        ███         ██████
-                             ████         █████████   ███████        ████            ██
-                          ████████        ████████    ██████        ████████████      █
-                         ████████          ███████    ██████        █████████      █████
-                        ████████            ██████    ██████         ████████      █████
-                        ████████████         ██████   ███████       ████████        ███
-                         ██████████████      █████    ██████     ████████
-                             █████████       ████     ███      ███████
-                               █████        █████      █       ███
-                                          ████████     ███
-                                        ███████████   █████
-                             ████         ████████    █████           ██████
-                     ███  ███ ███  ██         ██       ███      ████  ██ ████  █
-                      ███        ██████       ████    ████       ████        ████
-                        ███████████          ███       ████         ███████              ███
-              █                             ████        ████                            ████
-            ██████                      ██████████    ████████                          ████
-          ██████████              █████████████████  ██████████████████               █████
-         ████████████       █████████     ████████    ██████████████████████        ███████
-         ████████████     ████████          ████        ████          ███████      ███████
-            █████████    ████████      █    ███         ████              ████     ██████
-             ████████   ████████    █████████████     ██████████████       █████    ████
-                ████    ██████    ███        ███████████████    ██████       █        █
-                 ███        █     ██          ████████████         █████
-                     ███         ███            ████████            █████
-                     █████      ███████                             ██████       ██
-                       ██████ █████   █████                   █████████████  █████
-                         ███████         █████             ████        █████████
-                           ████            █████       ██████           ██████
-                           ███               ██████████████              ████
-                           ██                    █████                    █
-
-                                   ███           █    ██        ██
-                                    █████████   ███   ███   █████
-                                    ███████ ██████████████████ ██
-                                     ██      ██           ██   ██
-                                      ███    ██           █   ███
-                                         ███ ██         ███████
-                                           █████      ██████
-                                            ██         ██
-                                          ██            ██
-                                        ███     ███      ███
-                                       ████   ███████    ███
-                                        ███████████████ ████
-                                         ███████ ██ ███████
+    __.-._
+    '-._"7'
+     /'.-c
+     |  /T
+    _)_/LI
 )";
   std::cout << kArt << "\n";
-  std::cout << "\"At last we will reveal ourselves to the Jedi.\n"
-                " At last we will have revenge.\"\n\n";
+  std::cout << "\"You must unlearn what you have learned.\"\n\n";
 }
 
 }  // namespace
@@ -619,12 +584,10 @@ int main(int argc, char** argv) {
     }
     std::cout << "  " << (nonrel_hf_result.converged ? "Converged" : "Did NOT converge")
                << " after " << nonrel_hf_result.iterations << " iteration(s)\n";
-    std::cout << "  Electronic energy:          " << std::setprecision(10)
-               << nonrel_hf_result.electronic_energy << " Hartree\n";
-    std::cout << "  Nuclear repulsion energy:   " << nonrel_hf_result.nuclear_repulsion_energy
-               << " Hartree\n";
-    std::cout << "  Total nonrelativistic HF energy: " << nonrel_hf_result.total_energy
-               << " Hartree\n";
+    std::cout << std::setprecision(10);
+    printEnergyLine("Electronic energy", nonrel_hf_result.electronic_energy);
+    printEnergyLine("Nuclear repulsion energy", nonrel_hf_result.nuclear_repulsion_energy);
+    printEnergyLine("Total nonrelativistic HF energy", nonrel_hf_result.total_energy);
     std::cout << std::setprecision(6);
 
     std::cout << "\nConverged one-body (Fock_ortho) orbital energies:\n";
@@ -700,11 +663,10 @@ int main(int argc, char** argv) {
     }
     std::cout << "  " << (dhf_result.converged ? "Converged" : "Did NOT converge") << " after "
                << dhf_result.iterations << " iteration(s)\n";
-    std::cout << "  Electronic energy:          " << std::setprecision(10)
-               << dhf_result.electronic_energy << " Hartree\n";
-    std::cout << "  Nuclear repulsion energy:   " << dhf_result.nuclear_repulsion_energy
-               << " Hartree\n";
-    std::cout << "  Total DHF (4C) energy:      " << dhf_result.total_energy << " Hartree\n";
+    std::cout << std::setprecision(10);
+    printEnergyLine("Electronic energy", dhf_result.electronic_energy);
+    printEnergyLine("Nuclear repulsion energy", dhf_result.nuclear_repulsion_energy);
+    printEnergyLine("Total DHF (4C) energy", dhf_result.total_energy);
     std::cout << std::setprecision(6);
 
     std::cout << "\nConverged one-body (Fock_ortho) state energies (Kramers pairs, even/odd "
