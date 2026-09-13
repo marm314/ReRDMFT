@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "PhysicalConstants.h"
+
 namespace rerdmft {
 
 // Coordinates are in Bohr (atomic units), regardless of the input file's
@@ -29,12 +31,18 @@ class Input {
   // input file. When true, the program prints detailed basis and matrix
   // diagnostics; otherwise it only prints a concise summary.
   bool debug() const { return debug_; }
+  // Optional; defaults to the standard CODATA value (PhysicalConstants.h)
+  // when the SPEED_OF_LIGHT keyword is absent. Overriding it (e.g. to a
+  // very large number) lets you probe the nonrelativistic limit
+  // (c -> infinity) or otherwise vary relativistic effects.
+  double speed_of_light() const { return speed_of_light_; }
 
  private:
   int n_electrons_ = 0;
   std::string basis_file_;
   std::vector<Atom> geometry_;
   bool debug_ = false;
+  double speed_of_light_ = kSpeedOfLight;
 };
 
 }  // namespace rerdmft

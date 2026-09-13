@@ -40,6 +40,29 @@ bool parseBool(std::istringstream& stream, int line_number, const std::string& k
                             token + "' for " + keyword);
 }
 
+// Parses a double value token, accepting an optional '=' before it (with or
+// without surrounding whitespace), same as parseBool.
+double parseDouble(std::istringstream& stream, int line_number, const std::string& keyword) {
+  std::string token;
+  if (!(stream >> token)) {
+    throw std::runtime_error("line " + std::to_string(line_number) + ": expected a value after " +
+                              keyword);
+  }
+  if (!token.empty() && token[0] == '=') {
+    token.erase(0, 1);
+    if (token.empty() && !(stream >> token)) {
+      throw std::runtime_error("line " + std::to_string(line_number) +
+                                ": expected a value after " + keyword + " =");
+    }
+  }
+  try {
+    return std::stod(token);
+  } catch (const std::exception&) {
+    throw std::runtime_error("line " + std::to_string(line_number) +
+                              ": invalid floating point value '" + token + "' for " + keyword);
+  }
+}
+
 }  // namespace
 
 void Input::read(const std::string& filename) {
@@ -77,6 +100,12 @@ void Input::read(const std::string& filename) {
       has_basis_file = true;
     } else if (keyword == "DEBUG") {
       debug_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "SPEED_OF_LIGHT") {
+      speed_of_light_ = parseDouble(iss, line_number, keyword);
+      if (!(speed_of_light_ > 0.0)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": SPEED_OF_LIGHT must be positive");
+      }
     } else if (keyword == "GEOMETRY") {
       geometry_.clear();
       while (std::getline(file, raw_line)) {

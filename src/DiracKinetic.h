@@ -6,11 +6,9 @@
 
 #include "Matrix.h"
 #include "MolecularBasis.h"
+#include "PhysicalConstants.h"
 
 namespace rerdmft {
-
-// Speed of light in atomic units, as used throughout this project.
-inline constexpr double kSpeedOfLight = 137.036;
 
 // Builds the Dirac kinetic-energy matrix T = -i c (alpha . grad_r) in the
 // 4-component spinor basis [Large-alpha, Large-beta, Small-alpha,

@@ -122,13 +122,14 @@ int main(int argc, char** argv) {
 
     spinor_basis.build(large_basis.functions(), small_basis.functions());
 
-    dirac_kinetic = rerdmft::diracKineticMatrix(large_basis.functions(), small_basis.functions());
-    dirac_rest_energy =
-        rerdmft::diracRestEnergyMatrix(large_basis.functions(), small_basis.functions());
+    dirac_kinetic = rerdmft::diracKineticMatrix(large_basis.functions(), small_basis.functions(),
+                                                 input.speed_of_light());
+    dirac_rest_energy = rerdmft::diracRestEnergyMatrix(
+        large_basis.functions(), small_basis.functions(), input.speed_of_light());
     vext = rerdmft::vextMatrix(large_basis.functions(), small_basis.functions(),
                                 input.geometry());
     h_ukb = rerdmft::ukbHamiltonianMatrix(large_basis.functions(), small_basis.functions(),
-                                           input.geometry());
+                                           input.geometry(), input.speed_of_light());
     rkb_coefficients =
         rerdmft::rkbCoefficients(large_basis.functions(), small_basis.functions());
     h_rkb = rerdmft::rkbHamiltonianMatrix(h_ukb, rkb_coefficients);
@@ -149,6 +150,7 @@ int main(int argc, char** argv) {
 
   std::cout << "Number of electrons: " << input.n_electrons() << "\n";
   std::cout << "Basis set file:      " << input.basis_file() << "\n";
+  std::cout << "Speed of light (c):  " << input.speed_of_light() << " a.u.\n";
   std::cout << "Geometry (" << input.geometry().size() << " atoms):\n";
   std::cout << std::fixed << std::setprecision(6);
   for (const auto& atom : input.geometry()) {
@@ -216,7 +218,7 @@ int main(int argc, char** argv) {
     if (n_small > 0) {
       const std::size_t idx = 2 * n_large;
       std::cout << "  M[" << idx << "," << idx << "] (Small-alpha[0] self, expect -2c^2 = "
-                 << -2.0 * rerdmft::kSpeedOfLight * rerdmft::kSpeedOfLight
+                 << -2.0 * input.speed_of_light() * input.speed_of_light()
                  << "): " << dirac_rest_energy(idx, idx).real() << "\n";
     }
 
