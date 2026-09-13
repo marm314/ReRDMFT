@@ -7,6 +7,7 @@
 #include "Integrals.h"
 #include "MolecularBasis.h"
 #include "Shell.h"
+#include "SpinorBasis.h"
 
 int main(int argc, char** argv) {
   if (argc != 2) {
@@ -17,12 +18,14 @@ int main(int argc, char** argv) {
   rerdmft::Input input;
   rerdmft::BasisSet basis_set;
   rerdmft::MolecularBasis molecular_basis;
+  rerdmft::SpinorBasis spinor_basis;
   std::vector<rerdmft::NormalizationCheck> normalization;
   try {
     input.read(argv[1]);
     basis_set.read(input.basis_file());
     molecular_basis.build(input.geometry(), basis_set);
     normalization = rerdmft::normalizeCartesianBasis(molecular_basis.functions());
+    spinor_basis.build(molecular_basis.functions());
   } catch (const std::exception& e) {
     std::cerr << "Error: " << e.what() << "\n";
     return 1;
@@ -51,6 +54,25 @@ int main(int argc, char** argv) {
                << "S_self(before)=" << check.self_overlap_before << "  "
                << (check.was_renormalized ? "renormalized" : "already normalized")
                << "\n";
+  }
+
+  std::cout << "\nFour-component spinor basis (Large component only):\n";
+  std::cout << "  Cartesian AOs per spin block: " << spinor_basis.nao() << "\n";
+  std::cout << "  Total spinor basis functions: " << spinor_basis.size()
+             << " (all Large-alpha first, then all Large-beta)\n";
+  const auto describeSpinor = [&](std::size_t index) {
+    const auto& ao = spinor_basis.ao(index);
+    std::cout << "    index " << index << "  "
+               << rerdmft::spinBlockLabel(spinor_basis.block(index)) << "  ao="
+               << spinor_basis.aoIndex(index) << "  " << ao.element << "  "
+               << rerdmft::angularMomentumLabel(ao.l) << "(" << ao.cartesian.lx
+               << ao.cartesian.ly << ao.cartesian.lz << ")\n";
+  };
+  if (spinor_basis.size() > 0) {
+    describeSpinor(0);
+    describeSpinor(spinor_basis.nao() - 1);
+    describeSpinor(spinor_basis.nao());
+    describeSpinor(spinor_basis.size() - 1);
   }
 
   return 0;
