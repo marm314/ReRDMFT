@@ -25,6 +25,18 @@ namespace rerdmft {
 Matrix<std::complex<double>> xFullMatrix(const Matrix<double>& x_large,
                                           const Matrix<std::complex<double>>& x_small);
 
+// Builds the full RKB overlap (metric) matrix S_full = diag(S_Large,
+// S_Large, S_small), matching X_full's block structure and ordering
+// exactly (S_Large: RkbOverlap.h's overlapMatrix on the Large basis;
+// S_small: RkbOverlap.h's rkbSmallOverlapMatrix). This is the metric of
+// the generalized eigenvalue problem H_RKB C = S_full C E that
+// diagonalizing H_RKB_ortho = X_full^dagger H_RKB X_full and setting
+// C = X_full U implicitly solves (RkbDensityMatrix.h in C4_DHF/ uses it
+// to verify C's occupied columns are S_full-orthonormal). Throws
+// std::runtime_error under the same conditions as xFullMatrix.
+Matrix<std::complex<double>> sFullMatrix(const Matrix<double>& s_large,
+                                          const Matrix<std::complex<double>>& s_small);
+
 // Builds the orthonormalized restricted-kinetic-balance core Hamiltonian
 //   H_RKB_ortho = X_full^dagger H_RKB X_full
 // (see xFullMatrix for X_full, RkbHamiltonian.h for H_RKB). Throws

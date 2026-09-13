@@ -14,6 +14,7 @@
 #include "LinearAlgebra.h"
 #include "MolecularBasis.h"
 #include "NuclearAttraction.h"
+#include "RkbDensityMatrix.h"
 #include "RkbHamiltonian.h"
 #include "RkbOrthogonalization.h"
 #include "RkbOverlap.h"
@@ -214,6 +215,8 @@ int main(int argc, char** argv) {
   rerdmft::HermitianEigenResult h_positive_energy_eig;
   rerdmft::Matrix<double> h_core_nonrel_ortho;
   rerdmft::SymmetricEigenResult h_core_nonrel_eig;
+  rerdmft::Matrix<std::complex<double>> c_dhf;
+  rerdmft::Matrix<std::complex<double>> density_matrix;
   rerdmft::RkbTwoElectronTensor c4_spinor_eri;
   try {
     input.read(argv[1]);
@@ -253,6 +256,9 @@ int main(int argc, char** argv) {
 
     max_kramers_partner_deviation = rerdmft::maxKramersPartnerDeviation(
         h_rkb_ortho_eig.eigenvectors, rkb_coefficients, x_full, s_large, s_small_ukb);
+
+    c_dhf = rerdmft::rkbCoefficientMatrix(x_full, h_rkb_ortho_eig.eigenvectors);
+    density_matrix = rerdmft::rkbDensityMatrix(c_dhf, input.n_electrons());
 
     f_small = rerdmft::rkbSmallVextMatrix(small_basis.functions(), rkb_coefficients,
                                            input.geometry());
@@ -472,6 +478,38 @@ int main(int argc, char** argv) {
              << "\n";
   std::cout << "Max Kramers eigenvector-partner deviation, 1-|<odd|Theta even>_S| (expect ~0): "
              << max_kramers_partner_deviation << "\n";
+
+  {
+    const std::size_t n_rkb = h_rkb_ortho.rows();
+    const std::size_t occ_start = n_rkb / 2;
+    const std::size_t occ_end = occ_start + static_cast<std::size_t>(input.n_electrons());
+    std::cout << "\nC_DHF = X_full * U dimensions: " << c_dhf.rows() << " x " << c_dhf.cols()
+               << "\n";
+    std::cout << "Density matrix P dimensions: " << density_matrix.rows() << " x "
+               << density_matrix.cols() << "\n";
+    std::cout << "Occupied (lowest positive-energy) spinor indices: [" << occ_start << ", "
+               << occ_end << ")\n";
+    if (input.debug()) {
+      const auto s_full = rerdmft::sFullMatrix(s_large, s_small);
+      std::complex<double> trace_ps(0.0, 0.0);
+      for (std::size_t i = 0; i < n_rkb; ++i) {
+        for (std::size_t j = 0; j < n_rkb; ++j) {
+          trace_ps += density_matrix(i, j) * s_full(j, i);
+        }
+      }
+      std::cout << "  Max |P - P^dagger| (Hermiticity check): " << [&] {
+        double max_err = 0.0;
+        for (std::size_t i = 0; i < n_rkb; ++i)
+          for (std::size_t j = 0; j < n_rkb; ++j)
+            max_err = std::max(max_err, std::abs(density_matrix(i, j) -
+                                                  std::conj(density_matrix(j, i))));
+        return max_err;
+      }() << "\n";
+      std::cout << "  Tr(P S_full), expect exactly NELEC = " << input.n_electrons() << ": "
+                 << trace_ps.real() << (trace_ps.imag() >= 0 ? " + " : " - ")
+                 << std::abs(trace_ps.imag()) << "i\n";
+    }
+  }
 
   if (input.debug()) {
     std::cout << "\nPositive-energy eigenvalues (exact Feshbach reduction of H_RKB's Small-Small\n"
