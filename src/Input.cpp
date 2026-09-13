@@ -102,8 +102,8 @@ void Input::read(const std::string& filename) {
       debug_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "NON_RELATIVISTIC") {
       non_relativistic_ = parseBool(iss, line_number, keyword);
-    } else if (keyword == "TWO_ELECTRON") {
-      two_electron_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "C4_SPINOR") {
+      c4_spinor_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "SPEED_OF_LIGHT") {
       speed_of_light_ = parseDouble(iss, line_number, keyword);
       if (!(speed_of_light_ > 0.0)) {

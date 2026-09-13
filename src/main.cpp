@@ -214,7 +214,7 @@ int main(int argc, char** argv) {
   rerdmft::HermitianEigenResult h_positive_energy_eig;
   rerdmft::Matrix<double> h_core_nonrel_ortho;
   rerdmft::SymmetricEigenResult h_core_nonrel_eig;
-  rerdmft::Tensor4<std::complex<double>> two_electron_eri;
+  rerdmft::Tensor4<std::complex<double>> c4_spinor_eri;
   try {
     input.read(argv[1]);
     basis_set.read(input.basis_file());
@@ -271,8 +271,8 @@ int main(int argc, char** argv) {
       h_core_nonrel_eig = rerdmft::diagonalizeSymmetric(h_core_nonrel_ortho);
     }
 
-    if (input.two_electron()) {
-      two_electron_eri = rerdmft::rkbTwoElectronIntegrals(large_basis.functions(),
+    if (input.c4_spinor()) {
+      c4_spinor_eri = rerdmft::rkbTwoElectronIntegrals(large_basis.functions(),
                                                             small_basis.functions(),
                                                             rkb_coefficients);
     }
@@ -502,8 +502,8 @@ int main(int argc, char** argv) {
     }
   }
 
-  if (input.two_electron()) {
-    const std::size_t n_spinor = two_electron_eri.dim0();
+  if (input.c4_spinor()) {
+    const std::size_t n_spinor = c4_spinor_eri.dim0();
     std::cout << "\nTwo-electron Coulomb repulsion tensor <Spinor_A Spinor_B|Spinor_C Spinor_D>,\n"
                  "restricted kinetic balance basis (physics notation; A,C on electron 1, B,D on\n"
                  "electron 2):\n";
@@ -516,11 +516,11 @@ int main(int argc, char** argv) {
         for (std::size_t b = 0; b < n_spinor; ++b) {
           for (std::size_t c = 0; c < n_spinor; ++c) {
             for (std::size_t d = 0; d < n_spinor; ++d) {
-              const auto v_abcd = two_electron_eri(a, b, c, d);
+              const auto v_abcd = c4_spinor_eri(a, b, c, d);
               max_exchange_err =
-                  std::max(max_exchange_err, std::abs(v_abcd - two_electron_eri(b, a, d, c)));
+                  std::max(max_exchange_err, std::abs(v_abcd - c4_spinor_eri(b, a, d, c)));
               max_herm_err = std::max(
-                  max_herm_err, std::abs(v_abcd - std::conj(two_electron_eri(c, d, a, b))));
+                  max_herm_err, std::abs(v_abcd - std::conj(c4_spinor_eri(c, d, a, b))));
             }
           }
         }
