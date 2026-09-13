@@ -1,3 +1,4 @@
 build/
 rerdmft
 Makefile.local
+src/GitVersion.h

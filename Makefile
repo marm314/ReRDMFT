@@ -31,7 +31,9 @@ CPPFLAGS := -I$(LIBCINT_INC)
 # overlap-matrix inverse; installed system-wide via liblapacke-dev.
 LDLIBS   := $(LIBCINT) -llapacke -llapack -lblas -lquadmath -lm
 
-.PHONY: all clean
+GIT_VERSION_HEADER := $(SRC_DIR)/GitVersion.h
+
+.PHONY: all clean force
 
 all: $(BIN)
 
@@ -41,8 +43,26 @@ $(BIN): $(OBJS)
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
+# main.cpp prints the current commit SHA at startup, so it needs to be
+# rebuilt whenever GitVersion.h's content actually changes (not merely
+# regenerated -- see the recipe below, which only rewrites the file, and
+# so only updates its mtime, when the SHA differs from what's already
+# there).
+$(BUILD_DIR)/main.o: $(GIT_VERSION_HEADER)
+
+# Depending on the phony `force` target makes this recipe run on every
+# build, but the file itself is only rewritten when its content changes,
+# so dependents only see it as "changed" (and get rebuilt) when the
+# commit actually differs from the last build.
+$(GIT_VERSION_HEADER): force
+	@sha=$$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown); \
+	content="#define RERDMFT_GIT_SHA \"$$sha\""; \
+	if [ ! -f $@ ] || [ "$$(cat $@ 2>/dev/null)" != "$$content" ]; then \
+		echo "$$content" > $@; \
+	fi
+
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 clean:
-	rm -rf $(BUILD_DIR) $(BIN)
+	rm -rf $(BUILD_DIR) $(BIN) $(GIT_VERSION_HEADER)
