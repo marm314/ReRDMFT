@@ -2,6 +2,7 @@
 # length (r_e = 0.7414 Angstrom), using the cc-pVTZ basis (downloaded from
 # https://www.basissetexchange.org/), which includes P and D shells for
 # each hydrogen (see h2-cc-pvtz.gbs).
+NON_RELATIVISTIC TRUE
 NELEC 2
 BASIS h2-cc-pvtz.gbs
 
