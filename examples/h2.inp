@@ -1,0 +1,11 @@
+# Example ReRDMFT input file: H2 at its experimental equilibrium bond
+# length (r_e = 0.7414 Angstrom), using the cc-pVTZ basis (downloaded from
+# https://www.basissetexchange.org/), which includes P and D shells for
+# each hydrogen (see h2-cc-pvtz.gbs).
+NELEC 2
+BASIS h2-cc-pvtz.gbs
+
+GEOMETRY
+H   0.000000   0.000000   0.000000
+H   0.000000   0.000000   0.741400
+END
