@@ -1,8 +1,11 @@
 #include "RkbTwoElectron.h"
 
+#include <cblas.h>
+
 #include <complex>
 #include <cstddef>
 #include <utility>
+#include <vector>
 
 #include "ElectronRepulsion.h"
 
@@ -34,46 +37,113 @@ Matrix<std::complex<double>> conjMatrix(const Matrix<std::complex<double>>& m) {
 //   result(..., i_new, ...) = sum_k matrix(i_new, k) * src(..., k, ...).
 // Tensor4's row-major (dim0 slowest, dim3 fastest) layout means the flat
 // array can always be reshaped as (outer, this_leg, inner), with outer the
-// product of dims before `leg` and inner the product of dims after it --
-// so this single routine handles all four legs without needing four
-// near-duplicate loop nests.
-template <typename SrcT>
-Tensor4<std::complex<double>> transformLeg(const Tensor4<SrcT>& src, int leg,
-                                            const Matrix<std::complex<double>>& matrix) {
+// product of dims before `leg` and inner the product of dims after it.
+// `matrix` is already given as (new_dim x old_dim) -- no transpose is
+// needed for a "matrix @ slice" contraction, which is used directly
+// whenever inner > 1 (looping over the `outer` contiguous slices; a
+// single loop iteration when outer==1, i.e. leg 0); when the contracted
+// axis is the tensor's LAST dimension (inner==1, i.e. leg 3), src is
+// reshaped as (outer x old_dim) instead and multiplied by matrix^T from
+// the right in one call. Implemented via BLAS GEMM (cblas_zgemm for an
+// already-complex src; for a real src, cblas_dgemm applied twice --
+// against matrix's real and imaginary parts separately -- which is
+// cheaper than upcasting the [generally much larger] src tensor to
+// complex first). Verified against the original naive nested-loop
+// implementation on random non-square test data (all 4 legs, both real
+// and complex src) to floating-point precision before this rewrite.
+Tensor4<std::complex<double>> transformLegImpl(const Tensor4<std::complex<double>>& src, int leg,
+                                                const Matrix<std::complex<double>>& matrix) {
   const std::size_t dims[4] = {src.dim0(), src.dim1(), src.dim2(), src.dim3()};
   std::size_t outer = 1;
   std::size_t inner = 1;
-  for (int i = 0; i < leg; ++i) outer *= dims[i];
-  for (int i = leg + 1; i < 4; ++i) inner *= dims[i];
-  const std::size_t old_dim = dims[leg];
+  for (int i = 0; i < leg; ++i) outer *= dims[static_cast<std::size_t>(i)];
+  for (int i = leg + 1; i < 4; ++i) inner *= dims[static_cast<std::size_t>(i)];
+  const std::size_t old_dim = dims[static_cast<std::size_t>(leg)];
   const std::size_t new_dim = matrix.rows();
 
   std::size_t new_dims[4] = {dims[0], dims[1], dims[2], dims[3]};
   new_dims[static_cast<std::size_t>(leg)] = new_dim;
   Tensor4<std::complex<double>> result(new_dims[0], new_dims[1], new_dims[2], new_dims[3],
                                         std::complex<double>(0.0, 0.0));
+  const std::complex<double> alpha(1.0, 0.0), beta(0.0, 0.0);
 
-  const SrcT* src_data = src.data();
-  std::complex<double>* out_data = result.data();
-  // Every (o,j) pair owns a disjoint, non-overlapping `inner`-sized output
-  // slice and only reads from src -- never from `result` -- so looping
-  // over the combined (o,j) space in parallel is safe regardless of which
-  // leg this is (leg 0/2 calls have outer==1, so collapsing onto j alone
-  // still gives new_dim-way parallelism instead of none).
-#pragma omp parallel for collapse(2)
-  for (std::size_t o = 0; o < outer; ++o) {
-    for (std::size_t j = 0; j < new_dim; ++j) {
-      std::complex<double>* out = out_data + (o * new_dim + j) * inner;
-      for (std::size_t k = 0; k < old_dim; ++k) {
-        const std::complex<double> m_jk = matrix(j, k);
-        const SrcT* in = src_data + (o * old_dim + k) * inner;
-        for (std::size_t m = 0; m < inner; ++m) {
-          out[m] += m_jk * static_cast<std::complex<double>>(in[m]);
-        }
-      }
+  if (inner == 1) {
+    cblas_zgemm(CblasRowMajor, CblasNoTrans, CblasTrans, static_cast<int>(outer),
+                static_cast<int>(new_dim), static_cast<int>(old_dim), &alpha, src.data(),
+                static_cast<int>(old_dim), matrix.data(), static_cast<int>(old_dim), &beta,
+                result.data(), static_cast<int>(new_dim));
+  } else {
+    for (std::size_t o = 0; o < outer; ++o) {
+      cblas_zgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, static_cast<int>(new_dim),
+                  static_cast<int>(inner), static_cast<int>(old_dim), &alpha, matrix.data(),
+                  static_cast<int>(old_dim), src.data() + o * old_dim * inner,
+                  static_cast<int>(inner), &beta, result.data() + o * new_dim * inner,
+                  static_cast<int>(inner));
     }
   }
   return result;
+}
+
+Tensor4<std::complex<double>> transformLegImpl(const Tensor4<double>& src, int leg,
+                                                const Matrix<std::complex<double>>& matrix) {
+  const std::size_t dims[4] = {src.dim0(), src.dim1(), src.dim2(), src.dim3()};
+  std::size_t outer = 1;
+  std::size_t inner = 1;
+  for (int i = 0; i < leg; ++i) outer *= dims[static_cast<std::size_t>(i)];
+  for (int i = leg + 1; i < 4; ++i) inner *= dims[static_cast<std::size_t>(i)];
+  const std::size_t old_dim = dims[static_cast<std::size_t>(leg)];
+  const std::size_t new_dim = matrix.rows();
+
+  Matrix<double> matrix_re(new_dim, old_dim), matrix_im(new_dim, old_dim);
+  for (std::size_t i = 0; i < new_dim; ++i) {
+    for (std::size_t j = 0; j < old_dim; ++j) {
+      matrix_re(i, j) = matrix(i, j).real();
+      matrix_im(i, j) = matrix(i, j).imag();
+    }
+  }
+
+  std::size_t new_dims[4] = {dims[0], dims[1], dims[2], dims[3]};
+  new_dims[static_cast<std::size_t>(leg)] = new_dim;
+  const std::size_t total_new = new_dims[0] * new_dims[1] * new_dims[2] * new_dims[3];
+  std::vector<double> result_re(total_new, 0.0), result_im(total_new, 0.0);
+
+  if (inner == 1) {
+    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans, static_cast<int>(outer),
+                static_cast<int>(new_dim), static_cast<int>(old_dim), 1.0, src.data(),
+                static_cast<int>(old_dim), matrix_re.data(), static_cast<int>(old_dim), 0.0,
+                result_re.data(), static_cast<int>(new_dim));
+    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans, static_cast<int>(outer),
+                static_cast<int>(new_dim), static_cast<int>(old_dim), 1.0, src.data(),
+                static_cast<int>(old_dim), matrix_im.data(), static_cast<int>(old_dim), 0.0,
+                result_im.data(), static_cast<int>(new_dim));
+  } else {
+    for (std::size_t o = 0; o < outer; ++o) {
+      cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, static_cast<int>(new_dim),
+                  static_cast<int>(inner), static_cast<int>(old_dim), 1.0, matrix_re.data(),
+                  static_cast<int>(old_dim), src.data() + o * old_dim * inner,
+                  static_cast<int>(inner), 0.0, result_re.data() + o * new_dim * inner,
+                  static_cast<int>(inner));
+      cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, static_cast<int>(new_dim),
+                  static_cast<int>(inner), static_cast<int>(old_dim), 1.0, matrix_im.data(),
+                  static_cast<int>(old_dim), src.data() + o * old_dim * inner,
+                  static_cast<int>(inner), 0.0, result_im.data() + o * new_dim * inner,
+                  static_cast<int>(inner));
+    }
+  }
+
+  Tensor4<std::complex<double>> result(new_dims[0], new_dims[1], new_dims[2], new_dims[3]);
+  std::complex<double>* out = result.data();
+#pragma omp parallel for
+  for (std::size_t i = 0; i < total_new; ++i) {
+    out[i] = std::complex<double>(result_re[i], result_im[i]);
+  }
+  return result;
+}
+
+template <typename SrcT>
+Tensor4<std::complex<double>> transformLeg(const Tensor4<SrcT>& src, int leg,
+                                            const Matrix<std::complex<double>>& matrix) {
+  return transformLegImpl(src, leg, matrix);
 }
 
 void addInPlace(Tensor4<std::complex<double>>& total, const Tensor4<std::complex<double>>& add) {
