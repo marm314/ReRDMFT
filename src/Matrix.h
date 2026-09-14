@@ -23,6 +23,12 @@ class Matrix {
     return data_[i * cols_ + j];
   }
 
+  // Raw access to the flat, row-major backing storage -- e.g. for BLAS
+  // calls (cblas_dgemm/cblas_zgemm) that need a contiguous buffer
+  // directly, mirroring Tensor4<T>'s own data()/const data().
+  T* data() { return data_.data(); }
+  const T* data() const { return data_.data(); }
+
  private:
   std::size_t rows_ = 0;
   std::size_t cols_ = 0;
