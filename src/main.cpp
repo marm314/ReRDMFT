@@ -279,12 +279,17 @@ rerdmft::Matrix<T> densityFromRotation(const rerdmft::Matrix<T>& u,
 // floating-point cancellation in E(+h)-E(-h) at the ~1e-8 Hartree
 // gradient scale, not a bug -- the residual grows, not shrinks, at
 // smaller h, the signature of roundoff rather than truncation error).
+// Renders to a string (rather than printing directly) so the CALLER can
+// decide where in the overall report this appears -- built right after
+// each SCF's own results become available, but intended to be printed
+// later, alongside the final gradient-norm report (see main() below).
 template <typename T>
-void printFiniteDifferenceCheck(const std::string& label, const rerdmft::Matrix<T>& h,
-                                 const rerdmft::Tensor4<T>& eri,
-                                 const std::vector<double>& occupations, std::size_t p_idx,
-                                 std::size_t q_idx, double nuclear_repulsion,
-                                 const rerdmft::Matrix<T>& gradient) {
+std::string finiteDifferenceCheckReport(const std::string& label, const rerdmft::Matrix<T>& h,
+                                         const rerdmft::Tensor4<T>& eri,
+                                         const std::vector<double>& occupations,
+                                         std::size_t p_idx, std::size_t q_idx,
+                                         double nuclear_repulsion,
+                                         const rerdmft::Matrix<T>& gradient) {
   const std::size_t n = h.rows();
   rerdmft::Matrix<T> identity(n, n, T{});
   for (std::size_t i = 0; i < n; ++i) identity(i, i) = T(1.0);
@@ -295,15 +300,16 @@ void printFiniteDifferenceCheck(const std::string& label, const rerdmft::Matrix<
   // values printed below, no further scaling needed here.
   const std::complex<double> analytic_g_pq = std::complex<double>(gradient(p_idx, q_idx));
 
-  std::cout << "\n"
-             << label << " finite-difference gradient/Hessian check (p=" << p_idx
-             << " [virtual], q=" << q_idx << " [occupied]):\n";
-  std::cout << "  E(kappa=0):        " << std::setprecision(12) << e0
-             << "  (expect: converged total electronic+nuclear energy)\n";
-  std::cout << "  Analytic g_pq (Hessian_opt/OrbitalGradient.h, includes its "
-                "deliberate factor of 2 -- see derivation above): "
-             << analytic_g_pq << "\n";
-  std::cout << std::setprecision(6);
+  std::ostringstream out;
+  out << "\n"
+      << label << " finite-difference gradient/Hessian check (p=" << p_idx
+      << " [virtual], q=" << q_idx << " [occupied]):\n";
+  out << "  E(kappa=0):        " << std::setprecision(12) << e0
+      << "  (expect: converged total electronic+nuclear energy)\n";
+  out << "  Analytic g_pq (Hessian_opt/OrbitalGradient.h, includes its "
+         "deliberate factor of 2 -- see derivation above): "
+      << analytic_g_pq << "\n";
+  out << std::setprecision(6);
 
   for (const double step : {1e-2, 1e-3, 1e-4}) {
     rerdmft::Matrix<T> kappa_plus(n, n, T{});
@@ -322,9 +328,9 @@ void printFiniteDifferenceCheck(const std::string& label, const rerdmft::Matrix<
 
     const double g_numerical = (e_plus - e_minus) / (2.0 * step);
     const double h_numerical = (e_plus - 2.0 * e0 + e_minus) / (step * step);
-    std::cout << "  step = " << std::setprecision(3) << step << std::setprecision(10)
-               << "   Re(kappa) step: numerical g_pq = " << g_numerical
-               << "   numerical H_pq,pq = " << h_numerical << std::setprecision(6) << "\n";
+    out << "  step = " << std::setprecision(3) << step << std::setprecision(10)
+        << "   Re(kappa) step: numerical g_pq = " << g_numerical
+        << "   numerical H_pq,pq = " << h_numerical << std::setprecision(6) << "\n";
 
     // Imaginary-direction check: only representable when T is genuinely
     // complex (C4_DHF's spinor basis) -- kappa_pq = kappa_qp = i*step
@@ -349,11 +355,12 @@ void printFiniteDifferenceCheck(const std::string& label, const rerdmft::Matrix<
 
       const double g_numerical_im = (e_plus_im - e_minus_im) / (2.0 * step);
       const double h_numerical_im = (e_plus_im - 2.0 * e0 + e_minus_im) / (step * step);
-      std::cout << "           " << std::setprecision(3) << step << std::setprecision(10)
-                 << "   Im(kappa) step: numerical g_pq = " << g_numerical_im
-                 << "   numerical H_pq,pq = " << h_numerical_im << std::setprecision(6) << "\n";
+      out << "           " << std::setprecision(3) << step << std::setprecision(10)
+          << "   Im(kappa) step: numerical g_pq = " << g_numerical_im
+          << "   numerical H_pq,pq = " << h_numerical_im << std::setprecision(6) << "\n";
     }
   }
+  return out.str();
 }
 
 // Builds NON_REL's (Large,Large|Large,Large) two-electron tensor, or --
@@ -556,6 +563,11 @@ int main(int argc, char** argv) {
   double nonrel_gradient_efficient_max_abs = 0.0;
   double nonrel_gradient_rdmft_norm = 0.0;
   double nonrel_gradient_rdmft_max_abs = 0.0;
+  // Built (if DEBUG) right after each SCF's own results are available,
+  // but printed later, alongside the final gradient-norm report --
+  // see printFiniteDifferenceCheck (renders to a string instead of
+  // printing directly, precisely so the two can be decoupled).
+  std::string nonrel_finite_diff_report;
   bool dhf_gradient_computed = false;
   double dhf_gradient_norm = 0.0;
   double dhf_gradient_max_abs = 0.0;
@@ -563,6 +575,7 @@ int main(int argc, char** argv) {
   double dhf_gradient_efficient_max_abs = 0.0;
   double dhf_gradient_rdmft_norm = 0.0;
   double dhf_gradient_rdmft_max_abs = 0.0;
+  std::string dhf_finite_diff_report;
   rerdmft::Matrix<std::complex<double>> c_dhf;
   rerdmft::Matrix<std::complex<double>> density_matrix;
   rerdmft::RkbTwoElectronTensor c4_spinor_eri;
@@ -717,8 +730,9 @@ int main(int argc, char** argv) {
         if (n_spatial > static_cast<std::size_t>(n_occ_spatial) && n_occ_spatial > 0) {
           const std::size_t homo = static_cast<std::size_t>(n_occ_spatial) - 1;
           const std::size_t lumo = static_cast<std::size_t>(n_occ_spatial);
-          printFiniteDifferenceCheck("NON_REL", h_spin, eri_spin, hf_occ_spin, lumo, homo,
-                                      nonrel_hf_result.nuclear_repulsion_energy, gradient_rdmft);
+          nonrel_finite_diff_report =
+              finiteDifferenceCheckReport("NON_REL", h_spin, eri_spin, hf_occ_spin, lumo, homo,
+                                           nonrel_hf_result.nuclear_repulsion_energy, gradient_rdmft);
         }
       }
     }
@@ -808,8 +822,9 @@ int main(int argc, char** argv) {
         const std::size_t homo = n_negative + static_cast<std::size_t>(input.n_electrons()) - 1;
         const std::size_t lumo = n_negative + static_cast<std::size_t>(input.n_electrons());
         if (lumo < rkb_dim) {
-          printFiniteDifferenceCheck("C4_DHF", h_mo, eri_mo, dhf_occupations, lumo, homo,
-                                      dhf_result.nuclear_repulsion_energy, gradient_rdmft);
+          dhf_finite_diff_report =
+              finiteDifferenceCheckReport("C4_DHF", h_mo, eri_mo, dhf_occupations, lumo, homo,
+                                           dhf_result.nuclear_repulsion_energy, gradient_rdmft);
         }
       }
     }
@@ -1133,6 +1148,7 @@ int main(int argc, char** argv) {
       std::cout << "  General (dense 2-RDM, O(n^5)) gradient max |g_pq|:                 "
                  << std::setprecision(10) << nonrel_gradient_max_abs << std::setprecision(6)
                  << "\n";
+      std::cout << nonrel_finite_diff_report;
     }
   }
 
@@ -1247,6 +1263,7 @@ int main(int argc, char** argv) {
                  << std::setprecision(10) << dhf_gradient_norm << std::setprecision(6) << "\n";
       std::cout << "  General (dense 2-RDM, O(n^5)) gradient max |g_pq|:                 "
                  << std::setprecision(10) << dhf_gradient_max_abs << std::setprecision(6) << "\n";
+      std::cout << dhf_finite_diff_report;
     }
   }
 
