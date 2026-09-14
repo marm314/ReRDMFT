@@ -380,10 +380,11 @@ int main(int argc, char** argv) {
       // determinant 1-RDM/2-RDM in a spin-orbital basis, and confirm
       // the orbital gradient vanishes -- the generalized Brillouin
       // condition at a converged SCF stationary point. Densifies an
-      // O(n^4) tensor into O((2n)^4) and costs O((2n)^5) time, so this
-      // is gated behind DEBUG (fine for small bases like STO-3G; not
-      // recommended for large ones like cc-pVTZ).
-      if (input.debug()) {
+      // O(n^4) tensor into O((2n)^4) and costs O((2n)^5) time --
+      // currently unconditional (not gated behind DEBUG) at the user's
+      // request; fine for small bases like STO-3G, but expect this to
+      // be slow/memory-heavy for large ones like cc-pVTZ.
+      {
         const auto h_mo =
             rerdmft::moOneElectronTransform(h_core_nonrel, nonrel_hf_result.c_matrix);
         const auto eri_mo =
