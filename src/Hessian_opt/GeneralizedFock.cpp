@@ -29,13 +29,14 @@ Matrix<T> generalizedFockMatrix(const Matrix<T>& h, const Tensor4<T>& eri, const
   // and two_electron are declared inside the loop body, so each thread
   // accumulates into its own local variable -- no reduction needed.
   //
-  // F_pq = sum_r h_rp D_rq + 2 sum_rst <sr|tp> two_rdm_strq (Dyall &
-  // Faegri Eq. 8.30's first sum, rewritten for physics-notation eri and
-  // an N(N-1)/2-normalized two_rdm -- see GeneralizedFock.h for the
-  // derivation of both the eri(s,r,t,p) index mapping and the factor of
-  // 2): eri(s,r,t,p) is the physics-notation integral <sr|tp> (== Dyall's
-  // chemist-notation (st|rp)), two_rdm(s,t,r,q) is Dyall's P_strq
-  // (Eq. 8.28's index convention) divided by 2.
+  // F_pq = sum_r h_rp D_rq + 2 sum_rst <sr|tp> two_rdm_srtq (Dyall &
+  // Faegri Eq. 8.30's first sum, rewritten for physics-notation eri, the
+  // standard physicist 2-RDM ordering, and N(N-1)/2 normalization -- see
+  // GeneralizedFock.h for the derivation, verified against an explicit
+  // second-quantized calculation, of both the eri(s,r,t,p) index mapping
+  // and the factor of 2): eri(s,r,t,p) is the physics-notation integral
+  // <sr|tp> (== Dyall's chemist-notation (st|rp)), two_rdm(s,r,t,q) is
+  // (1/2)<a+_s a+_r a_t a_q> (== Dyall's P_strq (Eq. 8.28) divided by 2).
 #pragma omp parallel for collapse(2)
   for (std::size_t p = 0; p < n; ++p) {
     for (std::size_t q = 0; q < n; ++q) {
@@ -48,7 +49,7 @@ Matrix<T> generalizedFockMatrix(const Matrix<T>& h, const Tensor4<T>& eri, const
       for (std::size_t r = 0; r < n; ++r) {
         for (std::size_t s = 0; s < n; ++s) {
           for (std::size_t t = 0; t < n; ++t) {
-            two_electron += eri(s, r, t, p) * two_rdm(s, t, r, q);
+            two_electron += eri(s, r, t, p) * two_rdm(s, r, t, q);
           }
         }
       }
