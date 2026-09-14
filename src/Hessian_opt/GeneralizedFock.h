@@ -17,11 +17,13 @@ namespace rerdmft {
 // from Dyall's own, see below): `eri` in physics notation instead of
 // chemist, and `two_rdm` in the standard physicist operator ordering,
 // normalized to N(N-1)/2 (the number of electron PAIRS) instead of
-// Dyall's N(N-1). Its antisymmetric combination F_pq - F*_qp is the
-// orbital gradient/generalized Brillouin condition (Dyall's Eq. 8.32,
-// up to the same rewrites), and F_pq itself is the basic building block
-// for the orbital Hessian built elsewhere in this directory. Note the
-// free indices as Dyall writes them: h_rp (not h_pr) and D_rq --
+// Dyall's N(N-1). Its antisymmetric combination is the orbital gradient/
+// generalized Brillouin condition -- see OrbitalGradient.h's
+// orbitalGradient for the exact formula used here, g_pq =
+// 2*(F_qp - F*_pq), which includes a deliberate factor of 2 beyond
+// Dyall's own (unscaled) Eq. 8.32. F_pq itself is the basic building
+// block for the orbital Hessian built elsewhere in this directory. Note
+// the free indices as Dyall writes them: h_rp (not h_pr) and D_rq --
 // implemented exactly as printed, not silently transposed/conjugated,
 // even though h and D are both Hermitian.
 //

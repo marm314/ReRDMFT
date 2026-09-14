@@ -25,9 +25,11 @@ namespace rerdmft {
 // the ORDINARY closed-shell Fock matrix -- built from the density of
 // the CONVERGED `c_matrix` (via nonRelDensityMatrix), NOT the SCF
 // loop's stored, one-iteration-stale density -- transformed into the
-// spin-orbital MO basis. Then g_pq = F_qp - conj(F_pq) simplifies
-// (FockLike is Hermitian) to
-//   g_pq = FockLike(p,q) * ([p occupied] - [q occupied])
+// spin-orbital MO basis. Then g_pq = 2*(F_qp - conj(F_pq))
+// (Hessian_opt/OrbitalGradient.h's convention, including its
+// deliberate factor of 2 -- see that header) simplifies (FockLike is
+// Hermitian) to
+//   g_pq = 2 * FockLike(p,q) * ([p occupied] - [q occupied])
 // i.e. g is nonzero only in the occupied-virtual and virtual-occupied
 // blocks (occ-occ and virt-virt are identically zero -- the well-known
 // redundancy of those orbital rotations). Verified to reproduce

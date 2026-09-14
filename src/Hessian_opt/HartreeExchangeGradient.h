@@ -65,7 +65,7 @@ namespace rerdmft {
 // `two_rdm_l2` are always real (Matrix<double>) regardless of T, since
 // occupation-number-derived coupling coefficients are always real.
 // Feed the resulting F into OrbitalGradient.h's orbitalGradient to get
-// g_pq = F_qp - conj(F_pq).
+// g_pq = 2*(F_qp - conj(F_pq)) (see that header for the factor of 2).
 template <typename T>
 Matrix<T> hartreeExchangeFockMatrix(const Matrix<T>& h, const Tensor4<T>& eri,
                                      const std::vector<double>& occupations,

@@ -260,24 +260,25 @@ rerdmft::Matrix<T> densityFromRotation(const rerdmft::Matrix<T>& u,
 // direction gives
 //   dE/dx = -(F_mine(q,p) + F_mine(p,q)) = -2*Re(F_mine(p,q))
 //   dE/dy = i*(F_mine(p,q) - F_mine(q,p)) = -2*Im(F_mine(p,q))
-// Separately, orbitalGradient's g_pq = F_qp - conj(F_pq) built from
 // hartreeExchangeFockMatrix's F (F_theirs) satisfies, for idempotent
 // occupations(p)=0/occupations(q)=1, F_theirs(p,q) =
-// occupations(q)*F_mine(q,p) (direct substitution), which reduces
-// g_pq = (occupations(p)-occupations(q))*F_mine(p,q) = -F_mine(p,q).
-// So dE/dx = 2*Re(g_pq) and dE/dy = 2*Im(g_pq) exactly -- NOT Re(g_pq)/
-// Im(g_pq) directly: the stored g_pq (only p >= q, per
-// OrbitalGradient.h) is the coefficient for ONE of the two
-// antisymmetric-pair entries (p,q)/(q,p), while each finite-difference
-// direction above moves both at once, picking up the other's equal
-// contribution too. `analytic_g_pq` below is therefore defined as
-// `2 * gradient(p_idx, q_idx)` (not the bare gradient element) so it
-// compares directly against the numerical values. Confirmed against
-// this exact test: DHF's numerical g_pq (real-step direction) converges
-// to 2x the bare analytic g_pq to ~0.1% (limited by floating-point
-// cancellation in E(+h)-E(-h) at the ~1e-8 Hartree gradient scale, not
-// a bug -- the residual grows, not shrinks, at smaller h, the signature
-// of roundoff rather than truncation error).
+// occupations(q)*F_mine(q,p) (direct substitution), which reduces the
+// UNSCALED Dyall combination F_theirs(q,p) - conj(F_theirs(p,q)) =
+// (occupations(p)-occupations(q))*F_mine(p,q) = -F_mine(p,q). So
+// dE/dx = 2*Re(-F_mine(p,q)) and dE/dy = 2*Im(-F_mine(p,q)) exactly --
+// which is precisely `gradient(p_idx, q_idx)` as returned by
+// OrbitalGradient.h's `orbitalGradient` (its factor of 2 was chosen,
+// see that header, EXACTLY so this equality holds with no further
+// scaling needed here): the unscaled Dyall combination is the
+// coefficient for ONE of the two antisymmetric-pair entries (p,q)/
+// (q,p), while each finite-difference direction below moves both at
+// once, picking up the other's equal contribution too -- which is
+// exactly what `orbitalGradient`'s built-in factor of 2 accounts for.
+// Confirmed against this exact test: DHF's numerical g_pq (real-step
+// direction) converges to `gradient(p_idx, q_idx)` to ~0.1% (limited by
+// floating-point cancellation in E(+h)-E(-h) at the ~1e-8 Hartree
+// gradient scale, not a bug -- the residual grows, not shrinks, at
+// smaller h, the signature of roundoff rather than truncation error).
 template <typename T>
 void printFiniteDifferenceCheck(const std::string& label, const rerdmft::Matrix<T>& h,
                                  const rerdmft::Tensor4<T>& eri,
@@ -289,17 +290,18 @@ void printFiniteDifferenceCheck(const std::string& label, const rerdmft::Matrix<
   for (std::size_t i = 0; i < n; ++i) identity(i, i) = T(1.0);
   const rerdmft::Matrix<T> d0 = densityFromRotation(identity, occupations);
   const double e0 = singleDeterminantMoEnergy(h, eri, d0, nuclear_repulsion);
-  // Already includes the factor of 2 derived above -- compare directly
-  // against the numerical g_pq values printed below, no further scaling.
-  const std::complex<double> analytic_g_pq = 2.0 * std::complex<double>(gradient(p_idx, q_idx));
+  // OrbitalGradient.h's orbitalGradient already includes the factor of
+  // 2 derived above -- compare directly against the numerical g_pq
+  // values printed below, no further scaling needed here.
+  const std::complex<double> analytic_g_pq = std::complex<double>(gradient(p_idx, q_idx));
 
   std::cout << "\n"
              << label << " finite-difference gradient/Hessian check (p=" << p_idx
              << " [virtual], q=" << q_idx << " [occupied]):\n";
   std::cout << "  E(kappa=0):        " << std::setprecision(12) << e0
              << "  (expect: converged total electronic+nuclear energy)\n";
-  std::cout << "  Analytic 2*g_pq (Hessian_opt/OrbitalGradient.h, already includes the "
-                "factor of 2 -- see derivation above): "
+  std::cout << "  Analytic g_pq (Hessian_opt/OrbitalGradient.h, includes its "
+                "deliberate factor of 2 -- see derivation above): "
              << analytic_g_pq << "\n";
   std::cout << std::setprecision(6);
 

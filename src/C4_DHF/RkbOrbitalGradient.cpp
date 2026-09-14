@@ -28,7 +28,7 @@ Matrix<std::complex<double>> dhfOrbitalGradientEfficient(
     for (std::size_t q = 0; q <= p; ++q) {
       const bool occ_q = isOccupied(q);
       if (occ_p == occ_q) continue;
-      const std::complex<double> sign(occ_p ? 1.0 : -1.0, 0.0);
+      const std::complex<double> sign(occ_p ? 2.0 : -2.0, 0.0);
       g(p, q) = sign * fock_like_mo(p, q);
     }
   }

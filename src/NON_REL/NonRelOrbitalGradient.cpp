@@ -31,7 +31,7 @@ Matrix<double> nonRelOrbitalGradientEfficient(const Matrix<double>& h_core_ao,
     for (std::size_t q = 0; q <= p; ++q) {
       const bool occ_q = isOccupied(q);
       if (occ_p == occ_q) continue;
-      g(p, q) = (occ_p ? 1.0 : -1.0) * fock_like_spin(p, q);
+      g(p, q) = (occ_p ? 2.0 : -2.0) * fock_like_spin(p, q);
     }
   }
   return g;

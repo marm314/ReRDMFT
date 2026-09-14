@@ -18,11 +18,12 @@ namespace rerdmft {
 // exchange, at O(n^4)) on the density built fresh from the converged
 // `c_dhf` (via rkbDensityMatrix; NOT the SCF loop's stored, one-
 // iteration-stale density), then transforming into the MO basis:
-//   g_pq = FockLike(p,q) * ([p occupied] - [q occupied])
+//   g_pq = 2 * FockLike(p,q) * ([p occupied] - [q occupied])
 // (same derivation as the NON_REL header -- Dyall Eq. 8.30's own
 // "nonzero only if the second index is occupied" remark, plus
-// FockLike's Hermiticity), with "occupied" meaning the lowest
-// `n_electrons` POSITIVE-energy states (RkbDensityMatrix.h/
+// FockLike's Hermiticity, and Hessian_opt/OrbitalGradient.h's
+// deliberate factor of 2 -- see that header), with "occupied" meaning
+// the lowest `n_electrons` POSITIVE-energy states (RkbDensityMatrix.h/
 // RkbMoTransform.h's convention -- the negative-energy branch is never
 // occupied). No spin-orbital expansion is needed here (the RKB spinor
 // basis already IS spin-orbital-like). Verified to reproduce

@@ -28,11 +28,13 @@ Matrix<T> orbitalGradient(const Matrix<T>& fock) {
   Matrix<T> g(n, n, T{});
   // Each p owns rows q=0..p (a disjoint set of output positions across
   // threads) and only reads the shared, const fock -- safe to
-  // parallelize. Only p >= q is computed -- see OrbitalGradient.h.
+  // parallelize. Only p >= q is computed -- see OrbitalGradient.h. The
+  // factor of 2 is deliberate (see OrbitalGradient.h) -- NOT Dyall's
+  // own unscaled Eq. 8.32.
 #pragma omp parallel for
   for (std::size_t p = 0; p < n; ++p) {
     for (std::size_t q = 0; q <= p; ++q) {
-      g(p, q) = fock(q, p) - conjugate(fock(p, q));
+      g(p, q) = T(2.0) * (fock(q, p) - conjugate(fock(p, q)));
     }
   }
   return g;
