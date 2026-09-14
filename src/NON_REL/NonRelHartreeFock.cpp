@@ -107,19 +107,12 @@ Matrix<double> nonRelFockMatrix(const Matrix<double>& h_core, const PackedTwoEle
 }
 
 NonRelHartreeFockResult runNonRelativisticHartreeFock(
-    const std::vector<BasisFunction>& large_basis, const Matrix<double>& h_core,
+    const PackedTwoElectronTensor& eri, const Matrix<double>& h_core,
     const Matrix<double>& x_large, const Matrix<double>& initial_density, int n_electrons,
     const std::vector<Atom>& geometry, double mixing, int max_iterations,
     double energy_tolerance, double density_tolerance) {
   NonRelHartreeFockResult result;
   result.nuclear_repulsion_energy = nuclearRepulsionEnergy(geometry);
-
-  // (Large,Large|Large,Large) real two-electron tensor, packed to store
-  // only the unique values under the full 8-fold real-orbital symmetry: no
-  // restricted-kinetic-balance small component involved at all, and no
-  // leg-transform (unlike RkbTwoElectron.cpp) that would need a dense,
-  // strided intermediate.
-  const PackedTwoElectronTensor eri = twoElectronIntegralsPacked(large_basis);
 
   Matrix<double> p_current = initial_density;
   double previous_energy = 0.0;

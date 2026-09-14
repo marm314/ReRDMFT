@@ -69,3 +69,24 @@ make clean
 See `examples/*.inp` for sample input files (basis sets, geometries,
 and the `C4_SPINOR` / `NON_RELATIVISTIC` flags controlling which SCF
 path(s) run).
+
+## Two-electron integral disk cache
+
+The (expensive, O(N^4)) two-electron integral tensors depend only on the
+molecular geometry and basis set -- NOT on `SPEED_OF_LIGHT` -- so runs
+that share a geometry+basis but scan over the speed of light (e.g. a
+`water-c1000.inp` / `water-c100000.inp` / `water-c10000000.inp` series)
+would otherwise recompute bit-identical integrals every time. Setting
+
+```
+CACHE_INTEGRALS TRUE
+```
+
+in an input file caches each built tensor to disk (under `CACHE_DIR`,
+default `.rerdmft_cache`, created automatically) keyed by a hash of the
+actual basis functions, and reuses it on a later run with a matching
+key instead of rebuilding via libcint. It is off by default, since it
+writes files to disk; a cache from a different build of the code is
+detected via an embedded format version and never reused. Files under
+the cache directory are a same-machine binary format, not meant to be
+inspected or shared.

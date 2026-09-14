@@ -69,6 +69,21 @@ class Input {
   // at least one iteration) as soon as EITHER the density change or the
   // energy change falls below its own tolerance. Must be positive.
   double density_tolerance() const { return density_tolerance_; }
+  // Optional; defaults to false when CACHE_INTEGRALS is absent. When
+  // true, the two-electron integral tensors (C4_DHF's RKB spinor tensor
+  // and/or NON_REL's Large-basis tensor, whichever apply) are cached to
+  // disk under cache_dir() and reused on a later run with the same
+  // geometry+basis (regardless of SPEED_OF_LIGHT, which these tensors do
+  // not depend on -- see IntegralCache.h) instead of being recomputed
+  // via libcint from scratch. Off by default since it writes files to
+  // disk and a cache built by a different code version is only detected
+  // (and safely ignored) via an embedded format-version tag, not a
+  // content check.
+  bool cache_integrals() const { return cache_integrals_; }
+  // Optional; defaults to ".rerdmft_cache" when CACHE_DIR is absent.
+  // Directory (created if missing) that cache_integrals() cache files
+  // are written to/read from.
+  const std::string& cache_dir() const { return cache_dir_; }
 
  private:
   int n_electrons_ = 0;
@@ -82,6 +97,8 @@ class Input {
   int max_iterations_ = 100;
   double energy_tolerance_ = 1e-8;
   double density_tolerance_ = 1e-6;
+  bool cache_integrals_ = false;
+  std::string cache_dir_ = ".rerdmft_cache";
 };
 
 }  // namespace rerdmft

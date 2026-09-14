@@ -70,11 +70,12 @@ Matrix<double> nonRelFockMatrix(const Matrix<double>& h_core, const PackedTwoEle
                                  const Matrix<double>& density_matrix);
 
 // Runs the standard nonrelativistic (restricted, closed-shell) Hartree-
-// Fock SCF procedure in the Large-component AO basis. Builds the
-// (Large,Large|Large,Large) two-electron repulsion tensor internally
-// (ElectronRepulsion.h's twoElectronIntegralsPacked -- real, no
-// restricted-kinetic-balance small component involved at all, storing only
-// the unique values), then starting from
+// Fock SCF procedure in the Large-component AO basis, given the
+// (Large,Large|Large,Large) two-electron repulsion tensor `eri` (built by
+// the caller -- ElectronRepulsion.h's twoElectronIntegralsPacked, real,
+// no restricted-kinetic-balance small component involved at all, storing
+// only the unique values -- typically via main.cpp, which can then also
+// cache it to disk; see IntegralCache.h). Starting from
 // `initial_density` (typically the core-Hamiltonian-guess density built
 // from H_core's own eigenvectors in main.cpp), mirrors C4_DHF.h's
 // runDiracHartreeFockScf exactly (same linear-mixing and OR-combined
@@ -86,7 +87,7 @@ Matrix<double> nonRelFockMatrix(const Matrix<double>& h_core, const PackedTwoEle
 // tolerance, skipped on the first iteration). Stops after
 // `max_iterations` regardless of convergence.
 NonRelHartreeFockResult runNonRelativisticHartreeFock(
-    const std::vector<BasisFunction>& large_basis, const Matrix<double>& h_core,
+    const PackedTwoElectronTensor& eri, const Matrix<double>& h_core,
     const Matrix<double>& x_large, const Matrix<double>& initial_density, int n_electrons,
     const std::vector<Atom>& geometry, double mixing, int max_iterations,
     double energy_tolerance, double density_tolerance);

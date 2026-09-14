@@ -3,6 +3,7 @@
 
 #include <complex>
 #include <cstddef>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -38,9 +39,23 @@ class RkbTwoElectronTensor {
   explicit RkbTwoElectronTensor(std::size_t n)
       : n_(n), pairs_(n * n), data_(pairs_ * (pairs_ + 1) / 2, std::complex<double>(0.0, 0.0)) {}
 
+  // Trusted constructor for IntegralCache.h: takes already-packed raw
+  // data (e.g. read back from an on-disk cache file) as-is. Throws if
+  // its size does not match what dimension `n` implies, so a corrupt or
+  // mismatched cache file cannot silently lead to out-of-bounds reads
+  // via operator().
+  RkbTwoElectronTensor(std::size_t n, std::vector<std::complex<double>> data)
+      : n_(n), pairs_(n * n), data_(std::move(data)) {
+    if (data_.size() != pairs_ * (pairs_ + 1) / 2) {
+      throw std::runtime_error("RkbTwoElectronTensor: cached data size does not match dimension");
+    }
+  }
+
   std::size_t dim() const { return n_; }
   // Complex values actually stored -- half of the dense n^4 count.
   std::size_t storedCount() const { return data_.size(); }
+  // Raw packed storage, for IntegralCache.h to write/read directly.
+  const std::vector<std::complex<double>>& rawData() const { return data_; }
 
   std::complex<double> operator()(std::size_t a, std::size_t b, std::size_t c,
                                    std::size_t d) const {

@@ -151,6 +151,13 @@ void Input::read(const std::string& filename) {
         throw std::runtime_error("line " + std::to_string(line_number) +
                                   ": DENSITY_TOLERANCE must be positive");
       }
+    } else if (keyword == "CACHE_INTEGRALS") {
+      cache_integrals_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "CACHE_DIR") {
+      if (!(iss >> cache_dir_)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": expected a directory path after CACHE_DIR");
+      }
     } else if (keyword == "SPEED_OF_LIGHT") {
       speed_of_light_ = parseDouble(iss, line_number, keyword);
       if (!(speed_of_light_ > 0.0)) {
