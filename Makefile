@@ -16,6 +16,13 @@ C4_DIR   := $(SRC_DIR)/C4_DHF
 # ElectronRepulsion.h/Tensor4.h (both basis-agnostic) via the shared
 # include path below rather than duplicating them.
 NON_REL_DIR := $(SRC_DIR)/NON_REL
+# Orbital-optimization machinery (generalized Fock matrix, and later the
+# orbital Hessian) for RDMFT/CASSCF-style wavefunctions with a general
+# (non-idempotent) 1-RDM and an externally-supplied 2-RDM: its own
+# subdirectory for the same reason as C4_DIR/NON_REL_DIR, working
+# entirely in an orthonormal MO basis (reusing Matrix.h/Tensor4.h via the
+# shared include path below, not any AO- or RKB-spinor-specific code).
+HESSIAN_DIR := $(SRC_DIR)/Hessian_opt
 BUILD_DIR:= build
 BIN      := rerdmft
 
@@ -41,13 +48,15 @@ endif
 SRCS        := $(wildcard $(SRC_DIR)/*.cpp)
 C4_SRCS     := $(wildcard $(C4_DIR)/*.cpp)
 NON_REL_SRCS:= $(wildcard $(NON_REL_DIR)/*.cpp)
+HESSIAN_SRCS:= $(wildcard $(HESSIAN_DIR)/*.cpp)
 OBJS        := $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(SRCS)) \
                $(patsubst $(C4_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(C4_SRCS)) \
-               $(patsubst $(NON_REL_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(NON_REL_SRCS))
+               $(patsubst $(NON_REL_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(NON_REL_SRCS)) \
+               $(patsubst $(HESSIAN_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(HESSIAN_SRCS))
 
-# All three directories are on the quoted-include search path, so files
+# All four directories are on the quoted-include search path, so files
 # in any one can #include headers from the others without a path prefix.
-CPPFLAGS := -I$(LIBCINT_INC) -I$(SRC_DIR) -I$(C4_DIR) -I$(NON_REL_DIR)
+CPPFLAGS := -I$(LIBCINT_INC) -I$(SRC_DIR) -I$(C4_DIR) -I$(NON_REL_DIR) -I$(HESSIAN_DIR)
 # LAPACKE (the C interface to LAPACK) is used for the RKB transformation's
 # overlap-matrix inverse; installed system-wide via liblapacke-dev.
 LDLIBS   := $(LIBCINT) -llapacke -llapack -lblas -lquadmath -lm
@@ -68,6 +77,9 @@ $(BUILD_DIR)/%.o: $(C4_DIR)/%.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/%.o: $(NON_REL_DIR)/%.cpp | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/%.o: $(HESSIAN_DIR)/%.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
 # main.cpp prints the current commit SHA at startup, so it needs to be
