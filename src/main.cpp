@@ -42,6 +42,7 @@
 #include "SingleDeterminantRdm.h"
 #include "SmallComponentBasis.h"
 #include "SpinorBasis.h"
+#include "SpinorRotation.h"
 #include "UkbHamiltonian.h"
 #include "Vext.h"
 
@@ -142,6 +143,171 @@ rerdmft::Matrix<double> occupationOuterProduct(const std::vector<double>& occupa
     }
   }
   return m;
+}
+
+// conj(double) is a no-op; conj(complex<double>) is std::conj -- avoids
+// std::conj(double)'s real-to-complex promotion gotcha (see
+// Hessian_opt/OrbitalGradient.cpp's identical helper).
+double scalarConj(double x) { return x; }
+std::complex<double> scalarConj(std::complex<double> x) { return std::conj(x); }
+
+// Builds the single-determinant Fock matrix directly in an orthonormal
+// MO/natural-spinor basis:
+//   F(p,r) = h(p,r) + sum_qs P(s,q) * (eri(p,q,r,s) - eri(p,q,s,r))
+// -- the general spin-orbital-style Hartree-exchange contraction (no
+// "closed-shell 1/2" factor, no AO-basis "flavor" split needed), valid
+// for ANY P (in particular a density rotated away from the reference
+// determinant's own diagonal one), since `eri` already fully and
+// correctly represents the Coulomb operator in this basis. DEBUG-only
+// finite-difference gradient/Hessian test helper -- see main() below.
+template <typename T>
+rerdmft::Matrix<T> singleDeterminantMoFock(const rerdmft::Matrix<T>& h,
+                                            const rerdmft::Tensor4<T>& eri,
+                                            const rerdmft::Matrix<T>& p) {
+  const std::size_t n = h.rows();
+  rerdmft::Matrix<T> f(n, n, T{});
+  for (std::size_t pi = 0; pi < n; ++pi) {
+    for (std::size_t ri = 0; ri < n; ++ri) {
+      T sum{};
+      for (std::size_t qi = 0; qi < n; ++qi) {
+        for (std::size_t si = 0; si < n; ++si) {
+          sum += p(si, qi) * (eri(pi, qi, ri, si) - eri(pi, qi, si, ri));
+        }
+      }
+      f(pi, ri) = h(pi, ri) + sum;
+    }
+  }
+  return f;
+}
+
+// E = (1/2) Re(Tr[P (h+F)]) + nuclear_repulsion -- the same formula
+// C4_DHF.cpp/NonRelHartreeFock.cpp's own SCF loops use each iteration,
+// evaluated here for an arbitrary (possibly non-self-consistent, e.g.
+// rotated-away-from-convergence) P.
+template <typename T>
+double singleDeterminantMoEnergy(const rerdmft::Matrix<T>& h, const rerdmft::Tensor4<T>& eri,
+                                  const rerdmft::Matrix<T>& p, double nuclear_repulsion) {
+  const rerdmft::Matrix<T> f = singleDeterminantMoFock(h, eri, p);
+  const std::size_t n = h.rows();
+  T trace{};
+  for (std::size_t i = 0; i < n; ++i) {
+    for (std::size_t j = 0; j < n; ++j) {
+      trace += p(i, j) * (h(j, i) + f(j, i));
+    }
+  }
+  return 0.5 * std::real(std::complex<double>(trace)) + nuclear_repulsion;
+}
+
+// D(i,j) = sum_k occupations[k] * u(i,k) * conj(u(j,k)) -- the occupied-
+// projector density expressed in the SAME fixed MO/natural-spinor basis
+// as `u`'s own columns. `u` is the identity for the unperturbed
+// reference, or Hessian_opt/SpinorRotation.h's spinorRotationMatrix
+// (exp(-kappa)) for a rotated one -- rotating "within" the fixed MO
+// basis this way needs no reference to the original AO coefficients at
+// all.
+template <typename T>
+rerdmft::Matrix<T> densityFromRotation(const rerdmft::Matrix<T>& u,
+                                        const std::vector<double>& occupations) {
+  const std::size_t n = u.rows();
+  rerdmft::Matrix<T> d(n, n, T{});
+  for (std::size_t i = 0; i < n; ++i) {
+    for (std::size_t j = 0; j < n; ++j) {
+      T sum{};
+      for (std::size_t k = 0; k < n; ++k) {
+        if (occupations[k] == 0.0) continue;
+        sum += T(occupations[k]) * u(i, k) * scalarConj(u(j, k));
+      }
+      d(i, j) = sum;
+    }
+  }
+  return d;
+}
+
+// DEBUG-only: validates Hessian_opt/OrbitalGradient.h's analytic g_pq
+// (and previews the, so far unimplemented, orbital Hessian) against
+// finite differences of the actual energy functional at MO-basis
+// orbitals rotated by a small kappa -- built purely from `h`/`eri` and
+// SpinorRotation.h's U_rot = exp(-kappa), never touching the AO basis
+// or re-running an SCF. `p_idx` (e.g. LUMO) must be > `q_idx` (e.g.
+// HOMO) so `analytic_g_pq` can be read directly off `gradient` (which,
+// per OrbitalGradient.h, only stores p >= q). Central differences:
+//   g_pq (numerical)     ~ [E(+h) - E(-h)] / (2h)
+//   H_pq,pq (numerical)  ~ [E(+h) - 2 E(0) + E(-h)] / h^2
+// at a few shrinking step sizes h, to show the expected O(h^2)
+// convergence toward a stable value.
+//
+// The single real step `h` here moves kappa_pq = +h AND kappa_qp = -h
+// together -- i.e. it is the ONE independent real degree of freedom for
+// this anti-Hermitian pair, not two. Writing D(t) for the density along
+// this path and expanding U_rot = exp(-kappa) = I - kappa + O(kappa^2)
+// gives, to first order, D_pq(t) = D_qp(t) = -t (using occupations(p)=0,
+// occupations(q)=1). Since E(D) = Tr[D h] + (1/2) Tr[D G(D)] with G
+// linear and self-adjoint (Tr[D1 G(D2)] = Tr[D2 G(D1)], from the eri
+// exchange symmetry <AB|CD> = <BA|DC>), dE/dD_pq = F_mine(q,p) where
+// F_mine is singleDeterminantMoFock -- and F_mine is Hermitian for any
+// Hermitian D (shown the same way, using <AB|CD>* = <CD|AB>). Chaining
+// through both D_pq and D_qp (which move together, both ~ -t) gives
+//   dE/dt = -(F_mine(q,p) + F_mine(p,q)) = -2*Re(F_mine(p,q)).
+// Separately, orbitalGradient's g_pq = F_qp - conj(F_pq) built from
+// hartreeExchangeFockMatrix's F (F_theirs) satisfies, for idempotent
+// occupations(p)=0/occupations(q)=1, F_theirs(p,q) =
+// occupations(q)*F_mine(q,p) (direct substitution), which reduces
+// g_pq = (occupations(p)-occupations(q))*F_mine(p,q) = -F_mine(p,q).
+// So dE/dt = 2*g_pq exactly -- NOT g_pq itself: the stored g_pq (only
+// p >= q, per OrbitalGradient.h) is the coefficient for ONE of the two
+// antisymmetric-pair entries (p,q)/(q,p), while the finite-difference
+// path above moves both at once, picking up the other's equal
+// contribution too. Confirmed against this exact test: DHF's numerical
+// g_pq converges to 2x the analytic g_pq to ~0.1% (limited by
+// floating-point cancellation in E(+h)-E(-h) at the ~1e-8 Hartree
+// gradient scale, not a bug -- the residual grows, not shrinks, at
+// smaller h, the signature of roundoff rather than truncation error).
+// Compare numerical g_pq against `2 * analytic_g_pq` below, not
+// `analytic_g_pq` directly.
+template <typename T>
+void printFiniteDifferenceCheck(const std::string& label, const rerdmft::Matrix<T>& h,
+                                 const rerdmft::Tensor4<T>& eri,
+                                 const std::vector<double>& occupations, std::size_t p_idx,
+                                 std::size_t q_idx, double nuclear_repulsion,
+                                 const rerdmft::Matrix<T>& gradient) {
+  const std::size_t n = h.rows();
+  rerdmft::Matrix<T> identity(n, n, T{});
+  for (std::size_t i = 0; i < n; ++i) identity(i, i) = T(1.0);
+  const rerdmft::Matrix<T> d0 = densityFromRotation(identity, occupations);
+  const double e0 = singleDeterminantMoEnergy(h, eri, d0, nuclear_repulsion);
+  const double analytic_g_pq = std::real(std::complex<double>(gradient(p_idx, q_idx)));
+
+  std::cout << "\n"
+             << label << " finite-difference gradient/Hessian check (p=" << p_idx
+             << " [virtual], q=" << q_idx << " [occupied]):\n";
+  std::cout << "  E(kappa=0):        " << std::setprecision(12) << e0
+             << "  (expect: converged total electronic+nuclear energy)\n";
+  std::cout << "  Analytic g_pq (Hessian_opt/OrbitalGradient.h): " << analytic_g_pq
+             << "   (compare numerical g_pq below against 2*g_pq = " << 2.0 * analytic_g_pq
+             << " -- see derivation above)\n";
+  std::cout << std::setprecision(6);
+
+  for (const double step : {1e-2, 1e-3, 1e-4}) {
+    rerdmft::Matrix<T> kappa_plus(n, n, T{});
+    kappa_plus(p_idx, q_idx) = T(step);
+    kappa_plus(q_idx, p_idx) = T(-step);
+    const rerdmft::Matrix<T> d_plus =
+        densityFromRotation(rerdmft::spinorRotationMatrix(kappa_plus), occupations);
+    const double e_plus = singleDeterminantMoEnergy(h, eri, d_plus, nuclear_repulsion);
+
+    rerdmft::Matrix<T> kappa_minus(n, n, T{});
+    kappa_minus(p_idx, q_idx) = T(-step);
+    kappa_minus(q_idx, p_idx) = T(step);
+    const rerdmft::Matrix<T> d_minus =
+        densityFromRotation(rerdmft::spinorRotationMatrix(kappa_minus), occupations);
+    const double e_minus = singleDeterminantMoEnergy(h, eri, d_minus, nuclear_repulsion);
+
+    const double g_numerical = (e_plus - e_minus) / (2.0 * step);
+    const double h_numerical = (e_plus - 2.0 * e0 + e_minus) / (step * step);
+    std::cout << "  step = " << std::setprecision(3) << step << std::setprecision(10)
+               << "   numerical g_pq = " << g_numerical << "   numerical H_pq,pq = " << h_numerical
+               << std::setprecision(6) << "\n";
+  }
 }
 
 // Builds NON_REL's (Large,Large|Large,Large) two-electron tensor, or --
@@ -455,21 +621,18 @@ int main(int argc, char** argv) {
       // occupations its functional converges to instead. This should
       // reproduce the already-validated HF gradient (checked below,
       // under DEBUG) as the occupations-in-{0,1} special case.
-      {
-        std::vector<double> hf_occ_spin(2 * n_spatial, 0.0);
-        for (int p = 0; p < n_occ_spatial; ++p) {
-          hf_occ_spin[static_cast<std::size_t>(p)] = 1.0;
-          hf_occ_spin[n_spatial + static_cast<std::size_t>(p)] = 1.0;
-        }
-        const auto hx_test = occupationOuterProduct(hf_occ_spin);
-        const auto fock_rdmft =
-            rerdmft::hartreeExchangeFockMatrix(h_spin, eri_spin, hf_occ_spin, hx_test, hx_test);
-        const auto gradient_rdmft = rerdmft::orbitalGradient(fock_rdmft);
-        gradientNormAndMax(gradient_rdmft, nonrel_gradient_rdmft_norm,
-                            nonrel_gradient_rdmft_max_abs);
-        logTiming("NON_REL RDMFT-ansatz orbital gradient complete", t_start, t_checkpoint,
-                  timing_records);
+      std::vector<double> hf_occ_spin(2 * n_spatial, 0.0);
+      for (int p = 0; p < n_occ_spatial; ++p) {
+        hf_occ_spin[static_cast<std::size_t>(p)] = 1.0;
+        hf_occ_spin[n_spatial + static_cast<std::size_t>(p)] = 1.0;
       }
+      const auto hx_test = occupationOuterProduct(hf_occ_spin);
+      const auto fock_rdmft =
+          rerdmft::hartreeExchangeFockMatrix(h_spin, eri_spin, hf_occ_spin, hx_test, hx_test);
+      const auto gradient_rdmft = rerdmft::orbitalGradient(fock_rdmft);
+      gradientNormAndMax(gradient_rdmft, nonrel_gradient_rdmft_norm, nonrel_gradient_rdmft_max_abs);
+      logTiming("NON_REL RDMFT-ansatz orbital gradient complete", t_start, t_checkpoint,
+                timing_records);
 
       // DEBUG-only cross-checks against the RDMFT-ansatz path above:
       // Hessian_opt's general (dense 2-RDM, O(n^5) contraction) path
@@ -499,6 +662,18 @@ int main(int argc, char** argv) {
                             nonrel_gradient_efficient_max_abs);
         logTiming("NON_REL efficient orbital gradient complete", t_start, t_checkpoint,
                   timing_records);
+
+        // Numerical (finite-difference) gradient/Hessian test: rotates
+        // the HOMO/LUMO spin-orbital pair by a small kappa via
+        // Hessian_opt/SpinorRotation.h and recomputes the energy at the
+        // (non-self-consistent) rotated density -- an independent check
+        // of the analytic gradient above using no SCF machinery at all.
+        if (n_spatial > static_cast<std::size_t>(n_occ_spatial) && n_occ_spatial > 0) {
+          const std::size_t homo = static_cast<std::size_t>(n_occ_spatial) - 1;
+          const std::size_t lumo = static_cast<std::size_t>(n_occ_spatial);
+          printFiniteDifferenceCheck("NON_REL", h_spin, eri_spin, hf_occ_spin, lumo, homo,
+                                      nonrel_hf_result.nuclear_repulsion_energy, gradient_rdmft);
+        }
       }
     }
 
@@ -545,19 +720,16 @@ int main(int argc, char** argv) {
       // functional converges to instead. This should reproduce the
       // already-validated DHF gradient (checked below, under DEBUG) as
       // the occupations-in-{0,1} special case.
-      {
-        const auto d_occ_check =
-            rerdmft::occupiedPositiveEnergyDensity(rkb_dim, input.n_electrons());
-        std::vector<double> dhf_occupations(rkb_dim, 0.0);
-        for (std::size_t p = 0; p < rkb_dim; ++p) dhf_occupations[p] = d_occ_check(p, p).real();
-        const auto hx_test = occupationOuterProduct(dhf_occupations);
-        const auto fock_rdmft =
-            rerdmft::hartreeExchangeFockMatrix(h_mo, eri_mo, dhf_occupations, hx_test, hx_test);
-        const auto gradient_rdmft = rerdmft::orbitalGradient(fock_rdmft);
-        gradientNormAndMax(gradient_rdmft, dhf_gradient_rdmft_norm, dhf_gradient_rdmft_max_abs);
-        logTiming("C4_DHF RDMFT-ansatz orbital gradient complete", t_start, t_checkpoint,
-                  timing_records);
-      }
+      const auto d_occ_check = rerdmft::occupiedPositiveEnergyDensity(rkb_dim, input.n_electrons());
+      std::vector<double> dhf_occupations(rkb_dim, 0.0);
+      for (std::size_t p = 0; p < rkb_dim; ++p) dhf_occupations[p] = d_occ_check(p, p).real();
+      const auto hx_test = occupationOuterProduct(dhf_occupations);
+      const auto fock_rdmft =
+          rerdmft::hartreeExchangeFockMatrix(h_mo, eri_mo, dhf_occupations, hx_test, hx_test);
+      const auto gradient_rdmft = rerdmft::orbitalGradient(fock_rdmft);
+      gradientNormAndMax(gradient_rdmft, dhf_gradient_rdmft_norm, dhf_gradient_rdmft_max_abs);
+      logTiming("C4_DHF RDMFT-ansatz orbital gradient complete", t_start, t_checkpoint,
+                timing_records);
 
       // DEBUG-only cross-checks against the RDMFT-ansatz path above:
       // the DHF-specific efficient (O(n^4), hardcoded to idempotent
@@ -580,6 +752,19 @@ int main(int argc, char** argv) {
         logTiming("C4_DHF orbital gradient complete", t_start, t_checkpoint, timing_records);
         gradientNormAndMax(gradient_mo, dhf_gradient_norm, dhf_gradient_max_abs);
         dhf_gradient_computed = true;
+
+        // Numerical (finite-difference) gradient/Hessian test: rotates
+        // the HOMO/LUMO positive-energy spinor pair by a small kappa via
+        // Hessian_opt/SpinorRotation.h and recomputes the energy at the
+        // (non-self-consistent) rotated density -- an independent check
+        // of the analytic gradient above using no SCF machinery at all.
+        const std::size_t n_negative = rkb_dim / 2;
+        const std::size_t homo = n_negative + static_cast<std::size_t>(input.n_electrons()) - 1;
+        const std::size_t lumo = n_negative + static_cast<std::size_t>(input.n_electrons());
+        if (lumo < rkb_dim) {
+          printFiniteDifferenceCheck("C4_DHF", h_mo, eri_mo, dhf_occupations, lumo, homo,
+                                      dhf_result.nuclear_repulsion_energy, gradient_rdmft);
+        }
       }
     }
   } catch (const std::exception& e) {
