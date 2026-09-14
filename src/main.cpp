@@ -884,10 +884,10 @@ int main(int argc, char** argv) {
 
     std::cout << "\nHessian_opt cross-check (Dyall Eq. 8.30/8.32 generalized Fock/gradient, MO\n"
                  "basis, natural-orbital RDMFT ansatz -- tested here with HF occupations):\n";
-    std::cout << "  RDMFT-ansatz (Hartree+exchange, O(n^4)) gradient norm (expect ~0): "
+    std::cout << "  RDMFT-ansatz (Hartree+exchange, O(n^3) contraction) gradient norm (expect ~0): "
                << std::setprecision(10) << nonrel_gradient_rdmft_norm << std::setprecision(6)
                << "\n";
-    std::cout << "  RDMFT-ansatz (Hartree+exchange, O(n^4)) gradient max |g_pq|:       "
+    std::cout << "  RDMFT-ansatz (Hartree+exchange, O(n^3) contraction) gradient max |g_pq|:       "
                << std::setprecision(10) << nonrel_gradient_rdmft_max_abs << std::setprecision(6)
                << "\n";
     if (nonrel_gradient_computed) {
@@ -999,10 +999,10 @@ int main(int argc, char** argv) {
     std::cout << "\nHessian_opt cross-check (Dyall Eq. 8.30/8.32 generalized Fock/gradient, DHF\n"
                  "spinor MO basis, natural-spinor RDMFT ansatz -- tested here with DHF\n"
                  "occupations):\n";
-    std::cout << "  RDMFT-ansatz (Hartree+exchange, O(n^4)) gradient norm (expect ~0): "
+    std::cout << "  RDMFT-ansatz (Hartree+exchange, O(n^3) contraction) gradient norm (expect ~0): "
                << std::setprecision(10) << dhf_gradient_rdmft_norm << std::setprecision(6)
                << "\n";
-    std::cout << "  RDMFT-ansatz (Hartree+exchange, O(n^4)) gradient max |g_pq|:       "
+    std::cout << "  RDMFT-ansatz (Hartree+exchange, O(n^3) contraction) gradient max |g_pq|:       "
                << std::setprecision(10) << dhf_gradient_rdmft_max_abs << std::setprecision(6)
                << "\n";
     if (dhf_gradient_computed) {
