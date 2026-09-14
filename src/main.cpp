@@ -128,6 +128,22 @@ void gradientNormAndMax(const rerdmft::Matrix<T>& g, double& norm, double& max_a
   norm = std::sqrt(sum_sq);
 }
 
+// Builds the HF/DHF-as-an-RDMFT-functional test coupling matrix
+// two_rdm_h(p,q) = two_rdm_x(p,q) = occupations[p]*occupations[q] --
+// see Hessian_opt/HartreeExchangeGradient.h: ordinary HF/DHF is the
+// special case where Hartree and exchange share this SAME occupation-
+// number-product coupling, with idempotent occupations.
+rerdmft::Matrix<double> occupationOuterProduct(const std::vector<double>& occupations) {
+  const std::size_t n = occupations.size();
+  rerdmft::Matrix<double> m(n, n, 0.0);
+  for (std::size_t p = 0; p < n; ++p) {
+    for (std::size_t q = 0; q < n; ++q) {
+      m(p, q) = occupations[p] * occupations[q];
+    }
+  }
+  return m;
+}
+
 // Builds NON_REL's (Large,Large|Large,Large) two-electron tensor, or --
 // when input.cache_integrals() is set -- loads it from (and, on a miss,
 // saves it to) a disk cache keyed by the Large basis alone. See
@@ -445,7 +461,9 @@ int main(int argc, char** argv) {
           hf_occ_spin[static_cast<std::size_t>(p)] = 1.0;
           hf_occ_spin[n_spatial + static_cast<std::size_t>(p)] = 1.0;
         }
-        const auto fock_rdmft = rerdmft::hartreeExchangeFockMatrix(h_spin, eri_spin, hf_occ_spin);
+        const auto hx_test = occupationOuterProduct(hf_occ_spin);
+        const auto fock_rdmft =
+            rerdmft::hartreeExchangeFockMatrix(h_spin, eri_spin, hf_occ_spin, hx_test, hx_test);
         const auto gradient_rdmft = rerdmft::orbitalGradient(fock_rdmft);
         gradientNormAndMax(gradient_rdmft, nonrel_gradient_rdmft_norm,
                             nonrel_gradient_rdmft_max_abs);
@@ -532,7 +550,9 @@ int main(int argc, char** argv) {
             rerdmft::occupiedPositiveEnergyDensity(rkb_dim, input.n_electrons());
         std::vector<double> dhf_occupations(rkb_dim, 0.0);
         for (std::size_t p = 0; p < rkb_dim; ++p) dhf_occupations[p] = d_occ_check(p, p).real();
-        const auto fock_rdmft = rerdmft::hartreeExchangeFockMatrix(h_mo, eri_mo, dhf_occupations);
+        const auto hx_test = occupationOuterProduct(dhf_occupations);
+        const auto fock_rdmft =
+            rerdmft::hartreeExchangeFockMatrix(h_mo, eri_mo, dhf_occupations, hx_test, hx_test);
         const auto gradient_rdmft = rerdmft::orbitalGradient(fock_rdmft);
         gradientNormAndMax(gradient_rdmft, dhf_gradient_rdmft_norm, dhf_gradient_rdmft_max_abs);
         logTiming("C4_DHF RDMFT-ansatz orbital gradient complete", t_start, t_checkpoint,
