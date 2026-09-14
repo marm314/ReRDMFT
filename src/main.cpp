@@ -23,11 +23,14 @@
 #include "MoIntegralTransform.h"
 #include "MolecularBasis.h"
 #include "NonRelHartreeFock.h"
+#include "NonRelOrbitalGradient.h"
 #include "NuclearAttraction.h"
 #include "OrbitalGradient.h"
 #include "RkbDensityMatrix.h"
 #include "RkbFockMatrix.h"
 #include "RkbHamiltonian.h"
+#include "RkbMoTransform.h"
+#include "RkbOrbitalGradient.h"
 #include "RkbOrthogonalization.h"
 #include "RkbOverlap.h"
 #include "RkbPositiveEnergyHamiltonian.h"
@@ -102,6 +105,26 @@ void printTimings(const std::vector<TimingRecord>& records) {
 void printEnergyLine(const std::string& label, double value) {
   std::cout << "  " << std::setw(35) << std::left << (label + ":") << std::right
              << std::setw(20) << value << " Hartree\n";
+}
+
+// Frobenius norm and max |element| of an orbital-gradient matrix `g`
+// (Hessian_opt/OrbitalGradient.h or the NON_REL/C4_DHF "efficient" fast
+// paths), which only stores its p >= q half: g_qp = -conj(g_pq), so the
+// full norm-squared is sum_p |g_pp|^2 + 2*sum_{p>q} |g_pq|^2 (the p<q
+// "half" has the same magnitudes as its p>q mirror).
+template <typename T>
+void gradientNormAndMax(const rerdmft::Matrix<T>& g, double& norm, double& max_abs) {
+  const std::size_t n = g.rows();
+  double sum_sq = 0.0;
+  max_abs = 0.0;
+  for (std::size_t p = 0; p < n; ++p) {
+    for (std::size_t q = 0; q <= p; ++q) {
+      const double abs_val = std::abs(g(p, q));
+      max_abs = std::max(max_abs, abs_val);
+      sum_sq += (p == q ? 1.0 : 2.0) * abs_val * abs_val;
+    }
+  }
+  norm = std::sqrt(sum_sq);
 }
 
 // Builds NON_REL's (Large,Large|Large,Large) two-electron tensor, or --
@@ -300,6 +323,13 @@ int main(int argc, char** argv) {
   bool nonrel_gradient_computed = false;
   double nonrel_gradient_norm = 0.0;
   double nonrel_gradient_max_abs = 0.0;
+  double nonrel_gradient_efficient_norm = 0.0;
+  double nonrel_gradient_efficient_max_abs = 0.0;
+  bool dhf_gradient_computed = false;
+  double dhf_gradient_norm = 0.0;
+  double dhf_gradient_max_abs = 0.0;
+  double dhf_gradient_efficient_norm = 0.0;
+  double dhf_gradient_efficient_max_abs = 0.0;
   rerdmft::Matrix<std::complex<double>> c_dhf;
   rerdmft::Matrix<std::complex<double>> density_matrix;
   rerdmft::RkbTwoElectronTensor c4_spinor_eri;
@@ -403,24 +433,21 @@ int main(int argc, char** argv) {
             rerdmft::generalizedFockMatrix(h_spin, eri_spin, d_spin, two_rdm_spin);
         const auto gradient_spin = rerdmft::orbitalGradient(fock_spin);
         logTiming("NON_REL orbital gradient complete", t_start, t_checkpoint, timing_records);
-
-        // g is antisymmetric-Hermitian (g_qp = -conj(g_pq)) and only
-        // p >= q is stored (OrbitalGradient.h) -- the full Frobenius
-        // norm-squared is sum_p |g_pp|^2 + 2*sum_{p>q} |g_pq|^2 (the
-        // p<q "half" has the same magnitudes as its p>q mirror).
-        const std::size_t n_spin = gradient_spin.rows();
-        double sum_sq = 0.0;
-        double max_abs = 0.0;
-        for (std::size_t p = 0; p < n_spin; ++p) {
-          for (std::size_t q = 0; q <= p; ++q) {
-            const double abs_val = std::abs(gradient_spin(p, q));
-            max_abs = std::max(max_abs, abs_val);
-            sum_sq += (p == q ? 1.0 : 2.0) * abs_val * abs_val;
-          }
-        }
-        nonrel_gradient_norm = std::sqrt(sum_sq);
-        nonrel_gradient_max_abs = max_abs;
+        gradientNormAndMax(gradient_spin, nonrel_gradient_norm, nonrel_gradient_max_abs);
         nonrel_gradient_computed = true;
+
+        // Efficient alternative (see NonRelOrbitalGradient.h): the
+        // single-determinant 2-RDM has only Hartree/exchange/(would-be)
+        // opposite-spin-exchange terms, so the same gradient can be
+        // built from the ordinary (O(n^4)) Fock matrix instead of a
+        // dense 2-RDM contraction. Cross-checked against the general
+        // path above; should agree to numerical precision.
+        const auto gradient_efficient = rerdmft::nonRelOrbitalGradientEfficient(
+            h_core_nonrel, nonrel_eri, nonrel_hf_result.c_matrix, input.n_electrons());
+        gradientNormAndMax(gradient_efficient, nonrel_gradient_efficient_norm,
+                            nonrel_gradient_efficient_max_abs);
+        logTiming("NON_REL efficient orbital gradient complete", t_start, t_checkpoint,
+                  timing_records);
       }
     }
 
@@ -439,6 +466,54 @@ int main(int argc, char** argv) {
           input.mixing(), input.max_iterations(), input.energy_tolerance(),
           input.density_tolerance());
       logTiming("SCF loop complete", t_start, t_checkpoint, timing_records);
+
+      // Efficient path (see RkbOrbitalGradient.h): the single-
+      // determinant 2-RDM has only Hartree/same-flavor-exchange/
+      // opposite-flavor-exchange terms, so the orbital gradient can be
+      // built from the ordinary (O(n^4)) rkbFockMatrix instead of a
+      // dense 2-RDM contraction -- unconditional (cheap enough for
+      // larger bases too, unlike the general path below).
+      {
+        const auto gradient_efficient = rerdmft::dhfOrbitalGradientEfficient(
+            h_rkb, c4_spinor_eri, dhf_result.c_dhf, input.n_electrons());
+        gradientNormAndMax(gradient_efficient, dhf_gradient_efficient_norm,
+                            dhf_gradient_efficient_max_abs);
+        logTiming("C4_DHF efficient orbital gradient complete", t_start, t_checkpoint,
+                  timing_records);
+      }
+
+      // General/slow path (see Hessian_opt/ and NON_REL's analogous
+      // check): transform h_RKB and the RKB spinor ERIs into the
+      // converged DHF spinor ("molecular orbital") basis spanned by
+      // c_dhf, build the single-determinant 1-RDM/2-RDM for the
+      // occupied POSITIVE-energy states only (the negative-energy
+      // branch stays unoccupied, per the no-pair approximation --
+      // occupiedPositiveEnergyDensity, NOT a naive "lowest N states"),
+      // and confirm the orbital gradient vanishes -- the generalized
+      // Brillouin condition at the converged DHF stationary point.
+      // Costs O(n^5) with n = 4*n_large (the full RKB dimension) --
+      // ~4^5 = 1024x heavier than the analogous NON_REL check for the
+      // same molecule, so this stays DEBUG-gated (unlike NON_REL's,
+      // which is cheap enough to run unconditionally): kept only as a
+      // cross-check against the efficient path above, small systems
+      // only (e.g. it single-handedly turned h2.inp, cc-pVTZ, RKB dim
+      // ~120, into a multi-minute run when tried unconditionally).
+      if (input.debug()) {
+        const auto h_mo = rerdmft::rkbMoOneElectronTransform(h_rkb, dhf_result.c_dhf);
+        const auto eri_mo =
+            rerdmft::rkbMoTwoElectronTransformPhysics(c4_spinor_eri, dhf_result.c_dhf);
+        logTiming("C4_DHF MO integral transform complete", t_start, t_checkpoint, timing_records);
+
+        const std::size_t rkb_dim = h_mo.rows();
+        const auto d_mo = rerdmft::occupiedPositiveEnergyDensity(rkb_dim, input.n_electrons());
+        const auto two_rdm_mo = rerdmft::singleDeterminantTwoRdm(d_mo);
+
+        const auto fock_mo = rerdmft::generalizedFockMatrix(h_mo, eri_mo, d_mo, two_rdm_mo);
+        const auto gradient_mo = rerdmft::orbitalGradient(fock_mo);
+        logTiming("C4_DHF orbital gradient complete", t_start, t_checkpoint, timing_records);
+        gradientNormAndMax(gradient_mo, dhf_gradient_norm, dhf_gradient_max_abs);
+        dhf_gradient_computed = true;
+      }
     }
   } catch (const std::exception& e) {
     std::cerr << "Error: " << e.what() << "\n";
@@ -740,13 +815,20 @@ int main(int argc, char** argv) {
       std::cout << "  " << std::setw(6) << i << std::setw(20) << nonrel_oe[i] << "\n";
     }
 
+    std::cout << "\nHessian_opt cross-check (Dyall Eq. 8.30/8.32 generalized Fock/gradient,\n"
+                 "MO basis, spin-orbital-expanded closed-shell single determinant):\n";
+    std::cout << "  Efficient (Hartree+exchange, O(n^4)) gradient norm (expect ~0):    "
+               << std::setprecision(10) << nonrel_gradient_efficient_norm << std::setprecision(6)
+               << "\n";
+    std::cout << "  Efficient (Hartree+exchange, O(n^4)) gradient max |g_pq|:          "
+               << std::setprecision(10) << nonrel_gradient_efficient_max_abs
+               << std::setprecision(6) << "\n";
     if (nonrel_gradient_computed) {
-      std::cout << "\nHessian_opt cross-check (Dyall Eq. 8.30/8.32 generalized Fock/gradient,\n"
-                   "MO basis, spin-orbital-expanded closed-shell single determinant):\n";
-      std::cout << "  Orbital gradient norm (expect ~0 at convergence): " << std::setprecision(10)
-                 << nonrel_gradient_norm << std::setprecision(6) << "\n";
-      std::cout << "  Orbital gradient max |g_pq|:                     " << std::setprecision(10)
-                 << nonrel_gradient_max_abs << std::setprecision(6) << "\n";
+      std::cout << "  General (dense 2-RDM, O(n^5)) gradient norm (expect ~0):           "
+                 << std::setprecision(10) << nonrel_gradient_norm << std::setprecision(6) << "\n";
+      std::cout << "  General (dense 2-RDM, O(n^5)) gradient max |g_pq|:                 "
+                 << std::setprecision(10) << nonrel_gradient_max_abs << std::setprecision(6)
+                 << "\n";
     }
   }
 
@@ -840,6 +922,21 @@ int main(int argc, char** argv) {
     std::cout << "  Fock_ortho Max Kramers eigenvector-partner deviation, "
                  "1-|<odd|Theta even>_S| (expect ~0): "
                << fock_kramers_partner_deviation << "\n";
+
+    std::cout << "\nHessian_opt cross-check (Dyall Eq. 8.30/8.32 generalized Fock/gradient, DHF\n"
+                 "spinor MO basis, occupied positive-energy single determinant):\n";
+    std::cout << "  Efficient (Hartree+exchange, O(n^4)) gradient norm (expect ~0):    "
+               << std::setprecision(10) << dhf_gradient_efficient_norm << std::setprecision(6)
+               << "\n";
+    std::cout << "  Efficient (Hartree+exchange, O(n^4)) gradient max |g_pq|:          "
+               << std::setprecision(10) << dhf_gradient_efficient_max_abs << std::setprecision(6)
+               << "\n";
+    if (dhf_gradient_computed) {
+      std::cout << "  General (dense 2-RDM, O(n^5)) gradient norm (expect ~0):           "
+                 << std::setprecision(10) << dhf_gradient_norm << std::setprecision(6) << "\n";
+      std::cout << "  General (dense 2-RDM, O(n^5)) gradient max |g_pq|:                 "
+                 << std::setprecision(10) << dhf_gradient_max_abs << std::setprecision(6) << "\n";
+    }
   }
 
   printTimings(timing_records);
