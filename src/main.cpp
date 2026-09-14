@@ -7,6 +7,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "BasisSet.h"
@@ -236,34 +237,47 @@ rerdmft::Matrix<T> densityFromRotation(const rerdmft::Matrix<T>& u,
 // at a few shrinking step sizes h, to show the expected O(h^2)
 // convergence toward a stable value.
 //
-// The single real step `h` here moves kappa_pq = +h AND kappa_qp = -h
-// together -- i.e. it is the ONE independent real degree of freedom for
-// this anti-Hermitian pair, not two. Writing D(t) for the density along
-// this path and expanding U_rot = exp(-kappa) = I - kappa + O(kappa^2)
-// gives, to first order, D_pq(t) = D_qp(t) = -t (using occupations(p)=0,
-// occupations(q)=1). Since E(D) = Tr[D h] + (1/2) Tr[D G(D)] with G
-// linear and self-adjoint (Tr[D1 G(D2)] = Tr[D2 G(D1)], from the eri
-// exchange symmetry <AB|CD> = <BA|DC>), dE/dD_pq = F_mine(q,p) where
-// F_mine is singleDeterminantMoFock -- and F_mine is Hermitian for any
-// Hermitian D (shown the same way, using <AB|CD>* = <CD|AB>). Chaining
-// through both D_pq and D_qp (which move together, both ~ -t) gives
-//   dE/dt = -(F_mine(q,p) + F_mine(p,q)) = -2*Re(F_mine(p,q)).
+// The generator kappa_pq is complex in general (T = std::complex<double>
+// for C4_DHF's genuinely complex spinors; T = double, i.e. real
+// antisymmetric only, for NON_REL's real-valued HF orbitals -- the type
+// system enforces this, there is no way to build an imaginary kappa in
+// the T = double instantiation). A single independent real perturbation
+// direction moves EITHER the real part x = Re(kappa_pq) (kappa_pq = +x,
+// kappa_qp = -x, an antisymmetric real pair) OR, only when T =
+// std::complex<double>, the imaginary part y = Im(kappa_pq) (kappa_pq =
+// kappa_qp = iy -- anti-Hermiticity forces kappa_qp = -conj(kappa_pq) =
+// -conj(iy) = iy, i.e. this direction moves BOTH entries to the SAME
+// value, not opposite ones; verified numerically against
+// scipy.linalg.expm before implementing). Expanding U_rot = exp(-kappa)
+// = I - kappa + O(kappa^2) gives, to first order in EITHER direction,
+// D_pq(kappa) = -kappa_pq exactly (using occupations(p)=0,
+// occupations(q)=1; also verified numerically). Since E(D) = Tr[D h] +
+// (1/2) Tr[D G(D)] with G linear and self-adjoint (Tr[D1 G(D2)] =
+// Tr[D2 G(D1)], from the eri exchange symmetry <AB|CD> = <BA|DC>),
+// dE/dD_pq = F_mine(q,p) where F_mine is singleDeterminantMoFock -- and
+// F_mine is Hermitian for any Hermitian D (shown the same way, using
+// <AB|CD>* = <CD|AB>). Chaining through both D_pq and D_qp along each
+// direction gives
+//   dE/dx = -(F_mine(q,p) + F_mine(p,q)) = -2*Re(F_mine(p,q))
+//   dE/dy = i*(F_mine(p,q) - F_mine(q,p)) = -2*Im(F_mine(p,q))
 // Separately, orbitalGradient's g_pq = F_qp - conj(F_pq) built from
 // hartreeExchangeFockMatrix's F (F_theirs) satisfies, for idempotent
 // occupations(p)=0/occupations(q)=1, F_theirs(p,q) =
 // occupations(q)*F_mine(q,p) (direct substitution), which reduces
 // g_pq = (occupations(p)-occupations(q))*F_mine(p,q) = -F_mine(p,q).
-// So dE/dt = 2*g_pq exactly -- NOT g_pq itself: the stored g_pq (only
-// p >= q, per OrbitalGradient.h) is the coefficient for ONE of the two
-// antisymmetric-pair entries (p,q)/(q,p), while the finite-difference
-// path above moves both at once, picking up the other's equal
-// contribution too. Confirmed against this exact test: DHF's numerical
-// g_pq converges to 2x the analytic g_pq to ~0.1% (limited by
-// floating-point cancellation in E(+h)-E(-h) at the ~1e-8 Hartree
-// gradient scale, not a bug -- the residual grows, not shrinks, at
-// smaller h, the signature of roundoff rather than truncation error).
-// Compare numerical g_pq against `2 * analytic_g_pq` below, not
-// `analytic_g_pq` directly.
+// So dE/dx = 2*Re(g_pq) and dE/dy = 2*Im(g_pq) exactly -- NOT Re(g_pq)/
+// Im(g_pq) directly: the stored g_pq (only p >= q, per
+// OrbitalGradient.h) is the coefficient for ONE of the two
+// antisymmetric-pair entries (p,q)/(q,p), while each finite-difference
+// direction above moves both at once, picking up the other's equal
+// contribution too. `analytic_g_pq` below is therefore defined as
+// `2 * gradient(p_idx, q_idx)` (not the bare gradient element) so it
+// compares directly against the numerical values. Confirmed against
+// this exact test: DHF's numerical g_pq (real-step direction) converges
+// to 2x the bare analytic g_pq to ~0.1% (limited by floating-point
+// cancellation in E(+h)-E(-h) at the ~1e-8 Hartree gradient scale, not
+// a bug -- the residual grows, not shrinks, at smaller h, the signature
+// of roundoff rather than truncation error).
 template <typename T>
 void printFiniteDifferenceCheck(const std::string& label, const rerdmft::Matrix<T>& h,
                                  const rerdmft::Tensor4<T>& eri,
@@ -275,16 +289,18 @@ void printFiniteDifferenceCheck(const std::string& label, const rerdmft::Matrix<
   for (std::size_t i = 0; i < n; ++i) identity(i, i) = T(1.0);
   const rerdmft::Matrix<T> d0 = densityFromRotation(identity, occupations);
   const double e0 = singleDeterminantMoEnergy(h, eri, d0, nuclear_repulsion);
-  const double analytic_g_pq = std::real(std::complex<double>(gradient(p_idx, q_idx)));
+  // Already includes the factor of 2 derived above -- compare directly
+  // against the numerical g_pq values printed below, no further scaling.
+  const std::complex<double> analytic_g_pq = 2.0 * std::complex<double>(gradient(p_idx, q_idx));
 
   std::cout << "\n"
              << label << " finite-difference gradient/Hessian check (p=" << p_idx
              << " [virtual], q=" << q_idx << " [occupied]):\n";
   std::cout << "  E(kappa=0):        " << std::setprecision(12) << e0
              << "  (expect: converged total electronic+nuclear energy)\n";
-  std::cout << "  Analytic g_pq (Hessian_opt/OrbitalGradient.h): " << analytic_g_pq
-             << "   (compare numerical g_pq below against 2*g_pq = " << 2.0 * analytic_g_pq
-             << " -- see derivation above)\n";
+  std::cout << "  Analytic 2*g_pq (Hessian_opt/OrbitalGradient.h, already includes the "
+                "factor of 2 -- see derivation above): "
+             << analytic_g_pq << "\n";
   std::cout << std::setprecision(6);
 
   for (const double step : {1e-2, 1e-3, 1e-4}) {
@@ -305,8 +321,36 @@ void printFiniteDifferenceCheck(const std::string& label, const rerdmft::Matrix<
     const double g_numerical = (e_plus - e_minus) / (2.0 * step);
     const double h_numerical = (e_plus - 2.0 * e0 + e_minus) / (step * step);
     std::cout << "  step = " << std::setprecision(3) << step << std::setprecision(10)
-               << "   numerical g_pq = " << g_numerical << "   numerical H_pq,pq = " << h_numerical
-               << std::setprecision(6) << "\n";
+               << "   Re(kappa) step: numerical g_pq = " << g_numerical
+               << "   numerical H_pq,pq = " << h_numerical << std::setprecision(6) << "\n";
+
+    // Imaginary-direction check: only representable when T is genuinely
+    // complex (C4_DHF's spinor basis) -- kappa_pq = kappa_qp = i*step
+    // here (see derivation above), not an antisymmetric real pair.
+    // NON_REL's real orbitals (T = double) have no imaginary direction
+    // to test, so this is skipped entirely for that instantiation.
+    if constexpr (std::is_same_v<T, std::complex<double>>) {
+      const std::complex<double> i_step(0.0, step);
+      rerdmft::Matrix<T> kappa_plus_im(n, n, T{});
+      kappa_plus_im(p_idx, q_idx) = i_step;
+      kappa_plus_im(q_idx, p_idx) = i_step;
+      const rerdmft::Matrix<T> d_plus_im =
+          densityFromRotation(rerdmft::spinorRotationMatrix(kappa_plus_im), occupations);
+      const double e_plus_im = singleDeterminantMoEnergy(h, eri, d_plus_im, nuclear_repulsion);
+
+      rerdmft::Matrix<T> kappa_minus_im(n, n, T{});
+      kappa_minus_im(p_idx, q_idx) = -i_step;
+      kappa_minus_im(q_idx, p_idx) = -i_step;
+      const rerdmft::Matrix<T> d_minus_im =
+          densityFromRotation(rerdmft::spinorRotationMatrix(kappa_minus_im), occupations);
+      const double e_minus_im = singleDeterminantMoEnergy(h, eri, d_minus_im, nuclear_repulsion);
+
+      const double g_numerical_im = (e_plus_im - e_minus_im) / (2.0 * step);
+      const double h_numerical_im = (e_plus_im - 2.0 * e0 + e_minus_im) / (step * step);
+      std::cout << "           " << std::setprecision(3) << step << std::setprecision(10)
+                 << "   Im(kappa) step: numerical g_pq = " << g_numerical_im
+                 << "   numerical H_pq,pq = " << h_numerical_im << std::setprecision(6) << "\n";
+    }
   }
 }
 
