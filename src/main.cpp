@@ -723,16 +723,25 @@ int main(int argc, char** argv) {
                   timing_records);
 
         // Numerical (finite-difference) gradient/Hessian test: rotates
-        // the HOMO/LUMO spin-orbital pair by a small kappa via
+        // the (HOMO-1, LUMO) spin-orbital pair by a small kappa via
         // Hessian_opt/SpinorRotation.h and recomputes the energy at the
         // (non-self-consistent) rotated density -- an independent check
         // of the analytic gradient above using no SCF machinery at all.
-        if (n_spatial > static_cast<std::size_t>(n_occ_spatial) && n_occ_spatial > 0) {
-          const std::size_t homo = static_cast<std::size_t>(n_occ_spatial) - 1;
+        // Deliberately HOMO-1 rather than HOMO: for water/STO-3G (C2v),
+        // HOMO (1b1) and LUMO (4a1) belong to DIFFERENT irreps, so their
+        // coupling g_pq is EXACTLY zero by symmetry at every SCF
+        // iteration, converged or not (verified empirically: still
+        // ~1e-16 at 1, 2, 3, 5, and 10 iterations) -- not a useful check
+        // of the finite-difference machinery away from a stationary
+        // point. HOMO-1 (3a1) and LUMO (4a1) share the SAME irrep, so
+        // this pair's g_pq is symmetry-ALLOWED and genuinely tracks SCF
+        // convergence (large and nonzero before convergence, ~0 after).
+        if (n_spatial > static_cast<std::size_t>(n_occ_spatial) && n_occ_spatial > 1) {
+          const std::size_t homo_minus_1 = static_cast<std::size_t>(n_occ_spatial) - 2;
           const std::size_t lumo = static_cast<std::size_t>(n_occ_spatial);
-          nonrel_finite_diff_report =
-              finiteDifferenceCheckReport("NON_REL", h_spin, eri_spin, hf_occ_spin, lumo, homo,
-                                           nonrel_hf_result.nuclear_repulsion_energy, gradient_rdmft);
+          nonrel_finite_diff_report = finiteDifferenceCheckReport(
+              "NON_REL", h_spin, eri_spin, hf_occ_spin, lumo, homo_minus_1,
+              nonrel_hf_result.nuclear_repulsion_energy, gradient_rdmft);
         }
       }
     }

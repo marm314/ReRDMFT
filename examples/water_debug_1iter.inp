@@ -1,0 +1,20 @@
+# Example ReRDMFT input file: water molecule, SCF stopped after 1
+# iteration on purpose -- the density is far from converged, so the
+# analytic/numerical orbital gradients printed under DEBUG TRUE are
+# large instead of the near-zero values seen at a converged stationary
+# point (see water_debug.inp for the converged case). NON_REL's
+# finite-difference check tests the (HOMO-1, LUMO) pair specifically
+# (not HOMO/LUMO) since HOMO/LUMO are symmetry-decoupled in water's C2v
+# point group and would read ~0 regardless of convergence.
+NELEC 10
+BASIS water-sto-3g.gbs
+C4_SPINOR TRUE
+NON_RELATIVISTIC TRUE
+DEBUG TRUE
+MAX_ITERATIONS 1
+
+GEOMETRY
+O   0.000000   0.000000   0.000000
+H   0.000000   0.757000   0.586000
+H   0.000000  -0.757000   0.586000
+END
