@@ -1,0 +1,20 @@
+# Example ReRDMFT input file: carbon monoxide, using the minimal STO-3G
+# basis (downloaded from https://www.basissetexchange.org/), which keeps
+# the RKB two-electron Coulomb repulsion tensor (C4_SPINOR) small enough
+# to actually build and check: the full cc-pVTZ basis used in
+# co-cc-pvtz.inp gives nLarge=70, nSmall=224 -- a (4*70)^4 ~= 6e9-entry
+# tensor (~98 GB), far too large to materialize, whereas STO-3G keeps
+# nLarge and nSmall in the tens, not hundreds.
+# HESSIAN_NON_REL/HESSIAN_4C build and diagonalize the FULL cheap
+# orbital-rotation Hessian (see water_debug.inp) to confirm NON_REL is
+# a genuine minimum and C4_DHF a saddle point -- independent of
+# DEBUG/VERBOSE.
+NELEC 14
+BASIS co-sto-3g.gbs
+C4_SPINOR TRUE
+HESSIAN_4C TRUE
+
+GEOMETRY
+C   0.000000   0.000000   0.000000
+O   0.000000   0.000000   1.128000
+END
