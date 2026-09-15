@@ -49,6 +49,12 @@ namespace rerdmft {
 // `two_rdm_x` follow EXACTLY HartreeExchangeGradient.h's own
 // conventions -- see that header.
 //
+// `hartreeExchangeHessianElementImag` is the analogous cheap path for
+// GeneralizedHessian.h's generalizedOrbitalHessianElementImag (the
+// IMAGINARY-step direction, only meaningful for T =
+// std::complex<double> -- see that header for the derivation and the
+// same "compiles for T = double but not meaningful there" caveat).
+//
 // Works for either a real (T = double) or complex (T = std::complex
 // <double>) orbital basis -- explicit instantiations for both are
 // provided in the .cpp. `two_rdm_h`/`two_rdm_x` are always real
@@ -59,6 +65,13 @@ T hartreeExchangeHessianElement(const Matrix<T>& h, const Tensor4<T>& eri,
                                  const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x,
                                  const Matrix<T>& fock, std::size_t p, std::size_t q,
                                  std::size_t r, std::size_t s);
+
+template <typename T>
+T hartreeExchangeHessianElementImag(const Matrix<T>& h, const Tensor4<T>& eri,
+                                     const std::vector<double>& occupations,
+                                     const Matrix<double>& two_rdm_h,
+                                     const Matrix<double>& two_rdm_x, const Matrix<T>& fock,
+                                     std::size_t p, std::size_t q, std::size_t r, std::size_t s);
 
 }  // namespace rerdmft
 

@@ -457,6 +457,16 @@ double wickSingleDeterminantEnergy(const rerdmft::Matrix<T>& h, const rerdmft::T
 // computed it (VERBOSE > 0, see main() below) -- mirrors exactly how
 // finiteDifferenceCheckReport's `gradient_general` is a nullable
 // pointer for the SAME reason.
+//
+// `analytic_hess_imag`/`analytic_hess_imag_general` are the analogous
+// IMAGINARY-step direction (Hessian_opt/*.h's `*HessianElementImag`),
+// checked against a 2D finite difference using
+// kappa_pq = kappa_qp = i*step (see finiteDifferenceCheckReport's own
+// imaginary-direction derivation) instead of the antisymmetric real
+// pair -- only meaningful for T = std::complex<double> (C4_DHF), so
+// both are nullable pointers ALWAYS passed as nullptr for T = double
+// (NON_REL), exactly mirroring finiteDifferenceCheckReport's own
+// `if constexpr` gating for the gradient's imaginary direction.
 template <typename T>
 std::string hessianFiniteDifferenceReport(const std::string& label, const rerdmft::Matrix<T>& h,
                                            const rerdmft::Tensor4<T>& eri,
@@ -464,7 +474,9 @@ std::string hessianFiniteDifferenceReport(const std::string& label, const rerdmf
                                            std::size_t p_idx, std::size_t q_idx,
                                            std::size_t r_idx, std::size_t s_idx,
                                            double nuclear_repulsion, T analytic_hess,
-                                           const T* analytic_hess_general) {
+                                           const T* analytic_hess_general,
+                                           const T* analytic_hess_imag,
+                                           const T* analytic_hess_imag_general) {
   const std::size_t n = h.rows();
   auto kappa_pair = [&](std::size_t a, std::size_t b, T step) {
     rerdmft::Matrix<T> kappa(n, n, T{});
@@ -508,7 +520,50 @@ std::string hessianFiniteDifferenceReport(const std::string& label, const rerdmf
     const double e_mm = energy_at(km, ks);
     const double d2_numerical = (e_pp - e_pm - e_mp + e_mm) / (4.0 * step * step);
     out << "  step = " << std::setprecision(3) << step << std::setprecision(10)
-        << "   numerical Hess_pq,rs = " << d2_numerical << std::setprecision(6) << "\n";
+        << "   Re(kappa) step: numerical Hess_pq,rs = " << d2_numerical << std::setprecision(6)
+        << "\n";
+  }
+
+  // Imaginary-direction check: only representable when T is genuinely
+  // complex (C4_DHF's spinor basis) -- kappa_pq = kappa_qp = i*step and
+  // kappa_rs = kappa_sr = i*step' (see finiteDifferenceCheckReport's
+  // own imaginary-direction derivation), not antisymmetric real pairs.
+  // NON_REL's real orbitals (T = double) have no imaginary direction to
+  // test, so both `analytic_hess_imag*` pointers are always nullptr
+  // there and this whole block is skipped.
+  if constexpr (std::is_same_v<T, std::complex<double>>) {
+    if (analytic_hess_imag != nullptr) {
+      out << "  Analytic Hess^yy_pq,rs (Hessian_opt/HartreeExchangeHessian.h, cheap, "
+             "IMAGINARY direction): "
+          << *analytic_hess_imag << "\n";
+      if (analytic_hess_imag_general != nullptr) {
+        out << "  Analytic Hess^yy_pq,rs (Hessian_opt/GeneralizedHessian.h, dense "
+               "2-RDM, general path -- cross-check, |diff| from the line above: "
+            << std::abs(*analytic_hess_imag_general - *analytic_hess_imag)
+            << "): " << *analytic_hess_imag_general << "\n";
+      }
+      auto kappa_pair_imag = [&](std::size_t a, std::size_t b, double y) {
+        rerdmft::Matrix<T> kappa(n, n, T{});
+        const std::complex<double> val(0.0, y);
+        kappa(a, b) = val;
+        kappa(b, a) = val;
+        return kappa;
+      };
+      for (const double step : {1e-2, 1e-3, 1e-4}) {
+        const rerdmft::Matrix<T> kp = kappa_pair_imag(p_idx, q_idx, step);
+        const rerdmft::Matrix<T> km = kappa_pair_imag(p_idx, q_idx, -step);
+        const rerdmft::Matrix<T> kr = kappa_pair_imag(r_idx, s_idx, step);
+        const rerdmft::Matrix<T> ks = kappa_pair_imag(r_idx, s_idx, -step);
+        const double e_pp = energy_at(kp, kr);
+        const double e_pm = energy_at(kp, ks);
+        const double e_mp = energy_at(km, kr);
+        const double e_mm = energy_at(km, ks);
+        const double d2_numerical = (e_pp - e_pm - e_mp + e_mm) / (4.0 * step * step);
+        out << "  step = " << std::setprecision(3) << step << std::setprecision(10)
+            << "   Im(kappa) step: numerical Hess_pq,rs = " << d2_numerical
+            << std::setprecision(6) << "\n";
+      }
+    }
   }
   return out.str();
 }
@@ -951,7 +1006,8 @@ int main(int argc, char** argv) {
           nonrel_hessian_report = hessianFiniteDifferenceReport(
               "NON_REL", h_spin, eri_spin, hf_occ_spin, lumo, homo_minus_1, lumo, second_occ,
               nonrel_hf_result.nuclear_repulsion_energy, analytic_hess_cheap,
-              nonrel_gradient_computed ? &analytic_hess_general : nullptr);
+              nonrel_gradient_computed ? &analytic_hess_general : nullptr,
+              static_cast<const double*>(nullptr), static_cast<const double*>(nullptr));
         }
       }
     }
@@ -1089,10 +1145,28 @@ int main(int argc, char** argv) {
                       "element complete",
                       t_start, t_checkpoint, timing_records);
           }
+
+          const std::complex<double> analytic_hess_imag_cheap =
+              rerdmft::hartreeExchangeHessianElementImag(h_mo, eri_mo, dhf_occupations, hx_test,
+                                                          hx_test, fock_rdmft, lumo, homo, lumo,
+                                                          homo_minus_1);
+          logTiming("C4_DHF cheap (HartreeExchangeHessian, O(n) per element) imaginary-"
+                    "direction Hessian element complete",
+                    t_start, t_checkpoint, timing_records);
+          std::complex<double> analytic_hess_imag_general(0.0, 0.0);
+          if (dhf_gradient_computed) {
+            analytic_hess_imag_general = rerdmft::generalizedOrbitalHessianElementImag(
+                h_mo, eri_mo, d_mo, two_rdm_mo, fock_mo, lumo, homo, lumo, homo_minus_1);
+            logTiming("C4_DHF general (GeneralizedHessian, O(n^2) per element) imaginary-"
+                      "direction Hessian element complete",
+                      t_start, t_checkpoint, timing_records);
+          }
+
           dhf_hessian_report = hessianFiniteDifferenceReport(
               "C4_DHF", h_mo, eri_mo, dhf_occupations, lumo, homo, lumo, homo_minus_1,
               dhf_result.nuclear_repulsion_energy, analytic_hess_cheap,
-              dhf_gradient_computed ? &analytic_hess_general : nullptr);
+              dhf_gradient_computed ? &analytic_hess_general : nullptr, &analytic_hess_imag_cheap,
+              dhf_gradient_computed ? &analytic_hess_imag_general : nullptr);
         }
       }
     }

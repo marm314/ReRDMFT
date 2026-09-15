@@ -3,6 +3,7 @@
 #include <complex>
 #include <cstddef>
 #include <stdexcept>
+#include <string>
 
 namespace rerdmft {
 
@@ -90,6 +91,31 @@ T rawHessianTerm(const Matrix<T>& h, const Tensor4<T>& eri, const Matrix<T>& d,
   return term;
 }
 
+template <typename T>
+void checkHessianDimensions(const Matrix<T>& h, const Tensor4<T>& eri, const Matrix<T>& d,
+                             const Tensor4<T>& two_rdm, const Matrix<T>& fock, std::size_t n,
+                             std::size_t p, std::size_t q, std::size_t r, std::size_t s,
+                             const char* caller) {
+  if (h.cols() != n) {
+    throw std::runtime_error(std::string(caller) + ": h is not square");
+  }
+  if (d.rows() != n || d.cols() != n) {
+    throw std::runtime_error(std::string(caller) + ": d dimensions inconsistent with h");
+  }
+  if (fock.rows() != n || fock.cols() != n) {
+    throw std::runtime_error(std::string(caller) + ": fock dimensions inconsistent with h");
+  }
+  if (eri.dim0() != n || eri.dim1() != n || eri.dim2() != n || eri.dim3() != n) {
+    throw std::runtime_error(std::string(caller) + ": eri dimensions inconsistent with h");
+  }
+  if (two_rdm.dim0() != n || two_rdm.dim1() != n || two_rdm.dim2() != n || two_rdm.dim3() != n) {
+    throw std::runtime_error(std::string(caller) + ": two_rdm dimensions inconsistent with h");
+  }
+  if (p >= n || q >= n || r >= n || s >= n) {
+    throw std::runtime_error(std::string(caller) + ": index out of range");
+  }
+}
+
 }  // namespace
 
 template <typename T>
@@ -97,27 +123,8 @@ T generalizedOrbitalHessianElement(const Matrix<T>& h, const Tensor4<T>& eri, co
                                     const Tensor4<T>& two_rdm, const Matrix<T>& fock,
                                     std::size_t p, std::size_t q, std::size_t r, std::size_t s) {
   const std::size_t n = h.rows();
-  if (h.cols() != n) {
-    throw std::runtime_error("generalizedOrbitalHessianElement: h is not square");
-  }
-  if (d.rows() != n || d.cols() != n) {
-    throw std::runtime_error("generalizedOrbitalHessianElement: d dimensions inconsistent with h");
-  }
-  if (fock.rows() != n || fock.cols() != n) {
-    throw std::runtime_error(
-        "generalizedOrbitalHessianElement: fock dimensions inconsistent with h");
-  }
-  if (eri.dim0() != n || eri.dim1() != n || eri.dim2() != n || eri.dim3() != n) {
-    throw std::runtime_error(
-        "generalizedOrbitalHessianElement: eri dimensions inconsistent with h");
-  }
-  if (two_rdm.dim0() != n || two_rdm.dim1() != n || two_rdm.dim2() != n || two_rdm.dim3() != n) {
-    throw std::runtime_error(
-        "generalizedOrbitalHessianElement: two_rdm dimensions inconsistent with h");
-  }
-  if (p >= n || q >= n || r >= n || s >= n) {
-    throw std::runtime_error("generalizedOrbitalHessianElement: index out of range");
-  }
+  checkHessianDimensions(h, eri, d, two_rdm, fock, n, p, q, r, s,
+                          "generalizedOrbitalHessianElement");
 
   // Antisymmetrize both pairs (p,q) and (r,s), matching how
   // OrbitalGradient.h's orbitalGradient antisymmetrizes (p,q) alone --
@@ -129,6 +136,24 @@ T generalizedOrbitalHessianElement(const Matrix<T>& h, const Tensor4<T>& eri, co
          rawHessianTerm(h, eri, d, two_rdm, fock, q, p, s, r);
 }
 
+template <typename T>
+T generalizedOrbitalHessianElementImag(const Matrix<T>& h, const Tensor4<T>& eri,
+                                        const Matrix<T>& d, const Tensor4<T>& two_rdm,
+                                        const Matrix<T>& fock, std::size_t p, std::size_t q,
+                                        std::size_t r, std::size_t s) {
+  const std::size_t n = h.rows();
+  checkHessianDimensions(h, eri, d, two_rdm, fock, n, p, q, r, s,
+                          "generalizedOrbitalHessianElementImag");
+
+  // See GeneralizedHessian.h: ALL FOUR terms add (kappa_pq = kappa_qp
+  // for a pure-imaginary perturbation, unlike the real-real case's
+  // antisymmetric kappa_qp = -kappa_pq), plus an overall minus sign.
+  return -(rawHessianTerm(h, eri, d, two_rdm, fock, p, q, r, s) +
+            rawHessianTerm(h, eri, d, two_rdm, fock, p, q, s, r) +
+            rawHessianTerm(h, eri, d, two_rdm, fock, q, p, r, s) +
+            rawHessianTerm(h, eri, d, two_rdm, fock, q, p, s, r));
+}
+
 template double generalizedOrbitalHessianElement(const Matrix<double>& h,
                                                   const Tensor4<double>& eri,
                                                   const Matrix<double>& d,
@@ -136,6 +161,18 @@ template double generalizedOrbitalHessianElement(const Matrix<double>& h,
                                                   const Matrix<double>& fock, std::size_t p,
                                                   std::size_t q, std::size_t r, std::size_t s);
 template std::complex<double> generalizedOrbitalHessianElement(
+    const Matrix<std::complex<double>>& h, const Tensor4<std::complex<double>>& eri,
+    const Matrix<std::complex<double>>& d, const Tensor4<std::complex<double>>& two_rdm,
+    const Matrix<std::complex<double>>& fock, std::size_t p, std::size_t q, std::size_t r,
+    std::size_t s);
+template double generalizedOrbitalHessianElementImag(const Matrix<double>& h,
+                                                      const Tensor4<double>& eri,
+                                                      const Matrix<double>& d,
+                                                      const Tensor4<double>& two_rdm,
+                                                      const Matrix<double>& fock, std::size_t p,
+                                                      std::size_t q, std::size_t r,
+                                                      std::size_t s);
+template std::complex<double> generalizedOrbitalHessianElementImag(
     const Matrix<std::complex<double>>& h, const Tensor4<std::complex<double>>& eri,
     const Matrix<std::complex<double>>& d, const Tensor4<std::complex<double>>& two_rdm,
     const Matrix<std::complex<double>>& fock, std::size_t p, std::size_t q, std::size_t r,

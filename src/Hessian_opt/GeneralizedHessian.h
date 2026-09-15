@@ -31,12 +31,24 @@ namespace rerdmft {
 // This combination is what was actually validated (see below), not the
 // tex's own bare G_pq,rs alone.
 //
-// Only the REAL-step direction (t = Re(kappa_pq), t' = Re(kappa_rs)) is
-// implemented/validated here -- the analogous imaginary-direction and
-// mixed Re/Im second derivatives (needed for a fully complex/DHF
-// Newton-Raphson step) are NOT yet covered; extending this the same
-// way OrbitalGradient.h's imaginary-step validation was done is future
-// work.
+// `generalizedOrbitalHessianElementImag` (below) is the analogous
+// IMAGINARY-step direction (y = Im(kappa_pq), y' = Im(kappa_rs); only
+// meaningful for T = std::complex<double> -- C4_DHF's genuinely complex
+// spinors, mirroring exactly why OrbitalGradient.h's own imaginary-step
+// check only applies there, not to NON_REL's real orbitals):
+//   Hess^{yy}_pq,rs = d^2E/dy_pq dy_rs
+//                   = -(G_pq,rs + G_pq,sr + G_qp,rs + G_qp,sr)
+// (note ALL FOUR terms add here, unlike the real-real case's
+// alternating signs, plus an overall minus sign -- both come from
+// kappa_pq = kappa_qp = iy for a pure-imaginary perturbation, i.e. this
+// direction moves the (p,q) AND (q,p) entries to the SAME value with a
+// leading factor of i, rather than to opposite values, exactly as
+// already established for the gradient's own imaginary direction; see
+// main.cpp's finiteDifferenceCheckReport for that derivation). The
+// MIXED real/imaginary second derivative (d^2E/dt_pq dy_rs) is a
+// separate, distinctly-signed combination not implemented here --
+// only the "pure" real-real and imaginary-imaginary diagonal blocks of
+// the full complex Hessian are covered so far.
 //
 // `h`, `eri`, `d`, `two_rdm` follow EXACTLY GeneralizedFock.h's own
 // conventions (physics-notation eri, standard physicist 2-RDM ordering
@@ -62,24 +74,39 @@ namespace rerdmft {
 // Hessian_opt/HartreeExchangeHessian.h's hartreeExchangeHessianElement
 // (O(n) per element, O(n^5) for a full tensor).
 //
-// Validated (see feedback/project memory for the scratch scripts, not
-// committed) via: (1) a small explicit-Fock-space numerical check
-// against the true many-body double commutator
-// <0|[K1_pq,[K1_rs,H]]|0> (K1_ab = a+_a a_b - a+_b a_a), for a GENERAL
-// (non-idempotent, non-Wick-derivable) random 2-RDM built from an
-// actual few-particle quantum state -- confirming this formula needs
-// only the 1-RDM and 2-RDM (no 3-RDM), matching several independent
-// (p,q,r,s) index quadruples to floating-point precision; (2) a
-// finite-difference check against water/STO-3G's own converged
-// NON_REL HF data (see main.cpp, DEBUG TRUE).
+// Both are validated (see feedback/project memory for the scratch
+// scripts, not committed) via: (1) a small explicit-Fock-space
+// numerical check -- the real-real combination against the true
+// many-body double commutator <0|[K1_pq,[K1_rs,H]]|0>
+// (K1_ab = a+_a a_b - a+_b a_a), the imaginary-imaginary combination
+// against a 2D finite difference on the exact rotated-determinant
+// energy -- for a GENERAL (non-idempotent, non-Wick-derivable) random
+// 2-RDM built from an actual few-particle quantum state, confirming
+// both formulas need only the 1-RDM and 2-RDM (no 3-RDM), matching
+// several independent (p,q,r,s) index quadruples to floating-point/
+// finite-difference-limited precision; (2) a finite-difference check
+// against water/STO-3G's own converged NON_REL HF data (real-real) and
+// C4_DHF's own converged DHF data (imaginary-imaginary) (see main.cpp,
+// DEBUG TRUE).
 //
 // Works for either a real (T = double) or complex (T = std::complex
 // <double>) orbital basis -- explicit instantiations for both are
-// provided in the .cpp.
+// provided in the .cpp. `generalizedOrbitalHessianElementImag` compiles
+// for T = double too (so callers need not branch on T at the call
+// site) but is not meaningful there (a real orbital basis has no
+// imaginary kappa direction at all) -- callers should gate its use on
+// T = std::complex<double> the same way main.cpp's gradient check does
+// (`if constexpr`).
 template <typename T>
 T generalizedOrbitalHessianElement(const Matrix<T>& h, const Tensor4<T>& eri, const Matrix<T>& d,
                                     const Tensor4<T>& two_rdm, const Matrix<T>& fock,
                                     std::size_t p, std::size_t q, std::size_t r, std::size_t s);
+
+template <typename T>
+T generalizedOrbitalHessianElementImag(const Matrix<T>& h, const Tensor4<T>& eri,
+                                        const Matrix<T>& d, const Tensor4<T>& two_rdm,
+                                        const Matrix<T>& fock, std::size_t p, std::size_t q,
+                                        std::size_t r, std::size_t s);
 
 }  // namespace rerdmft
 
