@@ -580,17 +580,24 @@ std::string hessianFiniteDifferenceReport(const std::string& label, const rerdmf
 // respect to real orbital rotations -- e.g. DHF is expected to show
 // negative eigenvalues from rotations mixing occupied positive-energy
 // orbitals into the negative-energy branch, unlike NON_REL's genuine
-// minimum. EXPENSIVE (see HartreeExchangeHessian.h) -- prints directly
-// rather than returning a string since, unlike the other DEBUG
-// reports, there is no reason to defer this one.
+// minimum. EXPENSIVE (see HartreeExchangeHessian.h). Renders to a
+// string (rather than printing directly) so the CALLER can decide
+// where in the overall report this appears -- built right after each
+// SCF's own DEBUG cross-checks, but intended to be printed later,
+// alongside the final gradient/Hessian-norm report (see main() below),
+// exactly like finiteDifferenceCheckReport/hessianFiniteDifferenceReport.
+// The logTiming calls below are NOT deferred -- they record elapsed
+// time into `timing_records` at the point the work actually happens,
+// independent of when the returned text is printed.
 template <typename T>
-void printFullHessianReport(const std::string& label, const rerdmft::Matrix<T>& h,
-                             const rerdmft::Tensor4<T>& eri,
-                             const std::vector<double>& occupations,
-                             const rerdmft::Matrix<double>& hx_test, const rerdmft::Matrix<T>& fock,
-                             std::chrono::steady_clock::time_point t_start,
-                             std::chrono::steady_clock::time_point& t_checkpoint,
-                             std::vector<TimingRecord>& timing_records) {
+std::string buildFullHessianReport(const std::string& label, const rerdmft::Matrix<T>& h,
+                                    const rerdmft::Tensor4<T>& eri,
+                                    const std::vector<double>& occupations,
+                                    const rerdmft::Matrix<double>& hx_test,
+                                    const rerdmft::Matrix<T>& fock,
+                                    std::chrono::steady_clock::time_point t_start,
+                                    std::chrono::steady_clock::time_point& t_checkpoint,
+                                    std::vector<TimingRecord>& timing_records) {
   const std::size_t n = h.rows();
   const auto pair_indices = rerdmft::hessianPairIndices(n);
   const auto full_hessian =
@@ -623,22 +630,23 @@ void printFullHessianReport(const std::string& label, const rerdmft::Matrix<T>& 
     }
   }
 
-  std::cout << "\n"
-            << label
-            << " full orbital-rotation Hessian (Hessian_opt/HartreeExchangeHessian.h, cheap "
-               "path, "
-            << pair_indices.size() << "x" << pair_indices.size() << ", real-step pairs only):\n";
-  std::cout << "  Eigenvalues: " << n_negative << " negative, " << n_near_zero
-            << " near-zero (|lambda| <= " << kZeroTolerance << "), " << n_positive
-            << " positive\n";
-  std::cout << "  min eigenvalue: " << std::setprecision(10) << eigenvalues.front()
-             << "   max eigenvalue: " << eigenvalues.back() << std::setprecision(6) << "\n";
-  std::cout << "  "
-            << (n_negative == 0
-                    ? "Consistent with a MINIMUM (no negative eigenvalues)."
-                    : "NOT a minimum -- negative eigenvalue(s) found, consistent with a "
-                      "SADDLE POINT.")
-            << "\n";
+  std::ostringstream out;
+  out << "\n"
+      << label
+      << " full orbital-rotation Hessian (Hessian_opt/HartreeExchangeHessian.h, cheap "
+         "path, "
+      << pair_indices.size() << "x" << pair_indices.size() << ", real-step pairs only):\n";
+  out << "  Eigenvalues: " << n_negative << " negative, " << n_near_zero
+      << " near-zero (|lambda| <= " << kZeroTolerance << "), " << n_positive << " positive\n";
+  out << "  min eigenvalue: " << std::setprecision(10) << eigenvalues.front()
+      << "   max eigenvalue: " << eigenvalues.back() << std::setprecision(6) << "\n";
+  out << "  "
+      << (n_negative == 0
+              ? "Consistent with a MINIMUM (no negative eigenvalues)."
+              : "NOT a minimum -- negative eigenvalue(s) found, consistent with a "
+                "SADDLE POINT.")
+      << "\n";
+  return out.str();
 }
 
 // Builds NON_REL's (Large,Large|Large,Large) two-electron tensor, or --
@@ -847,6 +855,7 @@ int main(int argc, char** argv) {
   // printing directly, precisely so the two can be decoupled).
   std::string nonrel_finite_diff_report;
   std::string nonrel_hessian_report;
+  std::string nonrel_full_hessian_report;
   bool dhf_gradient_computed = false;
   double dhf_gradient_norm = 0.0;
   double dhf_gradient_max_abs = 0.0;
@@ -856,6 +865,7 @@ int main(int argc, char** argv) {
   double dhf_gradient_rdmft_max_abs = 0.0;
   std::string dhf_finite_diff_report;
   std::string dhf_hessian_report;
+  std::string dhf_full_hessian_report;
   rerdmft::Matrix<std::complex<double>> c_dhf;
   rerdmft::Matrix<std::complex<double>> density_matrix;
   rerdmft::RkbTwoElectronTensor c4_spinor_eri;
@@ -1088,8 +1098,9 @@ int main(int argc, char** argv) {
         // orbital space -- Hessian_opt/HartreeExchangeHessian.h),
         // diagonalized to confirm the converged HF solution is a
         // genuine MINIMUM (every eigenvalue >= 0).
-        printFullHessianReport("NON_REL", h_spin, eri_spin, hf_occ_spin, hx_test, fock_rdmft,
-                                t_start, t_checkpoint, timing_records);
+        nonrel_full_hessian_report =
+            buildFullHessianReport("NON_REL", h_spin, eri_spin, hf_occ_spin, hx_test, fock_rdmft,
+                                    t_start, t_checkpoint, timing_records);
       }
     }
 
@@ -1258,8 +1269,9 @@ int main(int argc, char** argv) {
         // negative eigenvalues expected, from rotations mixing
         // occupied positive-energy orbitals into the negative-energy
         // branch) rather than a genuine minimum.
-        printFullHessianReport("C4_DHF", h_mo, eri_mo, dhf_occupations, hx_test, fock_rdmft,
-                                t_start, t_checkpoint, timing_records);
+        dhf_full_hessian_report =
+            buildFullHessianReport("C4_DHF", h_mo, eri_mo, dhf_occupations, hx_test, fock_rdmft,
+                                    t_start, t_checkpoint, timing_records);
       }
     }
   } catch (const std::exception& e) {
@@ -1589,6 +1601,7 @@ int main(int argc, char** argv) {
       }
       std::cout << nonrel_finite_diff_report;
       std::cout << nonrel_hessian_report;
+      std::cout << nonrel_full_hessian_report;
     }
   }
 
@@ -1710,6 +1723,7 @@ int main(int argc, char** argv) {
       }
       std::cout << dhf_finite_diff_report;
       std::cout << dhf_hessian_report;
+      std::cout << dhf_full_hessian_report;
     }
   }
 
