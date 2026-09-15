@@ -589,6 +589,18 @@ std::string hessianFiniteDifferenceReport(const std::string& label, const rerdmf
 // The logTiming calls below are NOT deferred -- they record elapsed
 // time into `timing_records` at the point the work actually happens,
 // independent of when the returned text is printed.
+// `expected_n_negative`, when non-negative, is printed as a reference
+// alongside the actual negative-eigenvalue count -- for C4_DHF, the
+// number of occupied positive-energy spinors times the number of
+// negative-energy spinors each can rotate into
+// (Number_Negative_Energy_States * Number_Electrons) is a simple
+// counting-argument LOWER BOUND on how many independent rotation
+// directions couple an occupied positive-energy spinor to the
+// negative-energy branch, each expected to carry negative curvature --
+// NOT a proven exact count (degeneracies/symmetry could make the true
+// count differ), just a sanity-check reference. Pass -1 (the default)
+// when no such reference applies (e.g. NON_REL, which has no
+// negative-energy branch at all).
 template <typename T>
 std::string buildFullHessianReport(const std::string& label, const rerdmft::Matrix<T>& h,
                                     const rerdmft::Tensor4<T>& eri,
@@ -597,7 +609,8 @@ std::string buildFullHessianReport(const std::string& label, const rerdmft::Matr
                                     const rerdmft::Matrix<T>& fock,
                                     std::chrono::steady_clock::time_point t_start,
                                     std::chrono::steady_clock::time_point& t_checkpoint,
-                                    std::vector<TimingRecord>& timing_records) {
+                                    std::vector<TimingRecord>& timing_records,
+                                    long long expected_n_negative = -1) {
   const std::size_t n = h.rows();
   const auto pair_indices = rerdmft::hessianPairIndices(n);
   const auto full_hessian =
@@ -638,6 +651,11 @@ std::string buildFullHessianReport(const std::string& label, const rerdmft::Matr
       << pair_indices.size() << "x" << pair_indices.size() << ", real-step pairs only):\n";
   out << "  Eigenvalues: " << n_negative << " negative, " << n_near_zero
       << " near-zero (|lambda| <= " << kZeroTolerance << "), " << n_positive << " positive\n";
+  if (expected_n_negative >= 0) {
+    out << "  Expected negative eigenvalues (Number_Negative_Energy_States * "
+           "Number_Electrons, reference only): "
+        << expected_n_negative << "\n";
+  }
   out << "  min eigenvalue: " << std::setprecision(10) << eigenvalues.front()
       << "   max eigenvalue: " << eigenvalues.back() << std::setprecision(6) << "\n";
   out << "  "
@@ -1277,9 +1295,11 @@ int main(int argc, char** argv) {
       // keyword (Input.h), independent of DEBUG -- it is its own
       // opt-in diagnostic, not a DEBUG cross-check.
       if (input.hessian_4c()) {
-        dhf_full_hessian_report =
-            buildFullHessianReport("C4_DHF", h_mo, eri_mo, dhf_occupations, hx_test, fock_rdmft,
-                                    t_start, t_checkpoint, timing_records);
+        const long long expected_n_negative =
+            static_cast<long long>(rkb_dim / 2) * static_cast<long long>(input.n_electrons());
+        dhf_full_hessian_report = buildFullHessianReport(
+            "C4_DHF", h_mo, eri_mo, dhf_occupations, hx_test, fock_rdmft, t_start, t_checkpoint,
+            timing_records, expected_n_negative);
       }
     }
   } catch (const std::exception& e) {
