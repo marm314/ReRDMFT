@@ -1609,8 +1609,10 @@ int main(int argc, char** argv) {
       }
       std::cout << nonrel_finite_diff_report;
       std::cout << nonrel_hessian_report;
-      std::cout << nonrel_full_hessian_report;
     }
+    // Printed unconditionally (empty when HESSIAN_NON_REL is off) --
+    // gated by its own keyword, not DEBUG (see Input.h).
+    std::cout << nonrel_full_hessian_report;
   }
 
   if (input.c4_spinor()) {
@@ -1731,8 +1733,10 @@ int main(int argc, char** argv) {
       }
       std::cout << dhf_finite_diff_report;
       std::cout << dhf_hessian_report;
-      std::cout << dhf_full_hessian_report;
     }
+    // Printed unconditionally (empty when HESSIAN_4C is off) -- gated
+    // by its own keyword, not DEBUG (see Input.h).
+    std::cout << dhf_full_hessian_report;
   }
 
   printTimings(timing_records);
