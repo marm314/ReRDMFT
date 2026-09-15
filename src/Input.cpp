@@ -1,8 +1,10 @@
 #include "Input.h"
 
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#include <vector>
 
 #include "StringUtils.h"
 
@@ -168,6 +170,23 @@ void Input::read(const std::string& filename) {
         throw std::runtime_error("line " + std::to_string(line_number) +
                                   ": expected a directory path after CACHE_DIR");
       }
+    } else if (keyword == "FUNCTIONAL") {
+      std::string token;
+      if (!(iss >> token)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": expected a functional name after FUNCTIONAL");
+      }
+      const std::string upper = toUpper(token);
+      static const std::vector<std::string> kKnownFunctionals = {
+          "SD", "MBB", "BBC2", "CA", "CGA", "ML", "MLSIC", "GU", "POWER"};
+      if (std::find(kKnownFunctionals.begin(), kKnownFunctionals.end(), upper) ==
+          kKnownFunctionals.end()) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": unrecognized FUNCTIONAL '" + token +
+                                  "' (expected one of SD, MBB, BBC2, CA, CGA, ML, MLSIC, GU, "
+                                  "POWER)");
+      }
+      functional_ = upper;
     } else if (keyword == "SPEED_OF_LIGHT") {
       speed_of_light_ = parseDouble(iss, line_number, keyword);
       if (!(speed_of_light_ > 0.0)) {

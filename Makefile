@@ -5,6 +5,20 @@ CXX      := g++
 # over disjoint output blocks). Affects both compilation (pragma
 # recognition) and linking (libgomp), since CXXFLAGS is used for both.
 CXXFLAGS := -std=c++17 -Wall -Wextra -O2 -fopenmp
+# -MMD -MP: emit a per-object .d file listing the project headers it
+# includes, so `make` rebuilds an object when a header IT USES changes
+# -- not just when its own .cpp's mtime changes. Without this, editing
+# a widely-#included header (e.g. Input.h) only recompiles the .cpp
+# files whose mtime you also touched, leaving every OTHER already-built
+# .o compiled against the OLD header silently stale: since these are
+# all linked into one binary with no ABI/version check, a stale object
+# built against an old class layout (e.g. Input gaining a new member)
+# corrupts memory at runtime instead of failing to compile -- hit for
+# real once (Input.h gained a `functional_` member; main.o stayed
+# stale and segfaulted deep inside Input::read's std::string
+# assignment). -MP adds a dummy rule per header so a RENAMED/DELETED
+# header doesn't break the build with a "no rule to make target" error.
+DEPFLAGS := -MMD -MP
 SRC_DIR  := src
 # 4-component Dirac-Hartree-Fock two-electron integrals (restricted
 # kinetic balance spinor basis): kept in their own subdirectory since they
@@ -23,6 +37,11 @@ NON_REL_DIR := $(SRC_DIR)/NON_REL
 # entirely in an orthonormal MO basis (reusing Matrix.h/Tensor4.h via the
 # shared include path below, not any AO- or RKB-spinor-specific code).
 HESSIAN_DIR := $(SRC_DIR)/Hessian_opt
+# Occupation-number optimization machinery (sequential quadratic
+# programming, for a fixed orbital basis): its own subdirectory for the
+# same reason as HESSIAN_DIR, working with plain Matrix<double>/
+# std::vector<double> only (no eri/RKB/basis-specific code).
+OCC_DIR := $(SRC_DIR)/Occ_opt
 BUILD_DIR:= build
 BIN      := rerdmft
 
@@ -49,14 +68,16 @@ SRCS        := $(wildcard $(SRC_DIR)/*.cpp)
 C4_SRCS     := $(wildcard $(C4_DIR)/*.cpp)
 NON_REL_SRCS:= $(wildcard $(NON_REL_DIR)/*.cpp)
 HESSIAN_SRCS:= $(wildcard $(HESSIAN_DIR)/*.cpp)
+OCC_SRCS    := $(wildcard $(OCC_DIR)/*.cpp)
 OBJS        := $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(SRCS)) \
                $(patsubst $(C4_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(C4_SRCS)) \
                $(patsubst $(NON_REL_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(NON_REL_SRCS)) \
-               $(patsubst $(HESSIAN_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(HESSIAN_SRCS))
+               $(patsubst $(HESSIAN_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(HESSIAN_SRCS)) \
+               $(patsubst $(OCC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(OCC_SRCS))
 
-# All four directories are on the quoted-include search path, so files
+# All five directories are on the quoted-include search path, so files
 # in any one can #include headers from the others without a path prefix.
-CPPFLAGS := -I$(LIBCINT_INC) -I$(SRC_DIR) -I$(C4_DIR) -I$(NON_REL_DIR) -I$(HESSIAN_DIR)
+CPPFLAGS := -I$(LIBCINT_INC) -I$(SRC_DIR) -I$(C4_DIR) -I$(NON_REL_DIR) -I$(HESSIAN_DIR) -I$(OCC_DIR)
 # LAPACKE (the C interface to LAPACK) is used for the RKB transformation's
 # overlap-matrix inverse; installed system-wide via liblapacke-dev.
 LDLIBS   := $(LIBCINT) -llapacke -llapack -lblas -lquadmath -lm
@@ -71,16 +92,24 @@ $(BIN): $(OBJS)
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDLIBS)
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp | $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(DEPFLAGS) $(CPPFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/%.o: $(C4_DIR)/%.cpp | $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(DEPFLAGS) $(CPPFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/%.o: $(NON_REL_DIR)/%.cpp | $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(DEPFLAGS) $(CPPFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/%.o: $(HESSIAN_DIR)/%.cpp | $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(DEPFLAGS) $(CPPFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/%.o: $(OCC_DIR)/%.cpp | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(DEPFLAGS) $(CPPFLAGS) -c $< -o $@
+
+# Pull in each object's own header-dependency list generated above (a
+# missing .d on a fresh checkout/clean is fine -- `-include` ignores
+# that silently instead of erroring).
+-include $(OBJS:.o=.d)
 
 # main.cpp prints the current commit SHA at startup, so it needs to be
 # rebuilt whenever GitVersion.h's content actually changes (not merely
@@ -105,3 +134,5 @@ $(BUILD_DIR):
 
 clean:
 	rm -rf $(BUILD_DIR) $(BIN) $(GIT_VERSION_HEADER)
+# ($(BUILD_DIR) already holds the .d files alongside their .o's, so the
+# rm -rf above removes them too -- nothing extra needed here.)

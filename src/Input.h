@@ -111,6 +111,16 @@ class Input {
   // Directory (created if missing) that cache_integrals() cache files
   // are written to/read from.
   const std::string& cache_dir() const { return cache_dir_; }
+  // Optional; defaults to "SD" when FUNCTIONAL is absent. Selects which
+  // JK-only density matrix functional approximation (Occ_opt/JK_only.h,
+  // Table 1 of Rodriguez-Mayorga et al., PCCP (2017)) a future
+  // occupation-number optimization step should use -- one of SD, MBB,
+  // BBC2, CA, CGA, ML, MLSIC, GU, POWER (case-insensitive; validated
+  // against this exact list, throws otherwise). Stored as a plain
+  // string rather than Occ_opt's own JkFunctional enum so that Input.h
+  // stays independent of Occ_opt; not consumed anywhere yet (Occ_opt is
+  // not wired into main.cpp).
+  const std::string& functional() const { return functional_; }
 
  private:
   int n_electrons_ = 0;
@@ -129,6 +139,7 @@ class Input {
   double density_tolerance_ = 1e-6;
   bool cache_integrals_ = false;
   std::string cache_dir_ = ".rerdmft_cache";
+  std::string functional_ = "SD";
 };
 
 }  // namespace rerdmft
