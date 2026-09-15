@@ -95,6 +95,38 @@ anywhere on a line) are comments.
 | `DENSITY_TOLERANCE` | double (> 0) | `1e-6` | `C4_DHF` SCF density-change convergence threshold (see `ENERGY_TOLERANCE`). |
 | `CACHE_INTEGRALS` | bool | `FALSE` | Cache the two-electron integral tensors to disk and reuse them on a later run with matching geometry+basis (see below). |
 | `CACHE_DIR` | string | `.rerdmft_cache` | Directory (created if missing) used by `CACHE_INTEGRALS`. |
+| `FUNCTIONAL` | string | *(none)* | Selects a JK-only density matrix functional approximation (`Occ_opt/JK_only.h`, Table 1 of Rodriguez-Mayorga et al., *Phys. Chem. Chem. Phys.* 2017) to evaluate on the converged `NON_REL`/`C4_DHF` orbitals: one of `SD`, `MBB` (or `MULLER`), `BBC2`, `CA`, `CGA`, `ML`, `MLSIC`, `GU`, `POWER`. Setting this triggers the whole RDMFT functional evaluation described below; with no `FUNCTIONAL` keyword at all, that step is skipped entirely (it is not gated by `DEBUG`). |
+| `OCCUPATION_INIT` | string | `PROPORTIONAL` | How to generate the initial fractional occupation numbers for `FUNCTIONAL` (see below). `PROPORTIONAL`: an aufbau (idempotent) reference redistributed proportionally into an interior box -- temperature-independent. `FERMI_DIRAC`: smeared at `TEMPERATURE` instead. Only meaningful when `FUNCTIONAL` is set. |
+| `TEMPERATURE` | double (> 0) | `1000` (Kelvin) | Electronic temperature used to smear orbital energies into fractional Fermi-Dirac occupations. Only consumed when `OCCUPATION_INIT FERMI_DIRAC` is selected; ignored (but still validated) otherwise. |
+
+## RDMFT functional evaluation
+
+Setting `FUNCTIONAL` runs an additional step after each requested SCF
+(`NON_RELATIVISTIC`/`C4_SPINOR`) converges, using its orbitals and
+one-/two-electron integrals as a **fixed** background (no orbital
+reoptimization):
+
+1. Generate initial fractional occupation numbers via `OCCUPATION_INIT`
+   (`PROPORTIONAL` by default, or `FERMI_DIRAC` at `TEMPERATURE`).
+2. Evaluate `FUNCTIONAL`'s energy on those occupations
+   (`Occ_opt/JK_only.h` + `Hessian_opt/HartreeExchangeGradient.h`'s
+   `hartreeExchangeEnergy`).
+3. Optimize the occupation numbers further via a sequential quadratic
+   programming solver (`Occ_opt/SQP.h`), minimizing that same energy
+   subject to `sum(n_p) = NELEC` and `0 < n_p < 1`, and report the
+   optimized occupations, their sum, and the optimized energy.
+
+For `C4_SPINOR`, the negative-energy (Dirac sea) branch is excluded
+from both steps entirely (pinned at exactly zero occupation, never an
+optimization variable), preserving the no-pair approximation. Results
+are printed after the corresponding SCF's own energy, gradient, and
+(if requested) Hessian diagnostics -- optimized occupation numbers are
+listed at fixed 5-decimal precision, in two columns for `C4_SPINOR`
+(adjacent Kramers pairs side by side, which should read as identical
+values) and one column otherwise.
+
+See `examples/water_muller.inp` and `examples/co-sto-3g_muller.inp`
+for worked examples (`FUNCTIONAL MULLER`).
 
 ## Two-electron integral disk cache
 
