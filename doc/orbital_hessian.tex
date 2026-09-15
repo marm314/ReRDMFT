@@ -1,0 +1,112 @@
+\documentclass[11pt]{article}
+\usepackage{amsmath,amssymb}
+\usepackage[margin=1in]{geometry}
+
+\newcommand{\ccr}[1]{a_{#1}^{\dagger}}
+\newcommand{\ann}[1]{a_{#1}}
+
+\title{Orbital Rotation Gradient and Hessian for Exponential Parameterization\\
+\large (RDMFT-style, expressed via the Generalized Fock Matrix)}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section*{Conventions}
+
+One-particle and two-particle reduced density matrices:
+\begin{align}
+D_{ab} &= \langle 0 | \ccr{a}\ann{b} | 0\rangle, \\
+\Gamma_{pqrs} &= \tfrac{1}{2}\,\langle 0 | \ccr{p}\ccr{q}\ann{s}\ann{r} | 0\rangle .
+\end{align}
+
+Two-electron integrals in physicist's notation, $\langle ik|jl\rangle$.
+
+Hamiltonian:
+\begin{equation}
+\hat H = \hat H_1 + \hat H_2, \qquad
+\hat H_1 = \sum_{pq} h_{pq}\,\ccr{p}\ann{q}, \qquad
+\hat H_2 = \tfrac12 \sum_{uvwx} \langle uv|wx\rangle\, \ccr{u}\ccr{v}\ann{x}\ann{w}.
+\end{equation}
+
+Orbital rotation generator (anti-Hermitian): $\hat\kappa = \sum_{pq}\kappa_{pq}\,\ccr{p}\ann{q}$,
+with $\kappa_{qp} = -\kappa_{pq}^{*}$.
+
+\section*{Generalized Fock matrix}
+
+\begin{equation}
+F_{qp} \;=\; \sum_{r} D_{rq}\,h_{rp} \;+\; 2\sum_{rst} \Gamma_{srtq}\,\langle sr|tp\rangle .
+\end{equation}
+
+\section*{Gradient}
+
+\begin{equation}
+g_{pq} \;=\; F_{qp} \;-\; F_{pq}^{*}.
+\end{equation}
+
+\section*{Hessian}
+
+Energy expansion:
+\begin{equation}
+E(\boldsymbol\kappa) \approx E(\mathbf 0) + \sum_{pq}\kappa_{pq}\,g_{pq}
++ \tfrac12 \sum_{pq,rs}\kappa_{pq}\,\kappa_{rs}\,G_{pq,rs} + \cdots,
+\qquad
+G_{pq,rs} = \langle 0|\,[[\hat H,\ccr{p}\ann{q}],\ccr{r}\ann{s}]\,|0\rangle .
+\end{equation}
+
+\subsection*{One-electron contribution}
+
+\begin{equation}
+G^{(1)}_{pq,rs} \;=\; \delta_{qr}\sum_{u} h_{up}\,D_{us}
+\;-\; h_{sp}\,D_{rq}
+\;-\; h_{qr}\,D_{ps}
+\;+\; \delta_{sp}\sum_{v} h_{qv}\,D_{rv}.
+\end{equation}
+
+\subsection*{Two-electron contribution}
+
+\begin{align}
+G^{(2)}_{pq,rs} \;=\;
+&+\,2\,\delta_{rq}\sum_{uvt} \langle uv|pt\rangle\,\Gamma_{uvst}
+\;-\; 2\sum_{uv} \langle uv|pr\rangle\,\Gamma_{uvsq} \notag\\
+&+\,2\sum_{ut} \langle us|pt\rangle\,\Gamma_{ruqt}
+\;-\; 2\sum_{ut} \langle su|pt\rangle\,\Gamma_{ruqt} \notag\\
+&+\,2\sum_{ut} \langle uq|rt\rangle\,\Gamma_{pust}
+\;-\; 2\sum_{uw} \langle uq|wr\rangle\,\Gamma_{pusw} \notag\\
+&+\,2\sum_{wt} \langle sq|wt\rangle\,\Gamma_{rpwt}
+\;-\; 2\,\delta_{sp}\sum_{uwt} \langle uq|wt\rangle\,\Gamma_{ruwt}.
+\end{align}
+
+\subsection*{Full Hessian, Fock-matrix form}
+
+The $\delta_{qr}$ and $\delta_{sp}$ terms of $G^{(1)}$ and $G^{(2)}$ combine exactly into
+$F_{sp}$ and $F_{rq}^{*}$, leaving six two-electron ``exchange-type'' terms that do not
+reduce to $F$:
+
+\begin{align}
+\boxed{
+\begin{aligned}
+G_{pq,rs} \;=\;\;
+& \delta_{qr}\,F_{sp} \;+\; \delta_{sp}\,F_{rq}^{*}
+\;-\; h_{sp}\,D_{rq} \;-\; h_{qr}\,D_{ps} \\[4pt]
+& -\,2\sum_{uv} \langle uv|pr\rangle\,\Gamma_{uvsq}
+\;+\; 2\sum_{ut} \langle us|pt\rangle\,\Gamma_{ruqt}
+\;-\; 2\sum_{ut} \langle su|pt\rangle\,\Gamma_{ruqt} \\[4pt]
+& +\,2\sum_{ut} \langle uq|rt\rangle\,\Gamma_{pust}
+\;-\; 2\sum_{uw} \langle uq|wr\rangle\,\Gamma_{pusw}
+\;+\; 2\sum_{wt} \langle sq|wt\rangle\,\Gamma_{rpwt}
+\end{aligned}}
+\end{align}
+
+\bigskip
+\noindent\textbf{Status note.} The one-electron block $G^{(1)}_{pq,rs}$ and the
+gradient $g_{pq}$ were cross-checked by more than one derivation route. The
+two-electron block $G^{(2)}_{pq,rs}$ (and hence the boxed full Hessian) was
+obtained by direct operator-algebra expansion but has \emph{not yet} been
+independently verified numerically (e.g.\ by a finite-difference check of
+$E(\boldsymbol\kappa)$ against this Hessian for a small test system). Treat
+it as a first-pass result pending that check before using it in production
+code.
+
+\end{document}
