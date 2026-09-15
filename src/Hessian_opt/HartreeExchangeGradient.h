@@ -75,6 +75,39 @@ Matrix<T> hartreeExchangeFockMatrix(const Matrix<T>& h, const Tensor4<T>& eri,
                                      const Matrix<double>& two_rdm_l1 = Matrix<double>(),
                                      const Matrix<double>& two_rdm_l2 = Matrix<double>());
 
+// The ELECTRONIC energy (one- + two-electron; the caller adds nuclear
+// repulsion separately, matching every other *_result.electronic_energy/
+// nuclear_repulsion_energy/total_energy split in this project) for the
+// SAME diagonal-D, Hartree/exchange-only 2-RDM ansatz
+// hartreeExchangeFockMatrix itself uses (no L1/L2 pair terms -- not
+// needed by any caller yet):
+//   E = sum_p occupations[p] * h(p,p)
+//       + (1/2) * sum_pq [ eri(p,q,p,q)*two_rdm_h(p,q)
+//                           - eri(p,q,q,p)*two_rdm_x(p,q) ]
+// Derived by substituting the SAME two_rdm_pqrs ansatz as
+// hartreeExchangeFockMatrix's own header comment
+// (two_rdm_pqrs = (1/2)[two_rdm_h(p,q) delta_pr delta_qs -
+// two_rdm_x(p,q) delta_ps delta_qr]) into
+// E = sum_pq h_pq D_qp + sum_pqrs eri(p,q,r,s) two_rdm_pqrs, with
+// D_qp = occupations[q] delta_qp (diagonal) -- an O(n^2) sum, matching
+// this ansatz's cheap cost elsewhere. For idempotent HF/DHF occupations
+// (two_rdm_h = two_rdm_x = the occupation outer product), this reduces
+// EXACTLY to the standard spin-orbital/spinor HF two-electron energy
+// (1/2) sum_{i,j occupied} [<ij|ij> - <ij|ji>] -- confirmed numerically
+// against the already-converged HF/DHF SCF's own `electronic_energy`
+// (a completely different, AO-basis Fock-trace formula) before this was
+// trusted for a genuinely fractional-occupation (Occ_opt/JK_only.h)
+// evaluation.
+//
+// Returned as `double` even for T = std::complex<double> (via
+// std::real, valid for real T too) -- the energy is guaranteed real for
+// a Hermitian h/eri and a real, diagonal density, exactly like every
+// other *_result.electronic_energy in this project.
+template <typename T>
+double hartreeExchangeEnergy(const Matrix<T>& h, const Tensor4<T>& eri,
+                              const std::vector<double>& occupations,
+                              const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x);
+
 }  // namespace rerdmft
 
 #endif  // RERDMFT_HARTREEEXCHANGEGRADIENT_H

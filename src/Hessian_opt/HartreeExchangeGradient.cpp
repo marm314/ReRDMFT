@@ -115,6 +115,54 @@ Matrix<T> hartreeExchangeFockMatrix(const Matrix<T>& h, const Tensor4<T>& eri,
   return f;
 }
 
+template <typename T>
+double hartreeExchangeEnergy(const Matrix<T>& h, const Tensor4<T>& eri,
+                              const std::vector<double>& occupations,
+                              const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x) {
+  const std::size_t n = h.rows();
+  if (h.cols() != n) {
+    throw std::runtime_error("hartreeExchangeEnergy: h is not square");
+  }
+  if (eri.dim0() != n || eri.dim1() != n || eri.dim2() != n || eri.dim3() != n) {
+    throw std::runtime_error("hartreeExchangeEnergy: eri dimensions inconsistent with h");
+  }
+  if (occupations.size() != n) {
+    throw std::runtime_error("hartreeExchangeEnergy: occupations size inconsistent with h");
+  }
+  if (two_rdm_h.rows() != n || two_rdm_h.cols() != n) {
+    throw std::runtime_error("hartreeExchangeEnergy: two_rdm_h dimensions inconsistent with h");
+  }
+  if (two_rdm_x.rows() != n || two_rdm_x.cols() != n) {
+    throw std::runtime_error("hartreeExchangeEnergy: two_rdm_x dimensions inconsistent with h");
+  }
+
+  double energy = 0.0;
+  for (std::size_t p = 0; p < n; ++p) {
+    energy += occupations[p] * std::real(h(p, p));
+  }
+
+  double two_electron = 0.0;
+#pragma omp parallel for collapse(2) reduction(+ : two_electron)
+  for (std::size_t p = 0; p < n; ++p) {
+    for (std::size_t q = 0; q < n; ++q) {
+      two_electron +=
+          std::real(eri(p, q, p, q)) * two_rdm_h(p, q) - std::real(eri(p, q, q, p)) * two_rdm_x(p, q);
+    }
+  }
+  energy += 0.5 * two_electron;
+  return energy;
+}
+
+template double hartreeExchangeEnergy(const Matrix<double>& h, const Tensor4<double>& eri,
+                                       const std::vector<double>& occupations,
+                                       const Matrix<double>& two_rdm_h,
+                                       const Matrix<double>& two_rdm_x);
+template double hartreeExchangeEnergy(const Matrix<std::complex<double>>& h,
+                                       const Tensor4<std::complex<double>>& eri,
+                                       const std::vector<double>& occupations,
+                                       const Matrix<double>& two_rdm_h,
+                                       const Matrix<double>& two_rdm_x);
+
 template Matrix<double> hartreeExchangeFockMatrix(const Matrix<double>& h,
                                                     const Tensor4<double>& eri,
                                                     const std::vector<double>& occupations,

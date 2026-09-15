@@ -113,14 +113,44 @@ class Input {
   const std::string& cache_dir() const { return cache_dir_; }
   // Optional; defaults to "SD" when FUNCTIONAL is absent. Selects which
   // JK-only density matrix functional approximation (Occ_opt/JK_only.h,
-  // Table 1 of Rodriguez-Mayorga et al., PCCP (2017)) a future
-  // occupation-number optimization step should use -- one of SD, MBB,
-  // BBC2, CA, CGA, ML, MLSIC, GU, POWER (case-insensitive; validated
-  // against this exact list, throws otherwise). Stored as a plain
-  // string rather than Occ_opt's own JkFunctional enum so that Input.h
-  // stays independent of Occ_opt; not consumed anywhere yet (Occ_opt is
-  // not wired into main.cpp).
+  // Table 1 of Rodriguez-Mayorga et al., PCCP (2017)) main.cpp's
+  // buildFunctionalReport evaluates on the converged HF/DHF orbitals --
+  // one of SD, MBB (or MULLER), BBC2, CA, CGA, ML, MLSIC, GU, POWER
+  // (case-insensitive; validated against this exact list, throws
+  // otherwise). Stored as a plain string rather than Occ_opt's own
+  // JkFunctional enum so that Input.h stays independent of Occ_opt.
+  // The default here is never actually USED for that evaluation --
+  // see has_functional() below, which gates the whole step on the
+  // keyword being explicitly present.
   const std::string& functional() const { return functional_; }
+  // True iff the FUNCTIONAL keyword was explicitly present in the input
+  // file (as opposed to functional() just reading its default "SD").
+  // main.cpp's fractional-occupation RDMFT functional evaluation
+  // (Fermi-Dirac smearing + Occ_opt/JK_only.h, printed right after each
+  // "Total ... energy" line) runs ONLY when this is true -- with no
+  // FUNCTIONAL keyword given, there is no RDMFT functional to evaluate,
+  // so the whole step (and its extra cost) is skipped entirely.
+  bool has_functional() const { return has_functional_; }
+  // Optional; defaults to 1000.0 (Kelvin) when TEMPERATURE is absent.
+  // The ELECTRONIC temperature used to smear the converged HF/DHF
+  // orbital energies into fractional Fermi-Dirac occupations
+  // (Occ_opt/FermiDirac.h) -- only used when occupation_init() selects
+  // "FERMI_DIRAC" (see below); ignored (but still validated as
+  // positive) otherwise. Must be positive.
+  double temperature() const { return temperature_; }
+  // Optional; defaults to "PROPORTIONAL" when OCCUPATION_INIT is
+  // absent. Selects how main.cpp's buildFunctionalReport generates the
+  // initial fractional occupation numbers functional() is evaluated at
+  // / an SQP occupation-number optimization (Occ_opt/SQP.h) starts
+  // from -- one of PROPORTIONAL (Occ_opt/OccupationInit.h's aufbau
+  // reference, redistributed proportionally into the interior box;
+  // temperature-independent, the DEFAULT) or FERMI_DIRAC (smeared at
+  // temperature() instead). Case-insensitive, validated against this
+  // exact list, throws otherwise. Stored as a plain string rather than
+  // Occ_opt's own OccupationInitMethod enum, for the same reason
+  // functional() is (Input.h stays independent of Occ_opt). Only
+  // meaningful when has_functional() is true.
+  const std::string& occupation_init() const { return occupation_init_; }
 
  private:
   int n_electrons_ = 0;
@@ -140,6 +170,9 @@ class Input {
   bool cache_integrals_ = false;
   std::string cache_dir_ = ".rerdmft_cache";
   std::string functional_ = "SD";
+  bool has_functional_ = false;
+  double temperature_ = 1000.0;
+  std::string occupation_init_ = "PROPORTIONAL";
 };
 
 }  // namespace rerdmft

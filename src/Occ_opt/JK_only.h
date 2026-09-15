@@ -2,6 +2,7 @@
 #define RERDMFT_OCC_OPT_JK_ONLY_H
 
 #include <cstddef>
+#include <string>
 #include <vector>
 
 #include "Matrix.h"
@@ -80,6 +81,44 @@ Matrix<double> jkHartreeCoupling(const std::vector<double>& occupations);
 // paper itself covers the relativistic case.
 Matrix<double> jkExchangeCoupling(JkFunctional functional, const std::vector<double>& occupations,
                                    std::size_t f_l = 0, double power_alpha = 1.0);
+
+// Partial derivatives of jkExchangeFunction's own f(n_i,n_j), needed to
+// optimize occupation numbers (Occ_opt/SQP.h) at FIXED orbitals for a
+// given functional -- see Occ_opt/OccupationEnergy.h, which is the only
+// caller. All three take EXACTLY jkExchangeFunction's own arguments
+// (same per-branch index/f_l/power_alpha dispatch, so each piecewise
+// functional's derivative uses the SAME branch as the value itself --
+// each branch is a smooth, ordinary function of (n_i,n_j) once the
+// branch is fixed by the DISCRETE indices i,j,f_l, so differentiating
+// within a branch is unambiguous; only WHICH branch applies depends on
+// the indices, never on the occupation values themselves).
+//
+// D1 = df/dn_i (partial wrt the FIRST argument only). Every functional
+// here has f(n_i,n_j) = f(n_j,n_i) (symmetric), so df/dn_j at (n_i,n_j)
+// equals D1(functional, n_j, n_i, j, i, f_l, power_alpha) -- callers
+// needing the second partial should call D1 with arguments swapped,
+// not a separate function.
+double jkExchangeFunctionD1(JkFunctional functional, double n_i, double n_j, std::size_t i,
+                             std::size_t j, std::size_t f_l = 0, double power_alpha = 1.0);
+
+// D11 = d^2f/dn_i^2 (pure second partial wrt the first argument).
+double jkExchangeFunctionD11(JkFunctional functional, double n_i, double n_j, std::size_t i,
+                              std::size_t j, std::size_t f_l = 0, double power_alpha = 1.0);
+
+// D12 = d^2f/(dn_i dn_j) (mixed second partial). Symmetric in the sense
+// that D12(f,n_i,n_j,i,j,...) == D12(f,n_j,n_i,j,i,...) for every
+// functional here (Schwarz's theorem plus f's own argument symmetry).
+double jkExchangeFunctionD12(JkFunctional functional, double n_i, double n_j, std::size_t i,
+                              std::size_t j, std::size_t f_l = 0, double power_alpha = 1.0);
+
+// Maps Input.h's FUNCTIONAL keyword string (already validated there
+// against this exact name list, case-insensitive but stored uppercase)
+// to the corresponding JkFunctional -- kept here, not in Input.h, so
+// that Input.h stays independent of Occ_opt (see its own `functional()`
+// comment). Throws std::runtime_error on an unrecognized name (should
+// not happen for a string that already passed Input::read's own
+// validation).
+JkFunctional parseJkFunctional(const std::string& name);
 
 }  // namespace rerdmft
 

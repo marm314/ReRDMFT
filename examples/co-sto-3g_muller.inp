@@ -1,0 +1,15 @@
+# Example ReRDMFT input file: carbon monoxide (STO-3G), evaluating the
+# MULLER (Muller/Buijse-Baerends, Occ_opt/JK_only.h) JK-only RDMFT
+# functional -- see water_muller.inp for the FUNCTIONAL/OCCUPATION_INIT
+# keywords' own note (skipped entirely without FUNCTIONAL; not
+# DEBUG-gated when present; OCCUPATION_INIT PROPORTIONAL by default).
+NELEC 14
+BASIS co-sto-3g.gbs
+C4_SPINOR TRUE
+NON_RELATIVISTIC TRUE
+FUNCTIONAL MULLER
+
+GEOMETRY
+C   0.000000   0.000000   0.000000
+O   0.000000   0.000000   1.128000
+END

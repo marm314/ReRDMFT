@@ -82,7 +82,41 @@ EqualityQpSolution solveEqualityQpGivenFixed(const Matrix<double>& b, const std:
       rhs[nf + r] = rhat_r;
     }
 
-    const Matrix<double> kkt_inv = invert(kkt);
+    // The KKT matrix can be singular or ill-conditioned in practice --
+    // an occupation-number Hessian is NOT guaranteed positive definite
+    // (RDMFT energy vs. occupations is generally non-convex, and some
+    // functionals' second derivatives diverge/vanish near n=0 or n=1),
+    // and a particular active-set working set can make the reduced
+    // system exactly singular even when nearby working sets are fine.
+    // Standard Levenberg-Marquardt-style fix: add a small, increasing
+    // multiple of the identity to the FREE-FREE Hessian block only
+    // (never to the Lagrange-multiplier rows/columns, which have no
+    // diagonal to damp) and retry -- this perturbs the local quadratic
+    // model slightly without changing what a converged (zero-gradient,
+    // correct-sign-multiplier) solution looks like, since the damping
+    // only pushes the SEARCH DIRECTION, not the stationarity conditions
+    // solveBoxEqualityQp's own outer loop checks.
+    Matrix<double> kkt_inv;
+    bool solved = false;
+    std::string last_error;
+    double damping = 0.0;
+    for (int attempt = 0; attempt < 20; ++attempt) {
+      Matrix<double> kkt_damped = kkt;
+      for (std::size_t jj = 0; jj < nf; ++jj) kkt_damped(jj, jj) += damping;
+      try {
+        kkt_inv = invert(kkt_damped);
+        solved = true;
+        break;
+      } catch (const std::exception& e) {
+        last_error = e.what();
+        damping = (damping <= 0.0) ? 1e-10 : damping * 10.0;
+      }
+    }
+    if (!solved) {
+      throw std::runtime_error("solveBoxEqualityQp: KKT solve failed even after "
+                                "Levenberg-Marquardt regularization (" +
+                                last_error + ")");
+    }
     std::vector<double> sol(dim, 0.0);
     for (std::size_t r = 0; r < dim; ++r) {
       double val = 0.0;

@@ -1,0 +1,23 @@
+# Example ReRDMFT input file: water molecule, evaluating the MULLER
+# (Muller/Buijse-Baerends, Occ_opt/JK_only.h) JK-only RDMFT functional.
+# FUNCTIONAL does not need DEBUG -- setting it (as here) makes main.cpp
+# generate fractional initial occupations for the converged HF/DHF
+# orbitals (Occ_opt/OccupationInit.h; OCCUPATION_INIT PROPORTIONAL by
+# default -- an aufbau reference redistributed proportionally into the
+# interior box; OCCUPATION_INIT FERMI_DIRAC instead smears at
+# TEMPERATURE Kelvin, default 1000), evaluate FUNCTIONAL on them, and
+# then OPTIMIZE the occupations at those same fixed orbitals via
+# Occ_opt/SQP.h -- all printed right after each "Total ... energy"
+# line. With NO FUNCTIONAL keyword at all (see water.inp), this whole
+# step is skipped entirely.
+NELEC 10
+BASIS water-sto-3g.gbs
+C4_SPINOR TRUE
+NON_RELATIVISTIC TRUE
+FUNCTIONAL MULLER
+
+GEOMETRY
+O   0.000000   0.000000   0.000000
+H   0.000000   0.757000   0.586000
+H   0.000000  -0.757000   0.586000
+END

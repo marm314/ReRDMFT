@@ -176,17 +176,42 @@ void Input::read(const std::string& filename) {
         throw std::runtime_error("line " + std::to_string(line_number) +
                                   ": expected a functional name after FUNCTIONAL");
       }
-      const std::string upper = toUpper(token);
+      std::string upper = toUpper(token);
+      // MULLER is accepted as a synonym for MBB (Table 1's own name,
+      // Muller/Buijse-Baerends) -- the literature commonly calls this
+      // functional by either name.
+      if (upper == "MULLER") upper = "MBB";
       static const std::vector<std::string> kKnownFunctionals = {
           "SD", "MBB", "BBC2", "CA", "CGA", "ML", "MLSIC", "GU", "POWER"};
       if (std::find(kKnownFunctionals.begin(), kKnownFunctionals.end(), upper) ==
           kKnownFunctionals.end()) {
         throw std::runtime_error("line " + std::to_string(line_number) +
                                   ": unrecognized FUNCTIONAL '" + token +
-                                  "' (expected one of SD, MBB, BBC2, CA, CGA, ML, MLSIC, GU, "
-                                  "POWER)");
+                                  "' (expected one of SD, MBB (or MULLER), BBC2, CA, CGA, ML, "
+                                  "MLSIC, GU, POWER)");
       }
       functional_ = upper;
+      has_functional_ = true;
+    } else if (keyword == "TEMPERATURE") {
+      temperature_ = parseDouble(iss, line_number, keyword);
+      if (!(temperature_ > 0.0)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": TEMPERATURE must be positive");
+      }
+    } else if (keyword == "OCCUPATION_INIT") {
+      std::string token;
+      if (!(iss >> token)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": expected a method name after OCCUPATION_INIT");
+      }
+      const std::string upper = toUpper(token);
+      static const std::vector<std::string> kKnownMethods = {"PROPORTIONAL", "FERMI_DIRAC"};
+      if (std::find(kKnownMethods.begin(), kKnownMethods.end(), upper) == kKnownMethods.end()) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": unrecognized OCCUPATION_INIT '" + token +
+                                  "' (expected one of PROPORTIONAL, FERMI_DIRAC)");
+      }
+      occupation_init_ = upper;
     } else if (keyword == "SPEED_OF_LIGHT") {
       speed_of_light_ = parseDouble(iss, line_number, keyword);
       if (!(speed_of_light_ > 0.0)) {
