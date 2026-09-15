@@ -5,12 +5,16 @@
 # point (see water_debug.inp for the converged case). NON_REL's
 # finite-difference check tests the (HOMO-1, LUMO) pair specifically
 # (not HOMO/LUMO) since HOMO/LUMO are symmetry-decoupled in water's C2v
-# point group and would read ~0 regardless of convergence.
+# point group and would read ~0 regardless of convergence. VERBOSE 1
+# additionally runs the GeneralizedFock.h dense-2-RDM (O(n^5)) cross-
+# check, both in the gradient-norm summary and element-wise in the
+# finite-difference report.
 NELEC 10
 BASIS water-sto-3g.gbs
 C4_SPINOR TRUE
 NON_RELATIVISTIC TRUE
 DEBUG TRUE
+VERBOSE 1
 MAX_ITERATIONS 1
 
 GEOMETRY

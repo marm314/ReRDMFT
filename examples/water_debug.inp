@@ -1,4 +1,8 @@
-# Example ReRDMFT input file: water molecule
+# Example ReRDMFT input file: water molecule. DEBUG TRUE alone (VERBOSE
+# defaults to 0) runs only the cheap DEBUG cross-checks (the O(n^4)
+# efficient gradient, the finite-difference test); add VERBOSE 1 (see
+# water_debug_verbose1.inp) to also run the more expensive O(n^5)
+# GeneralizedFock.h dense-2-RDM cross-check.
 NELEC 10
 BASIS water-sto-3g.gbs
 C4_SPINOR TRUE

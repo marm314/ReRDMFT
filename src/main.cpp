@@ -283,13 +283,36 @@ rerdmft::Matrix<T> densityFromRotation(const rerdmft::Matrix<T>& u,
 // decide where in the overall report this appears -- built right after
 // each SCF's own results become available, but intended to be printed
 // later, alongside the final gradient-norm report (see main() below).
+// This project builds the analytic HF/DHF orbital gradient THREE
+// independent ways; `gradient` is the RDMFT-ansatz one
+// (HartreeExchangeGradient.h's hartreeExchangeFockMatrix -> orbitalGradient,
+// O(n^3)) actually compared against the numerical values below.
+// `gradient_general` and `gradient_efficient` are the other two, printed
+// alongside it purely as further independent cross-checks at this exact
+// (p_idx,q_idx) element -- all three are mathematically equivalent for
+// the idempotent HF/DHF occupations used here (already cross-checked in
+// aggregate via the gradient-norm summary), so this additionally
+// confirms that equivalence holds element-by-element, not just in
+// Frobenius norm/max|g_pq|.
+// `gradient_general`: GeneralizedFock.h's generalizedFockMatrix (dense
+// 2-RDM, O(n^5)) -> orbitalGradient. Passed as a possibly-null pointer
+// since this contraction is only actually computed by the caller when
+// VERBOSE > 0 (see main.cpp/Input.h); nullptr skips this line entirely.
+// `gradient_efficient`: the HF/DHF-specific O(n^4) shortcut
+// (NON_REL/NonRelOrbitalGradient.h's nonRelOrbitalGradientEfficient or
+// C4_DHF/RkbOrbitalGradient.h's dhfOrbitalGradientEfficient, built
+// directly from the converged c_matrix/c_dhf, no 2-RDM at all) -- cheap
+// enough to always be available whenever DEBUG is on, so this one is a
+// plain reference, not a nullable pointer.
 template <typename T>
 std::string finiteDifferenceCheckReport(const std::string& label, const rerdmft::Matrix<T>& h,
                                          const rerdmft::Tensor4<T>& eri,
                                          const std::vector<double>& occupations,
                                          std::size_t p_idx, std::size_t q_idx,
                                          double nuclear_repulsion,
-                                         const rerdmft::Matrix<T>& gradient) {
+                                         const rerdmft::Matrix<T>& gradient,
+                                         const rerdmft::Matrix<T>* gradient_general,
+                                         const rerdmft::Matrix<T>& gradient_efficient) {
   const std::size_t n = h.rows();
   rerdmft::Matrix<T> identity(n, n, T{});
   for (std::size_t i = 0; i < n; ++i) identity(i, i) = T(1.0);
@@ -299,6 +322,8 @@ std::string finiteDifferenceCheckReport(const std::string& label, const rerdmft:
   // 2 derived above -- compare directly against the numerical g_pq
   // values printed below, no further scaling needed here.
   const std::complex<double> analytic_g_pq = std::complex<double>(gradient(p_idx, q_idx));
+  const std::complex<double> analytic_g_pq_efficient =
+      std::complex<double>(gradient_efficient(p_idx, q_idx));
 
   std::ostringstream out;
   out << "\n"
@@ -309,6 +334,19 @@ std::string finiteDifferenceCheckReport(const std::string& label, const rerdmft:
   out << "  Analytic g_pq (Hessian_opt/OrbitalGradient.h, includes its "
          "deliberate factor of 2 -- see derivation above): "
       << analytic_g_pq << "\n";
+  if (gradient_general != nullptr) {
+    const std::complex<double> analytic_g_pq_general =
+        std::complex<double>((*gradient_general)(p_idx, q_idx));
+    out << "  Analytic g_pq (GeneralizedFock.h, dense 2-RDM, general path -- "
+           "cross-check, |diff| from the line above: "
+        << std::abs(analytic_g_pq_general - analytic_g_pq) << "): " << analytic_g_pq_general
+        << "\n";
+  }
+  out << "  Analytic g_pq (NonRelOrbitalGradient.h/RkbOrbitalGradient.h, "
+         "HF/DHF-specific efficient O(n^4) path -- cross-check, |diff| from "
+         "the first line: "
+      << std::abs(analytic_g_pq_efficient - analytic_g_pq) << "): " << analytic_g_pq_efficient
+      << "\n";
   out << std::setprecision(6);
 
   for (const double step : {1e-2, 1e-3, 1e-4}) {
@@ -699,15 +737,24 @@ int main(int argc, char** argv) {
       // occupations) path. Kept only for validation -- not needed for
       // an actual RDMFT run.
       if (input.debug()) {
-        const auto d_spin = rerdmft::closedShellSpinOrbitalDensity(n_spatial, n_occ_spatial);
-        const auto two_rdm_spin = rerdmft::singleDeterminantTwoRdm(d_spin);
+        // The O(n^5) dense-2-RDM path is noticeably more expensive than
+        // everything else DEBUG does, so it only runs at VERBOSE > 0 (see
+        // Input.h) -- gradient_spin stays default-constructed (empty) and
+        // nonrel_gradient_computed stays false otherwise, which already
+        // correctly gates the "General (dense 2-RDM, O(n^5))" summary
+        // lines below via the existing `if (nonrel_gradient_computed)`.
+        rerdmft::Matrix<double> gradient_spin;
+        if (input.verbose() > 0) {
+          const auto d_spin = rerdmft::closedShellSpinOrbitalDensity(n_spatial, n_occ_spatial);
+          const auto two_rdm_spin = rerdmft::singleDeterminantTwoRdm(d_spin);
 
-        const auto fock_spin =
-            rerdmft::generalizedFockMatrix(h_spin, eri_spin, d_spin, two_rdm_spin);
-        const auto gradient_spin = rerdmft::orbitalGradient(fock_spin);
-        logTiming("NON_REL orbital gradient complete", t_start, t_checkpoint, timing_records);
-        gradientNormAndMax(gradient_spin, nonrel_gradient_norm, nonrel_gradient_max_abs);
-        nonrel_gradient_computed = true;
+          const auto fock_spin =
+              rerdmft::generalizedFockMatrix(h_spin, eri_spin, d_spin, two_rdm_spin);
+          gradient_spin = rerdmft::orbitalGradient(fock_spin);
+          logTiming("NON_REL orbital gradient complete", t_start, t_checkpoint, timing_records);
+          gradientNormAndMax(gradient_spin, nonrel_gradient_norm, nonrel_gradient_max_abs);
+          nonrel_gradient_computed = true;
+        }
 
         // Efficient alternative (see NonRelOrbitalGradient.h): the
         // single-determinant 2-RDM has only Hartree/exchange/(would-be)
@@ -741,7 +788,8 @@ int main(int argc, char** argv) {
           const std::size_t lumo = static_cast<std::size_t>(n_occ_spatial);
           nonrel_finite_diff_report = finiteDifferenceCheckReport(
               "NON_REL", h_spin, eri_spin, hf_occ_spin, lumo, homo_minus_1,
-              nonrel_hf_result.nuclear_repulsion_energy, gradient_rdmft);
+              nonrel_hf_result.nuclear_repulsion_energy, gradient_rdmft,
+              nonrel_gradient_computed ? &gradient_spin : nullptr, gradient_efficient);
         }
       }
     }
@@ -813,14 +861,23 @@ int main(int argc, char** argv) {
         logTiming("C4_DHF efficient orbital gradient complete", t_start, t_checkpoint,
                   timing_records);
 
-        const auto d_mo = rerdmft::occupiedPositiveEnergyDensity(rkb_dim, input.n_electrons());
-        const auto two_rdm_mo = rerdmft::singleDeterminantTwoRdm(d_mo);
+        // The O(n^5) dense-2-RDM path is noticeably more expensive than
+        // everything else DEBUG does, so it only runs at VERBOSE > 0 (see
+        // Input.h) -- gradient_mo stays default-constructed (empty) and
+        // dhf_gradient_computed stays false otherwise, which already
+        // correctly gates the "General (dense 2-RDM, O(n^5))" summary
+        // lines below via the existing `if (dhf_gradient_computed)`.
+        rerdmft::Matrix<std::complex<double>> gradient_mo;
+        if (input.verbose() > 0) {
+          const auto d_mo = rerdmft::occupiedPositiveEnergyDensity(rkb_dim, input.n_electrons());
+          const auto two_rdm_mo = rerdmft::singleDeterminantTwoRdm(d_mo);
 
-        const auto fock_mo = rerdmft::generalizedFockMatrix(h_mo, eri_mo, d_mo, two_rdm_mo);
-        const auto gradient_mo = rerdmft::orbitalGradient(fock_mo);
-        logTiming("C4_DHF orbital gradient complete", t_start, t_checkpoint, timing_records);
-        gradientNormAndMax(gradient_mo, dhf_gradient_norm, dhf_gradient_max_abs);
-        dhf_gradient_computed = true;
+          const auto fock_mo = rerdmft::generalizedFockMatrix(h_mo, eri_mo, d_mo, two_rdm_mo);
+          gradient_mo = rerdmft::orbitalGradient(fock_mo);
+          logTiming("C4_DHF orbital gradient complete", t_start, t_checkpoint, timing_records);
+          gradientNormAndMax(gradient_mo, dhf_gradient_norm, dhf_gradient_max_abs);
+          dhf_gradient_computed = true;
+        }
 
         // Numerical (finite-difference) gradient/Hessian test: rotates
         // the HOMO/LUMO positive-energy spinor pair by a small kappa via
@@ -831,9 +888,10 @@ int main(int argc, char** argv) {
         const std::size_t homo = n_negative + static_cast<std::size_t>(input.n_electrons()) - 1;
         const std::size_t lumo = n_negative + static_cast<std::size_t>(input.n_electrons());
         if (lumo < rkb_dim) {
-          dhf_finite_diff_report =
-              finiteDifferenceCheckReport("C4_DHF", h_mo, eri_mo, dhf_occupations, lumo, homo,
-                                           dhf_result.nuclear_repulsion_energy, gradient_rdmft);
+          dhf_finite_diff_report = finiteDifferenceCheckReport(
+              "C4_DHF", h_mo, eri_mo, dhf_occupations, lumo, homo,
+              dhf_result.nuclear_repulsion_energy, gradient_rdmft,
+              dhf_gradient_computed ? &gradient_mo : nullptr, gradient_efficient);
         }
       }
     }
@@ -1145,18 +1203,23 @@ int main(int argc, char** argv) {
     std::cout << "  RDMFT-ansatz (Hartree+exchange, O(n^3) contraction) gradient max |g_pq|:       "
                << std::setprecision(10) << nonrel_gradient_rdmft_max_abs << std::setprecision(6)
                << "\n";
-    if (nonrel_gradient_computed) {
+    if (input.debug()) {
       std::cout << "  HF-specific efficient (O(n^4)) gradient norm (expect ~0):          "
                  << std::setprecision(10) << nonrel_gradient_efficient_norm
                  << std::setprecision(6) << "\n";
       std::cout << "  HF-specific efficient (O(n^4)) gradient max |g_pq|:                "
                  << std::setprecision(10) << nonrel_gradient_efficient_max_abs
                  << std::setprecision(6) << "\n";
-      std::cout << "  General (dense 2-RDM, O(n^5)) gradient norm (expect ~0):           "
-                 << std::setprecision(10) << nonrel_gradient_norm << std::setprecision(6) << "\n";
-      std::cout << "  General (dense 2-RDM, O(n^5)) gradient max |g_pq|:                 "
-                 << std::setprecision(10) << nonrel_gradient_max_abs << std::setprecision(6)
-                 << "\n";
+      // General (dense 2-RDM, O(n^5)) path only runs at VERBOSE > 0 (see
+      // Input.h) -- nonrel_gradient_computed reflects that.
+      if (nonrel_gradient_computed) {
+        std::cout << "  General (dense 2-RDM, O(n^5)) gradient norm (expect ~0):           "
+                   << std::setprecision(10) << nonrel_gradient_norm << std::setprecision(6)
+                   << "\n";
+        std::cout << "  General (dense 2-RDM, O(n^5)) gradient max |g_pq|:                 "
+                   << std::setprecision(10) << nonrel_gradient_max_abs << std::setprecision(6)
+                   << "\n";
+      }
       std::cout << nonrel_finite_diff_report;
     }
   }
@@ -1261,17 +1324,22 @@ int main(int argc, char** argv) {
     std::cout << "  RDMFT-ansatz (Hartree+exchange, O(n^3) contraction) gradient max |g_pq|:       "
                << std::setprecision(10) << dhf_gradient_rdmft_max_abs << std::setprecision(6)
                << "\n";
-    if (dhf_gradient_computed) {
+    if (input.debug()) {
       std::cout << "  DHF-specific efficient (O(n^4)) gradient norm (expect ~0):         "
                  << std::setprecision(10) << dhf_gradient_efficient_norm << std::setprecision(6)
                  << "\n";
       std::cout << "  DHF-specific efficient (O(n^4)) gradient max |g_pq|:               "
                  << std::setprecision(10) << dhf_gradient_efficient_max_abs
                  << std::setprecision(6) << "\n";
-      std::cout << "  General (dense 2-RDM, O(n^5)) gradient norm (expect ~0):           "
-                 << std::setprecision(10) << dhf_gradient_norm << std::setprecision(6) << "\n";
-      std::cout << "  General (dense 2-RDM, O(n^5)) gradient max |g_pq|:                 "
-                 << std::setprecision(10) << dhf_gradient_max_abs << std::setprecision(6) << "\n";
+      // General (dense 2-RDM, O(n^5)) path only runs at VERBOSE > 0 (see
+      // Input.h) -- dhf_gradient_computed reflects that.
+      if (dhf_gradient_computed) {
+        std::cout << "  General (dense 2-RDM, O(n^5)) gradient norm (expect ~0):           "
+                   << std::setprecision(10) << dhf_gradient_norm << std::setprecision(6) << "\n";
+        std::cout << "  General (dense 2-RDM, O(n^5)) gradient max |g_pq|:                 "
+                   << std::setprecision(10) << dhf_gradient_max_abs << std::setprecision(6)
+                   << "\n";
+      }
       std::cout << dhf_finite_diff_report;
     }
   }

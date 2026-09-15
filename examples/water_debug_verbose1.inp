@@ -1,0 +1,18 @@
+# Example ReRDMFT input file: water molecule, DEBUG TRUE with VERBOSE 1
+# -- also runs the more expensive O(n^5) GeneralizedFock.h dense-2-RDM
+# cross-check (both the aggregate gradient-norm summary and the
+# element-wise comparison in the finite-difference report), skipped by
+# default (VERBOSE 0, see water_debug.inp) since it is noticeably more
+# expensive than DEBUG's other, cheap cross-checks.
+NELEC 10
+BASIS water-sto-3g.gbs
+C4_SPINOR TRUE
+NON_RELATIVISTIC TRUE
+DEBUG TRUE
+VERBOSE 1
+
+GEOMETRY
+O   0.000000   0.000000   0.000000
+H   0.000000   0.757000   0.586000
+H   0.000000  -0.757000   0.586000
+END

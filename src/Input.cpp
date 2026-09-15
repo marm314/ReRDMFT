@@ -123,6 +123,12 @@ void Input::read(const std::string& filename) {
       has_basis_file = true;
     } else if (keyword == "DEBUG") {
       debug_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "VERBOSE") {
+      verbose_ = parseInt(iss, line_number, keyword);
+      if (!(verbose_ >= 0)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": VERBOSE must be non-negative");
+      }
     } else if (keyword == "NON_RELATIVISTIC") {
       non_relativistic_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "C4_SPINOR") {

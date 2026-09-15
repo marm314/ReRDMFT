@@ -31,6 +31,18 @@ class Input {
   // input file. When true, the program prints detailed basis and matrix
   // diagnostics; otherwise it only prints a concise summary.
   bool debug() const { return debug_; }
+  // Optional; defaults to 0 when the VERBOSE keyword is absent. Only
+  // meaningful alongside DEBUG TRUE: controls which of DEBUG's own
+  // cross-checks run, from cheapest to most expensive, so a routine DEBUG
+  // run does not always pay for the priciest ones. At the default
+  // verbose == 0, the O(n^5) dense-2-RDM cross-check against
+  // Hessian_opt/GeneralizedFock.h's fully general generalizedFockMatrix
+  // (both the aggregate gradient-norm summary and the element-wise
+  // comparison in the finite-difference report) is SKIPPED; at
+  // verbose > 0 it runs. Every other DEBUG cross-check (the O(n^4)
+  // "efficient" gradient, the finite-difference test itself) is cheap and
+  // always runs whenever DEBUG is on, regardless of this setting.
+  int verbose() const { return verbose_; }
   // Optional; defaults to the standard CODATA value (PhysicalConstants.h)
   // when the SPEED_OF_LIGHT keyword is absent. Overriding it (e.g. to a
   // very large number) lets you probe the nonrelativistic limit
@@ -90,6 +102,7 @@ class Input {
   std::string basis_file_;
   std::vector<Atom> geometry_;
   bool debug_ = false;
+  int verbose_ = 0;
   double speed_of_light_ = kSpeedOfLight;
   bool non_relativistic_ = false;
   bool c4_spinor_ = false;
