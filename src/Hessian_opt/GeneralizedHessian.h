@@ -47,15 +47,20 @@ namespace rerdmft {
 // Fock elements are used in the definition" is exactly this F.
 //
 // EXPENSIVE and deliberately unoptimized (this is the first, general
-// version): each of the four G_pq,rs-style terms costs O(n^4)
-// (six independent double sums over the remaining orbital indices), so
-// this single ELEMENT already costs O(n^4); a full dense Hessian
-// tensor (looping p,q,r,s) would cost O(n^8) -- expect this to be
-// usable only for small test systems (e.g. water/STO-3G) or for
-// spot-checking a handful of elements, not for a production Newton-
-// Raphson step on a realistic basis. A cheaper, HF/DHF-specific
-// shortcut (mirroring NonRelOrbitalGradient.h/RkbOrbitalGradient.h's
-// relationship to the general gradient) is not implemented here.
+// version): each of the four G_pq,rs-style terms costs O(n^2) (six
+// independent DOUBLE sums, each over just two of the remaining orbital
+// indices -- NOT a dense O(n^4) contraction; the other two indices of
+// each eri/two_rdm element are already pinned to p,q,r,s), so this
+// single ELEMENT costs O(n^2); a full dense Hessian tensor (looping
+// p,q,r,s, i.e. O(n^4) elements) would cost O(n^6) -- expect this to
+// be usable for a small-to-moderate basis (e.g. water/STO-3G, or
+// spot-checking a handful of elements on something larger), but not
+// for a production Newton-Raphson step on a realistic basis, where
+// O(n^6) for the full tensor is still prohibitive. A cheaper,
+// HF/DHF-specific shortcut (mirroring NonRelOrbitalGradient.h/
+// RkbOrbitalGradient.h's relationship to the general gradient) is
+// Hessian_opt/HartreeExchangeHessian.h's hartreeExchangeHessianElement
+// (O(n) per element, O(n^5) for a full tensor).
 //
 // Validated (see feedback/project memory for the scratch scripts, not
 // committed) via: (1) a small explicit-Fock-space numerical check

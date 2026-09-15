@@ -936,11 +936,17 @@ int main(int argc, char** argv) {
           const double analytic_hess_cheap = rerdmft::hartreeExchangeHessianElement(
               h_spin, eri_spin, hf_occ_spin, hx_test, hx_test, fock_rdmft, lumo, homo_minus_1,
               lumo, second_occ);
+          logTiming("NON_REL cheap (HartreeExchangeHessian, O(n) per element) Hessian "
+                    "element complete",
+                    t_start, t_checkpoint, timing_records);
           double analytic_hess_general = 0.0;
           if (nonrel_gradient_computed) {
             analytic_hess_general = rerdmft::generalizedOrbitalHessianElement(
                 h_spin, eri_spin, d_spin, two_rdm_spin, fock_spin, lumo, homo_minus_1, lumo,
                 second_occ);
+            logTiming("NON_REL general (GeneralizedHessian, O(n^2) per element) Hessian "
+                      "element complete",
+                      t_start, t_checkpoint, timing_records);
           }
           nonrel_hessian_report = hessianFiniteDifferenceReport(
               "NON_REL", h_spin, eri_spin, hf_occ_spin, lumo, homo_minus_1, lumo, second_occ,
@@ -1072,10 +1078,16 @@ int main(int argc, char** argv) {
           const std::complex<double> analytic_hess_cheap = rerdmft::hartreeExchangeHessianElement(
               h_mo, eri_mo, dhf_occupations, hx_test, hx_test, fock_rdmft, lumo, homo, lumo,
               homo_minus_1);
+          logTiming("C4_DHF cheap (HartreeExchangeHessian, O(n) per element) Hessian "
+                    "element complete",
+                    t_start, t_checkpoint, timing_records);
           std::complex<double> analytic_hess_general(0.0, 0.0);
           if (dhf_gradient_computed) {
             analytic_hess_general = rerdmft::generalizedOrbitalHessianElement(
                 h_mo, eri_mo, d_mo, two_rdm_mo, fock_mo, lumo, homo, lumo, homo_minus_1);
+            logTiming("C4_DHF general (GeneralizedHessian, O(n^2) per element) Hessian "
+                      "element complete",
+                      t_start, t_checkpoint, timing_records);
           }
           dhf_hessian_report = hessianFiniteDifferenceReport(
               "C4_DHF", h_mo, eri_mo, dhf_occupations, lumo, homo, lumo, homo_minus_1,

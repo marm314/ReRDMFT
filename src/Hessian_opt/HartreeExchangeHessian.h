@@ -29,8 +29,11 @@ namespace rerdmft {
 // hartreeExchangeFockMatrix's own) collapses every O(n^2)-cost double
 // sum in the general formula to an O(n)-cost single sum, with NO dense
 // 2-RDM tensor ever built -- the cheap counterpart to
-// GeneralizedHessian.h's generalizedOrbitalHessianElement, exactly as
-// hartreeExchangeFockMatrix is to generalizedFockMatrix.
+// GeneralizedHessian.h's generalizedOrbitalHessianElement (O(n^2) per
+// element there), exactly as hartreeExchangeFockMatrix is to
+// generalizedFockMatrix. This single ELEMENT costs O(n); a full dense
+// Hessian tensor (looping p,q,r,s, i.e. O(n^4) elements) would cost
+// O(n^5).
 //
 // `fock` MUST be `hartreeExchangeFockMatrix(h, eri, occupations,
 // two_rdm_h, two_rdm_x)`'s own output, passed in by the caller (not
