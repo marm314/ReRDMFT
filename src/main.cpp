@@ -1092,12 +1092,16 @@ int main(int argc, char** argv) {
               nonrel_gradient_computed ? &analytic_hess_general : nullptr,
               static_cast<const double*>(nullptr), static_cast<const double*>(nullptr));
         }
+      }
 
-        // Full orbital-rotation Hessian (cheap Hartree/exchange path,
-        // ALL independent real-step pairs p>q over the full spin-
-        // orbital space -- Hessian_opt/HartreeExchangeHessian.h),
-        // diagonalized to confirm the converged HF solution is a
-        // genuine MINIMUM (every eigenvalue >= 0).
+      // Full orbital-rotation Hessian (cheap Hartree/exchange path, ALL
+      // independent real-step pairs p>q over the full spin-orbital
+      // space -- Hessian_opt/HartreeExchangeHessian.h), diagonalized to
+      // confirm the converged HF solution is a genuine MINIMUM (every
+      // eigenvalue >= 0). Gated by its own HESSIAN_NON_REL keyword
+      // (Input.h), independent of DEBUG -- it is its own opt-in
+      // diagnostic, not a DEBUG cross-check.
+      if (input.hessian_non_rel()) {
         nonrel_full_hessian_report =
             buildFullHessianReport("NON_REL", h_spin, eri_spin, hf_occ_spin, hx_test, fock_rdmft,
                                     t_start, t_checkpoint, timing_records);
@@ -1260,15 +1264,19 @@ int main(int argc, char** argv) {
               dhf_gradient_computed ? &analytic_hess_general : nullptr, &analytic_hess_imag_cheap,
               dhf_gradient_computed ? &analytic_hess_imag_general : nullptr);
         }
+      }
 
-        // Full orbital-rotation Hessian (cheap Hartree/exchange path,
-        // ALL independent real-step pairs p>q over the FULL RKB
-        // spinor space, including the negative-energy branch --
-        // Hessian_opt/HartreeExchangeHessian.h), diagonalized to
-        // confirm the converged DHF solution is a SADDLE POINT (some
-        // negative eigenvalues expected, from rotations mixing
-        // occupied positive-energy orbitals into the negative-energy
-        // branch) rather than a genuine minimum.
+      // Full orbital-rotation Hessian (cheap Hartree/exchange path, ALL
+      // independent real-step pairs p>q over the FULL RKB spinor
+      // space, including the negative-energy branch --
+      // Hessian_opt/HartreeExchangeHessian.h), diagonalized to confirm
+      // the converged DHF solution is a SADDLE POINT (some negative
+      // eigenvalues expected, from rotations mixing occupied
+      // positive-energy orbitals into the negative-energy branch)
+      // rather than a genuine minimum. Gated by its own HESSIAN_4C
+      // keyword (Input.h), independent of DEBUG -- it is its own
+      // opt-in diagnostic, not a DEBUG cross-check.
+      if (input.hessian_4c()) {
         dhf_full_hessian_report =
             buildFullHessianReport("C4_DHF", h_mo, eri_mo, dhf_occupations, hx_test, fock_rdmft,
                                     t_start, t_checkpoint, timing_records);

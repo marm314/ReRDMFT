@@ -60,6 +60,21 @@ class Input {
   // (C4_DHF/RkbTwoElectron.h) -- opt-in since both its time and memory
   // cost scale steeply with basis size.
   bool c4_spinor() const { return c4_spinor_; }
+  // Optional; defaults to false when the HESSIAN_NON_REL keyword is
+  // absent. When true, builds the FULL cheap (Hartree/exchange-ansatz,
+  // Hessian_opt/HartreeExchangeHessian.h) orbital-rotation Hessian over
+  // the whole spin-orbital space for the converged NON_REL solution and
+  // diagonalizes it, reporting whether it is a genuine minimum (no
+  // negative eigenvalues). Independent of DEBUG/VERBOSE -- its own
+  // opt-in diagnostic, since the full Hessian/diagonalization cost is
+  // O(n^5)/O(n^6) and not needed for a routine DEBUG run.
+  bool hessian_non_rel() const { return hessian_non_rel_; }
+  // Optional; defaults to false when the HESSIAN_4C keyword is absent.
+  // Same as hessian_non_rel(), but for the converged C4_DHF solution --
+  // the Hessian spans the FULL RKB spinor space (including the
+  // negative-energy branch), expected to show negative eigenvalues
+  // (a saddle point) rather than a minimum.
+  bool hessian_4c() const { return hessian_4c_; }
   // Optional; defaults to 0.4 when the MIXING keyword is absent. Linear
   // density-matrix mixing weight for the C4_DHF SCF loop (C4_DHF/C4_DHF.h):
   // the density fed into the next iteration's Fock build is
@@ -106,6 +121,8 @@ class Input {
   double speed_of_light_ = kSpeedOfLight;
   bool non_relativistic_ = false;
   bool c4_spinor_ = false;
+  bool hessian_non_rel_ = false;
+  bool hessian_4c_ = false;
   double mixing_ = 0.4;
   int max_iterations_ = 100;
   double energy_tolerance_ = 1e-8;
