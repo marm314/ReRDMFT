@@ -568,6 +568,79 @@ std::string hessianFiniteDifferenceReport(const std::string& label, const rerdmf
   return out.str();
 }
 
+// Builds the FULL orbital-rotation Hessian (Hessian_opt/
+// HartreeExchangeHessian.h's cheap Hartree/exchange path, ALL
+// independent real-step pairs p>q over the FULL orbital space -- for
+// C4_DHF this includes the negative-energy branch, exactly as
+// hartreeExchangeFockMatrix/orbitalGradient already do) and
+// diagonalizes it (LinearAlgebra.h's diagonalizeSymmetric for T =
+// double, diagonalizeHermitian for T = std::complex<double>) to check
+// whether the converged SCF solution is a genuine MINIMUM (every
+// eigenvalue >= 0) or a SADDLE POINT (some strictly negative) with
+// respect to real orbital rotations -- e.g. DHF is expected to show
+// negative eigenvalues from rotations mixing occupied positive-energy
+// orbitals into the negative-energy branch, unlike NON_REL's genuine
+// minimum. EXPENSIVE (see HartreeExchangeHessian.h) -- prints directly
+// rather than returning a string since, unlike the other DEBUG
+// reports, there is no reason to defer this one.
+template <typename T>
+void printFullHessianReport(const std::string& label, const rerdmft::Matrix<T>& h,
+                             const rerdmft::Tensor4<T>& eri,
+                             const std::vector<double>& occupations,
+                             const rerdmft::Matrix<double>& hx_test, const rerdmft::Matrix<T>& fock,
+                             std::chrono::steady_clock::time_point t_start,
+                             std::chrono::steady_clock::time_point& t_checkpoint,
+                             std::vector<TimingRecord>& timing_records) {
+  const std::size_t n = h.rows();
+  const auto pair_indices = rerdmft::hessianPairIndices(n);
+  const auto full_hessian =
+      rerdmft::hartreeExchangeHessianMatrix(h, eri, occupations, hx_test, hx_test, fock,
+                                             pair_indices);
+  logTiming(label + " full cheap Hessian matrix built (" +
+                std::to_string(pair_indices.size()) + "x" +
+                std::to_string(pair_indices.size()) + ")",
+            t_start, t_checkpoint, timing_records);
+
+  std::vector<double> eigenvalues;
+  if constexpr (std::is_same_v<T, double>) {
+    eigenvalues = rerdmft::diagonalizeSymmetric(full_hessian).eigenvalues;
+  } else {
+    eigenvalues = rerdmft::diagonalizeHermitian(full_hessian).eigenvalues;
+  }
+  logTiming(label + " full Hessian diagonalized", t_start, t_checkpoint, timing_records);
+
+  constexpr double kZeroTolerance = 1e-6;
+  std::size_t n_negative = 0;
+  std::size_t n_near_zero = 0;
+  std::size_t n_positive = 0;
+  for (const double eigenvalue : eigenvalues) {
+    if (eigenvalue < -kZeroTolerance) {
+      ++n_negative;
+    } else if (eigenvalue > kZeroTolerance) {
+      ++n_positive;
+    } else {
+      ++n_near_zero;
+    }
+  }
+
+  std::cout << "\n"
+            << label
+            << " full orbital-rotation Hessian (Hessian_opt/HartreeExchangeHessian.h, cheap "
+               "path, "
+            << pair_indices.size() << "x" << pair_indices.size() << ", real-step pairs only):\n";
+  std::cout << "  Eigenvalues: " << n_negative << " negative, " << n_near_zero
+            << " near-zero (|lambda| <= " << kZeroTolerance << "), " << n_positive
+            << " positive\n";
+  std::cout << "  min eigenvalue: " << std::setprecision(10) << eigenvalues.front()
+             << "   max eigenvalue: " << eigenvalues.back() << std::setprecision(6) << "\n";
+  std::cout << "  "
+            << (n_negative == 0
+                    ? "Consistent with a MINIMUM (no negative eigenvalues)."
+                    : "NOT a minimum -- negative eigenvalue(s) found, consistent with a "
+                      "SADDLE POINT.")
+            << "\n";
+}
+
 // Builds NON_REL's (Large,Large|Large,Large) two-electron tensor, or --
 // when input.cache_integrals() is set -- loads it from (and, on a miss,
 // saves it to) a disk cache keyed by the Large basis alone. See
@@ -1009,6 +1082,14 @@ int main(int argc, char** argv) {
               nonrel_gradient_computed ? &analytic_hess_general : nullptr,
               static_cast<const double*>(nullptr), static_cast<const double*>(nullptr));
         }
+
+        // Full orbital-rotation Hessian (cheap Hartree/exchange path,
+        // ALL independent real-step pairs p>q over the full spin-
+        // orbital space -- Hessian_opt/HartreeExchangeHessian.h),
+        // diagonalized to confirm the converged HF solution is a
+        // genuine MINIMUM (every eigenvalue >= 0).
+        printFullHessianReport("NON_REL", h_spin, eri_spin, hf_occ_spin, hx_test, fock_rdmft,
+                                t_start, t_checkpoint, timing_records);
       }
     }
 
@@ -1168,6 +1249,17 @@ int main(int argc, char** argv) {
               dhf_gradient_computed ? &analytic_hess_general : nullptr, &analytic_hess_imag_cheap,
               dhf_gradient_computed ? &analytic_hess_imag_general : nullptr);
         }
+
+        // Full orbital-rotation Hessian (cheap Hartree/exchange path,
+        // ALL independent real-step pairs p>q over the FULL RKB
+        // spinor space, including the negative-energy branch --
+        // Hessian_opt/HartreeExchangeHessian.h), diagonalized to
+        // confirm the converged DHF solution is a SADDLE POINT (some
+        // negative eigenvalues expected, from rotations mixing
+        // occupied positive-energy orbitals into the negative-energy
+        // branch) rather than a genuine minimum.
+        printFullHessianReport("C4_DHF", h_mo, eri_mo, dhf_occupations, hx_test, fock_rdmft,
+                                t_start, t_checkpoint, timing_records);
       }
     }
   } catch (const std::exception& e) {

@@ -2,6 +2,7 @@
 #define RERDMFT_HARTREEEXCHANGEHESSIAN_H
 
 #include <cstddef>
+#include <utility>
 #include <vector>
 
 #include "Matrix.h"
@@ -72,6 +73,39 @@ T hartreeExchangeHessianElementImag(const Matrix<T>& h, const Tensor4<T>& eri,
                                      const Matrix<double>& two_rdm_h,
                                      const Matrix<double>& two_rdm_x, const Matrix<T>& fock,
                                      std::size_t p, std::size_t q, std::size_t r, std::size_t s);
+
+// The independent real-step orbital-rotation parameters are exactly
+// the (p,q) pairs with p > q (see OrbitalGradient.h) -- this lists them
+// all, in a FIXED order, for a basis of dimension `n`: pair I is
+// (pair[I].first, pair[I].second), first > second. Used to give
+// `hartreeExchangeHessianMatrix`'s rows/columns a definite meaning.
+std::vector<std::pair<std::size_t, std::size_t>> hessianPairIndices(std::size_t n);
+
+// Builds the FULL, dense orbital-rotation Hessian, indexed by the
+// INDEPENDENT rotation pairs `pair_indices` (typically
+// `hessianPairIndices(h.rows())`) rather than by individual orbital
+// indices: element (I,J) is `hartreeExchangeHessianElement` evaluated
+// at (p,q) = pair_indices[I], (r,s) = pair_indices[J]. This is exactly
+// the real-symmetric (T = double) or complex-Hermitian (T =
+// std::complex<double>) matrix to diagonalize (LinearAlgebra.h's
+// diagonalizeSymmetric/diagonalizeHermitian) to check whether a
+// converged SCF solution is a genuine minimum (all eigenvalues >= 0)
+// or a saddle point (some strictly negative) with respect to real
+// orbital rotations -- e.g. DHF's admission of rotations into the
+// negative-energy branch is expected to show up as negative
+// eigenvalues here, unlike NON_REL's genuine minimum.
+//
+// EXPENSIVE: `pair_indices.size()` is O(n^2), and each element costs
+// O(n) (hartreeExchangeHessianElement's own cost), so this costs
+// O(n^5) overall, plus whatever the caller's subsequent diagonalization
+// costs (O(n^6) for a dense eigensolver on the O(n^2)-dimensional
+// result) -- usable for a small-to-moderate basis (e.g. water/STO-3G),
+// not a production Newton-Raphson step on a realistic basis.
+template <typename T>
+Matrix<T> hartreeExchangeHessianMatrix(
+    const Matrix<T>& h, const Tensor4<T>& eri, const std::vector<double>& occupations,
+    const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x, const Matrix<T>& fock,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);
 
 }  // namespace rerdmft
 

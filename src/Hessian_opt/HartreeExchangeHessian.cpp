@@ -184,4 +184,46 @@ template std::complex<double> hartreeExchangeHessianElementImag(
     const Matrix<double>& two_rdm_x, const Matrix<std::complex<double>>& fock, std::size_t p,
     std::size_t q, std::size_t r, std::size_t s);
 
+std::vector<std::pair<std::size_t, std::size_t>> hessianPairIndices(std::size_t n) {
+  std::vector<std::pair<std::size_t, std::size_t>> pairs;
+  pairs.reserve(n * (n - 1) / 2);
+  for (std::size_t p = 1; p < n; ++p) {
+    for (std::size_t q = 0; q < p; ++q) {
+      pairs.emplace_back(p, q);
+    }
+  }
+  return pairs;
+}
+
+template <typename T>
+Matrix<T> hartreeExchangeHessianMatrix(
+    const Matrix<T>& h, const Tensor4<T>& eri, const std::vector<double>& occupations,
+    const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x, const Matrix<T>& fock,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices) {
+  const std::size_t n_pairs = pair_indices.size();
+  Matrix<T> hess(n_pairs, n_pairs, T{});
+  // Each (I,J) owns its own disjoint output position and only reads the
+  // shared, const inputs -- safe to parallelize.
+#pragma omp parallel for collapse(2)
+  for (std::size_t big_i = 0; big_i < n_pairs; ++big_i) {
+    for (std::size_t big_j = 0; big_j < n_pairs; ++big_j) {
+      const auto& [p, q] = pair_indices[big_i];
+      const auto& [r, s] = pair_indices[big_j];
+      hess(big_i, big_j) =
+          hartreeExchangeHessianElement(h, eri, occupations, two_rdm_h, two_rdm_x, fock, p, q, r, s);
+    }
+  }
+  return hess;
+}
+
+template Matrix<double> hartreeExchangeHessianMatrix(
+    const Matrix<double>& h, const Tensor4<double>& eri, const std::vector<double>& occupations,
+    const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x, const Matrix<double>& fock,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);
+template Matrix<std::complex<double>> hartreeExchangeHessianMatrix(
+    const Matrix<std::complex<double>>& h, const Tensor4<std::complex<double>>& eri,
+    const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
+    const Matrix<double>& two_rdm_x, const Matrix<std::complex<double>>& fock,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);
+
 }  // namespace rerdmft
