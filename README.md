@@ -218,3 +218,8 @@ writes files to disk; a cache from a different build of the code is
 detected via an embedded format version and never reused. Files under
 the cache directory are a same-machine binary format, not meant to be
 inspected or shared.
+
+## Contributors
+
+- Dr. M. Rodriguez-Mayorga 
+
