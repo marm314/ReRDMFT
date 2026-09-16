@@ -202,4 +202,37 @@ Matrix<std::complex<double>> invertHermitian(const Matrix<std::complex<double>>&
   return x;
 }
 
+Matrix<std::complex<double>> invertGeneral(const Matrix<std::complex<double>>& a_in) {
+  if (a_in.rows() != a_in.cols()) {
+    throw std::runtime_error("invertGeneral: matrix is not square");
+  }
+  const lapack_int n = static_cast<lapack_int>(a_in.rows());
+  const std::size_t un = static_cast<std::size_t>(n);
+
+  std::vector<std::complex<double>> data(un * un);
+  for (std::size_t i = 0; i < un; ++i) {
+    for (std::size_t j = 0; j < un; ++j) {
+      data[i * un + j] = a_in(i, j);
+    }
+  }
+
+  std::vector<lapack_int> ipiv(un);
+  lapack_int info = LAPACKE_zgetrf(LAPACK_ROW_MAJOR, n, n, data.data(), n, ipiv.data());
+  if (info != 0) {
+    throw std::runtime_error("invertGeneral: LAPACKE_zgetrf failed (matrix is singular or invalid)");
+  }
+  info = LAPACKE_zgetri(LAPACK_ROW_MAJOR, n, data.data(), n, ipiv.data());
+  if (info != 0) {
+    throw std::runtime_error("invertGeneral: LAPACKE_zgetri failed (matrix is singular)");
+  }
+
+  Matrix<std::complex<double>> result(un, un);
+  for (std::size_t i = 0; i < un; ++i) {
+    for (std::size_t j = 0; j < un; ++j) {
+      result(i, j) = data[i * un + j];
+    }
+  }
+  return result;
+}
+
 }  // namespace rerdmft

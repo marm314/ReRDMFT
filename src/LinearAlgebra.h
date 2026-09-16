@@ -57,6 +57,14 @@ HermitianEigenResult diagonalizeHermitian(const Matrix<std::complex<double>>& a)
 // eigenvalue with |w| at or below 1e-10 (too close to singular).
 Matrix<std::complex<double>> invertHermitian(const Matrix<std::complex<double>>& s);
 
+// Inverts a square, nonsingular GENERAL complex matrix via LAPACK (LU
+// factorization with LAPACKE_zgetrf, then LAPACKE_zgetri) -- unlike
+// invertHermitian, `a` need NOT be Hermitian (e.g. X2C_DHF's own
+// large-component coefficient block C_L, an ordinary matrix of
+// eigenvector components, not a physical operator). Throws
+// std::runtime_error if `a` is singular (or not square).
+Matrix<std::complex<double>> invertGeneral(const Matrix<std::complex<double>>& a);
+
 }  // namespace rerdmft
 
 #endif  // RERDMFT_LINEARALGEBRA_H

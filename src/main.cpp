@@ -54,6 +54,7 @@
 #include "SQP.h"
 #include "UkbHamiltonian.h"
 #include "X2C_decoupling.h"
+#include "X2C_hamiltonian.h"
 #include "Vext.h"
 
 namespace {
@@ -1808,6 +1809,79 @@ int main(int argc, char** argv) {
     std::cout << "Max |H_RKB C_tmp - S_full C_tmp E| (C_tmp = X_full * U genuinely solves the\n"
                  "generalized eigenvalue problem, expect ~0): "
                << max_generalized_eigenproblem_residual << "\n";
+
+    // Build the EXACT X2C Hamiltonian (X2C_DHF/X2C_hamiltonian.h) from
+    // the same decoupling data above, and validate it the strongest
+    // way possible: diagonalizing it must reproduce the ALREADY-KNOWN
+    // positive-energy spectrum (the upper half of h_rkb_ortho_eig's own
+    // eigenvalues) EXACTLY, since no approximation was introduced
+    // anywhere in the construction (see X2C_hamiltonian.h's own
+    // derivation comment).
+    const auto x2c_hamiltonian = rerdmft::buildX2CHamiltonian(h_rkb, s_full, x2c_c_tmp);
+    const auto x2c_eig = rerdmft::diagonalizeHermitian(x2c_hamiltonian.h_x2c_ortho);
+    const std::size_t n2 = h_rkb.rows() / 2;
+    double max_x2c_eigenvalue_deviation = 0.0;
+    for (std::size_t i = 0; i < n2 && i < x2c_eig.eigenvalues.size(); ++i) {
+      max_x2c_eigenvalue_deviation = std::max(
+          max_x2c_eigenvalue_deviation, std::abs(x2c_eig.eigenvalues[i] - eigenvalues[n2 + i]));
+    }
+
+    std::cout << "\nX2C_DHF/X2C_hamiltonian.h: exact X2C Hamiltonian eigenvalues (Kramers\n"
+                 "pairs, even/odd indices side by side; should reproduce H_RKB_ortho's own\n"
+                 "positive-energy branch above EXACTLY -- the no-pair approximation is simply\n"
+                 "USING this Hamiltonian alone, since the negative-energy branch never\n"
+                 "appears in it at all):\n";
+    std::cout << "  " << std::setw(6) << "index" << std::setw(20) << "E (even)" << std::setw(10)
+               << "index" << std::setw(20) << "E (odd)" << "\n";
+    double max_x2c_kramers_splitting = 0.0;
+    for (std::size_t i = 0; i + 1 < x2c_eig.eigenvalues.size(); i += 2) {
+      std::cout << "  " << std::setw(6) << i << std::setw(20) << x2c_eig.eigenvalues[i]
+                 << std::setw(10) << (i + 1) << std::setw(20) << x2c_eig.eigenvalues[i + 1]
+                 << "\n";
+      max_x2c_kramers_splitting = std::max(
+          max_x2c_kramers_splitting, std::abs(x2c_eig.eigenvalues[i] - x2c_eig.eigenvalues[i + 1]));
+    }
+    std::cout << "Max |E(even) - E(odd)| Kramers-pair splitting (expect ~0): "
+               << max_x2c_kramers_splitting << "\n";
+    std::cout << "Max |E_X2C - E_DHF(positive-energy branch)| (expect ~0): "
+               << max_x2c_eigenvalue_deviation << "\n";
+
+    // APPROXIMATE X2C: orthogonalize the SAME raw h_x2c using ONLY the
+    // plain large-component Loewdin matrix (x_full's own Large block)
+    // instead of the exact renormalization metric Lambda used above --
+    // a common simplification (skipping the picture-change/
+    // renormalization correction). Its eigenvalues are expected to be
+    // CLOSE to, but NOT exactly equal to, the true DHF positive-energy
+    // spectrum (unlike h_x2c_ortho's exact agreement just confirmed).
+    const auto h_x2c_ortho_approx =
+        rerdmft::approximateX2COrtho(x2c_hamiltonian.h_x2c, x_full);
+    const auto x2c_eig_approx = rerdmft::diagonalizeHermitian(h_x2c_ortho_approx);
+    double max_x2c_approx_deviation = 0.0;
+    for (std::size_t i = 0; i < n2 && i < x2c_eig_approx.eigenvalues.size(); ++i) {
+      max_x2c_approx_deviation = std::max(
+          max_x2c_approx_deviation, std::abs(x2c_eig_approx.eigenvalues[i] - eigenvalues[n2 + i]));
+    }
+
+    std::cout << "\nX2C_DHF/X2C_hamiltonian.h: APPROXIMATE X2C Hamiltonian eigenvalues\n"
+                 "(orthogonalized with ONLY the large-component overlap X_Large, NOT the\n"
+                 "exact renormalization metric Lambda -- Kramers pairs, even/odd indices\n"
+                 "side by side; expect CLOSE to, but not exactly equal to, the exact\n"
+                 "positive-energy branch above):\n";
+    std::cout << "  " << std::setw(6) << "index" << std::setw(20) << "E (even)" << std::setw(10)
+               << "index" << std::setw(20) << "E (odd)" << "\n";
+    double max_x2c_approx_kramers_splitting = 0.0;
+    for (std::size_t i = 0; i + 1 < x2c_eig_approx.eigenvalues.size(); i += 2) {
+      std::cout << "  " << std::setw(6) << i << std::setw(20) << x2c_eig_approx.eigenvalues[i]
+                 << std::setw(10) << (i + 1) << std::setw(20) << x2c_eig_approx.eigenvalues[i + 1]
+                 << "\n";
+      max_x2c_approx_kramers_splitting =
+          std::max(max_x2c_approx_kramers_splitting,
+                    std::abs(x2c_eig_approx.eigenvalues[i] - x2c_eig_approx.eigenvalues[i + 1]));
+    }
+    std::cout << "Max |E(even) - E(odd)| Kramers-pair splitting (expect ~0): "
+               << max_x2c_approx_kramers_splitting << "\n";
+    std::cout << "Max |E_X2C_approx - E_DHF(positive-energy branch)| (expect small but NOT ~0): "
+               << max_x2c_approx_deviation << "\n";
   }
 
   if (input.c4_spinor()) {
