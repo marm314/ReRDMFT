@@ -98,24 +98,29 @@ anywhere on a line) are comments.
 | `FUNCTIONAL` | string | *(none)* | Selects a JK-only density matrix functional approximation (`Occ_opt/JK_only.h`, Table 1 of Rodriguez-Mayorga et al., *Phys. Chem. Chem. Phys.* 2017) to evaluate on the converged `NON_REL`/`C4_DHF` orbitals: one of `SD`, `MBB` (or `MULLER`), `BBC2`, `CA`, `CGA`, `ML`, `MLSIC`, `GU`, `POWER`. Setting this triggers the whole RDMFT functional evaluation described below; with no `FUNCTIONAL` keyword at all, that step is skipped entirely (it is not gated by `DEBUG`). |
 | `OCCUPATION_INIT` | string | `PROPORTIONAL` | How to generate the initial fractional occupation numbers for `FUNCTIONAL` (see below). `PROPORTIONAL`: an aufbau (idempotent) reference redistributed proportionally into an interior box -- temperature-independent. `FERMI_DIRAC`: smeared at `TEMPERATURE` instead. Only meaningful when `FUNCTIONAL` is set. |
 | `TEMPERATURE` | double (> 0) | `1000` (Kelvin) | Electronic temperature used to smear orbital energies into fractional Fermi-Dirac occupations. Only consumed when `OCCUPATION_INIT FERMI_DIRAC` is selected; ignored (but still validated) otherwise. |
-| `X2C` | bool | `FALSE` | Print the one-electron X2C ("exact two-component") decoupling report described below. Independent of `C4_SPINOR`/`DEBUG` -- the underlying one-electron RKB Hamiltonian is always built regardless (it also seeds `C4_SPINOR`'s own SCF initial guess); this keyword only gates printing the report. |
+| `X2C` | bool | `FALSE` | Print the one-electron X2C decoupling report AND run the approximate X2C-HF SCF, both described below, printed between the `NON_RELATIVISTIC` and `C4_SPINOR` final reports. Independent of `C4_SPINOR` -- the underlying one-electron RKB Hamiltonian is always built regardless (it also seeds `C4_SPINOR`'s own SCF initial guess); this keyword gates running/printing the X2C-specific steps only. Combined with `DEBUG`, additional cross-checks are printed within the X2C sections (see below). |
 
-## X2C decoupling
+## X2C decoupling and X2C-HF
 
-Setting `X2C` prints a report built from `X2C_DHF/X2C_decoupling.h` and
-`X2C_DHF/X2C_hamiltonian.h`, covering both the exact and an
-approximate one-electron X2C treatment of the bare (uncorrelated) RKB
-Dirac Hamiltonian:
+Setting `X2C` runs everything below, built from
+`X2C_DHF/X2C_decoupling.h`, `X2C_DHF/X2C_hamiltonian.h`, and
+`X2C_DHF/X2C_HF.h`, and prints it **between** the `NON_RELATIVISTIC`
+and `C4_SPINOR` (4-component DHF) final reports, regardless of whether
+either of those keywords is itself set (X2C sits conceptually between
+the nonrelativistic and exact 4-component treatments). With `DEBUG`
+also set, extra detail is added throughout (called out per step
+below); the underlying computation itself is unaffected by `DEBUG`.
 
 1. **Decoupling**: diagonalizing the orthonormalized 4-component
    Hamiltonian `H_RKB_ortho = X_full^dagger H_RKB X_full` block-
    diagonalizes the Dirac equation into positive-/negative-energy
    branches -- this diagonalization *is* the one-electron X2C
    transformation. Its eigenvalues are printed in two columns (adjacent
-   Kramers pairs side by side), along with the Kramers-pair splitting,
-   the eigenvector-partner-deviation check, and a check that
-   `C_tmp = X_full * U` genuinely solves the *original* generalized
-   eigenvalue problem `H_RKB * C_tmp = S_full * C_tmp * E`.
+   Kramers pairs side by side), along with the Kramers-pair splitting.
+   With `DEBUG`, this also prints the eigenvector-partner-deviation
+   check and a check that `C_tmp = X_full * U` genuinely solves the
+   *original* generalized eigenvalue problem
+   `H_RKB * C_tmp = S_full * C_tmp * E`.
 2. **Exact X2C Hamiltonian**: eliminating the small component from the
    positive-energy block (via the decoupling matrix `R = C_S * C_L^-1`
    and the exact renormalization metric `Lambda = S_LL + R^dagger S_SS
@@ -132,8 +137,32 @@ Dirac Hamiltonian:
    exactly reproduce, the true spectrum (the deviation is largest for
    the most relativistic, deepest-lying orbitals); Kramers symmetry is
    still exact.
+4. **Approximate X2C-HF SCF**: a full self-consistent Hartree-Fock
+   treatment using the exact X2C Hamiltonian from step 2 as a *fixed*
+   one-electron core (no picture-change correction as the density
+   changes) and the ordinary non-relativistic two-electron Coulomb
+   integrals over the Large-component basis (no two-electron
+   picture-change correction either). Because the density is a general
+   complex Hermitian matrix (spin-orbit coupling in the core
+   Hamiltonian mixes alpha/beta already at the one-electron level), the
+   Fock build includes genuine opposite-spin exchange. Every iteration
+   orthogonalizes the Fock matrix with only the plain large-component
+   overlap (step 3's approach, not step 2's exact metric), diagonalizes
+   it to get eigenvectors `U`, and builds the density matrix from
+   `C = X_Large * U` -- so this is a deliberately approximate SCF,
+   confirmed to reduce exactly to ordinary `NON_RELATIVISTIC` HF in the
+   `SPEED_OF_LIGHT -> infinity` limit, but its converged energy at
+   realistic `SPEED_OF_LIGHT` can fall *below* the exact 4-component DHF
+   energy (the usual variational bound does not apply once the metric is
+   no longer exact) -- a known consequence of skipping both
+   picture-change corrections, not a bug. With `DEBUG`, this also prints
+   each iteration's orbital energies and, at convergence, a check that
+   `C = X_Large * U` genuinely solves `F * C = S_Large * C * E` in the
+   original (non-orthogonal) Large-component AO basis.
 
-See `examples/water_X2C_debug.inp` for a worked example.
+See `examples/water_X2C.inp` for a plain worked example, or
+`examples/water_X2C_debug.inp` for the same run with `DEBUG TRUE` (all
+the extra cross-checks described above, plus `HESSIAN_4C`).
 
 ## RDMFT functional evaluation
 

@@ -61,13 +61,37 @@ class Input {
   // cost scale steeply with basis size.
   bool c4_spinor() const { return c4_spinor_; }
   // Optional; defaults to false when the X2C keyword is absent. When
-  // true, prints the one-electron X2C decoupling report
-  // (X2C_DHF/X2C_decoupling.h): the eigenvalues of the orthonormalized
-  // bare RKB Dirac Hamiltonian H_RKB_ortho, in two columns (Kramers
-  // pairs side by side), plus the Kramers-pair splitting/eigenvector-
-  // partner-deviation checks. H_RKB_ortho itself is always built
-  // (needed as the C4_DHF SCF's own initial guess whenever C4_SPINOR is
-  // on); this keyword only gates PRINTING it as a standalone report.
+  // true:
+  //   1. Prints the one-electron X2C decoupling report
+  //      (X2C_DHF/X2C_decoupling.h): the eigenvalues of the
+  //      orthonormalized bare RKB Dirac Hamiltonian H_RKB_ortho, in two
+  //      columns (Kramers pairs side by side), plus the Kramers-pair
+  //      splitting check, and the exact vs. approximate X2C Hamiltonian
+  //      eigenvalue comparison (X2C_DHF/X2C_hamiltonian.h).
+  //   2. Runs an approximate X2C Hartree-Fock SCF (X2C_DHF/X2C_HF.h):
+  //      the one-electron core Hamiltonian is the EXACT X2C Hamiltonian
+  //      (X2C_DHF/X2C_hamiltonian.h's h_x2c, built ONCE from the bare
+  //      one-electron RKB Hamiltonian -- no picture-change correction
+  //      of any kind, one-electron or two-electron), the two-electron
+  //      part is the ORDINARY (real, non-relativistic) Large-component
+  //      Coulomb integrals, and the Fock matrix is orthogonalized at
+  //      EVERY iteration using only the plain large-component overlap
+  //      (X_Large), never the exact renormalization metric Lambda --
+  //      so this is a genuinely approximate treatment, not exact
+  //      X2C-DHF. The density matrix's coefficients are C = X_Large * U
+  //      (U = the eigenvectors diagonalizing Fock_ortho).
+  // This whole report/SCF is printed between the NON_RELATIVISTIC and
+  // C4_SPINOR (4-component DHF) final reports, regardless of whether
+  // either of those keywords is itself on. With DEBUG also true, extra
+  // detail is added throughout: the decoupling step's own Kramers
+  // eigenvector-partner-deviation and generalized-eigenproblem-residual
+  // checks, per-iteration orbital energies within the X2C-HF SCF history,
+  // and a residual check confirming C = X_Large * U genuinely solves
+  // F C = S_Large C E (validating the coefficient formula above).
+  // H_RKB_ortho/h_x2c themselves are always built regardless (H_RKB_
+  // ortho is needed as the C4_DHF SCF's own initial guess whenever
+  // C4_SPINOR is on); this keyword only gates running/printing the
+  // above. Independent of C4_SPINOR.
   bool x2c() const { return x2c_; }
   // Optional; defaults to false when the HESSIAN_NON_REL keyword is
   // absent. When true, builds the FULL cheap (Hartree/exchange-ansatz,

@@ -73,14 +73,18 @@ Matrix<std::complex<double>> approximateX2COrtho(const Matrix<std::complex<doubl
   if (h_x2c.cols() != n) {
     throw std::runtime_error("approximateX2COrtho: h_x2c is not square");
   }
-  if (x_full.rows() < n || x_full.cols() < n) {
-    throw std::runtime_error("approximateX2COrtho: x_full is too small for h_x2c");
-  }
-  // Only the LARGE-component block of X_full (its own upper-left n x n
-  // block, diag(X_Large, X_Large)) -- NOT the exact Lambda^-1/2
-  // renormalization h_x2c_ortho itself uses.
-  const auto x_large_block = subBlock(x_full, 0, n, 0, n);
+  // Only the LARGE-component block of X_full -- NOT the exact
+  // Lambda^-1/2 renormalization h_x2c_ortho itself uses.
+  const auto x_large_block = extractLargeComponentBlock(x_full, n);
   return dagger(x_large_block) * (h_x2c * x_large_block);
+}
+
+Matrix<std::complex<double>> extractLargeComponentBlock(const Matrix<std::complex<double>>& x_full,
+                                                         std::size_t n) {
+  if (x_full.rows() < n || x_full.cols() < n) {
+    throw std::runtime_error("extractLargeComponentBlock: x_full is too small for n");
+  }
+  return subBlock(x_full, 0, n, 0, n);
 }
 
 }  // namespace rerdmft

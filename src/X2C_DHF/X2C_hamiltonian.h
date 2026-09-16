@@ -90,6 +90,17 @@ X2CHamiltonianResult buildX2CHamiltonian(const Matrix<std::complex<double>>& h_r
 Matrix<std::complex<double>> approximateX2COrtho(const Matrix<std::complex<double>>& h_x2c,
                                                   const Matrix<std::complex<double>>& x_full);
 
+// Extracts x_full's own upper-left `n x n` block (diag(X_Large,
+// X_Large) -- the ONLY large-component part of the full RKB
+// orthonormalization matrix), the SAME block approximateX2COrtho uses
+// above -- exposed separately so X2C_DHF/X2C_HF.h's own SCF loop can
+// reuse it directly for its own per-iteration Fock-matrix
+// orthogonalization (every X2C-HF Fock build orthogonalizes with this
+// SAME plain large-component matrix, never the exact Lambda
+// renormalization).
+Matrix<std::complex<double>> extractLargeComponentBlock(const Matrix<std::complex<double>>& x_full,
+                                                         std::size_t n);
+
 }  // namespace rerdmft
 
 #endif  // RERDMFT_X2C_DHF_X2C_HAMILTONIAN_H
