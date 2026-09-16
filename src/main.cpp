@@ -2016,12 +2016,11 @@ int main(int argc, char** argv) {
     }
     std::cout << "Max |E(even) - E(odd)| Kramers-pair splitting (expect ~0): "
                << max_kramers_splitting << "\n";
+    max_kramers_partner_deviation = rerdmft::maxKramersPartnerDeviation(
+        h_rkb_ortho_eig.eigenvectors, rkb_coefficients, x_full, s_large, s_small_ukb);
+    std::cout << "Max Kramers eigenvector-partner deviation, 1-|<odd|Theta even>_S| (expect ~0): "
+               << max_kramers_partner_deviation << "\n";
     if (input.debug()) {
-      max_kramers_partner_deviation = rerdmft::maxKramersPartnerDeviation(
-          h_rkb_ortho_eig.eigenvectors, rkb_coefficients, x_full, s_large, s_small_ukb);
-      std::cout << "  [DEBUG] Max Kramers eigenvector-partner deviation, 1-|<odd|Theta even>_S|\n"
-                   "  (expect ~0): "
-                 << max_kramers_partner_deviation << "\n";
       std::cout << "  [DEBUG] Max |H_RKB C_tmp - S_full C_tmp E| (C_tmp = X_full * U genuinely\n"
                    "  solves the generalized eigenvalue problem, expect ~0): "
                  << max_generalized_eigenproblem_residual << "\n";

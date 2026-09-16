@@ -116,10 +116,11 @@ below); the underlying computation itself is unaffected by `DEBUG`.
    diagonalizes the Dirac equation into positive-/negative-energy
    branches -- this diagonalization *is* the one-electron X2C
    transformation. Its eigenvalues are printed in two columns (adjacent
-   Kramers pairs side by side), along with the Kramers-pair splitting.
-   With `DEBUG`, this also prints the eigenvector-partner-deviation
-   check and a check that `C_tmp = X_full * U` genuinely solves the
-   *original* generalized eigenvalue problem
+   Kramers pairs side by side), along with the Kramers-pair splitting
+   and the eigenvector-partner-deviation check (both always printed,
+   confirming Kramers' theorem holds, never hidden behind `DEBUG`).
+   With `DEBUG`, this also prints a check that `C_tmp = X_full * U`
+   genuinely solves the *original* generalized eigenvalue problem
    `H_RKB * C_tmp = S_full * C_tmp * E`.
 2. **Exact X2C Hamiltonian**: eliminating the small component from the
    positive-energy block (via the decoupling matrix `R = C_S * C_L^-1`
