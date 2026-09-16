@@ -28,6 +28,13 @@ SRC_DIR  := src
 # separate from everything built ON TOP of these AO integrals (RKB/
 # spinor transforms, SCF, etc.) elsewhere in the tree.
 AO_DIR   := $(SRC_DIR)/AO_ints
+# Cartesian AO basis construction (BasisSet.h/.cpp's shell-set parsing,
+# Shell.h/.cpp's cartesian-component enumeration, SmallComponentBasis.h/
+# .cpp's unrestricted-kinetic-balance small-component basis derived from
+# the large one): its own subdirectory grouping the AO basis DATA
+# STRUCTURES, separate from AO_DIR's actual LIBCINT integral evaluation
+# over that basis.
+AO_BASIS_DIR := $(SRC_DIR)/AO_basis
 # 4-component Dirac-Hartree-Fock two-electron integrals (restricted
 # kinetic balance spinor basis): kept in their own subdirectory since they
 # are a distinct, self-contained piece of the physics (RkbTwoElectron.h,
@@ -81,6 +88,7 @@ endif
 
 SRCS        := $(wildcard $(SRC_DIR)/*.cpp)
 AO_SRCS     := $(wildcard $(AO_DIR)/*.cpp)
+AO_BASIS_SRCS := $(wildcard $(AO_BASIS_DIR)/*.cpp)
 C4_SRCS     := $(wildcard $(C4_DIR)/*.cpp)
 NON_REL_SRCS:= $(wildcard $(NON_REL_DIR)/*.cpp)
 HESSIAN_SRCS:= $(wildcard $(HESSIAN_DIR)/*.cpp)
@@ -88,15 +96,16 @@ OCC_SRCS    := $(wildcard $(OCC_DIR)/*.cpp)
 X2C_SRCS    := $(wildcard $(X2C_DIR)/*.cpp)
 OBJS        := $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(SRCS)) \
                $(patsubst $(AO_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(AO_SRCS)) \
+               $(patsubst $(AO_BASIS_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(AO_BASIS_SRCS)) \
                $(patsubst $(C4_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(C4_SRCS)) \
                $(patsubst $(NON_REL_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(NON_REL_SRCS)) \
                $(patsubst $(HESSIAN_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(HESSIAN_SRCS)) \
                $(patsubst $(OCC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(OCC_SRCS)) \
                $(patsubst $(X2C_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(X2C_SRCS))
 
-# All seven directories are on the quoted-include search path, so files
+# All eight directories are on the quoted-include search path, so files
 # in any one can #include headers from the others without a path prefix.
-CPPFLAGS := -I$(LIBCINT_INC) -I$(SRC_DIR) -I$(AO_DIR) -I$(C4_DIR) -I$(NON_REL_DIR) -I$(HESSIAN_DIR) -I$(OCC_DIR) -I$(X2C_DIR)
+CPPFLAGS := -I$(LIBCINT_INC) -I$(SRC_DIR) -I$(AO_DIR) -I$(AO_BASIS_DIR) -I$(C4_DIR) -I$(NON_REL_DIR) -I$(HESSIAN_DIR) -I$(OCC_DIR) -I$(X2C_DIR)
 # LAPACKE (the C interface to LAPACK) is used for the RKB transformation's
 # overlap-matrix inverse; installed system-wide via liblapacke-dev.
 LDLIBS   := $(LIBCINT) -llapacke -llapack -lblas -lquadmath -lm
@@ -114,6 +123,9 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(DEPFLAGS) $(CPPFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/%.o: $(AO_DIR)/%.cpp | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(DEPFLAGS) $(CPPFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/%.o: $(AO_BASIS_DIR)/%.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(DEPFLAGS) $(CPPFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/%.o: $(C4_DIR)/%.cpp | $(BUILD_DIR)
