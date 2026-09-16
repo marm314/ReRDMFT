@@ -31,6 +31,36 @@ Matrix<std::complex<double>> elementwiseConjugate(const Matrix<std::complex<doub
   return result;
 }
 
+// Shared by both maxKramersPartnerDeviation and
+// maxKramersPartnerDeviationLarge once `psi` (each column a spinor,
+// already in its own original AO representation), `theta`, and `s_full`
+// (both sized to that same AO representation) are built.
+double maxPartnerDeviationFromPsi(const Matrix<std::complex<double>>& psi,
+                                   const Matrix<double>& theta, const Matrix<double>& s_full) {
+  const std::size_t n_orig = psi.rows();
+  const std::size_t n_final = psi.cols();
+  const Matrix<std::complex<double>> theta_psi = toComplex(theta) * elementwiseConjugate(psi);
+  const Matrix<std::complex<double>> s_complex = toComplex(s_full);
+  const Matrix<std::complex<double>> s_theta_psi = s_complex * theta_psi;
+  const Matrix<std::complex<double>> s_psi = s_complex * psi;
+
+  double max_deviation = 0.0;
+  for (std::size_t k = 0; k + 1 < n_final; k += 2) {
+    std::complex<double> overlap(0.0, 0.0);
+    std::complex<double> norm_odd(0.0, 0.0);
+    std::complex<double> norm_theta_even(0.0, 0.0);
+    for (std::size_t r = 0; r < n_orig; ++r) {
+      overlap += std::conj(psi(r, k + 1)) * s_theta_psi(r, k);
+      norm_odd += std::conj(psi(r, k + 1)) * s_psi(r, k + 1);
+      norm_theta_even += std::conj(theta_psi(r, k)) * s_theta_psi(r, k);
+    }
+    const double denom = std::sqrt(norm_odd.real() * norm_theta_even.real());
+    const double deviation = 1.0 - std::abs(overlap) / denom;
+    max_deviation = std::max(max_deviation, std::abs(deviation));
+  }
+  return max_deviation;
+}
+
 }  // namespace
 
 double maxKramersPartnerDeviation(const Matrix<std::complex<double>>& eigenvectors,
@@ -83,27 +113,41 @@ double maxKramersPartnerDeviation(const Matrix<std::complex<double>>& eigenvecto
     }
   }
 
-  const Matrix<std::complex<double>> theta_psi = toComplex(theta) * elementwiseConjugate(psi);
-  const Matrix<std::complex<double>> s_complex = toComplex(s_full);
-  const Matrix<std::complex<double>> s_theta_psi = s_complex * theta_psi;
-  const Matrix<std::complex<double>> s_psi = s_complex * psi;
+  return maxPartnerDeviationFromPsi(psi, theta, s_full);
+}
 
-  double max_deviation = 0.0;
-  for (std::size_t k = 0; k + 1 < n_final; k += 2) {
-    std::complex<double> overlap(0.0, 0.0);
-    std::complex<double> norm_odd(0.0, 0.0);
-    std::complex<double> norm_theta_even(0.0, 0.0);
-    for (std::size_t r = 0; r < n_orig; ++r) {
-      overlap += std::conj(psi(r, k + 1)) * s_theta_psi(r, k);
-      norm_odd += std::conj(psi(r, k + 1)) * s_psi(r, k + 1);
-      norm_theta_even += std::conj(theta_psi(r, k)) * s_theta_psi(r, k);
-    }
-    const double denom = std::sqrt(norm_odd.real() * norm_theta_even.real());
-    const double deviation = 1.0 - std::abs(overlap) / denom;
-    max_deviation = std::max(max_deviation, std::abs(deviation));
+double maxKramersPartnerDeviationLarge(const Matrix<std::complex<double>>& c_matrix,
+                                        const Matrix<double>& s_large) {
+  const std::size_t n_large = s_large.rows();
+  const std::size_t n_orig = 2 * n_large;
+
+  if (s_large.cols() != n_large || c_matrix.rows() != n_orig) {
+    throw std::runtime_error("maxKramersPartnerDeviationLarge: inconsistent input dimensions");
   }
 
-  return max_deviation;
+  // Theta_matrix: Theta(AO*alpha) = +AO*beta, Theta(AO*beta) = -AO*alpha,
+  // applied within the Large sector -- no small component at all here
+  // (X2C's own decoupling already eliminated it).
+  Matrix<double> theta(n_orig, n_orig, 0.0);
+  for (std::size_t i = 0; i < n_large; ++i) {
+    theta(n_large + i, i) = 1.0;
+    theta(i, n_large + i) = -1.0;
+  }
+
+  Matrix<double> s_full(n_orig, n_orig, 0.0);
+  for (std::size_t i = 0; i < n_large; ++i) {
+    for (std::size_t j = 0; j < n_large; ++j) {
+      s_full(i, j) = s_large(i, j);
+      s_full(n_large + i, n_large + j) = s_large(i, j);
+    }
+  }
+
+  // c_matrix's columns are already expressed in the original
+  // [Large-alpha, Large-beta] AO representation (c_matrix = X_Large * U),
+  // so no embedding step is needed -- unlike maxKramersPartnerDeviation,
+  // which must first map H_RKB_ortho's own eigenvectors back through the
+  // Large+Small RKB basis.
+  return maxPartnerDeviationFromPsi(c_matrix, theta, s_full);
 }
 
 }  // namespace rerdmft

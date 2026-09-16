@@ -156,8 +156,12 @@ below); the underlying computation itself is unaffected by `DEBUG`.
    realistic `SPEED_OF_LIGHT` can fall *below* the exact 4-component DHF
    energy (the usual variational bound does not apply once the metric is
    no longer exact) -- a known consequence of skipping both
-   picture-change corrections, not a bug. With `DEBUG`, this also prints
-   each iteration's orbital energies and, at convergence, a check that
+   picture-change corrections, not a bug. The converged orbital energies
+   are printed the same way as step 1, with both the Kramers-pair
+   splitting and the eigenvector-partner-deviation check always shown
+   (never hidden behind `DEBUG`, matching `C4_SPINOR`'s own
+   `Fock_ortho` Kramers check). With `DEBUG`, this also prints each
+   iteration's orbital energies and, at convergence, a check that
    `C = X_Large * U` genuinely solves `F * C = S_Large * C * E` in the
    original (non-orthogonal) Large-component AO basis.
 

@@ -2140,6 +2140,10 @@ int main(int argc, char** argv) {
     }
     std::cout << "Max |E(even) - E(odd)| Kramers-pair splitting (expect ~0): "
                << max_x2c_hf_kramers_splitting << "\n";
+    const double x2c_hf_kramers_partner_deviation =
+        rerdmft::maxKramersPartnerDeviationLarge(x2c_hf_result.c_matrix, s_large);
+    std::cout << "Max Kramers eigenvector-partner deviation, 1-|<odd|Theta even>_S| (expect ~0): "
+               << x2c_hf_kramers_partner_deviation << "\n";
 
     if (input.debug()) {
       // Confirm that the density matrix's own coefficients are exactly

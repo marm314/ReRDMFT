@@ -45,6 +45,24 @@ double maxKramersPartnerDeviation(const Matrix<std::complex<double>>& eigenvecto
                                    const Matrix<double>& s_large,
                                    const Matrix<double>& s_small_ukb);
 
+// Same check as maxKramersPartnerDeviation, but for a strictly
+// two-component (Large-component-only) spinor basis with no small
+// component at all -- as used by X2C's own converged orbitals
+// (X2C_DHF/X2C_HF.h's c_matrix = X_Large * U), which already live
+// purely in the [Large-alpha, Large-beta] AO representation, so no
+// RKB embedding step is needed to get there (unlike
+// maxKramersPartnerDeviation, which must first map H_RKB_ortho's own
+// eigenvectors back through the Large+Small RKB basis).
+//
+// `c_matrix` columns are assumed sorted so that consecutive pairs
+// (2k, 2k+1) are the Kramers-degenerate pairs (as produced by
+// diagonalizing Fock_ortho and already relied on for the even/odd
+// orbital-energy printing). `s_large` is the Large-component AO
+// overlap. Returns the maximum, over all pairs, of
+// 1 - |<psi_odd|Theta psi_even>_S| (0 = perfect Kramers symmetry).
+double maxKramersPartnerDeviationLarge(const Matrix<std::complex<double>>& c_matrix,
+                                        const Matrix<double>& s_large);
+
 }  // namespace rerdmft
 
 #endif  // RERDMFT_KRAMERSSYMMETRY_H
