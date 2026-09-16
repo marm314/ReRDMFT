@@ -53,6 +53,7 @@
 #include "SpinorRotation.h"
 #include "SQP.h"
 #include "UkbHamiltonian.h"
+#include "X2C_decoupling.h"
 #include "Vext.h"
 
 namespace {
@@ -1079,8 +1080,11 @@ int main(int argc, char** argv) {
   rerdmft::Matrix<std::complex<double>> s_small;
   rerdmft::Matrix<std::complex<double>> x_small;
   rerdmft::Matrix<std::complex<double>> x_full;
+  rerdmft::Matrix<std::complex<double>> s_full;
   rerdmft::Matrix<std::complex<double>> h_rkb_ortho;
   rerdmft::HermitianEigenResult h_rkb_ortho_eig;
+  rerdmft::Matrix<std::complex<double>> x2c_c_tmp;
+  double max_generalized_eigenproblem_residual = 0.0;
   double max_kramers_partner_deviation = 0.0;
   rerdmft::Matrix<std::complex<double>> f_small;
   rerdmft::Matrix<std::complex<double>> h_positive_energy;
@@ -1157,12 +1161,22 @@ int main(int argc, char** argv) {
     x_small = rerdmft::inverseSqrtHermitian(s_small);
 
     x_full = rerdmft::xFullMatrix(x_large, x_small);
-    h_rkb_ortho = rerdmft::hRkbOrthoMatrix(h_rkb, x_full);
-
-    h_rkb_ortho_eig = rerdmft::diagonalizeHermitian(h_rkb_ortho);
-
-    max_kramers_partner_deviation = rerdmft::maxKramersPartnerDeviation(
-        h_rkb_ortho_eig.eigenvectors, rkb_coefficients, x_full, s_large, s_small_ukb);
+    // S_full = diag(S_Large, S_Large, S_small), the metric X_full
+    // orthonormalizes against (RkbOrthogonalization.h) -- built
+    // alongside X_full itself so both are always available together
+    // wherever one is needed (e.g. X2C_decoupling.h below).
+    s_full = rerdmft::sFullMatrix(s_large, s_small);
+    // One-electron X2C decoupling (X2C_DHF/X2C_decoupling.h): builds
+    // H_RKB_ortho and diagonalizes it -- ALWAYS needed below as the
+    // C4_DHF SCF's own initial guess (c_dhf/density_matrix), not just
+    // for the optional X2C report (Input.h's X2C keyword, gated
+    // further down at the report itself).
+    const auto x2c_result =
+        rerdmft::x2cDecoupling(h_rkb, s_large, x_large, s_small, s_full, x_full);
+    h_rkb_ortho = x2c_result.h_rkb_ortho;
+    h_rkb_ortho_eig = x2c_result.eigen;
+    x2c_c_tmp = x2c_result.c_tmp;
+    max_generalized_eigenproblem_residual = x2c_result.max_generalized_eigenproblem_residual;
 
     f_small = rerdmft::rkbSmallVextMatrix(small_basis.functions(), rkb_coefficients,
                                            input.geometry());
@@ -1766,20 +1780,35 @@ int main(int argc, char** argv) {
   std::cout << "H_RKB_ortho dimensions: " << h_rkb_ortho.rows() << " x " << h_rkb_ortho.cols()
              << "\n";
 
-  std::cout << "\nEigenvalues of H_RKB_ortho (Kramers pairs, even/odd indices side by side):\n";
-  std::cout << "  " << std::setw(6) << "index" << std::setw(20) << "E (even)" << std::setw(10)
-             << "index" << std::setw(20) << "E (odd)" << "\n";
-  const auto& eigenvalues = h_rkb_ortho_eig.eigenvalues;
-  double max_kramers_splitting = 0.0;
-  for (std::size_t i = 0; i + 1 < eigenvalues.size(); i += 2) {
-    std::cout << "  " << std::setw(6) << i << std::setw(20) << eigenvalues[i] << std::setw(10)
-               << (i + 1) << std::setw(20) << eigenvalues[i + 1] << "\n";
-    max_kramers_splitting = std::max(max_kramers_splitting, std::abs(eigenvalues[i] - eigenvalues[i + 1]));
+  // X2C report: PRINTING the one-electron X2C decoupling's own
+  // molecular orbital energies is opt-in (Input.h's X2C keyword) --
+  // H_RKB_ortho/h_rkb_ortho_eig themselves are already always built
+  // above (needed as C4_DHF's initial guess), so this only gates the
+  // report, not the underlying computation.
+  if (input.x2c()) {
+    max_kramers_partner_deviation = rerdmft::maxKramersPartnerDeviation(
+        h_rkb_ortho_eig.eigenvectors, rkb_coefficients, x_full, s_large, s_small_ukb);
+
+    std::cout << "\nX2C_DHF/X2C_decoupling.h: one-electron X2C decoupling (eigenvalues of\n"
+                 "H_RKB_ortho, Kramers pairs, even/odd indices side by side):\n";
+    std::cout << "  " << std::setw(6) << "index" << std::setw(20) << "E (even)" << std::setw(10)
+               << "index" << std::setw(20) << "E (odd)" << "\n";
+    const auto& eigenvalues = h_rkb_ortho_eig.eigenvalues;
+    double max_kramers_splitting = 0.0;
+    for (std::size_t i = 0; i + 1 < eigenvalues.size(); i += 2) {
+      std::cout << "  " << std::setw(6) << i << std::setw(20) << eigenvalues[i] << std::setw(10)
+                 << (i + 1) << std::setw(20) << eigenvalues[i + 1] << "\n";
+      max_kramers_splitting =
+          std::max(max_kramers_splitting, std::abs(eigenvalues[i] - eigenvalues[i + 1]));
+    }
+    std::cout << "Max |E(even) - E(odd)| Kramers-pair splitting (expect ~0): "
+               << max_kramers_splitting << "\n";
+    std::cout << "Max Kramers eigenvector-partner deviation, 1-|<odd|Theta even>_S| (expect ~0): "
+               << max_kramers_partner_deviation << "\n";
+    std::cout << "Max |H_RKB C_tmp - S_full C_tmp E| (C_tmp = X_full * U genuinely solves the\n"
+                 "generalized eigenvalue problem, expect ~0): "
+               << max_generalized_eigenproblem_residual << "\n";
   }
-  std::cout << "Max |E(even) - E(odd)| Kramers-pair splitting (expect ~0): " << max_kramers_splitting
-             << "\n";
-  std::cout << "Max Kramers eigenvector-partner deviation, 1-|<odd|Theta even>_S| (expect ~0): "
-             << max_kramers_partner_deviation << "\n";
 
   if (input.c4_spinor()) {
     const std::size_t n_rkb = h_rkb_ortho.rows();
@@ -1792,7 +1821,7 @@ int main(int argc, char** argv) {
     std::cout << "Occupied (lowest positive-energy) spinor indices: [" << occ_start << ", "
                << occ_end << ")\n";
     if (input.debug()) {
-      const auto s_full = rerdmft::sFullMatrix(s_large, s_small);
+      // s_full is already built once, alongside x_full, above.
       std::complex<double> trace_ps(0.0, 0.0);
       for (std::size_t i = 0; i < n_rkb; ++i) {
         for (std::size_t j = 0; j < n_rkb; ++j) {

@@ -60,6 +60,15 @@ class Input {
   // (C4_DHF/RkbTwoElectron.h) -- opt-in since both its time and memory
   // cost scale steeply with basis size.
   bool c4_spinor() const { return c4_spinor_; }
+  // Optional; defaults to false when the X2C keyword is absent. When
+  // true, prints the one-electron X2C decoupling report
+  // (X2C_DHF/X2C_decoupling.h): the eigenvalues of the orthonormalized
+  // bare RKB Dirac Hamiltonian H_RKB_ortho, in two columns (Kramers
+  // pairs side by side), plus the Kramers-pair splitting/eigenvector-
+  // partner-deviation checks. H_RKB_ortho itself is always built
+  // (needed as the C4_DHF SCF's own initial guess whenever C4_SPINOR is
+  // on); this keyword only gates PRINTING it as a standalone report.
+  bool x2c() const { return x2c_; }
   // Optional; defaults to false when the HESSIAN_NON_REL keyword is
   // absent. When true, builds the FULL cheap (Hartree/exchange-ansatz,
   // Hessian_opt/HartreeExchangeHessian.h) orbital-rotation Hessian over
@@ -161,6 +170,7 @@ class Input {
   double speed_of_light_ = kSpeedOfLight;
   bool non_relativistic_ = false;
   bool c4_spinor_ = false;
+  bool x2c_ = false;
   bool hessian_non_rel_ = false;
   bool hessian_4c_ = false;
   double mixing_ = 0.4;

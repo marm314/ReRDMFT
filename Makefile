@@ -42,6 +42,11 @@ HESSIAN_DIR := $(SRC_DIR)/Hessian_opt
 # same reason as HESSIAN_DIR, working with plain Matrix<double>/
 # std::vector<double> only (no eri/RKB/basis-specific code).
 OCC_DIR := $(SRC_DIR)/Occ_opt
+# One-electron X2C ("exact two-component") decoupling of the bare RKB
+# Dirac Hamiltonian: its own subdirectory for the same reason as
+# C4_DIR, reusing RkbOrthogonalization.h/LinearAlgebra.h via the shared
+# include path below.
+X2C_DIR := $(SRC_DIR)/X2C_DHF
 BUILD_DIR:= build
 BIN      := rerdmft
 
@@ -69,15 +74,17 @@ C4_SRCS     := $(wildcard $(C4_DIR)/*.cpp)
 NON_REL_SRCS:= $(wildcard $(NON_REL_DIR)/*.cpp)
 HESSIAN_SRCS:= $(wildcard $(HESSIAN_DIR)/*.cpp)
 OCC_SRCS    := $(wildcard $(OCC_DIR)/*.cpp)
+X2C_SRCS    := $(wildcard $(X2C_DIR)/*.cpp)
 OBJS        := $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(SRCS)) \
                $(patsubst $(C4_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(C4_SRCS)) \
                $(patsubst $(NON_REL_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(NON_REL_SRCS)) \
                $(patsubst $(HESSIAN_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(HESSIAN_SRCS)) \
-               $(patsubst $(OCC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(OCC_SRCS))
+               $(patsubst $(OCC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(OCC_SRCS)) \
+               $(patsubst $(X2C_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(X2C_SRCS))
 
-# All five directories are on the quoted-include search path, so files
+# All six directories are on the quoted-include search path, so files
 # in any one can #include headers from the others without a path prefix.
-CPPFLAGS := -I$(LIBCINT_INC) -I$(SRC_DIR) -I$(C4_DIR) -I$(NON_REL_DIR) -I$(HESSIAN_DIR) -I$(OCC_DIR)
+CPPFLAGS := -I$(LIBCINT_INC) -I$(SRC_DIR) -I$(C4_DIR) -I$(NON_REL_DIR) -I$(HESSIAN_DIR) -I$(OCC_DIR) -I$(X2C_DIR)
 # LAPACKE (the C interface to LAPACK) is used for the RKB transformation's
 # overlap-matrix inverse; installed system-wide via liblapacke-dev.
 LDLIBS   := $(LIBCINT) -llapacke -llapack -lblas -lquadmath -lm
@@ -104,6 +111,9 @@ $(BUILD_DIR)/%.o: $(HESSIAN_DIR)/%.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(DEPFLAGS) $(CPPFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/%.o: $(OCC_DIR)/%.cpp | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(DEPFLAGS) $(CPPFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/%.o: $(X2C_DIR)/%.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(DEPFLAGS) $(CPPFLAGS) -c $< -o $@
 
 # Pull in each object's own header-dependency list generated above (a

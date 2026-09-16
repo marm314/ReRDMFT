@@ -135,6 +135,8 @@ void Input::read(const std::string& filename) {
       non_relativistic_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "C4_SPINOR") {
       c4_spinor_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "X2C") {
+      x2c_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "HESSIAN_NON_REL") {
       hessian_non_rel_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "HESSIAN_4C") {
