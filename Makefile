@@ -1,5 +1,5 @@
 CXX      := g++
-# -fopenmp: used by C4_DHF/ElectronRepulsion.cpp and RkbTwoElectron.cpp to
+# -fopenmp: used by AO_ints/ElectronRepulsion.cpp and C4_DHF/RkbTwoElectron.cpp to
 # parallelize the two-electron integral construction (both the raw libcint
 # evaluation and the RKB-basis leg transforms are embarrassingly parallel
 # over disjoint output blocks). Affects both compilation (pragma
@@ -20,10 +20,20 @@ CXXFLAGS := -std=c++17 -Wall -Wextra -O2 -fopenmp
 # header doesn't break the build with a "no rule to make target" error.
 DEPFLAGS := -MMD -MP
 SRC_DIR  := src
+# Every file that calls LIBCINT directly to evaluate an AO integral
+# (Integrals.h/.cpp's overlap+normalization, NablaIntegrals.h/.cpp,
+# NuclearAttraction.h/.cpp, SchrodingerKinetic.h/.cpp,
+# ElectronRepulsion.h/.cpp's two-electron tensor): kept in their own
+# subdirectory so the LIBCINT-facing layer is easy to find as a whole,
+# separate from everything built ON TOP of these AO integrals (RKB/
+# spinor transforms, SCF, etc.) elsewhere in the tree.
+AO_DIR   := $(SRC_DIR)/AO_ints
 # 4-component Dirac-Hartree-Fock two-electron integrals (restricted
 # kinetic balance spinor basis): kept in their own subdirectory since they
 # are a distinct, self-contained piece of the physics (RkbTwoElectron.h,
-# ElectronRepulsion.h, Tensor4.h), built into the same binary.
+# Tensor4.h), built into the same binary. Its own ElectronRepulsion.h/.cpp
+# (the actual LIBCINT call) lives in AO_DIR instead, reused via the shared
+# include path below.
 C4_DIR   := $(SRC_DIR)/C4_DHF
 # Nonrelativistic (Large-component-only) Hartree-Fock: its own
 # subdirectory for the same reason as C4_DIR, and reuses C4_DIR's
@@ -70,21 +80,23 @@ endif
 endif
 
 SRCS        := $(wildcard $(SRC_DIR)/*.cpp)
+AO_SRCS     := $(wildcard $(AO_DIR)/*.cpp)
 C4_SRCS     := $(wildcard $(C4_DIR)/*.cpp)
 NON_REL_SRCS:= $(wildcard $(NON_REL_DIR)/*.cpp)
 HESSIAN_SRCS:= $(wildcard $(HESSIAN_DIR)/*.cpp)
 OCC_SRCS    := $(wildcard $(OCC_DIR)/*.cpp)
 X2C_SRCS    := $(wildcard $(X2C_DIR)/*.cpp)
 OBJS        := $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(SRCS)) \
+               $(patsubst $(AO_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(AO_SRCS)) \
                $(patsubst $(C4_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(C4_SRCS)) \
                $(patsubst $(NON_REL_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(NON_REL_SRCS)) \
                $(patsubst $(HESSIAN_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(HESSIAN_SRCS)) \
                $(patsubst $(OCC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(OCC_SRCS)) \
                $(patsubst $(X2C_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(X2C_SRCS))
 
-# All six directories are on the quoted-include search path, so files
+# All seven directories are on the quoted-include search path, so files
 # in any one can #include headers from the others without a path prefix.
-CPPFLAGS := -I$(LIBCINT_INC) -I$(SRC_DIR) -I$(C4_DIR) -I$(NON_REL_DIR) -I$(HESSIAN_DIR) -I$(OCC_DIR) -I$(X2C_DIR)
+CPPFLAGS := -I$(LIBCINT_INC) -I$(SRC_DIR) -I$(AO_DIR) -I$(C4_DIR) -I$(NON_REL_DIR) -I$(HESSIAN_DIR) -I$(OCC_DIR) -I$(X2C_DIR)
 # LAPACKE (the C interface to LAPACK) is used for the RKB transformation's
 # overlap-matrix inverse; installed system-wide via liblapacke-dev.
 LDLIBS   := $(LIBCINT) -llapacke -llapack -lblas -lquadmath -lm
@@ -99,6 +111,9 @@ $(BIN): $(OBJS)
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDLIBS)
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(DEPFLAGS) $(CPPFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/%.o: $(AO_DIR)/%.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(DEPFLAGS) $(CPPFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/%.o: $(C4_DIR)/%.cpp | $(BUILD_DIR)
