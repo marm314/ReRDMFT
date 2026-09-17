@@ -116,18 +116,19 @@ class RkbTwoElectronTensor {
 // the same electron-exchange symmetry used for storage. Both time and
 // memory still scale steeply with basis size, so this remains intended
 // for small test systems.
-// `use_cholesky` (default true) decomposes the dominant-cost (Small,Small|
-// Small,Small) piece via Utils/Cholesky_Decomposition.h's pivoted Cholesky
-// decomposition before projecting it into the four RKB-Small(y1),RKB-
-// Small(y2) blocks, instead of directly quarter-transforming the full
-// (n_small)^4 tensor on each of its two electron-pair legs (see the .cpp
-// for the derivation of why this is a legitimate, verified-equivalent
-// reformulation). `false` uses the original, unmodified direct-transform
-// code path.
+// `use_cholesky` (default false, matching Input.h's CHOLESKY keyword
+// default) decomposes the dominant-cost (Small,Small|Small,Small) piece
+// via Utils/Cholesky_Decomposition.h's pivoted Cholesky decomposition
+// before projecting it into the four RKB-Small(y1),RKB-Small(y2) blocks,
+// instead of directly quarter-transforming the full (n_small)^4 tensor on
+// each of its two electron-pair legs (see the .cpp for the derivation of
+// why this is a legitimate, verified-equivalent reformulation) -- this is
+// the one Cholesky application that compresses well, so worth enabling
+// explicitly (CHOLESKY TRUE) for larger small-component bases.
 RkbTwoElectronTensor rkbTwoElectronIntegrals(const std::vector<BasisFunction>& large_basis,
                                               const std::vector<BasisFunction>& small_basis,
                                               const Matrix<std::complex<double>>& rkb_coefficients,
-                                              bool use_cholesky = true, double cholesky_threshold = 1e-10);
+                                              bool use_cholesky = false, double cholesky_threshold = 1e-10);
 
 }  // namespace rerdmft
 

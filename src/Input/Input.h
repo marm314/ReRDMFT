@@ -172,24 +172,25 @@ class Input {
   // Directory (created if missing) that cache_integrals() cache files
   // are written to/read from.
   const std::string& cache_dir() const { return cache_dir_; }
-  // Optional; defaults to TRUE when the CHOLESKY keyword is absent --
-  // the DEFAULT option, per explicit design. When true, every two-
-  // electron integral basis TRANSFORMATION in this project (NON_REL's
-  // AO->MO transform, C4_DHF's RKB-spinor AO->MO transform, X2C_DHF's
-  // Large-spin-orbital AO->MO transform, and C4_DHF/RkbTwoElectron.cpp's
-  // own unrestricted- to restricted-kinetic-balance Small-basis
-  // projection) goes through a pivoted Cholesky decomposition of the
-  // SOURCE tensor first (Utils/Cholesky_Decomposition.h), transforming
-  // only the resulting (far fewer) Cholesky VECTORS instead of the full
-  // O(n^4) tensor, then reconstructing in the new basis -- reducing an
-  // O(n_old^4 * n_new)-scaling direct 4-leg transform to O(Nchol *
-  // n_old^3) (Nchol scaling empirically like O(n_old), not O(n_old^2)),
-  // at a numerically negligible accuracy cost controlled by the
+  // Optional; defaults to FALSE when the CHOLESKY keyword is absent --
+  // the original direct 4-leg transform is the default everywhere. When
+  // TRUE, every two-electron integral basis TRANSFORMATION in this
+  // project (NON_REL's AO->MO transform, C4_DHF's RKB-spinor AO->MO
+  // transform, X2C_DHF's Large-spin-orbital AO->MO transform, and
+  // C4_DHF/RkbTwoElectron.cpp's own unrestricted- to restricted-kinetic-
+  // balance Small-basis projection) instead goes through a pivoted
+  // Cholesky decomposition of the SOURCE tensor first (Utils/
+  // Cholesky_Decomposition.h), transforming only the resulting (often
+  // far fewer) Cholesky VECTORS instead of the full O(n^4) tensor, then
+  // reconstructing in the new basis. This helps when the source tensor
+  // actually compresses (e.g. the UKB->RKB Small-basis projection); the
+  // AO/spinor->MO transforms often show little to no rank reduction (the
+  // complex spinor pair-space lacks the symmetry real AO integrals have),
+  // so CHOLESKY TRUE is opt-in rather than default. Numerically
+  // negligible accuracy cost when enabled, controlled by the
   // decomposition's own internal threshold (tight enough that CHOLESKY
   // TRUE reproduces CHOLESKY FALSE's converged energies to the full
-  // displayed precision, not merely approximately). Setting CHOLESKY
-  // FALSE disables this entirely and falls back to this project's
-  // original direct 4-leg transform everywhere, unchanged.
+  // displayed precision, not merely approximately).
   bool cholesky() const { return cholesky_; }
   // Residual-diagonal cutoff for the pivoted Cholesky decomposition above
   // (Utils/Cholesky_Decomposition.h's own `threshold` parameter) -- below
@@ -260,7 +261,7 @@ class Input {
   double energy_tolerance_ = 1e-8;
   double density_tolerance_ = 1e-6;
   bool cache_integrals_ = false;
-  bool cholesky_ = true;
+  bool cholesky_ = false;
   double cholesky_threshold_ = 1e-10;
   std::string cache_dir_ = ".rerdmft_cache";
   std::string functional_ = "SD";
