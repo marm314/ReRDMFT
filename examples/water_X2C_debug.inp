@@ -1,11 +1,15 @@
 # Example ReRDMFT input file: water molecule. DEBUG TRUE alone (VERBOSE
 # defaults to 0) runs only the cheap DEBUG cross-checks (the O(n^4)
-# efficient gradient, the finite-difference test); add VERBOSE 1 (see
-# water_debug_verbose1.inp) to also run the more expensive O(n^5)
-# GeneralizedFock.h dense-2-RDM cross-check. HESSIAN_NON_REL/HESSIAN_4C
-# are independent of DEBUG/VERBOSE: they build and diagonalize the FULL
-# cheap orbital-rotation Hessian to confirm NON_REL is a genuine minimum
-# and C4_DHF a saddle point.
+# efficient gradient, the finite-difference test, for NON_REL, C4_DHF,
+# AND X2C-HF); add VERBOSE 1 (see water_debug_verbose1.inp) to also run
+# the more expensive O(n^5) GeneralizedFock.h dense-2-RDM cross-check,
+# or VERBOSE 2 (see water_debug_verbose2.inp) to additionally validate
+# the mixed real/imaginary Hessian block. HESSIAN_NON_REL/HESSIAN_4C/
+# HESSIAN_X2C are independent of DEBUG/VERBOSE: they build and
+# diagonalize the FULL cheap orbital-rotation Hessian to confirm
+# NON_REL and X2C-HF are genuine minima (X2C-HF has no negative-energy
+# branch to admit a downhill rotation into, unlike C4_DHF) and C4_DHF a
+# saddle point.
 NELEC 10
 BASIS water-sto-3g.gbs
 X2C TRUE
@@ -13,6 +17,7 @@ NON_RELATIVISTIC TRUE
 DEBUG TRUE
 HESSIAN_NON_REL TRUE
 HESSIAN_4C TRUE
+HESSIAN_X2C TRUE
 
 GEOMETRY
 O   0.000000   0.000000   0.000000

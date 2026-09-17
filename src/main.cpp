@@ -57,6 +57,8 @@
 #include "X2C_DensityMatrix.h"
 #include "X2C_hamiltonian.h"
 #include "X2C_HF.h"
+#include "X2C_MoTransform.h"
+#include "X2C_OrbitalGradient.h"
 #include "Vext.h"
 
 namespace {
@@ -1215,6 +1217,20 @@ int main(int argc, char** argv) {
   std::string dhf_mixed_hessian_report;
   std::string dhf_full_hessian_report;
   std::string dhf_functional_report;
+  // X2C-HF's own analogues of the dhf_* gradient/Hessian test suite
+  // above -- see the (long) comment right before the X2C-HF MO
+  // transform in the main try block for how these are all populated.
+  bool x2c_gradient_computed = false;
+  double x2c_gradient_norm = 0.0;
+  double x2c_gradient_max_abs = 0.0;
+  double x2c_gradient_efficient_norm = 0.0;
+  double x2c_gradient_efficient_max_abs = 0.0;
+  double x2c_gradient_rdmft_norm = 0.0;
+  double x2c_gradient_rdmft_max_abs = 0.0;
+  std::string x2c_finite_diff_report;
+  std::string x2c_hessian_report;
+  std::string x2c_mixed_hessian_report;
+  std::string x2c_full_hessian_report;
   rerdmft::Matrix<std::complex<double>> c_dhf;
   rerdmft::Matrix<std::complex<double>> density_matrix;
   rerdmft::RkbTwoElectronTensor c4_spinor_eri;
@@ -1554,6 +1570,166 @@ int main(int argc, char** argv) {
           input.geometry(), input.mixing(), input.max_iterations(), input.energy_tolerance(),
           input.density_tolerance());
       logTiming("X2C-HF SCF complete", t_start, t_checkpoint, timing_records);
+
+      // Transform h_x2c and the (fixed) Large-component spin-orbital
+      // two-electron integrals into the converged X2C-HF spinor
+      // ("molecular orbital") basis spanned by x2c_hf_result.c_matrix --
+      // needed by the RDMFT-ansatz gradient/Hessian test suite below,
+      // mirroring EXACTLY what C4_SPINOR does for DHF (see its own
+      // comment above), just in the smaller 2*nLarge-dimensional
+      // X2C-HF space (no negative-energy branch at all).
+      const auto h_x2c_mo =
+          rerdmft::x2cMoOneElectronTransform(x2c_hamiltonian.h_x2c, x2c_hf_result.c_matrix);
+      const auto eri_x2c_mo =
+          rerdmft::x2cMoTwoElectronTransformPhysics(eri_x2c_spin, x2c_hf_result.c_matrix);
+      logTiming("X2C-HF MO integral transform complete", t_start, t_checkpoint, timing_records);
+
+      const std::size_t x2c_dim = h_x2c_mo.rows();
+
+      // Default, always-on check: the RDMFT-ansatz gradient, TESTED
+      // here with X2C-HF's own occupation numbers (1.0 for each of the
+      // lowest n_electrons spinors, 0.0 elsewhere -- no negative-energy
+      // offset needed, unlike DHF: X2C's own decoupling already
+      // eliminated that branch, so occupied spinors are simply
+      // [0, n_electrons)).
+      std::vector<double> x2c_hf_occupations(x2c_dim, 0.0);
+      for (int p = 0; p < input.n_electrons(); ++p) x2c_hf_occupations[static_cast<std::size_t>(p)] = 1.0;
+      const auto hx_test_x2c = occupationOuterProduct(x2c_hf_occupations);
+      const auto fock_rdmft_x2c = rerdmft::hartreeExchangeFockMatrix(
+          h_x2c_mo, eri_x2c_mo, x2c_hf_occupations, hx_test_x2c, hx_test_x2c);
+      const auto gradient_rdmft_x2c = rerdmft::orbitalGradient(fock_rdmft_x2c);
+      gradientNormAndMax(gradient_rdmft_x2c, x2c_gradient_rdmft_norm, x2c_gradient_rdmft_max_abs);
+      logTiming("X2C-HF RDMFT-ansatz orbital gradient complete", t_start, t_checkpoint,
+                timing_records);
+
+      // DEBUG-only cross-checks against the RDMFT-ansatz path above,
+      // mirroring DHF's own exactly (see its comment above).
+      if (input.debug()) {
+        const auto gradient_efficient_x2c = rerdmft::x2cOrbitalGradientEfficient(
+            x2c_hamiltonian.h_x2c, eri_x2c_spin, x2c_hf_result.c_matrix, input.n_electrons());
+        gradientNormAndMax(gradient_efficient_x2c, x2c_gradient_efficient_norm,
+                            x2c_gradient_efficient_max_abs);
+        logTiming("X2C-HF efficient orbital gradient complete", t_start, t_checkpoint,
+                  timing_records);
+
+        rerdmft::Matrix<std::complex<double>> gradient_mo_x2c;
+        rerdmft::Matrix<std::complex<double>> d_mo_x2c;
+        rerdmft::Tensor4<std::complex<double>> two_rdm_mo_x2c;
+        rerdmft::Matrix<std::complex<double>> fock_mo_x2c;
+        if (input.verbose() > 0) {
+          d_mo_x2c = rerdmft::Matrix<std::complex<double>>(x2c_dim, x2c_dim,
+                                                             std::complex<double>(0.0, 0.0));
+          for (int p = 0; p < input.n_electrons(); ++p) {
+            d_mo_x2c(static_cast<std::size_t>(p), static_cast<std::size_t>(p)) =
+                std::complex<double>(1.0, 0.0);
+          }
+          two_rdm_mo_x2c = rerdmft::singleDeterminantTwoRdm(d_mo_x2c);
+
+          fock_mo_x2c = rerdmft::generalizedFockMatrix(h_x2c_mo, eri_x2c_mo, d_mo_x2c, two_rdm_mo_x2c);
+          gradient_mo_x2c = rerdmft::orbitalGradient(fock_mo_x2c);
+          logTiming("X2C-HF orbital gradient complete", t_start, t_checkpoint, timing_records);
+          gradientNormAndMax(gradient_mo_x2c, x2c_gradient_norm, x2c_gradient_max_abs);
+          x2c_gradient_computed = true;
+        }
+
+        // Numerical (finite-difference) gradient/Hessian test: rotates
+        // the HOMO/LUMO pair (no negative-energy offset -- lumo =
+        // n_electrons, homo = n_electrons-1) by a small kappa and
+        // recomputes the energy at the (non-self-consistent) rotated
+        // density, exactly mirroring DHF's own check.
+        const std::size_t x2c_homo = static_cast<std::size_t>(input.n_electrons()) - 1;
+        const std::size_t x2c_lumo = static_cast<std::size_t>(input.n_electrons());
+        if (x2c_lumo < x2c_dim) {
+          x2c_finite_diff_report = finiteDifferenceCheckReport(
+              "X2C_HF", h_x2c_mo, eri_x2c_mo, x2c_hf_occupations, x2c_lumo, x2c_homo,
+              x2c_hf_result.nuclear_repulsion_energy, gradient_rdmft_x2c,
+              x2c_gradient_computed ? &gradient_mo_x2c : nullptr, gradient_efficient_x2c);
+        }
+
+        // Analogous OFF-DIAGONAL Hessian finite-difference check,
+        // exactly mirroring DHF's own: (p,q)=(lumo,homo) and
+        // (r,s)=(lumo,homo-1), needs at least 2 electrons so homo-1
+        // stays within the occupied block.
+        if (x2c_lumo < x2c_dim && input.n_electrons() > 1) {
+          const std::size_t x2c_homo_minus_1 = x2c_homo - 1;
+          const std::complex<double> analytic_hess_cheap_x2c = rerdmft::hartreeExchangeHessianElement(
+              h_x2c_mo, eri_x2c_mo, x2c_hf_occupations, hx_test_x2c, hx_test_x2c, fock_rdmft_x2c,
+              x2c_lumo, x2c_homo, x2c_lumo, x2c_homo_minus_1);
+          logTiming("X2C-HF cheap (HartreeExchangeHessian, O(n) per element) Hessian "
+                    "element complete",
+                    t_start, t_checkpoint, timing_records);
+          std::complex<double> analytic_hess_general_x2c(0.0, 0.0);
+          if (x2c_gradient_computed) {
+            analytic_hess_general_x2c = rerdmft::generalizedOrbitalHessianElement(
+                h_x2c_mo, eri_x2c_mo, d_mo_x2c, two_rdm_mo_x2c, fock_mo_x2c, x2c_lumo, x2c_homo,
+                x2c_lumo, x2c_homo_minus_1);
+            logTiming("X2C-HF general (GeneralizedHessian, O(n^2) per element) Hessian "
+                      "element complete",
+                      t_start, t_checkpoint, timing_records);
+          }
+
+          const std::complex<double> analytic_hess_imag_cheap_x2c =
+              rerdmft::hartreeExchangeHessianElementImag(h_x2c_mo, eri_x2c_mo, x2c_hf_occupations,
+                                                          hx_test_x2c, hx_test_x2c, fock_rdmft_x2c,
+                                                          x2c_lumo, x2c_homo, x2c_lumo,
+                                                          x2c_homo_minus_1);
+          logTiming("X2C-HF cheap (HartreeExchangeHessian, O(n) per element) imaginary-"
+                    "direction Hessian element complete",
+                    t_start, t_checkpoint, timing_records);
+          std::complex<double> analytic_hess_imag_general_x2c(0.0, 0.0);
+          if (x2c_gradient_computed) {
+            analytic_hess_imag_general_x2c = rerdmft::generalizedOrbitalHessianElementImag(
+                h_x2c_mo, eri_x2c_mo, d_mo_x2c, two_rdm_mo_x2c, fock_mo_x2c, x2c_lumo, x2c_homo,
+                x2c_lumo, x2c_homo_minus_1);
+            logTiming("X2C-HF general (GeneralizedHessian, O(n^2) per element) imaginary-"
+                      "direction Hessian element complete",
+                      t_start, t_checkpoint, timing_records);
+          }
+
+          x2c_hessian_report = hessianFiniteDifferenceReport(
+              "X2C_HF", h_x2c_mo, eri_x2c_mo, x2c_hf_occupations, x2c_lumo, x2c_homo, x2c_lumo,
+              x2c_homo_minus_1, x2c_hf_result.nuclear_repulsion_energy, analytic_hess_cheap_x2c,
+              x2c_gradient_computed ? &analytic_hess_general_x2c : nullptr,
+              &analytic_hess_imag_cheap_x2c,
+              x2c_gradient_computed ? &analytic_hess_imag_general_x2c : nullptr);
+
+          // MIXED real/imaginary Hessian block, gated by VERBOSE > 1,
+          // exactly mirroring DHF's own.
+          if (input.verbose() > 1) {
+            const std::complex<double> analytic_mixed_x2c = rerdmft::hartreeExchangeHessianElementMixed(
+                h_x2c_mo, eri_x2c_mo, x2c_hf_occupations, hx_test_x2c, hx_test_x2c, fock_rdmft_x2c,
+                x2c_lumo, x2c_homo, x2c_lumo, x2c_homo_minus_1);
+            const std::complex<double> analytic_mixed_swapped_x2c =
+                rerdmft::hartreeExchangeHessianElementMixed(h_x2c_mo, eri_x2c_mo,
+                                                             x2c_hf_occupations, hx_test_x2c,
+                                                             hx_test_x2c, fock_rdmft_x2c,
+                                                             x2c_lumo, x2c_homo_minus_1, x2c_lumo,
+                                                             x2c_homo);
+            logTiming("X2C-HF cheap (HartreeExchangeHessian, O(n) per element) mixed-"
+                      "direction Hessian element complete",
+                      t_start, t_checkpoint, timing_records);
+            x2c_mixed_hessian_report = mixedHessianFiniteDifferenceReport(
+                "X2C_HF", h_x2c_mo, eri_x2c_mo, x2c_hf_occupations, x2c_lumo, x2c_homo, x2c_lumo,
+                x2c_homo_minus_1, x2c_hf_result.nuclear_repulsion_energy, analytic_mixed_x2c,
+                analytic_mixed_swapped_x2c);
+          }
+        }
+      }
+
+      // Full orbital-rotation Hessian (cheap Hartree/exchange path, ALL
+      // independent real-step pairs p>q over the FULL X2C-HF spinor
+      // space), diagonalized to confirm the converged X2C-HF solution
+      // is a genuine MINIMUM (no negative eigenvalues expected) --
+      // UNLIKE C4_DHF's saddle point, since X2C's own decoupling
+      // already eliminated the negative-energy branch entirely, so
+      // there is no downhill rotation direction left to admit. Gated
+      // by its own HESSIAN_X2C keyword (Input.h), independent of
+      // DEBUG -- mirroring HESSIAN_NON_REL/HESSIAN_4C exactly.
+      if (input.hessian_x2c()) {
+        x2c_full_hessian_report = buildFullHessianReport(
+            "X2C_HF", h_x2c_mo, eri_x2c_mo, x2c_hf_occupations, hx_test_x2c, fock_rdmft_x2c,
+            t_start, t_checkpoint, timing_records, /*expected_n_negative=*/0);
+      }
     }
 
     if (input.c4_spinor()) {
@@ -2283,6 +2459,43 @@ int main(int argc, char** argv) {
                    "  expect ~0): "
                  << max_x2c_hf_coefficient_residual << "\n";
     }
+
+    std::cout << "\nHessian_opt cross-check (Dyall Eq. 8.30/8.32 generalized Fock/gradient,\n"
+                 "X2C-HF spinor MO basis, natural-spinor RDMFT ansatz -- tested here with\n"
+                 "X2C-HF occupations):\n";
+    std::cout << "  RDMFT-ansatz (Hartree+exchange, O(n^3) contraction) gradient norm (expect ~0): "
+               << std::setprecision(10) << x2c_gradient_rdmft_norm << std::setprecision(6)
+               << "\n";
+    std::cout << "  RDMFT-ansatz (Hartree+exchange, O(n^3) contraction) gradient max |g_pq|:       "
+               << std::setprecision(10) << x2c_gradient_rdmft_max_abs << std::setprecision(6)
+               << "\n";
+    if (input.debug()) {
+      std::cout << "  X2C-HF-specific efficient (O(n^4)) gradient norm (expect ~0):      "
+                 << std::setprecision(10) << x2c_gradient_efficient_norm << std::setprecision(6)
+                 << "\n";
+      std::cout << "  X2C-HF-specific efficient (O(n^4)) gradient max |g_pq|:            "
+                 << std::setprecision(10) << x2c_gradient_efficient_max_abs
+                 << std::setprecision(6) << "\n";
+      // General (dense 2-RDM, O(n^5)) path only runs at VERBOSE > 0 (see
+      // Input.h) -- x2c_gradient_computed reflects that.
+      if (x2c_gradient_computed) {
+        std::cout << "  General (dense 2-RDM, O(n^5)) gradient norm (expect ~0):           "
+                   << std::setprecision(10) << x2c_gradient_norm << std::setprecision(6) << "\n";
+        std::cout << "  General (dense 2-RDM, O(n^5)) gradient max |g_pq|:                 "
+                   << std::setprecision(10) << x2c_gradient_max_abs << std::setprecision(6)
+                   << "\n";
+      }
+      std::cout << x2c_finite_diff_report;
+      std::cout << x2c_hessian_report;
+      std::cout << x2c_mixed_hessian_report;
+    }
+    // Printed unconditionally (empty when HESSIAN_X2C is off) -- gated
+    // by its own keyword, not DEBUG (see Input.h). Unlike C4_DHF's own
+    // full-Hessian report (expected to show a SADDLE POINT), this one
+    // is expected to show a genuine MINIMUM: no negative-energy branch
+    // exists in the X2C-HF spinor space at all, so there is no downhill
+    // rotation direction for the occupied spinors to admit.
+    std::cout << x2c_full_hessian_report;
   }
 
   if (input.c4_spinor()) {

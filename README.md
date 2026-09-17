@@ -88,6 +88,7 @@ anywhere on a line) are comments.
 | `VERBOSE` | int (>= 0) | `0` | Only meaningful with `DEBUG TRUE`. At `0`, skips the extra O(n^5) dense-2-RDM cross-check (`Hessian_opt/GeneralizedFock.h`'s fully general path); at `> 0`, also runs it. At `> 1` (`C4_SPINOR` only), additionally validates the mixed real/imaginary orbital-rotation Hessian block (`Hessian_opt/HartreeExchangeHessian.h`'s `hartreeExchangeHessianElementMixed`) against a genuine mixed-direction finite difference. All other `DEBUG` cross-checks are cheap and always run regardless of this setting. |
 | `HESSIAN_NON_REL` | bool | `FALSE` | Build the FULL cheap (Hartree/exchange-ansatz) orbital-rotation Hessian for the converged `NON_REL` solution and diagonalize it, reporting whether it is a genuine minimum (no negative eigenvalues). Independent of `DEBUG`/`VERBOSE`; O(n^5) to build plus O(n^6) to diagonalize, so opt-in. |
 | `HESSIAN_4C` | bool | `FALSE` | Same as `HESSIAN_NON_REL`, but for the converged `C4_DHF` solution -- spans the FULL RKB spinor space (including the negative-energy branch), where negative eigenvalues (a saddle point) are physically expected rather than a bug. |
+| `HESSIAN_X2C` | bool | `FALSE` | Same as `HESSIAN_NON_REL`/`HESSIAN_4C`, but for the converged approximate X2C-HF solution -- spans the full X2C-HF spinor space (2 components, no negative-energy branch at all), where a genuine MINIMUM (no negative eigenvalues) is physically expected, same as `HESSIAN_NON_REL`. |
 | `SPEED_OF_LIGHT` | double (> 0) | CODATA value | Override the speed of light (atomic units). A very large value probes the nonrelativistic limit; smaller values exaggerate relativistic effects. |
 | `MIXING` | double, in `(0, 1]` | `0.4` | Linear density-matrix mixing weight for the `C4_DHF` SCF loop: the density fed into the next iteration is `mixing*P_new + (1-mixing)*P_current`. |
 | `MAX_ITERATIONS` | int (> 0) | `100` | Maximum number of `C4_DHF` SCF cycles before giving up (the last cycle's results are still returned, with `converged = false`). |
@@ -164,10 +165,32 @@ below); the underlying computation itself is unaffected by `DEBUG`.
    iteration's orbital energies and, at convergence, a check that
    `C = X_Large * U` genuinely solves `F * C = S_Large * C * E` in the
    original (non-orthogonal) Large-component AO basis.
+5. **Gradient/Hessian test suite**: after the SCF converges, `h_x2c`
+   and the Large-component spin-orbital two-electron integrals are
+   transformed into the converged X2C-HF MO basis
+   (`X2C_DHF/X2C_MoTransform.h`), and the SAME `Hessian_opt` test suite
+   `C4_SPINOR` runs for DHF is run here too: the RDMFT-ansatz gradient
+   (always on); under `DEBUG`, the X2C-HF-specific efficient gradient
+   (`X2C_DHF/X2C_OrbitalGradient.h`), the general dense-2-RDM
+   cross-check at `VERBOSE > 0`, a finite-difference gradient/Hessian
+   check, and the mixed real/imaginary Hessian block at `VERBOSE > 1`;
+   and, under `HESSIAN_X2C`, the full orbital-rotation Hessian
+   diagonalization. Unlike `C4_DHF`'s saddle point, X2C-HF's converged
+   solution is a genuine **minimum** (no negative eigenvalues) -- X2C's
+   own decoupling already eliminated the negative-energy branch, so
+   there is no downhill rotation direction left for the occupied
+   spinors to admit. Confirmed on water/STO-3G (91x91 Hessian: 0
+   negative, 40 positive, min eigenvalue `~-1e-11`) and CO/STO-3G
+   (190x190: same result) -- and all three independently-derived
+   gradient formulas (RDMFT-ansatz, efficient, general) agree to
+   machine precision at both.
 
-See `examples/water_X2C.inp` for a plain worked example, or
-`examples/water_X2C_debug.inp` for the same run with `DEBUG TRUE` (all
-the extra cross-checks described above, plus `HESSIAN_4C`).
+See `examples/water_X2C.inp` for a plain worked example (now including
+`HESSIAN_X2C TRUE`), or `examples/water_X2C_debug.inp` for the same run
+with `DEBUG TRUE` (all the extra cross-checks described above, plus
+`HESSIAN_4C`/`HESSIAN_X2C`); `examples/water_debug_verbose2.inp` also
+exercises X2C-HF's own mixed-Hessian check (`VERBOSE 2`) alongside
+`C4_DHF`'s.
 
 ## RDMFT functional evaluation
 

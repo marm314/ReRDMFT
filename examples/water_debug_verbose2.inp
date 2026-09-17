@@ -6,12 +6,14 @@
 # Hess^ty_pq,rs = d^2E/dt_pq dy_rs) against a genuine mixed-direction
 # 2D finite difference (a real step on one orbital-rotation pair
 # crossed with an imaginary step on another) -- only meaningful for
-# C4_SPINOR's genuinely complex spinors, and a newer, less commonly
+# genuinely complex spinors (C4_SPINOR's 4-component DHF and X2C's
+# 2-component X2C-HF, both included here), and a newer, less commonly
 # needed check than everything else DEBUG/VERBOSE 1 already cover, so
 # it needs a strictly higher VERBOSE threshold (> 1, not just > 0).
 NELEC 10
 BASIS water-sto-3g.gbs
 C4_SPINOR TRUE
+X2C TRUE
 NON_RELATIVISTIC TRUE
 DEBUG TRUE
 VERBOSE 2

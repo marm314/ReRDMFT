@@ -88,14 +88,26 @@ class Input {
   //      so this is a genuinely approximate treatment, not exact
   //      X2C-DHF. The density matrix's coefficients are C = X_Large * U
   //      (U = the eigenvectors diagonalizing Fock_ortho).
+  //   3. After the SCF converges, transforms h_x2c and the Large-
+  //      component spin-orbital two-electron integrals into the
+  //      converged X2C-HF MO basis (X2C_DHF/X2C_MoTransform.h) and runs
+  //      the SAME Hessian_opt gradient/Hessian test suite as C4_SPINOR
+  //      does for DHF (RDMFT-ansatz gradient always on; under DEBUG,
+  //      the X2C-HF-specific efficient gradient
+  //      (X2C_DHF/X2C_OrbitalGradient.h), the general dense-2-RDM cross-
+  //      check at VERBOSE > 0, a finite-difference gradient/Hessian
+  //      check, and the mixed real/imaginary Hessian block at
+  //      VERBOSE > 1) -- see hessian_x2c() below for the corresponding
+  //      full-Hessian-diagonalization diagnostic.
   // This whole report/SCF is printed between the NON_RELATIVISTIC and
   // C4_SPINOR (4-component DHF) final reports, regardless of whether
   // either of those keywords is itself on. With DEBUG also true, extra
   // detail is added throughout: the decoupling step's own Kramers
   // eigenvector-partner-deviation and generalized-eigenproblem-residual
   // checks, per-iteration orbital energies within the X2C-HF SCF history,
-  // and a residual check confirming C = X_Large * U genuinely solves
-  // F C = S_Large C E (validating the coefficient formula above).
+  // a residual check confirming C = X_Large * U genuinely solves
+  // F C = S_Large C E (validating the coefficient formula above), and
+  // everything listed in point 3 above.
   // H_RKB_ortho/h_x2c themselves are always built regardless (H_RKB_
   // ortho is needed as the C4_DHF SCF's own initial guess whenever
   // C4_SPINOR is on); this keyword only gates running/printing the
@@ -116,6 +128,14 @@ class Input {
   // negative-energy branch), expected to show negative eigenvalues
   // (a saddle point) rather than a minimum.
   bool hessian_4c() const { return hessian_4c_; }
+  // Optional; defaults to false when the HESSIAN_X2C keyword is
+  // absent. Same as hessian_non_rel()/hessian_4c(), but for the
+  // converged X2C-HF solution (X2C_DHF/X2C_HF.h) -- the Hessian spans
+  // the FULL X2C-HF spinor space (2*nLarge, no negative-energy branch
+  // at all, unlike C4_DHF: X2C's own decoupling already eliminated
+  // it), so this is expected to show a genuine MINIMUM (no negative
+  // eigenvalues), same as hessian_non_rel(), NOT a saddle point.
+  bool hessian_x2c() const { return hessian_x2c_; }
   // Optional; defaults to 0.4 when the MIXING keyword is absent. Linear
   // density-matrix mixing weight for the C4_DHF SCF loop (C4_DHF/C4_DHF.h):
   // the density fed into the next iteration's Fock build is
@@ -205,6 +225,7 @@ class Input {
   bool x2c_ = false;
   bool hessian_non_rel_ = false;
   bool hessian_4c_ = false;
+  bool hessian_x2c_ = false;
   double mixing_ = 0.4;
   int max_iterations_ = 100;
   double energy_tolerance_ = 1e-8;

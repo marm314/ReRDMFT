@@ -141,6 +141,8 @@ void Input::read(const std::string& filename) {
       hessian_non_rel_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "HESSIAN_4C") {
       hessian_4c_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "HESSIAN_X2C") {
+      hessian_x2c_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "MIXING") {
       mixing_ = parseDouble(iss, line_number, keyword);
       if (!(mixing_ > 0.0 && mixing_ <= 1.0)) {
