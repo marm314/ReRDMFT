@@ -1,0 +1,25 @@
+# Example ReRDMFT input file: water molecule, evaluating the MULLER
+# (Muller/Buijse-Baerends, Occ_opt/JK_only.h) JK-only RDMFT functional
+# on the converged approximate X2C-HF spinors -- same idea as
+# water_muller.inp/co-sto-3g_muller.inp's own NON_REL/C4_DHF runs, just
+# for X2C (see README.md's "X2C decoupling and X2C-HF" section): the
+# converged X2C-HF orbitals/MO-basis integrals are held FIXED, initial
+# fractional occupations are generated (OCCUPATION_INIT PROPORTIONAL by
+# default), FUNCTIONAL is evaluated on them, and the occupations are
+# then further OPTIMIZED at those same fixed orbitals via Occ_opt/SQP.h
+# -- printed right after the X2C-HF Hessian_opt cross-check section.
+# Like NON_REL (and unlike C4_DHF), every X2C-HF spinor competes for
+# occupation, since X2C's own decoupling already eliminated the
+# negative-energy branch entirely. Kramers partners (adjacent even/odd
+# indices) are confirmed to always receive the SAME optimized
+# occupation, exactly as for C4_DHF's own spinors.
+NELEC 10
+BASIS water-sto-3g.gbs
+X2C TRUE
+FUNCTIONAL MULLER
+
+GEOMETRY
+O   0.000000   0.000000   0.000000
+H   0.000000   0.757000   0.586000
+H   0.000000  -0.757000   0.586000
+END

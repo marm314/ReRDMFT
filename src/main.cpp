@@ -795,7 +795,10 @@ std::string buildFullHessianReport(const std::string& label, const rerdmft::Matr
 // (Dirac sea) branch from thermal population entirely (matches this
 // project's existing no-pair convention, e.g. occupiedPositiveEnergyDensity)
 // rather than relying on it being numerically negligible at a physical
-// temperature; for NON_REL it is always 0 (every spin-orbital competes).
+// temperature; for NON_REL and X2C_HF it is always 0 (every spin-
+// orbital/spinor competes -- X2C's own decoupling already eliminated
+// its negative-energy branch entirely, so there is nothing left to
+// exclude there, unlike C4_DHF).
 //
 // `f_l` for JK_only's BBC2 functional (the only one that needs it) is
 // SIMPLIFIED here to round(n_electrons) -- the number of "nominally
@@ -952,7 +955,7 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
            "orbital/spinor space, fixed 5 decimals):\n";
     out << std::fixed << std::setprecision(5);
     double displayed_occupation_sum = 0.0;
-    if (label == "C4_DHF") {
+    if (label == "C4_DHF" || label == "X2C_HF") {
       // Two columns, even/odd side by side -- SAME adjacent-index
       // Kramers-pair convention already used elsewhere in this file
       // (e.g. "Converged one-body (Fock_ortho) state energies"): lets
@@ -1231,6 +1234,7 @@ int main(int argc, char** argv) {
   std::string x2c_hessian_report;
   std::string x2c_mixed_hessian_report;
   std::string x2c_full_hessian_report;
+  std::string x2c_functional_report;
   rerdmft::Matrix<std::complex<double>> c_dhf;
   rerdmft::Matrix<std::complex<double>> density_matrix;
   rerdmft::RkbTwoElectronTensor c4_spinor_eri;
@@ -1729,6 +1733,23 @@ int main(int argc, char** argv) {
         x2c_full_hessian_report = buildFullHessianReport(
             "X2C_HF", h_x2c_mo, eri_x2c_mo, x2c_hf_occupations, hx_test_x2c, fock_rdmft_x2c,
             t_start, t_checkpoint, timing_records, /*expected_n_negative=*/0);
+      }
+
+      // NOT DEBUG-gated, but SKIPPED entirely unless FUNCTIONAL was
+      // explicitly given (Input::has_functional()) -- see NON_REL's own
+      // comment above. Same fractional-occupation RDMFT evaluation +
+      // SQP occupation-number optimization as NON_REL/C4_DHF's own, at
+      // FIXED X2C-HF orbitals/integrals (h_x2c_mo/eri_x2c_mo). Like
+      // NON_REL (and UNLIKE C4_DHF), every X2C-HF spinor competes for
+      // occupation -- n_inactive_below = 0, since X2C's own decoupling
+      // already eliminated the negative-energy branch entirely, so
+      // there is nothing left to hold at exactly zero.
+      if (input.has_functional()) {
+        x2c_functional_report = buildFunctionalReport(
+            "X2C_HF", h_x2c_mo, eri_x2c_mo, x2c_hf_result.orbital_energies, 0,
+            input.n_electrons(), input.temperature(), input.functional(),
+            input.occupation_init(), x2c_hf_result.nuclear_repulsion_energy, t_start,
+            t_checkpoint, timing_records);
       }
     }
 
@@ -2496,6 +2517,11 @@ int main(int argc, char** argv) {
     // exists in the X2C-HF spinor space at all, so there is no downhill
     // rotation direction for the occupied spinors to admit.
     std::cout << x2c_full_hessian_report;
+    // RDMFT (fractional-occupation functional evaluation + SQP
+    // optimization) is conceptually a step AFTER the X2C-HF calculation
+    // and its own gradient/Hessian diagnostics -- printed last within
+    // this section accordingly, matching NON_REL/C4_DHF's own placement.
+    std::cout << x2c_functional_report;
   }
 
   if (input.c4_spinor()) {

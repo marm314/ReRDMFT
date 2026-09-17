@@ -195,9 +195,9 @@ exercises X2C-HF's own mixed-Hessian check (`VERBOSE 2`) alongside
 ## RDMFT functional evaluation
 
 Setting `FUNCTIONAL` runs an additional step after each requested SCF
-(`NON_RELATIVISTIC`/`C4_SPINOR`) converges, using its orbitals and
-one-/two-electron integrals as a **fixed** background (no orbital
-reoptimization):
+(`NON_RELATIVISTIC`/`C4_SPINOR`/`X2C`'s own X2C-HF) converges, using its
+orbitals and one-/two-electron integrals as a **fixed** background (no
+orbital reoptimization):
 
 1. Generate initial fractional occupation numbers via `OCCUPATION_INIT`
    (`PROPORTIONAL` by default, or `FERMI_DIRAC` at `TEMPERATURE`).
@@ -211,15 +211,20 @@ reoptimization):
 
 For `C4_SPINOR`, the negative-energy (Dirac sea) branch is excluded
 from both steps entirely (pinned at exactly zero occupation, never an
-optimization variable), preserving the no-pair approximation. Results
+optimization variable), preserving the no-pair approximation; for `X2C`
+(like `NON_RELATIVISTIC`), every spinor competes for occupation, since
+X2C's own decoupling already eliminated that branch entirely. Results
 are printed after the corresponding SCF's own energy, gradient, and
 (if requested) Hessian diagnostics -- optimized occupation numbers are
-listed at fixed 5-decimal precision, in two columns for `C4_SPINOR`
-(adjacent Kramers pairs side by side, which should read as identical
-values) and one column otherwise.
+listed at fixed 5-decimal precision, in two columns for `C4_SPINOR` and
+`X2C` (adjacent Kramers pairs side by side, which should read as
+identical values -- confirmed to hold through the SQP optimization too)
+and one column otherwise.
 
-See `examples/water_muller.inp` and `examples/co-sto-3g_muller.inp`
-for worked examples (`FUNCTIONAL MULLER`).
+See `examples/water_muller.inp` and `examples/co-sto-3g_muller.inp` for
+worked `C4_SPINOR`/`NON_RELATIVISTIC` examples, or
+`examples/water_X2C_muller.inp` for the `X2C` case (`FUNCTIONAL MULLER`
+throughout).
 
 ## Two-electron integral disk cache
 
