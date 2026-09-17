@@ -118,6 +118,38 @@ Tensor4<std::complex<double>> reconstructBlas(
   return eri;
 }
 
+// Subtracts conj(Lmat)^T @ pivot_col from `row` (length n2) via ONE GEMV,
+// replacing choleskyDecomposeEri's own O(Nchol_so_far) scalar loop over
+// previously-found vectors per residual point. `lmat` stores the
+// Nchol_so_far already-found vectors as its ROWS (row-major, each row one
+// vector flattened over the (C,D) pair -- exactly Tensor4's own pair-index
+// flattening), and `pivot_col` holds each of those vectors' own value at
+// the current pivot (A*,B*) -- i.e. lmat's PIVOT-th COLUMN, hence "Lmat-
+// vs-pivot-column GEMV". CblasTrans/CblasConjTrans applied to `lmat`
+// computes exactly y(C,D) = sum_k Lmat(k,C,D) * pivot_col(k) (conjugated
+// on Lmat for T = complex<double>, a no-op for T = double), i.e. the
+// residual's sum_k V_k(A*,B*)*conj(V_k(C,D)) term for every (C,D) at once
+// -- turning a badly-cache-behaved scalar loop over separate heap-
+// allocated Matrix objects into one BLAS2 call over one contiguous buffer.
+void subtractConjTransGemv(const double* lmat, std::size_t nchol, std::size_t n2,
+                            const double* pivot_col, double* row) {
+  if (nchol == 0) return;
+  std::vector<double> y(n2, 0.0);
+  cblas_dgemv(CblasRowMajor, CblasTrans, static_cast<int>(nchol), static_cast<int>(n2), 1.0, lmat,
+              static_cast<int>(n2), pivot_col, 1, 0.0, y.data(), 1);
+  for (std::size_t i = 0; i < n2; ++i) row[i] -= y[i];
+}
+
+void subtractConjTransGemv(const std::complex<double>* lmat, std::size_t nchol, std::size_t n2,
+                            const std::complex<double>* pivot_col, std::complex<double>* row) {
+  if (nchol == 0) return;
+  std::vector<std::complex<double>> y(n2, std::complex<double>(0.0, 0.0));
+  const std::complex<double> alpha(1.0, 0.0), beta(0.0, 0.0);
+  cblas_zgemv(CblasRowMajor, CblasConjTrans, static_cast<int>(nchol), static_cast<int>(n2), &alpha,
+              lmat, static_cast<int>(n2), pivot_col, 1, &beta, y.data(), 1);
+  for (std::size_t i = 0; i < n2; ++i) row[i] -= y[i];
+}
+
 }  // namespace
 
 template <typename T>
@@ -145,7 +177,12 @@ std::vector<Matrix<T>> choleskyDecomposeEri(const Tensor4<T>& eri, double thresh
     }
   }
 
-  std::vector<Matrix<T>> vectors;
+  // Cholesky vectors found so far, stacked as ROWS of one growing (Nchol x
+  // n2) contiguous buffer -- see subtractConjTransGemv above for why this
+  // replaces an O(Nchol_so_far) scalar loop per residual point with a
+  // single GEMV per iteration.
+  std::vector<T> lmat;
+  std::vector<T> row(n2);
   const std::size_t max_iterations = (max_vectors > 0) ? std::min(max_vectors, n2) : n2;
   for (std::size_t iter = 0; iter < max_iterations; ++iter) {
     std::size_t pivot = 0;
@@ -166,31 +203,46 @@ std::vector<Matrix<T>> choleskyDecomposeEri(const Tensor4<T>& eri, double thresh
     const std::size_t b_star = pivot % n;
     const double inv_sqrt_pivot = 1.0 / std::sqrt(pivot_value);
 
-    Matrix<T> v(n, n, T{});
     for (std::size_t c = 0; c < n; ++c) {
       for (std::size_t d = 0; d < n; ++d) {
-        T residual = eri(a_star, b_star, c, d);
-        for (const auto& prev : vectors) {
-          residual -= prev(a_star, b_star) * conjugate(prev(c, d));
-        }
-        // The defining sum eri(A,B,C,D) = sum_k V_k(A,B)*conj(V_k(C,D))
-        // gives, at the pivot row (a*,b*): residual(C,D) = V_k(a*,b*) *
-        // conj(V_k(C,D)) for the NEW vector k. Solving for V_k(C,D)
-        // itself (not conj(V_k(C,D))) needs an EXTRA conjugate here on
-        // top of dividing by the (real) sqrt(pivot) -- verified by
-        // direct hand substitution (and the numerical test that caught
-        // its absence) before trusting this, since it is easy to get
-        // backwards for a genuinely complex decomposition (real T makes
-        // conjugate() a no-op, silently hiding the bug there).
-        v(c, d) = conjugate(residual) * T(inv_sqrt_pivot);
+        row[c * n + d] = eri(a_star, b_star, c, d);
       }
     }
-    for (std::size_t c = 0; c < n; ++c) {
-      for (std::size_t d = 0; d < n; ++d) {
-        const T val = v(c, d);
-        diag[c * n + d] -= realPart(val * conjugate(val));
+
+    const std::size_t nchol_so_far = lmat.size() / n2;
+    if (nchol_so_far > 0) {
+      // pivot_col[k] = the k-th already-found vector's own value at
+      // (A*,B*) -- lmat's column `pivot` (pivot == a_star*n+b_star by
+      // construction).
+      std::vector<T> pivot_col(nchol_so_far);
+      for (std::size_t k = 0; k < nchol_so_far; ++k) {
+        pivot_col[k] = lmat[k * n2 + pivot];
       }
+      subtractConjTransGemv(lmat.data(), nchol_so_far, n2, pivot_col.data(), row.data());
     }
+
+    // The defining sum eri(A,B,C,D) = sum_k V_k(A,B)*conj(V_k(C,D)) gives,
+    // at the pivot row (a*,b*): residual(C,D) = V_k(a*,b*) *
+    // conj(V_k(C,D)) for the NEW vector k. Solving for V_k(C,D) itself
+    // (not conj(V_k(C,D))) needs an EXTRA conjugate here on top of
+    // dividing by the (real) sqrt(pivot) -- verified by direct hand
+    // substitution (and the numerical test that caught its absence)
+    // before trusting this, since it is easy to get backwards for a
+    // genuinely complex decomposition (real T makes conjugate() a no-op,
+    // silently hiding the bug there).
+    for (std::size_t i = 0; i < n2; ++i) {
+      row[i] = conjugate(row[i]) * T(inv_sqrt_pivot);
+      diag[i] -= realPart(row[i] * conjugate(row[i]));
+    }
+    lmat.insert(lmat.end(), row.begin(), row.end());
+  }
+
+  const std::size_t nchol_final = lmat.size() / n2;
+  std::vector<Matrix<T>> vectors;
+  vectors.reserve(nchol_final);
+  for (std::size_t k = 0; k < nchol_final; ++k) {
+    Matrix<T> v(n, n);
+    std::copy(lmat.data() + k * n2, lmat.data() + (k + 1) * n2, v.data());
     vectors.push_back(std::move(v));
   }
   return vectors;
