@@ -99,14 +99,62 @@ G_{pq,rs} \;=\;\;
 \end{aligned}}
 \end{align}
 
+\section*{Real/imaginary directional blocks}
+
+For a complex (relativistic, spin-orbit-coupled) spinor basis, $\kappa_{pq}$
+for an independent pair $p>q$ is a free complex number, $\kappa_{pq}=t_{pq}+iy_{pq}$
+($\kappa_{qp}=-t_{pq}+iy_{pq}$, enforcing $\kappa_{qp}=-\kappa_{pq}^{*}$). The full
+real Hessian over these $2\times(\text{number of pairs})$ real parameters therefore
+has three independent blocks between any two distinct pairs $(p,q)$ and $(r,s)$, all
+obtainable from the SAME four raw terms $G_{pq,rs}$, $G_{pq,sr}$, $G_{qp,rs}$,
+$G_{qp,sr}$ by substituting $\kappa_{pq}=t+iy$, $\kappa_{qp}=-t+iy$,
+$\kappa_{rs}=t'+iy'$, $\kappa_{sr}=-t'+iy'$ into
+$\tfrac12\sum\kappa_{pq}\kappa_{rs}G_{pq,rs}$ and reading off the coefficient of
+each real product:
+
+\begin{align}
+\text{Hess}_{pq,rs} &= \frac{\partial^2 E}{\partial t_{pq}\,\partial t_{rs}}
+= G_{pq,rs} - G_{pq,sr} - G_{qp,rs} + G_{qp,sr}, \\[4pt]
+\text{Hess}^{yy}_{pq,rs} &= \frac{\partial^2 E}{\partial y_{pq}\,\partial y_{rs}}
+= -\big(G_{pq,rs} + G_{pq,sr} + G_{qp,rs} + G_{qp,sr}\big), \\[4pt]
+\text{Hess}^{ty}_{pq,rs} &= \frac{\partial^2 E}{\partial t_{pq}\,\partial y_{rs}}
+= i\big(G_{rs,pq} + G_{rs,qp} - G_{sr,pq} - G_{sr,qp}\big).
+\end{align}
+
+The first two are the $(+,-,-,+)$ and $(-,-,-,-)$ sign patterns over the four raw
+terms with $(p,q)$ in the flipping (first) slot; the third is the same idea but
+with the \emph{other} pair, $(r,s)$, in the flipping slot -- not $(p,q)$, which is
+easy to get backwards by analogy with the first two (an earlier draft of this
+derivation did exactly that, and was only caught by the finite-difference check
+below). The fourth possible direction, $\text{Hess}^{yt}_{pq,rs}=\partial^2E/\partial
+y_{pq}\partial t_{rs}$, is not a new formula: by Schwarz's theorem,
+$\text{Hess}^{yt}_{pq,rs}=\text{Hess}^{ty}_{rs,pq}$.
+
+All three are real for physical (Hermitian $h$, $\langle\cdot|\cdot\rangle$, $D$,
+$\Gamma$) input by the same argument: $K_{pq}=\ccr{p}\ann{q}-\ccr{q}\ann{p}$ and
+$K'_{rs}=i(\ccr{r}\ann{s}+\ccr{s}\ann{r})$ are both anti-Hermitian, so
+$[[\hat H,K_{pq}],K'_{rs}]$ is Hermitian and its expectation value is real,
+regardless of which of the three sign patterns above it corresponds to.
+
 \bigskip
-\noindent\textbf{Status note.} The one-electron block $G^{(1)}_{pq,rs}$ and the
-gradient $g_{pq}$ were cross-checked by more than one derivation route. The
-two-electron block $G^{(2)}_{pq,rs}$ (and hence the boxed full Hessian) was
-obtained by direct operator-algebra expansion but has \emph{not yet} been
-independently verified numerically (e.g.\ by a finite-difference check of
-$E(\boldsymbol\kappa)$ against this Hessian for a small test system). Treat
-it as a first-pass result pending that check before using it in production
-code.
+\noindent\textbf{Status note (updated).} $G^{(1)}_{pq,rs}$, the gradient $g_{pq}$,
+$\text{Hess}_{pq,rs}$, and $\text{Hess}^{yy}_{pq,rs}$ have all been independently
+verified: by more than one derivation route, by an explicit small-Fock-space
+numerical check against a general (non-idempotent, non-Wick-derivable) random
+1-/2-RDM, and by finite-difference checks against converged NON\_REL/C4\_DHF SCF
+data. $\text{Hess}^{ty}_{pq,rs}$ (and hence $\text{Hess}^{yt}_{pq,rs}$ via Schwarz)
+has since also been derived and confirmed the same way -- a genuine
+mixed-direction (real step on one pair, imaginary step on the other) 2D finite
+difference against water/STO-3G's converged AND a deliberately non-converged
+(1 SCF iteration) C4\_DHF density, matching to $O(\text{step}^2)$ in both cases
+(implementation: \texttt{Hessian\_opt/HartreeExchangeHessian.h}'s
+\texttt{hartreeExchangeHessianElementMixed}, the Hartree/exchange-ansatz "cheap"
+path only -- the fully general (\texttt{GeneralizedHessian.h}) counterpart has not
+been added). The only remaining unimplemented piece for a full $2N(N-1)$-real-parameter
+orbital-rotation Hessian is the general (non-Hartree/exchange-ansatz) 2-RDM version
+of the mixed block, and assembling all three blocks into one joint matrix for an
+actual Newton-Raphson/NEO step (currently only $\text{Hess}_{pq,rs}$ alone is ever
+assembled into a diagonalizable matrix, for the minimum/saddle-point diagnostic in
+\texttt{main.cpp}'s \texttt{HESSIAN\_4C}).
 
 \end{document}

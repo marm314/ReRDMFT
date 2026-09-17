@@ -1,0 +1,23 @@
+# Example ReRDMFT input file: water molecule, DEBUG TRUE with VERBOSE 2
+# -- on top of everything VERBOSE 1 already runs (see
+# water_debug_verbose1.inp), this also validates the MIXED real/
+# imaginary orbital-rotation Hessian block (Hessian_opt/
+# HartreeExchangeHessian.h's hartreeExchangeHessianElementMixed,
+# Hess^ty_pq,rs = d^2E/dt_pq dy_rs) against a genuine mixed-direction
+# 2D finite difference (a real step on one orbital-rotation pair
+# crossed with an imaginary step on another) -- only meaningful for
+# C4_SPINOR's genuinely complex spinors, and a newer, less commonly
+# needed check than everything else DEBUG/VERBOSE 1 already cover, so
+# it needs a strictly higher VERBOSE threshold (> 1, not just > 0).
+NELEC 10
+BASIS water-sto-3g.gbs
+C4_SPINOR TRUE
+NON_RELATIVISTIC TRUE
+DEBUG TRUE
+VERBOSE 2
+
+GEOMETRY
+O   0.000000   0.000000   0.000000
+H   0.000000   0.757000   0.586000
+H   0.000000  -0.757000   0.586000
+END

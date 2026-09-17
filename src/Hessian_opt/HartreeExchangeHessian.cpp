@@ -184,6 +184,55 @@ template std::complex<double> hartreeExchangeHessianElementImag(
     const Matrix<double>& two_rdm_x, const Matrix<std::complex<double>>& fock, std::size_t p,
     std::size_t q, std::size_t r, std::size_t s);
 
+// See the header for the derivation and its numerical validation.
+// Writing kappa_pq=t+iy, kappa_qp=-t+iy (t on the FIRST pair) and
+// kappa_rs=t'+iy', kappa_sr=-t'+iy' (y' on the SECOND pair) and
+// expanding the tex's own quadratic term (1/2) sum kappa kappa G_pq,rs
+// isolates the coefficient of t*y' as
+// i*[G_rs,pq + G_rs,qp - G_sr,pq - G_sr,qp] -- the "y" pair (r,s) sits
+// in the flipping (first) slot of each raw term, (p,q) in the fixed
+// (second) slot (compare Hess_pq,rs's (+,-,-,+) pattern and Hess^yy's
+// (-,-,-,-) pattern, both with (p,q) in the flipping slot -- this one
+// is different, confirmed only after the numerical check below caught
+// an earlier version with the roles the other way round). Unlike the
+// other two combinations, this one needs an EXPLICIT
+// multiplication by the imaginary unit (the t*y'/y*t' coefficients sit
+// in the IMAGINARY part of the raw complex expansion, unlike t*t'/y*Y',
+// which sit in the real part) -- only meaningful for T =
+// std::complex<double> (no "i" exists for T = double, and there is no
+// y-direction to mix with t- there anyway), so ONLY that explicit
+// instantiation is provided below (deliberately, not a real/double one
+// too, unlike every other function in this file).
+template <typename T>
+T hartreeExchangeHessianElementMixed(const Matrix<T>& h, const Tensor4<T>& eri,
+                                      const std::vector<double>& occupations,
+                                      const Matrix<double>& two_rdm_h,
+                                      const Matrix<double>& two_rdm_x, const Matrix<T>& fock,
+                                      std::size_t p, std::size_t q, std::size_t r,
+                                      std::size_t s) {
+  const std::size_t n = h.rows();
+  checkHartreeExchangeHessianDimensions(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, p, q,
+                                         r, s, "hartreeExchangeHessianElementMixed");
+
+  // (r,s), not (p,q), is the pair whose order gets flipped for the
+  // sign pattern -- see the comment above.
+  return T(0.0, 1.0) *
+         (rawHartreeExchangeHessianTerm(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, r, s,
+                                         p, q) +
+          rawHartreeExchangeHessianTerm(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, r, s,
+                                         q, p) -
+          rawHartreeExchangeHessianTerm(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, s, r,
+                                         p, q) -
+          rawHartreeExchangeHessianTerm(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, s, r,
+                                         q, p));
+}
+
+template std::complex<double> hartreeExchangeHessianElementMixed(
+    const Matrix<std::complex<double>>& h, const Tensor4<std::complex<double>>& eri,
+    const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
+    const Matrix<double>& two_rdm_x, const Matrix<std::complex<double>>& fock, std::size_t p,
+    std::size_t q, std::size_t r, std::size_t s);
+
 std::vector<std::pair<std::size_t, std::size_t>> hessianPairIndices(std::size_t n) {
   std::vector<std::pair<std::size_t, std::size_t>> pairs;
   pairs.reserve(n * (n - 1) / 2);

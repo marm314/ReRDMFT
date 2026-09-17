@@ -42,6 +42,14 @@ class Input {
   // verbose > 0 it runs. Every other DEBUG cross-check (the O(n^4)
   // "efficient" gradient, the finite-difference test itself) is cheap and
   // always runs whenever DEBUG is on, regardless of this setting.
+  // At verbose > 1 (C4_SPINOR only), an additional, less commonly
+  // needed check ALSO runs: the MIXED real/imaginary orbital-rotation
+  // Hessian block (Hessian_opt/HartreeExchangeHessian.h's
+  // hartreeExchangeHessianElementMixed) is validated against a genuine
+  // mixed-direction (real step on one pair, imaginary step on another)
+  // 2D finite difference -- a strictly higher bar than the dense-2-RDM
+  // check's own verbose > 0, since it is newer and not needed for a
+  // routine DHF DEBUG run.
   int verbose() const { return verbose_; }
   // Optional; defaults to the standard CODATA value (PhysicalConstants.h)
   // when the SPEED_OF_LIGHT keyword is absent. Overriding it (e.g. to a

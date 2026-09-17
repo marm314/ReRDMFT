@@ -578,6 +578,95 @@ std::string hessianFiniteDifferenceReport(const std::string& label, const rerdmf
   return out.str();
 }
 
+// DEBUG + VERBOSE > 1 only (see Input.h): validates Hessian_opt/
+// HartreeExchangeHessian.h's newly-derived MIXED real/imaginary
+// Hessian block, Hess^{ty}_pq,rs = d^2E/dt_pq dy_rs (t-direction on
+// the FIRST pair, y-direction on the SECOND pair -- hartreeExchange
+// HessianElementMixed's own header documents the derivation), against
+// a genuine MIXED-direction 2D finite difference: a real step on
+// (p_idx,q_idx) crossed with an imaginary step on (r_idx,s_idx). Also
+// checks the Schwarz-symmetry partner, Hess^{yt}_pq,rs = d^2E/dy_pq
+// dt_rs = Hess^{ty}_rs,pq (just the same analytic function called with
+// the two pairs swapped -- `analytic_mixed_swapped`, supplied by the
+// caller), against the OTHER ordering's finite difference (y on the
+// first pair, t on the second). Only meaningful for T =
+// std::complex<double> (C4_DHF's genuinely complex spinors, same
+// reason the imaginary-direction check in
+// hessianFiniteDifferenceReport only applies there) -- unlike that
+// function, this one is not templated over T at all, since
+// hartreeExchangeHessianElementMixed itself is only instantiated for
+// complex<double> (a real orbital basis has no y-direction to mix with
+// t- in the first place, not just "not meaningful").
+std::string mixedHessianFiniteDifferenceReport(
+    const std::string& label, const rerdmft::Matrix<std::complex<double>>& h,
+    const rerdmft::Tensor4<std::complex<double>>& eri, const std::vector<double>& occupations,
+    std::size_t p_idx, std::size_t q_idx, std::size_t r_idx, std::size_t s_idx,
+    double nuclear_repulsion, std::complex<double> analytic_mixed,
+    std::complex<double> analytic_mixed_swapped) {
+  const std::size_t n = h.rows();
+  using C = std::complex<double>;
+  auto kappa_real = [&](std::size_t a, std::size_t b, double step) {
+    rerdmft::Matrix<C> kappa(n, n, C{});
+    kappa(a, b) = C(step, 0.0);
+    kappa(b, a) = C(-step, 0.0);
+    return kappa;
+  };
+  auto kappa_imag = [&](std::size_t a, std::size_t b, double y) {
+    rerdmft::Matrix<C> kappa(n, n, C{});
+    const C val(0.0, y);
+    kappa(a, b) = val;
+    kappa(b, a) = val;
+    return kappa;
+  };
+  auto energy_at = [&](const rerdmft::Matrix<C>& k1, const rerdmft::Matrix<C>& k2) {
+    rerdmft::Matrix<C> ksum(n, n, C{});
+    for (std::size_t i = 0; i < n; ++i)
+      for (std::size_t j = 0; j < n; ++j) ksum(i, j) = k1(i, j) + k2(i, j);
+    const auto d = densityFromRotation(rerdmft::spinorRotationMatrix(ksum), occupations);
+    return wickSingleDeterminantEnergy(h, eri, d, nuclear_repulsion);
+  };
+
+  std::ostringstream out;
+  out << "\n"
+      << label << " MIXED real/imaginary finite-difference HESSIAN check (pair1=(p="
+      << p_idx << ",q=" << q_idx << "), pair2=(r=" << r_idx << ",s=" << s_idx << ")):\n";
+  out << "  Analytic Hess^ty_pair1,pair2 [t on pair1, y on pair2] (Hessian_opt/\n"
+         "  HartreeExchangeHessian.h, cheap): "
+      << analytic_mixed << "\n";
+  out << "  Analytic Hess^ty_pair2,pair1 [Schwarz check: equals Hess^yt_pair1,pair2 =\n"
+         "  d^2E/dy_pair1 dt_pair2]: "
+      << analytic_mixed_swapped << "\n";
+  for (const double step : {1e-2, 1e-3, 1e-4}) {
+    const auto kt_p = kappa_real(p_idx, q_idx, step);
+    const auto kt_m = kappa_real(p_idx, q_idx, -step);
+    const auto ky_p = kappa_imag(r_idx, s_idx, step);
+    const auto ky_m = kappa_imag(r_idx, s_idx, -step);
+    const double e_pp = energy_at(kt_p, ky_p);
+    const double e_pm = energy_at(kt_p, ky_m);
+    const double e_mp = energy_at(kt_m, ky_p);
+    const double e_mm = energy_at(kt_m, ky_m);
+    const double d2_numerical = (e_pp - e_pm - e_mp + e_mm) / (4.0 * step * step);
+    out << "  step = " << std::setprecision(3) << step << std::setprecision(10)
+        << "   t(pair1)/y(pair2) step: numerical d^2E/dt_pair1 dy_pair2 = " << d2_numerical
+        << std::setprecision(6) << "\n";
+  }
+  for (const double step : {1e-2, 1e-3, 1e-4}) {
+    const auto ky_p = kappa_imag(p_idx, q_idx, step);
+    const auto ky_m = kappa_imag(p_idx, q_idx, -step);
+    const auto kt_p = kappa_real(r_idx, s_idx, step);
+    const auto kt_m = kappa_real(r_idx, s_idx, -step);
+    const double e_pp = energy_at(ky_p, kt_p);
+    const double e_pm = energy_at(ky_p, kt_m);
+    const double e_mp = energy_at(ky_m, kt_p);
+    const double e_mm = energy_at(ky_m, kt_m);
+    const double d2_numerical = (e_pp - e_pm - e_mp + e_mm) / (4.0 * step * step);
+    out << "  step = " << std::setprecision(3) << step << std::setprecision(10)
+        << "   y(pair1)/t(pair2) step: numerical d^2E/dy_pair1 dt_pair2 = " << d2_numerical
+        << std::setprecision(6) << "\n";
+  }
+  return out.str();
+}
+
 // Builds the FULL orbital-rotation Hessian (Hessian_opt/
 // HartreeExchangeHessian.h's cheap Hartree/exchange path, ALL
 // independent real-step pairs p>q over the FULL orbital space -- for
@@ -1123,6 +1212,7 @@ int main(int argc, char** argv) {
   double dhf_gradient_rdmft_max_abs = 0.0;
   std::string dhf_finite_diff_report;
   std::string dhf_hessian_report;
+  std::string dhf_mixed_hessian_report;
   std::string dhf_full_hessian_report;
   std::string dhf_functional_report;
   rerdmft::Matrix<std::complex<double>> c_dhf;
@@ -1621,6 +1711,29 @@ int main(int argc, char** argv) {
               dhf_result.nuclear_repulsion_energy, analytic_hess_cheap,
               dhf_gradient_computed ? &analytic_hess_general : nullptr, &analytic_hess_imag_cheap,
               dhf_gradient_computed ? &analytic_hess_imag_general : nullptr);
+
+          // MIXED real/imaginary Hessian block (Hessian_opt/
+          // HartreeExchangeHessian.h's hartreeExchangeHessianElementMixed)
+          // -- gated by VERBOSE > 1 (not just DEBUG, and a strictly
+          // higher bar than the O(n^5) dense-2-RDM cross-check's own
+          // VERBOSE > 0), since it is a newly-derived, less commonly
+          // needed check on top of everything else DEBUG already does.
+          if (input.verbose() > 1) {
+            const std::complex<double> analytic_mixed =
+                rerdmft::hartreeExchangeHessianElementMixed(h_mo, eri_mo, dhf_occupations, hx_test,
+                                                             hx_test, fock_rdmft, lumo, homo, lumo,
+                                                             homo_minus_1);
+            const std::complex<double> analytic_mixed_swapped =
+                rerdmft::hartreeExchangeHessianElementMixed(h_mo, eri_mo, dhf_occupations, hx_test,
+                                                             hx_test, fock_rdmft, lumo,
+                                                             homo_minus_1, lumo, homo);
+            logTiming("C4_DHF cheap (HartreeExchangeHessian, O(n) per element) mixed-"
+                      "direction Hessian element complete",
+                      t_start, t_checkpoint, timing_records);
+            dhf_mixed_hessian_report = mixedHessianFiniteDifferenceReport(
+                "C4_DHF", h_mo, eri_mo, dhf_occupations, lumo, homo, lumo, homo_minus_1,
+                dhf_result.nuclear_repulsion_energy, analytic_mixed, analytic_mixed_swapped);
+          }
         }
       }
 
@@ -2290,6 +2403,7 @@ int main(int argc, char** argv) {
       }
       std::cout << dhf_finite_diff_report;
       std::cout << dhf_hessian_report;
+      std::cout << dhf_mixed_hessian_report;
     }
     // Printed unconditionally (empty when HESSIAN_4C is off) -- gated
     // by its own keyword, not DEBUG (see Input.h).

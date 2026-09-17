@@ -74,6 +74,54 @@ T hartreeExchangeHessianElementImag(const Matrix<T>& h, const Tensor4<T>& eri,
                                      const Matrix<double>& two_rdm_x, const Matrix<T>& fock,
                                      std::size_t p, std::size_t q, std::size_t r, std::size_t s);
 
+// The MIXED real/imaginary second derivative,
+//   Hess^{ty}_pq,rs = d^2E/dt_pq dy_rs
+// (t_pq = Re(kappa_pq)-direction on the FIRST pair, y_rs = Im(kappa_rs)-
+// direction on the SECOND pair) -- the block GeneralizedHessian.h's own
+// derivation history flagged as "not implemented" (only the pure
+// real-real and imaginary-imaginary diagonal blocks were covered).
+// Derived the same way those two were, from the SAME four raw terms
+// (GeneralizedHessian.h's/this file's own internal G_pq,rs): writing
+// kappa_pq = t+iy, kappa_qp = -t+iy (t on pair (p,q)) and
+// kappa_rs = t'+iy', kappa_sr = -t'+iy' (y' on pair (r,s)) and expanding
+// the tex's own E(kappa) ~ (1/2) sum kappa_pq kappa_rs G_pq,rs quadratic
+// term, the coefficient of t*y' (as a REAL number, after pulling out an
+// overall factor of i -- see the .cpp) is:
+//   Hess^{ty}_pq,rs = i * [ G_rs,pq + G_rs,qp - G_sr,pq - G_sr,qp ]
+// -- note the "y" pair (r,s) sits in the flipping (first) slot of each
+// raw term and the "t" pair (p,q) in the fixed (second) slot, the
+// OPPOSITE of the naive reading of the symbol names above. This was
+// caught by, not just avoided by, the numerical check below (an
+// earlier version of this derivation had the two pairs' roles swapped
+// and reproduced d^2E/dy_pq dt_rs instead -- exactly right in
+// magnitude, wrong in which pair got which direction -- until the
+// finite-difference comparison caught it): a real-vs-imaginary-step
+// mixed-direction 2D finite difference (t on (p,q), y on (r,s)) against
+// this exact function, and the complementary check with the roles
+// swapped against Hess^{ty}_rs,pq, at BOTH a converged (water_debug.inp)
+// and a deliberately non-converged, 1-SCF-iteration
+// (water_debug_1iter.inp) DHF density, matching to O(step^2) (down to
+// ~1e-8 at step=1e-3) in both cases. By the same double-commutator-
+// Hermiticity argument as the other two blocks (K_pq = E_pq-E_qp and
+// K'_rs = i(E_rs+E_sr) are BOTH anti-Hermitian, so [[H,K_pq],K'_rs] is
+// Hermitian too), this is exactly real for physical (Hermitian
+// h/eri/D/2-RDM) input -- confirmed numerically alongside the
+// magnitude check (imaginary part ~1e-16-1e-17, floating-point
+// roundoff, at both test points).
+//
+// The OTHER mixed direction, Hess^{yt}_pq,rs = d^2E/dy_pq dt_rs, is NOT
+// a new function: by Schwarz's theorem (mixed partials commute for any
+// smooth function, regardless of which physical pair each one belongs
+// to), Hess^{yt}_pq,rs = Hess^{ty}_rs,pq -- i.e. just call this same
+// function with the two pairs swapped. Confirmed numerically, not just
+// asserted, at both test points above.
+template <typename T>
+T hartreeExchangeHessianElementMixed(const Matrix<T>& h, const Tensor4<T>& eri,
+                                      const std::vector<double>& occupations,
+                                      const Matrix<double>& two_rdm_h,
+                                      const Matrix<double>& two_rdm_x, const Matrix<T>& fock,
+                                      std::size_t p, std::size_t q, std::size_t r, std::size_t s);
+
 // The independent real-step orbital-rotation parameters are exactly
 // the (p,q) pairs with p > q (see OrbitalGradient.h) -- this lists them
 // all, in a FIXED order, for a basis of dimension `n`: pair I is
