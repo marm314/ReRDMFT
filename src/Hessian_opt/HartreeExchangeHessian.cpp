@@ -275,4 +275,36 @@ template Matrix<std::complex<double>> hartreeExchangeHessianMatrix(
     const Matrix<double>& two_rdm_x, const Matrix<std::complex<double>>& fock,
     const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);
 
+Matrix<double> hartreeExchangeJointHessianMatrix(
+    const Matrix<std::complex<double>>& h, const Tensor4<std::complex<double>>& eri,
+    const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
+    const Matrix<double>& two_rdm_x, const Matrix<std::complex<double>>& fock,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices) {
+  const std::size_t n_pairs = pair_indices.size();
+  Matrix<double> hess(2 * n_pairs, 2 * n_pairs, 0.0);
+  // Each (I,J) owns four disjoint output positions (see the header:
+  // the y-t block's (n_pairs+J, I) entry is filled from the SAME
+  // t-y value computed for (I,J), not from a separately-derived
+  // formula) and only reads the shared, const inputs -- safe to
+  // parallelize exactly like hartreeExchangeHessianMatrix.
+#pragma omp parallel for collapse(2)
+  for (std::size_t big_i = 0; big_i < n_pairs; ++big_i) {
+    for (std::size_t big_j = 0; big_j < n_pairs; ++big_j) {
+      const auto& [p, q] = pair_indices[big_i];
+      const auto& [r, s] = pair_indices[big_j];
+      const std::complex<double> tt =
+          hartreeExchangeHessianElement(h, eri, occupations, two_rdm_h, two_rdm_x, fock, p, q, r, s);
+      const std::complex<double> yy = hartreeExchangeHessianElementImag(
+          h, eri, occupations, two_rdm_h, two_rdm_x, fock, p, q, r, s);
+      const std::complex<double> ty = hartreeExchangeHessianElementMixed(
+          h, eri, occupations, two_rdm_h, two_rdm_x, fock, p, q, r, s);
+      hess(big_i, big_j) = tt.real();
+      hess(n_pairs + big_i, n_pairs + big_j) = yy.real();
+      hess(big_i, n_pairs + big_j) = ty.real();
+      hess(n_pairs + big_j, big_i) = ty.real();
+    }
+  }
+  return hess;
+}
+
 }  // namespace rerdmft

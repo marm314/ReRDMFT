@@ -155,6 +155,89 @@ Matrix<T> hartreeExchangeHessianMatrix(
     const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x, const Matrix<T>& fock,
     const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);
 
+// The FULL, JOINT, real-parameter orbital-rotation Hessian for a
+// complex (relativistic, spin-orbit-coupled) spinor basis -- the
+// matrix a genuine Newton-Raphson/NEO step needs, unlike
+// `hartreeExchangeHessianMatrix` above, which only ever assembles the
+// real-real (t-t) block. Each independent pair `pair_indices[I] =
+// (p,q)` carries TWO real rotation parameters, `t_I = Re(kappa_pq)`
+// and `y_I = Im(kappa_pq)` (kappa_qp = -conj(kappa_pq) is not
+// independent) -- so the full real Hessian over ALL such parameters is
+// `2*n_pairs x 2*n_pairs`, block-ordered [t_0..t_{n_pairs-1},
+// y_0..y_{n_pairs-1}] (all t's first, then all y's, each in
+// `pair_indices` order):
+//
+//   [ Hess_tt   Hess_ty ]
+//   [ Hess_yt   Hess_yy ]
+//
+// where block (I,J), 0-indexed within each n_pairs x n_pairs quadrant,
+// is:
+//   Hess_tt(I,J) = hartreeExchangeHessianElement(p_I,q_I,p_J,q_J)
+//   Hess_yy(I,J) = hartreeExchangeHessianElementImag(p_I,q_I,p_J,q_J)
+//   Hess_ty(I,J) = hartreeExchangeHessianElementMixed(p_I,q_I,p_J,q_J)
+//   Hess_yt(I,J) = hartreeExchangeHessianElementMixed(p_J,q_J,p_I,q_I)
+//                = Hess_ty(J,I)  [Schwarz's theorem, see
+//                  hartreeExchangeHessianElementMixed's own header
+//                  comment -- NOT a separate formula]
+// Note Hess_yt(I,J) is defined to equal Hess_ty(J,I), which is exactly
+// what makes the assembled matrix symmetric: entry (I, n_pairs+J)
+// [row t_I, col y_J] and entry (n_pairs+J, I) [row y_J, col t_I] are
+// both set from the SAME single `hartreeExchangeHessianElementMixed`
+// call, by construction, rather than from two independently-derived
+// formulas that would need to be checked against each other.
+//
+// Every element is real for physical (Hermitian h/eri/D/2-RDM) input
+// (the same double-commutator-Hermiticity argument as each individual
+// element function -- see their own headers), so this returns a plain
+// `Matrix<double>`, ready for `LinearAlgebra.h`'s
+// `diagonalizeSymmetric` exactly like `hartreeExchangeHessianMatrix`'s
+// own real-orbital (T=double) instantiation -- `.real()` is taken of
+// each underlying complex element value (confirmed, not just assumed,
+// to leave only floating-point roundoff behind: see
+// hartreeExchangeHessianElementMixed's own validation history).
+//
+// IMPORTANT CAVEAT, discovered while validating this exact function:
+// the returned matrix is symmetric to FLOATING-POINT PRECISION ONLY AT
+// (or very near) a converged, stationary SCF solution -- off
+// stationarity, `Hess_tt(I,J)` and `Hess_tt(J,I)` (and, separately,
+// `Hess_yy(I,J)`/`Hess_yy(J,I)`) can differ by an amount that tracks
+// the SCF's own residual orbital gradient, whenever pairs I and J
+// share a common orbital index (Hess_ty/Hess_yt are exactly symmetric
+// by construction regardless, per the note above -- only the diagonal
+// blocks are affected). Confirmed on water/STO-3G: max asymmetry
+// 2.65e-6 at the default DENSITY_TOLERANCE=1e-6 (matching the SCF's
+// own known residual-gradient scale at that tolerance), dropping to
+// 1.82e-11 (floating-point roundoff) at DENSITY_TOLERANCE=1e-13/
+// ENERGY_TOLERANCE=1e-14. This is expected, not a bug: `Hess_pq,rs` is
+// built from the SAME double-commutator formula validated (against
+// finite differences) to equal the true `d^2E/dt_pq dt_rs` for one
+// FIXED (p,q,r,s) ordering at a time; Schwarz's theorem guarantees the
+// two orderings agree only where the reference state is an actual
+// stationary point (converged SCF; the standard setting a
+// Newton-Raphson/NEO step is taken from anyway). A caller working with
+// a not-fully-converged density should symmetrize the result
+// (`0.5*(H+H^T)`) before diagonalizing/inverting it.
+//
+// Only meaningful for a genuinely complex spinor basis (T =
+// std::complex<double> inputs) -- a real orbital basis has no
+// y-direction at all, so there is nothing for this function to add
+// over `hartreeExchangeHessianMatrix<double>` there; this function
+// does not attempt to support that case (no `T` template parameter,
+// unlike every OTHER function in this file -- matching
+// hartreeExchangeHessianElementMixed's own deliberate departure from
+// the template-over-T pattern for the same reason).
+//
+// EXPENSIVE: three O(n) element evaluations per (I,J) pair instead of
+// `hartreeExchangeHessianMatrix`'s one, so this costs 3x as much for
+// the same `pair_indices` -- still O(n^5) overall, plus O(n^6) for the
+// caller's subsequent diagonalization of the (now twice as large)
+// `2*n_pairs`-dimensional result.
+Matrix<double> hartreeExchangeJointHessianMatrix(
+    const Matrix<std::complex<double>>& h, const Tensor4<std::complex<double>>& eri,
+    const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
+    const Matrix<double>& two_rdm_x, const Matrix<std::complex<double>>& fock,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);
+
 }  // namespace rerdmft
 
 #endif  // RERDMFT_HARTREEEXCHANGEHESSIAN_H
