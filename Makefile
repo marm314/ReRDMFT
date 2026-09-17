@@ -20,50 +20,26 @@ CXXFLAGS := -std=c++17 -Wall -Wextra -O2 -fopenmp
 # header doesn't break the build with a "no rule to make target" error.
 DEPFLAGS := -MMD -MP
 SRC_DIR  := src
-# Every file that calls LIBCINT directly to evaluate an AO integral
-# (Integrals.h/.cpp's overlap+normalization, NablaIntegrals.h/.cpp,
-# NuclearAttraction.h/.cpp, SchrodingerKinetic.h/.cpp,
-# ElectronRepulsion.h/.cpp's two-electron tensor): kept in their own
-# subdirectory so the LIBCINT-facing layer is easy to find as a whole,
-# separate from everything built ON TOP of these AO integrals (RKB/
-# spinor transforms, SCF, etc.) elsewhere in the tree.
-AO_DIR   := $(SRC_DIR)/AO_ints
-# Cartesian AO basis construction (BasisSet.h/.cpp's shell-set parsing,
-# Shell.h/.cpp's cartesian-component enumeration, SmallComponentBasis.h/
-# .cpp's unrestricted-kinetic-balance small-component basis derived from
-# the large one): its own subdirectory grouping the AO basis DATA
-# STRUCTURES, separate from AO_DIR's actual LIBCINT integral evaluation
-# over that basis.
-AO_BASIS_DIR := $(SRC_DIR)/AO_basis
-# 4-component Dirac-Hartree-Fock two-electron integrals (restricted
-# kinetic balance spinor basis): kept in their own subdirectory since they
-# are a distinct, self-contained piece of the physics (RkbTwoElectron.h,
-# Tensor4.h), built into the same binary. Its own ElectronRepulsion.h/.cpp
-# (the actual LIBCINT call) lives in AO_DIR instead, reused via the shared
-# include path below.
-C4_DIR   := $(SRC_DIR)/C4_DHF
-# Nonrelativistic (Large-component-only) Hartree-Fock: its own
-# subdirectory for the same reason as C4_DIR, and reuses C4_DIR's
-# ElectronRepulsion.h/Tensor4.h (both basis-agnostic) via the shared
-# include path below rather than duplicating them.
-NON_REL_DIR := $(SRC_DIR)/NON_REL
-# Orbital-optimization machinery (generalized Fock matrix, and later the
-# orbital Hessian) for RDMFT/CASSCF-style wavefunctions with a general
-# (non-idempotent) 1-RDM and an externally-supplied 2-RDM: its own
-# subdirectory for the same reason as C4_DIR/NON_REL_DIR, working
-# entirely in an orthonormal MO basis (reusing Matrix.h/Tensor4.h via the
-# shared include path below, not any AO- or RKB-spinor-specific code).
-HESSIAN_DIR := $(SRC_DIR)/Hessian_opt
-# Occupation-number optimization machinery (sequential quadratic
-# programming, for a fixed orbital basis): its own subdirectory for the
-# same reason as HESSIAN_DIR, working with plain Matrix<double>/
-# std::vector<double> only (no eri/RKB/basis-specific code).
-OCC_DIR := $(SRC_DIR)/Occ_opt
-# One-electron X2C ("exact two-component") decoupling of the bare RKB
-# Dirac Hamiltonian: its own subdirectory for the same reason as
-# C4_DIR, reusing RkbOrthogonalization.h/LinearAlgebra.h via the shared
-# include path below.
-X2C_DIR := $(SRC_DIR)/X2C_DHF
+
+# All source files live directly under src/ or exactly one level below
+# it (src/<SomeDir>/*.cpp) -- e.g. (not exhaustive, and deliberately not
+# kept in sync by hand): AO_basis/ (cartesian AO basis data structures),
+# AO_ints/ (every file that calls LIBCINT directly to evaluate an AO
+# integral), C4_DHF/ (4-component Dirac-Hartree-Fock, RKB spinor basis),
+# NON_REL/ (nonrelativistic HF), Hessian_opt/ (RDMFT/CASSCF orbital
+# gradient/Hessian machinery, orthonormal MO basis only), Occ_opt/
+# (occupation-number SQP optimization), X2C_DHF/ (X2C decoupling and
+# X2C-HF), plus whatever else has been split out since this comment was
+# last updated. EVERY such subdirectory is auto-discovered below (both
+# for compiling its own .cpp files and for the shared -I search path,
+# so files in any one can #include headers from any other with no path
+# prefix) -- moving, renaming, or adding a source subdirectory needs NO
+# Makefile edit, only that its .cpp basenames stay globally unique
+# (object files all land flatly in $(BUILD_DIR), keyed by basename
+# alone) and that it stays exactly one level under src/ (a deeper nested
+# subdirectory, e.g. src/A/B/*.cpp, is NOT discovered).
+SRC_SUBDIRS  := $(patsubst %/,%,$(wildcard $(SRC_DIR)/*/))
+ALL_SRC_DIRS := $(SRC_DIR) $(SRC_SUBDIRS)
 BUILD_DIR:= build
 BIN      := rerdmft
 
@@ -86,26 +62,13 @@ $(error LIBCINT is not set. Build with: make LIBCINT=/path/to/libcint.a)
 endif
 endif
 
-SRCS        := $(wildcard $(SRC_DIR)/*.cpp)
-AO_SRCS     := $(wildcard $(AO_DIR)/*.cpp)
-AO_BASIS_SRCS := $(wildcard $(AO_BASIS_DIR)/*.cpp)
-C4_SRCS     := $(wildcard $(C4_DIR)/*.cpp)
-NON_REL_SRCS:= $(wildcard $(NON_REL_DIR)/*.cpp)
-HESSIAN_SRCS:= $(wildcard $(HESSIAN_DIR)/*.cpp)
-OCC_SRCS    := $(wildcard $(OCC_DIR)/*.cpp)
-X2C_SRCS    := $(wildcard $(X2C_DIR)/*.cpp)
-OBJS        := $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(SRCS)) \
-               $(patsubst $(AO_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(AO_SRCS)) \
-               $(patsubst $(AO_BASIS_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(AO_BASIS_SRCS)) \
-               $(patsubst $(C4_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(C4_SRCS)) \
-               $(patsubst $(NON_REL_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(NON_REL_SRCS)) \
-               $(patsubst $(HESSIAN_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(HESSIAN_SRCS)) \
-               $(patsubst $(OCC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(OCC_SRCS)) \
-               $(patsubst $(X2C_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(X2C_SRCS))
+SRCS := $(foreach d,$(ALL_SRC_DIRS),$(wildcard $(d)/*.cpp))
+OBJS := $(addprefix $(BUILD_DIR)/,$(notdir $(SRCS:.cpp=.o)))
 
-# All eight directories are on the quoted-include search path, so files
-# in any one can #include headers from the others without a path prefix.
-CPPFLAGS := -I$(LIBCINT_INC) -I$(SRC_DIR) -I$(AO_DIR) -I$(AO_BASIS_DIR) -I$(C4_DIR) -I$(NON_REL_DIR) -I$(HESSIAN_DIR) -I$(OCC_DIR) -I$(X2C_DIR)
+# Every discovered directory is on the quoted-include search path, so
+# files in any one can #include headers from any other without a path
+# prefix.
+CPPFLAGS := -I$(LIBCINT_INC) $(addprefix -I,$(ALL_SRC_DIRS))
 # LAPACKE (the C interface to LAPACK) is used for the RKB transformation's
 # overlap-matrix inverse; installed system-wide via liblapacke-dev.
 LDLIBS   := $(LIBCINT) -llapacke -llapack -lblas -lquadmath -lm
@@ -119,28 +82,14 @@ all: $(BIN)
 $(BIN): $(OBJS)
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDLIBS)
 
-$(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp | $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) $(DEPFLAGS) $(CPPFLAGS) -c $< -o $@
+# One generic pattern rule for every object, regardless of which
+# discovered directory its .cpp actually lives in: `vpath` tells make
+# where to look for a prerequisite named `%.cpp` that isn't in the
+# current directory, trying each of $(ALL_SRC_DIRS) in turn, so `$<`
+# below resolves to wherever the file was actually found.
+vpath %.cpp $(ALL_SRC_DIRS)
 
-$(BUILD_DIR)/%.o: $(AO_DIR)/%.cpp | $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) $(DEPFLAGS) $(CPPFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/%.o: $(AO_BASIS_DIR)/%.cpp | $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) $(DEPFLAGS) $(CPPFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/%.o: $(C4_DIR)/%.cpp | $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) $(DEPFLAGS) $(CPPFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/%.o: $(NON_REL_DIR)/%.cpp | $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) $(DEPFLAGS) $(CPPFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/%.o: $(HESSIAN_DIR)/%.cpp | $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) $(DEPFLAGS) $(CPPFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/%.o: $(OCC_DIR)/%.cpp | $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) $(DEPFLAGS) $(CPPFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/%.o: $(X2C_DIR)/%.cpp | $(BUILD_DIR)
+$(BUILD_DIR)/%.o: %.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(DEPFLAGS) $(CPPFLAGS) -c $< -o $@
 
 # Pull in each object's own header-dependency list generated above (a
