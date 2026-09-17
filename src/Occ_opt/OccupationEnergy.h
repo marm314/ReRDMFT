@@ -18,7 +18,7 @@ namespace rerdmft {
 // `h`/`eri` (the converged, FIXED one-/two-electron integrals in the
 // natural-orbital/natural-spinor MO basis) held constant. This is the
 // objective for OPTIMIZING OCCUPATION NUMBERS ALONE at fixed orbitals
-// (Occ_opt/SQP.h): value/gradient/hessian below all take exactly the
+// (Utils/SQP.h): value/gradient/hessian below all take exactly the
 // shape SqpValueFn/SqpGradientFn/SqpHessianFn expect (a function of
 // `occupations` only).
 //

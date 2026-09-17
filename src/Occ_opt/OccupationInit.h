@@ -8,7 +8,7 @@ namespace rerdmft {
 
 // How to generate the initial fractional occupation numbers a JK-only
 // functional (Occ_opt/JK_only.h) is evaluated at / an SQP occupation-
-// number optimization (Occ_opt/SQP.h) starts from, for a FIXED set of
+// number optimization (Utils/SQP.h) starts from, for a FIXED set of
 // (already-converged HF/DHF) orbitals.
 enum class OccupationInitMethod {
   // Aufbau (T=0, idempotent: 1.0 for the n_electrons lowest-energy
@@ -61,7 +61,7 @@ std::vector<double> redistributeIntoInteriorBox(std::vector<double> occupations,
 // Generates the initial occupations via `method` (see
 // OccupationInitMethod above), already redistributed into the interior
 // box and exactly summing to n_electrons -- i.e. ready to use directly
-// both as the functional-evaluation occupations AND as Occ_opt/SQP.h's
+// both as the functional-evaluation occupations AND as Utils/SQP.h's
 // feasible starting point, no further clamping needed by the caller.
 std::vector<double> generateInitialOccupations(OccupationInitMethod method,
                                                 const std::vector<double>& orbital_energies_active,

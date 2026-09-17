@@ -778,7 +778,7 @@ std::string buildFullHessianReport(const std::string& label, const rerdmft::Matr
 // FUNCTIONAL keyword's JK-only density matrix functional
 // (Occ_opt/JK_only.h) on those SAME converged orbitals with the new,
 // fractional occupations, then OPTIMIZES the occupations further via
-// Occ_opt/SQP.h at those same fixed orbitals -- i.e. a genuinely
+// Utils/SQP.h at those same fixed orbitals -- i.e. a genuinely
 // fractional-occupation RDMFT single-point energy (plus an
 // occupation-number-optimized one), not the trivial idempotent-
 // occupation HF/DHF energy computed elsewhere in this file. The
@@ -867,7 +867,7 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
   out << "  Total " << functional_name << " (fractional-occupation) energy: "
       << std::setprecision(10) << total_energy << std::setprecision(6) << " Hartree\n";
 
-  // Occupation-number OPTIMIZATION (Occ_opt/SQP.h), at FIXED orbitals
+  // Occupation-number OPTIMIZATION (Utils/SQP.h), at FIXED orbitals
   // and one-/two-electron integrals (h/eri never change below) --
   // minimize the SAME functional's energy (Occ_opt/OccupationEnergy.h,
   // an explicit function of occupations alone) subject to sum(n)=
@@ -922,7 +922,7 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
     return active_hess;
   };
 
-  out << "\n  SQP occupation-number optimization (Occ_opt/SQP.h, FIXED orbitals/integrals,\n"
+  out << "\n  SQP occupation-number optimization (Utils/SQP.h, FIXED orbitals/integrals,\n"
       << "  sum(n) = " << n_electrons << " constraint, " << kOccupationEpsilon << " <= n_p <= "
       << (1.0 - kOccupationEpsilon) << "):\n";
   try {

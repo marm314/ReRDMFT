@@ -83,7 +83,7 @@ Matrix<double> jkExchangeCoupling(JkFunctional functional, const std::vector<dou
                                    std::size_t f_l = 0, double power_alpha = 1.0);
 
 // Partial derivatives of jkExchangeFunction's own f(n_i,n_j), needed to
-// optimize occupation numbers (Occ_opt/SQP.h) at FIXED orbitals for a
+// optimize occupation numbers (Utils/SQP.h) at FIXED orbitals for a
 // given functional -- see Occ_opt/OccupationEnergy.h, which is the only
 // caller. All three take EXACTLY jkExchangeFunction's own arguments
 // (same per-branch index/f_l/power_alpha dispatch, so each piecewise

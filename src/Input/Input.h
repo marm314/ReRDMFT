@@ -232,7 +232,7 @@ class Input {
   // Optional; defaults to "PROPORTIONAL" when OCCUPATION_INIT is
   // absent. Selects how main.cpp's buildFunctionalReport generates the
   // initial fractional occupation numbers functional() is evaluated at
-  // / an SQP occupation-number optimization (Occ_opt/SQP.h) starts
+  // / an SQP occupation-number optimization (Utils/SQP.h) starts
   // from -- one of PROPORTIONAL (Occ_opt/OccupationInit.h's aufbau
   // reference, redistributed proportionally into the interior box;
   // temperature-independent, the DEFAULT) or FERMI_DIRAC (smeared at
