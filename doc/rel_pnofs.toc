@@ -1,0 +1,25 @@
+\contentsline {section}{\numberline {1}Scope, conventions, and notation}{2}{section.1}%
+\contentsline {section}{\numberline {2}The general reconstructed 2-RDM [Eqs.\nobreakspace {}(98a)--(98f)]}{3}{section.2}%
+\contentsline {section}{\numberline {3}Explicit 2-RDM elements for each functional}{3}{section.3}%
+\contentsline {subsubsection}{\numberline {3.0.1}PNOF5}{4}{subsubsection.3.0.1}%
+\contentsline {subsubsection}{\numberline {3.0.2}PNOF7}{4}{subsubsection.3.0.2}%
+\contentsline {subsubsection}{\numberline {3.0.3}PNOF7s}{4}{subsubsection.3.0.3}%
+\contentsline {subsubsection}{\numberline {3.0.4}GNOF}{5}{subsubsection.3.0.4}%
+\contentsline {section}{\numberline {4}The energy expression, Eq.\nobreakspace {}(64)}{5}{section.4}%
+\contentsline {subsection}{\numberline {4.1}The $h$-block}{5}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}The Coulomb ($J$) block}{6}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}The Gaunt ($J^G$) block}{6}{subsection.4.3}%
+\contentsline {subsection}{\numberline {4.4}The exchange ($K$) block}{6}{subsection.4.4}%
+\contentsline {subsection}{\numberline {4.5}The spin-flip ($L$) block}{6}{subsection.4.5}%
+\contentsline {subsection}{\numberline {4.6}The $\Pi (K+K^G)$ block}{7}{subsection.4.6}%
+\contentsline {subsection}{\numberline {4.7}The $\Pi (L+L^G)$ block}{7}{subsection.4.7}%
+\contentsline {section}{\numberline {5}The master formula}{7}{section.5}%
+\contentsline {section}{\numberline {6}Separation into intra- and inter-subspace terms}{7}{section.6}%
+\contentsline {section}{\numberline {7}Recovery of each functional's final energy expression}{8}{section.7}%
+\contentsline {subsection}{\numberline {7.1}PNOF5}{8}{subsection.7.1}%
+\contentsline {subsection}{\numberline {7.2}PNOF7}{8}{subsection.7.2}%
+\contentsline {subsection}{\numberline {7.3}PNOF7s}{8}{subsection.7.3}%
+\contentsline {subsection}{\numberline {7.4}GNOF}{8}{subsection.7.4}%
+\contentsline {section}{\numberline {8}The no-pair Dirac--Hartree--Fock limit}{9}{section.8}%
+\contentsline {section}{\numberline {9}Summary table}{9}{section.9}%
+\contentsline {section}{\numberline {10}Conclusion}{9}{section.10}%

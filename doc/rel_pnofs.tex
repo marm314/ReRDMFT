@@ -1,0 +1,694 @@
+% rel_pnofs.tex
+%
+% Explicit reconstructed-2-RDM elements [cf. Eqs. (98a)-(98f) of
+% SciPost Chem. 1, 004 (2022)] for each of the relativistic PNOF5,
+% PNOF7, PNOF7s and GNOF functionals, together with the complete,
+% step-by-step algebraic derivation showing that substitution of
+% these elements into Eq. (64) of the source paper reproduces the
+% published energy expressions of Sec. 3.5.3 [Eqs. (72)-(76)].
+
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{amsmath,amssymb,mathtools,bm}
+\usepackage{geometry}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{microtype}
+\usepackage{enumitem}
+
+\geometry{margin=1in}
+\hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
+
+\newcommand{\Dtwo}{{}^2D}
+\newcommand{\PiMat}{\Pi}
+\newcommand{\DeltaMat}{\Delta}
+\newcommand{\Om}{\Omega}
+\newcommand{\hi}{h_i}
+\newcommand{\hj}{h_j}
+
+\title{Explicit Reconstructed 2-RDM Elements and Full Derivation of the\\
+Relativistic PNOF5, PNOF7, PNOF7s, and GNOF Energy Functionals}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Starting from the general no-pair relativistic 2-RDM reconstruction of
+Appendix D of SciPost Chem.\ \textbf{1}, 004 (2022) [Eqs.~(97a)--(98f)],
+we write down, fully explicitly and separately for the relativistic
+PNOF5, PNOF7, PNOF7s, and GNOF functionals, every 2-RDM element
+$\Dtwo^{kl}_{ij}$ entering the natural-orbital energy expression
+Eq.~(64) of that paper. We then substitute these explicit elements
+into Eq.~(64), evaluate every one of its six blocks in full detail,
+and show that the result is identical, term by term, to the published
+energy expressions Eqs.~(72)--(76) of Sec.~3.5.3. The no-pair
+Dirac--Hartree--Fock limit is recovered as a corollary.
+\end{abstract}
+
+\tableofcontents
+
+\section{Scope, conventions, and notation}
+\label{sec:scope}
+
+We work throughout within the no-pair approximation and impose
+Kramers' pairing symmetry, restricting attention to `spin-compensated'
+systems, exactly as in Sec.~3.5 of the source paper. Natural spinors
+are grouped into Kramers pairs $(i,\bar i)$, with $i$ running over
+`half of the positive-energy spinors' and $\bar i$ its time-reversed
+partner. Spin compensation means
+\begin{equation}
+ n_{\bar i}=n_i \qquad\text{for all } i.
+ \label{eq:kramers-occ}
+\end{equation}
+The spinor space is partitioned into mutually disjoint subspaces
+(geminals),
+\begin{equation}
+ \Om=\bigcup_p \Om_p, \qquad \Om_p\cap\Om_q=\varnothing \ (p\neq q),
+ \qquad \sum_p n_p =\tfrac12 N_e ,
+ \label{eq:partition}
+\end{equation}
+with $n_p\equiv n_i$ for the reference (`principal') orbital of
+$\Om_p$ and $h_p=1-n_p$.
+
+We use the same integral symbols as the source paper,
+\begin{align}
+ h_{ii}&=\int d\mathbf r\,d\mathbf r'\,\widetilde\chi_i^\dagger(\mathbf r')
+ \big[\delta(\mathbf r-\mathbf r')\widehat T_D(\mathbf r)+v_{\rm ext}^{\rm nl}(\mathbf r,\mathbf r')\big]\widetilde\chi_i(\mathbf r),\\
+ J_{ij}&=\langle ij|ij\rangle, &
+ J^G_{ij}&=\langle ij|\bm\alpha\!\cdot\!\bm\alpha|ij\rangle,\\
+ K_{ij}&=\langle ij|ji\rangle, &
+ K^G_{ij}&=\langle ij|\bm\alpha\!\cdot\!\bm\alpha|ji\rangle,\\
+ L_{ij}&=\langle \bar i j|j\bar i\rangle, &
+ L^G_{ij}&=\langle \bar i j|\bm\alpha\!\cdot\!\bm\alpha|j\bar i\rangle,
+\end{align}
+with the paper's stated property $L_{ii}=0$ (while $L^G_{ii}\neq0$ in
+general).
+
+The cumulant reconstruction of Appendix D uses two auxiliary real,
+symmetric matrices, $\DeltaMat_{ij}$ and $\PiMat_{ij}\equiv
+\PiMat_{i\bar i,j\bar j}$ (the four possible bar-orderings of the
+latter are all numerically equal, as shown explicitly below
+Eq.~(97e) of the source paper). Following the prescription used to
+build Eqs.~(72)--(76), we adopt
+\begin{equation}
+ \DeltaMat_{ij}=\DeltaMat_{i\bar j}=\DeltaMat_{\bar ij}=\DeltaMat_{\bar i\bar j},
+ \qquad
+ \DeltaMat_{ii}=n_i^2,
+ \qquad
+ \PiMat_{ii}=n_i,
+ \label{eq:delta-pi-diag}
+\end{equation}
+and, for the off-diagonal part of $\DeltaMat$, the subspace ansatz
+\begin{equation}
+ \DeltaMat_{ij}=
+ \begin{cases}
+ n_i n_j, & i,j\in\Om_p \ (i\neq j),\\[1mm]
+ 0, & i\in\Om_q,\ j\in\Om_p,\quad p\neq q.
+ \end{cases}
+ \label{eq:delta-subspaces}
+\end{equation}
+This ansatz is the \emph{same for all four functionals}; only
+$\PiMat^{\rm inter}$ differs between PNOF5, PNOF7, PNOF7s, and GNOF.
+For compactness define
+\begin{equation}
+ A_{ij}\equiv\frac{n_in_j-\DeltaMat_{ij}}{2}
+ \;\Longrightarrow\;
+ A_{ij}=
+ \begin{cases}
+ 0, & i,j\in\Om_p,\\[1mm]
+ \dfrac{n_in_j}{2}, & i\in\Om_q,\ j\in\Om_p\ (p\neq q).
+ \end{cases}
+ \label{eq:Aij}
+\end{equation}
+
+The intra-subspace part of $\PiMat$ is likewise common to all four
+functionals [Eq.~(74) of the source paper]:
+\begin{equation}
+ \PiMat^{\rm intra}_{ij}=
+ \begin{cases}
+ -\sqrt{n_in_j}, & i=p\ \text{or}\ j=p \ (\text{principal orbital of }\Om_p),\\[1mm]
+ +\sqrt{n_in_j}, & \text{otherwise},
+ \end{cases}
+ \qquad i,j\in\Om_p,\ i\neq j.
+ \label{eq:Pi-intra}
+\end{equation}
+The inter-subspace part, $\PiMat^{\rm inter}_{ij;pq}$ for
+$i\in\Om_q,\,j\in\Om_p,\,p\neq q$, is what distinguishes the four
+functionals (Table 3 of the source paper) and is given explicitly in
+Sec.~\ref{sec:functionals} below.
+
+\section{The general reconstructed 2-RDM [Eqs.~(98a)--(98f)]}
+\label{sec:general98}
+
+For reference, the general (functional-independent) reconstruction of
+Appendix D reads
+\begin{align}
+\Dtwo^{kl}_{ij} &=
+ \frac{n_in_j-\DeltaMat_{ij}}{2}\delta_{ik}\delta_{jl}
+ -\frac{n_in_j-\DeltaMat_{ij}}{2}\delta_{il}\delta_{jk},
+ \label{eq:98a}\\
+\Dtwo^{\bar k\bar l}_{\bar i\bar j} &=
+ \frac{n_{\bar i}n_{\bar j}-\DeltaMat_{\bar i\bar j}}{2}\delta_{ik}\delta_{jl}
+ -\frac{n_{\bar i}n_{\bar j}-\DeltaMat_{\bar i\bar j}}{2}\delta_{il}\delta_{jk},
+ \label{eq:98b}\\
+\Dtwo^{k\bar l}_{i\bar j} &=
+ \frac{n_in_{\bar j}-\DeltaMat_{i\bar j}}{2}\delta_{ik}\delta_{jl}
+ +\frac{\PiMat_{i\bar i,k\bar k}}{2}\delta_{ij}\delta_{kl},
+ \label{eq:98c}\\
+\Dtwo^{\bar lk}_{\bar ji} &=
+ \frac{n_in_{\bar j}-\DeltaMat_{\bar ji}}{2}\delta_{ik}\delta_{jl}
+ +\frac{\PiMat_{\bar ii,\bar k\bar k}}{2}\delta_{ij}\delta_{kl},
+ \label{eq:98d}\\
+\Dtwo^{k\bar l}_{\bar ji} &=
+ -\frac{n_in_{\bar j}-\DeltaMat_{\bar ji}}{2}\delta_{ik}\delta_{jl}
+ -\frac{\PiMat_{\bar ii,k\bar k}}{2}\delta_{ij}\delta_{kl},
+ \label{eq:98e}\\
+\Dtwo^{\bar lk}_{i\bar j} &=
+ -\frac{n_in_{\bar j}-\DeltaMat_{i\bar j}}{2}\delta_{ik}\delta_{jl}
+ -\frac{\PiMat_{i\bar i,\bar k\bar k}}{2}\delta_{ij}\delta_{kl}.
+ \label{eq:98f}
+\end{align}
+Using spin compensation \eqref{eq:kramers-occ}, the $\DeltaMat$
+symmetry \eqref{eq:delta-pi-diag}, and the equality of all
+bar-orderings of $\PiMat$, every element that enters Eq.~(64) reduces
+to one of only two closed forms, valid for \emph{any} $i,k$ (equal or
+not):
+\begin{align}
+\Dtwo^{k\bar k}_{i\bar i} &= \frac{n_i^2-\DeltaMat_{ii}}{2}\delta_{ik}
+ +\frac{\PiMat_{ik}}{2}
+ \;=\;\frac{\PiMat_{ik}}{2},
+ \label{eq:unified-plus}\\
+\Dtwo^{i\bar i}_{\bar kk} &= -\frac{n_k^2-\DeltaMat_{kk}}{2}\delta_{ik}
+ -\frac{\PiMat_{ik}}{2}
+ \;=\;-\frac{\PiMat_{ik}}{2},
+ \label{eq:unified-minus}
+\end{align}
+where the diagonal-$\DeltaMat$ convention $\DeltaMat_{ii}=n_i^2$ kills
+the first term identically (this is what makes the diagonal case,
+$i=k$, consistent with the off-diagonal one via
+$\PiMat_{ii}=n_i$). Equations \eqref{eq:unified-plus}--\eqref{eq:unified-minus}
+are the compact `Eq.~98' library used repeatedly below.
+
+The remaining `Coulomb/exchange-type' elements needed are, for
+$i\neq j$,
+\begin{equation}
+\Dtwo^{ij}_{ij}=\Dtwo^{\bar ij}_{\bar ij}=\Dtwo^{i\bar j}_{i\bar j}
+=\Dtwo^{\bar i\bar j}_{\bar i\bar j}=A_{ij},
+\qquad
+\Dtwo^{ji}_{ij}=\Dtwo^{\bar i\bar j}_{\bar j\bar i}=-A_{ij},
+\label{eq:coulomb-elems}
+\end{equation}
+and the four `spin-flip' ($L$-type) elements, for $i\neq j$,
+\begin{equation}
+\Dtwo^{j\bar i}_{\bar ij}=\Dtwo^{i\bar j}_{\bar ji}
+=\Dtwo^{\bar ij}_{j\bar i}=\Dtwo^{\bar ji}_{i\bar j}=-A_{ij}.
+\label{eq:lflip-elems}
+\end{equation}
+For $i=j$ the pure-unbarred/pure-barred elements
+$\Dtwo^{ii}_{ii}=\Dtwo^{\bar i\bar i}_{\bar i\bar i}=0$ vanish
+identically by antisymmetry, while $\Dtwo^{i\bar i}_{i\bar i}=\Dtwo^{\bar ii}_{\bar ii}=n_i/2$
+follow from \eqref{eq:unified-plus} at $i=k$, and
+$\Dtwo^{i\bar i}_{\bar ii}=\Dtwo^{\bar ii}_{i\bar i}=-n_i/2$ follow
+from \eqref{eq:unified-minus} at $i=k$.
+
+\section{Explicit 2-RDM elements for each functional}
+\label{sec:functionals}
+
+Because \eqref{eq:Aij}, \eqref{eq:coulomb-elems}, and
+\eqref{eq:lflip-elems} depend on $\DeltaMat$ only, they are
+\emph{identical for all four functionals} once the intra/inter split
+\eqref{eq:delta-subspaces} is applied. The functional identity enters
+only through $\PiMat_{ik}$ in \eqref{eq:unified-plus}--\eqref{eq:unified-minus},
+via $\PiMat^{\rm intra}$ [Eq.~\eqref{eq:Pi-intra}, common to all] and
+$\PiMat^{\rm inter}$ [functional-dependent]. We now list, functional
+by functional, the complete set of explicit 2-RDM elements.
+
+\subsection*{Common intra-subspace elements ($i,j\in\Om_p$, $i\neq j$)}
+\begin{align}
+\Dtwo^{ij}_{ij}=\Dtwo^{\bar ij}_{\bar ij}=\Dtwo^{i\bar j}_{i\bar j}
+=\Dtwo^{\bar i\bar j}_{\bar i\bar j}&=0, &
+\Dtwo^{ji}_{ij}=\Dtwo^{\bar i\bar j}_{\bar j\bar i}&=0,
+\label{eq:intra-coulomb}\\
+\Dtwo^{j\bar i}_{\bar ij}=\Dtwo^{i\bar j}_{\bar ji}
+=\Dtwo^{\bar ij}_{j\bar i}=\Dtwo^{\bar ji}_{i\bar j}&=0,
+\label{eq:intra-lflip}\\
+\Dtwo^{j\bar j}_{i\bar i}=\Dtwo^{\bar ii}_{\bar jj}
+&=\frac{\PiMat^{\rm intra}_{ij}}{2}
+=\mp\frac{\sqrt{n_in_j}}{2},
+\label{eq:intra-piK}\\
+\Dtwo^{i\bar i}_{\bar jj}=\Dtwo^{j\bar j}_{\bar ii}
+=\Dtwo^{\bar ii}_{j\bar j}=\Dtwo^{\bar jj}_{i\bar i}
+&=-\frac{\PiMat^{\rm intra}_{ij}}{2}
+=\pm\frac{\sqrt{n_in_j}}{2},
+\label{eq:intra-piL}
+\end{align}
+(upper sign if $i$ or $j$ is the principal orbital of $\Om_p$, lower
+sign otherwise), all vanishing whenever $\Delta_{ij}=n_in_j$ makes
+$A_{ij}=0$, since intra-subspace pairs never contribute a
+Coulomb/exchange-type or $L$-flip-type 2-RDM element -- only the
+$\PiMat^{\rm intra}$ pairing term survives.
+
+\subsection*{Common diagonal elements ($i=j$, any functional)}
+\begin{equation}
+\Dtwo^{ii}_{ii}=\Dtwo^{\bar i\bar i}_{\bar i\bar i}=0,\qquad
+\Dtwo^{i\bar i}_{i\bar i}=\Dtwo^{\bar ii}_{\bar ii}=\frac{n_i}{2},\qquad
+\Dtwo^{i\bar i}_{\bar ii}=\Dtwo^{\bar ii}_{i\bar i}=-\frac{n_i}{2}.
+\label{eq:diag-common}
+\end{equation}
+
+\subsection*{Inter-subspace elements ($i\in\Om_q$, $j\in\Om_p$, $q\neq p$)}
+Here $A_{ij}=n_in_j/2$, so
+\begin{align}
+\Dtwo^{ij}_{ij}=\Dtwo^{\bar ij}_{\bar ij}=\Dtwo^{i\bar j}_{i\bar j}
+=\Dtwo^{\bar i\bar j}_{\bar i\bar j}&=\frac{n_in_j}{2}, &
+\Dtwo^{ji}_{ij}=\Dtwo^{\bar i\bar j}_{\bar j\bar i}&=-\frac{n_in_j}{2},
+\label{eq:inter-coulomb}\\
+\Dtwo^{j\bar i}_{\bar ij}=\Dtwo^{i\bar j}_{\bar ji}
+=\Dtwo^{\bar ij}_{j\bar i}=\Dtwo^{\bar ji}_{i\bar j}&=-\frac{n_in_j}{2},
+\label{eq:inter-lflip}\\
+\Dtwo^{j\bar j}_{i\bar i}=\Dtwo^{\bar ii}_{\bar jj}
+&=\frac{\PiMat^{\rm inter}_{ij;pq}}{2},
+\label{eq:inter-piK}\\
+\Dtwo^{i\bar i}_{\bar jj}=\Dtwo^{j\bar j}_{\bar ii}
+=\Dtwo^{\bar ii}_{j\bar j}=\Dtwo^{\bar jj}_{i\bar i}
+&=-\frac{\PiMat^{\rm inter}_{ij;pq}}{2}.
+\label{eq:inter-piL}
+\end{align}
+These are common in \emph{form} to all four functionals; only the
+value of $\PiMat^{\rm inter}_{ij;pq}$ in
+\eqref{eq:inter-piK}--\eqref{eq:inter-piL} changes. We now give this
+value, and hence the fully explicit inter-subspace 2-RDM elements,
+functional by functional.
+
+\subsubsection{PNOF5}
+\begin{equation}
+\PiMat^{\rm inter,\,PNOF5}_{ij;pq}=0
+\;\;\Longrightarrow\;\;
+\Dtwo^{j\bar j}_{i\bar i}=\Dtwo^{\bar ii}_{\bar jj}
+=\Dtwo^{i\bar i}_{\bar jj}=\Dtwo^{j\bar j}_{\bar ii}
+=\Dtwo^{\bar ii}_{j\bar j}=\Dtwo^{\bar jj}_{i\bar i}=0.
+\label{eq:98-pnof5}
+\end{equation}
+For PNOF5 the inter-subspace $2$-RDM therefore contains \emph{only}
+the ordinary Coulomb/exchange/$L$-flip elements
+\eqref{eq:inter-coulomb}--\eqref{eq:inter-lflip}; there is no
+inter-subspace pairing contribution.
+
+\subsubsection{PNOF7}
+\begin{equation}
+\PiMat^{\rm inter,\,PNOF7}_{ij;pq}=-\sqrt{n_in_j\hi\hj}
+\;\;\Longrightarrow\;\;
+\begin{aligned}
+\Dtwo^{j\bar j}_{i\bar i}&=\Dtwo^{\bar ii}_{\bar jj}
+=-\tfrac12\sqrt{n_in_j\hi\hj},\\
+\Dtwo^{i\bar i}_{\bar jj}&=\Dtwo^{j\bar j}_{\bar ii}
+=\Dtwo^{\bar ii}_{j\bar j}=\Dtwo^{\bar jj}_{i\bar i}
+=+\tfrac12\sqrt{n_in_j\hi\hj}.
+\end{aligned}
+\label{eq:98-pnof7}
+\end{equation}
+
+\subsubsection{PNOF7s}
+\begin{equation}
+\PiMat^{\rm inter,\,PNOF7s}_{ij;pq}=-4n_in_j\hi\hj
+\;\;\Longrightarrow\;\;
+\begin{aligned}
+\Dtwo^{j\bar j}_{i\bar i}&=\Dtwo^{\bar ii}_{\bar jj}
+=-2n_in_j\hi\hj,\\
+\Dtwo^{i\bar i}_{\bar jj}&=\Dtwo^{j\bar j}_{\bar ii}
+=\Dtwo^{\bar ii}_{j\bar j}=\Dtwo^{\bar jj}_{i\bar i}
+=+2n_in_j\hi\hj.
+\end{aligned}
+\label{eq:98-pnof7s}
+\end{equation}
+
+\subsubsection{GNOF}
+Define, with $h_p=1-n_p$ (the hole of the principal orbital of
+$\Om_p$),
+\begin{equation}
+ n_i^d=n_i\,\frac{h_p^d}{h_p},
+ \qquad
+ h_p^d=h_p\exp\!\left[-\Big(\frac{h_p}{0.02\sqrt2}\Big)^2\right].
+\end{equation}
+Then, for $i\in\Om_q$, $j\in\Om_p$, $q\neq p$,
+\begin{equation}
+\PiMat^{\rm inter,\,GNOF}_{ij;pq}=
+\begin{cases}
+n_i^dn_j^d-\sqrt{n_in_j\hi\hj}-\sqrt{n_i^dn_j^d}, & i>q,\ j=p\ \text{or}\ i=q,\ j>p,\\[1mm]
+n_i^dn_j^d-\sqrt{n_in_j\hi\hj}+\sqrt{n_i^dn_j^d}, & i>q,\ j>p,\\[1mm]
+0, & i=q,\ j=p,
+\end{cases}
+\label{eq:Pi-gnof}
+\end{equation}
+so that the fully explicit GNOF inter-subspace elements are
+\begin{equation}
+\Dtwo^{j\bar j}_{i\bar i}=\Dtwo^{\bar ii}_{\bar jj}
+=\frac{\PiMat^{\rm inter,\,GNOF}_{ij;pq}}{2},
+\qquad
+\Dtwo^{i\bar i}_{\bar jj}=\Dtwo^{j\bar j}_{\bar ii}
+=\Dtwo^{\bar ii}_{j\bar j}=\Dtwo^{\bar jj}_{i\bar i}
+=-\frac{\PiMat^{\rm inter,\,GNOF}_{ij;pq}}{2},
+\label{eq:98-gnof}
+\end{equation}
+with $\PiMat^{\rm inter,\,GNOF}_{ij;pq}$ given piecewise by
+\eqref{eq:Pi-gnof}.
+
+Equations \eqref{eq:98-pnof5}, \eqref{eq:98-pnof7},
+\eqref{eq:98-pnof7s}, and \eqref{eq:98-gnof} -- together with the
+common elements \eqref{eq:intra-coulomb}--\eqref{eq:diag-common} and
+\eqref{eq:inter-coulomb}--\eqref{eq:inter-lflip} -- constitute the
+complete, explicit reconstructed 2-RDM (`Eq.~98') for each of the
+four functionals. We now show, step by step, that inserting these
+elements into Eq.~(64) reproduces Eqs.~(72)--(76).
+
+\section{The energy expression, Eq.~(64)}
+\label{sec:E64}
+
+The np-ReNOFT energy under Kramers symmetry (Eq.~(64) of the source
+paper) is
+\begin{align}
+E={}&\sum_i h_{ii}(n_i+n_{\bar i})
+\nonumber\\
+&+\sum_{i,j}\Big(\Dtwo^{ij}_{ij}+\Dtwo^{\bar ij}_{\bar ij}
++\Dtwo^{i\bar j}_{i\bar j}+\Dtwo^{\bar i\bar j}_{\bar i\bar j}\Big)J_{ij}
+\nonumber\\
+&-\sum_{i,j}\Big(\Dtwo^{ij}_{ij}-\Dtwo^{\bar ij}_{\bar ij}
+-\Dtwo^{i\bar j}_{i\bar j}+\Dtwo^{\bar i\bar j}_{\bar i\bar j}\Big)J^G_{ij}
+\nonumber\\
+&+\sum_{i,j}\Big[\Dtwo^{ji}_{ij}+\Dtwo^{\bar i\bar j}_{\bar j\bar i}\Big](K_{ij}-K^G_{ij})
+\nonumber\\
+&+\frac12\sum_{i,j}\Big[\Dtwo^{j\bar i}_{\bar ij}+\Dtwo^{i\bar j}_{\bar ji}
++\Dtwo^{\bar ij}_{j\bar i}+\Dtwo^{\bar ji}_{i\bar j}\Big](L_{ij}-L^G_{ij})
+\nonumber\\
+&+\sum_{i\neq j}\Big[\Dtwo^{j\bar j}_{i\bar i}+\Dtwo^{\bar ii}_{\bar jj}\Big](K_{ij}+K^G_{ij})
+\nonumber\\
+&-\frac12\sum_{i\neq j}\Big[\Dtwo^{i\bar i}_{\bar jj}+\Dtwo^{j\bar j}_{\bar ii}
++\Dtwo^{\bar ii}_{j\bar j}+\Dtwo^{\bar jj}_{i\bar i}\Big](L_{ij}+L^G_{ij}).
+\label{eq:E64}
+\end{align}
+The six sums (call them, in order, the $h$-, $J$-, $J^G$-, $K$-,
+$L$-, $\PiMat K$-, and $\PiMat L$-blocks) are evaluated one at a time
+below, generically in $A_{ij}$ and $\PiMat_{ij}$; the functional
+identity is inserted only at the very end.
+
+\subsection{The $h$-block}
+By spin compensation \eqref{eq:kramers-occ},
+\begin{equation}
+\sum_i h_{ii}(n_i+n_{\bar i})=2\sum_i n_ih_{ii}.
+\label{eq:hblock}
+\end{equation}
+
+\subsection{The Coulomb ($J$) block}
+Define $C^J_{ij}=\Dtwo^{ij}_{ij}+\Dtwo^{\bar ij}_{\bar ij}+\Dtwo^{i\bar j}_{i\bar j}+\Dtwo^{\bar i\bar j}_{\bar i\bar j}$.
+For $i\neq j$, using \eqref{eq:coulomb-elems},
+\begin{equation}
+C^J_{ij}=4A_{ij}=2(n_in_j-\DeltaMat_{ij}).
+\label{eq:CJ-offdiag}
+\end{equation}
+For $i=j$, using \eqref{eq:diag-common},
+\begin{equation}
+C^J_{ii}=0+0+\frac{n_i}{2}+\frac{n_i}{2}=n_i.
+\label{eq:CJ-diag}
+\end{equation}
+Hence
+\begin{equation}
+E_J=\sum_i n_iJ_{ii}+\sum_{i\neq j}2(n_in_j-\DeltaMat_{ij})J_{ij}.
+\label{eq:EJ}
+\end{equation}
+
+\subsection{The Gaunt ($J^G$) block}
+Define $C^{J^G}_{ij}=\Dtwo^{ij}_{ij}-\Dtwo^{\bar ij}_{\bar ij}-\Dtwo^{i\bar j}_{i\bar j}+\Dtwo^{\bar i\bar j}_{\bar i\bar j}$.
+For $i\neq j$, all four elements equal $A_{ij}$, so
+\begin{equation}
+C^{J^G}_{ij}=A_{ij}-A_{ij}-A_{ij}+A_{ij}=0.
+\end{equation}
+For $i=j$,
+\begin{equation}
+C^{J^G}_{ii}=0-\frac{n_i}{2}-\frac{n_i}{2}+0=-n_i .
+\end{equation}
+Since Eq.~\eqref{eq:E64} contains $-C^{J^G}_{ij}J^G_{ij}$,
+\begin{equation}
+E_{J^G}=\sum_i n_iJ^G_{ii}.
+\label{eq:EJG}
+\end{equation}
+No inter- or intra-subspace ($i\neq j$) Gaunt-Coulomb term survives:
+this is why Eqs.~(73) and (75) contain $J^G_{ii}$ (diagonal only) and
+never $J^G_{ij}$ ($i\ne j$).
+
+\subsection{The exchange ($K$) block}
+Define $C^K_{ij}=\Dtwo^{ji}_{ij}+\Dtwo^{\bar i\bar j}_{\bar j\bar i}$.
+For $i\neq j$, using \eqref{eq:coulomb-elems},
+\begin{equation}
+C^K_{ij}=-2A_{ij}=-(n_in_j-\DeltaMat_{ij}).
+\label{eq:CK}
+\end{equation}
+For $i=j$ both terms vanish by antisymmetry. Hence
+\begin{equation}
+E_K=-\sum_{i\neq j}(n_in_j-\DeltaMat_{ij})(K_{ij}-K^G_{ij}).
+\label{eq:EK}
+\end{equation}
+
+\subsection{The spin-flip ($L$) block}
+Define $C^L_{ij}=\Dtwo^{j\bar i}_{\bar ij}+\Dtwo^{i\bar j}_{\bar ji}+\Dtwo^{\bar ij}_{j\bar i}+\Dtwo^{\bar ji}_{i\bar j}$
+(note that in Eq.~\eqref{eq:E64} this sum runs over \emph{all} $i,j$,
+including $i=j$, unlike the $K$- and $\PiMat$-blocks).
+
+For $i\neq j$, using \eqref{eq:lflip-elems},
+\begin{equation}
+C^L_{ij}=-4A_{ij}=-2(n_in_j-\DeltaMat_{ij}) .
+\end{equation}
+With the $\tfrac12$ prefactor of Eq.~\eqref{eq:E64},
+\begin{equation}
+E_L^{i\neq j}=-\sum_{i\neq j}(n_in_j-\DeltaMat_{ij})(L_{ij}-L^G_{ij}).
+\label{eq:EL-offdiag}
+\end{equation}
+
+For $i=j$, using \eqref{eq:diag-common}, all four terms collapse
+pairwise into $2\Dtwo^{i\bar i}_{\bar ii}+2\Dtwo^{\bar ii}_{i\bar i}
+=2(-n_i/2)+2(-n_i/2)=-2n_i$, so
+\begin{equation}
+C^L_{ii}=-2n_i .
+\label{eq:CLdiag}
+\end{equation}
+With the $\tfrac12$ prefactor and $L_{ii}=0$ (source paper),
+\begin{equation}
+\frac12C^L_{ii}(L_{ii}-L^G_{ii})
+=-n_i(0-L^G_{ii})
+=+n_iL^G_{ii}.
+\label{eq:ELdiag}
+\end{equation}
+This diagonal contribution, $\sum_in_iL^G_{ii}$, is precisely the
+term that appears together with $2h_{ii}+J_{ii}+J^G_{ii}$ in the
+one-body-like sum of Eqs.~(72)--(76), even though $L_{ii}=0$
+identically.
+
+\subsection{The $\PiMat(K+K^G)$ block}
+For $i\neq j$, using \eqref{eq:unified-plus},
+\begin{equation}
+\Dtwo^{j\bar j}_{i\bar i}=\Dtwo^{\bar ii}_{\bar jj}=\frac{\PiMat_{ij}}{2}
+\;\Longrightarrow\;
+E_{\PiMat K}=\sum_{i\neq j}\PiMat_{ij}(K_{ij}+K^G_{ij}).
+\label{eq:EpiK}
+\end{equation}
+
+\subsection{The $\PiMat(L+L^G)$ block}
+For $i\neq j$, using \eqref{eq:unified-minus},
+\begin{equation}
+\Dtwo^{i\bar i}_{\bar jj}=\Dtwo^{j\bar j}_{\bar ii}=\Dtwo^{\bar ii}_{j\bar j}
+=\Dtwo^{\bar jj}_{i\bar i}=-\frac{\PiMat_{ij}}{2}
+\;\Longrightarrow\;
+-\frac12\big(-4\cdot\tfrac{\PiMat_{ij}}{2}\big)=\PiMat_{ij},
+\end{equation}
+so
+\begin{equation}
+E_{\PiMat L}=\sum_{i\neq j}\PiMat_{ij}(L_{ij}+L^G_{ij}).
+\label{eq:EpiL}
+\end{equation}
+Combining \eqref{eq:EpiK} and \eqref{eq:EpiL},
+\begin{equation}
+E_\PiMat=\sum_{i\neq j}\PiMat_{ij}\big(K_{ij}+K^G_{ij}+L_{ij}+L^G_{ij}\big).
+\label{eq:Epi}
+\end{equation}
+
+\section{The master formula}
+\label{sec:master}
+
+Collecting \eqref{eq:hblock}, \eqref{eq:EJ}, \eqref{eq:EJG},
+\eqref{eq:EK}, \eqref{eq:EL-offdiag}, \eqref{eq:ELdiag}, and
+\eqref{eq:Epi}, and grouping diagonal versus off-diagonal terms,
+\begin{equation}
+\boxed{
+\begin{aligned}
+E={}&\sum_in_i\big(2h_{ii}+J_{ii}+J^G_{ii}+L^G_{ii}\big)\\
+&+\sum_{i\neq j}(n_in_j-\DeltaMat_{ij})\Big[2J_{ij}-(K_{ij}-K^G_{ij})-(L_{ij}-L^G_{ij})\Big]\\
+&+\sum_{i\neq j}\PiMat_{ij}\Big[K_{ij}+K^G_{ij}+L_{ij}+L^G_{ij}\Big].
+\end{aligned}
+}
+\label{eq:master}
+\end{equation}
+This identity holds for \emph{any} valid choice of $\DeltaMat$ and
+$\PiMat$ satisfying the conventions of Sec.~\ref{sec:scope}; it is
+independent of which of the four Piris-type functionals is used.
+
+\section{Separation into intra- and inter-subspace terms}
+\label{sec:separation}
+
+Insert the subspace ansatz \eqref{eq:delta-subspaces} into
+\eqref{eq:master}.
+
+\subsection*{Intra-subspace ($i,j\in\Om_p$)}
+Here $n_in_j-\DeltaMat_{ij}=0$, so the second sum in
+\eqref{eq:master} drops out entirely and only $\PiMat^{\rm intra}$
+survives:
+\begin{equation}
+\boxed{
+E_p=\sum_{i\in\Om_p}n_i\big(2h_{ii}+J_{ii}+J^G_{ii}+L^G_{ii}\big)
++\sum_{\substack{i,j\in\Om_p\\i\neq j}}\PiMat^{\rm intra}_{ij}\big(K_{ij}+K^G_{ij}+L_{ij}+L^G_{ij}\big).
+}
+\label{eq:Ep}
+\end{equation}
+This is \emph{identical} to Eq.~(73) of the source paper.
+
+\subsection*{Inter-subspace ($i\in\Om_q$, $j\in\Om_p$, $q\neq p$)}
+Here $n_in_j-\DeltaMat_{ij}=n_in_j$, so
+\begin{equation}
+\boxed{
+E_{qp}=\sum_{i\in\Om_q}\sum_{j\in\Om_p}n_in_j\Big[2J_{ij}-(K_{ij}-K^G_{ij})-(L_{ij}-L^G_{ij})\Big]
++\sum_{i\in\Om_q}\sum_{j\in\Om_p}\PiMat^{\rm inter}_{ij;pq}\big(K_{ij}+K^G_{ij}+L_{ij}+L^G_{ij}\big).
+}
+\label{eq:Eqp}
+\end{equation}
+This is \emph{identical} to Eq.~(75) of the source paper. Since
+$E=\sum_pE_p+\sum_{q\neq p}E_{qp}$, Eq.~(72) is recovered exactly.
+
+Equations \eqref{eq:Ep}--\eqref{eq:Eqp} are still generic in
+$\PiMat^{\rm inter}_{ij;pq}$: they hold for \emph{any} of the four
+functionals. We now specialize.
+
+\section{Recovery of each functional's final energy expression}
+\label{sec:recovery}
+
+\subsection{PNOF5}
+Substituting $\PiMat^{\rm inter}_{ij;pq}=0$ [Eq.~\eqref{eq:98-pnof5}]
+into \eqref{eq:Eqp} kills the second sum identically:
+\begin{equation}
+\boxed{
+E_{qp}^{\rm PNOF5}=\sum_{i\in\Om_q}\sum_{j\in\Om_p}n_in_j\Big[2J_{ij}-(K_{ij}-K^G_{ij})-(L_{ij}-L^G_{ij})\Big].
+}
+\label{eq:PNOF5-final}
+\end{equation}
+Together with the (unchanged) intra-subspace term \eqref{eq:Ep} using
+$\PiMat^{\rm intra}$ of \eqref{eq:Pi-intra}, this reproduces the
+relativistic PNOF5 functional exactly.
+
+\subsection{PNOF7}
+Substituting $\PiMat^{\rm inter}_{ij;pq}=-\sqrt{n_in_j\hi\hj}$
+[Eq.~\eqref{eq:98-pnof7}] into \eqref{eq:Eqp},
+\begin{equation}
+\boxed{
+E_{qp}^{\rm PNOF7}=\sum_{i\in\Om_q}\sum_{j\in\Om_p}n_in_j\Big[2J_{ij}-(K_{ij}-K^G_{ij})-(L_{ij}-L^G_{ij})\Big]
+-\sum_{i\in\Om_q}\sum_{j\in\Om_p}\sqrt{n_in_j\hi\hj}\big(K_{ij}+K^G_{ij}+L_{ij}+L^G_{ij}\big).
+}
+\label{eq:PNOF7-final}
+\end{equation}
+This is exactly the relativistic PNOF7 term of Eq.~(75).
+
+\subsection{PNOF7s}
+Substituting $\PiMat^{\rm inter}_{ij;pq}=-4n_in_j\hi\hj$
+[Eq.~\eqref{eq:98-pnof7s}] into \eqref{eq:Eqp},
+\begin{equation}
+\boxed{
+E_{qp}^{\rm PNOF7s}=\sum_{i\in\Om_q}\sum_{j\in\Om_p}n_in_j\Big[2J_{ij}-(K_{ij}-K^G_{ij})-(L_{ij}-L^G_{ij})\Big]
+-4\sum_{i\in\Om_q}\sum_{j\in\Om_p}n_in_j\hi\hj\big(K_{ij}+K^G_{ij}+L_{ij}+L^G_{ij}\big).
+}
+\label{eq:PNOF7s-final}
+\end{equation}
+
+\subsection{GNOF}
+Substituting the piecewise $\PiMat^{\rm inter,\,GNOF}_{ij;pq}$ of
+\eqref{eq:Pi-gnof} into \eqref{eq:Eqp} gives, with no further change
+to the reconstructed-2-RDM algebra,
+\begin{equation}
+\boxed{
+E_{qp}^{\rm GNOF}=\sum_{i\in\Om_q}\sum_{j\in\Om_p}n_in_j\Big[2J_{ij}-(K_{ij}-K^G_{ij})-(L_{ij}-L^G_{ij})\Big]
++\sum_{i\in\Om_q}\sum_{j\in\Om_p}\PiMat^{\rm inter,\,GNOF}_{ij;pq}\big(K_{ij}+K^G_{ij}+L_{ij}+L^G_{ij}\big),
+}
+\label{eq:GNOF-final}
+\end{equation}
+i.e.\ exactly the relativistic GNOF term of Eq.~(75)--(76).
+
+In every case,
+\begin{equation}
+E^{x}=\sum_pE_p+\sum_{q\neq p}E_{qp}^{x},\qquad x\in\{{\rm PNOF5,\,PNOF7,\,PNOF7s,\,GNOF}\},
+\end{equation}
+with $E_p$ common [Eq.~\eqref{eq:Ep}] and $E_{qp}^{x}$ given by
+\eqref{eq:PNOF5-final}--\eqref{eq:GNOF-final}: these are precisely
+Eqs.~(72) and (75) of the source paper, specialized functional by
+functional.
+
+\section{The no-pair Dirac--Hartree--Fock limit}
+\label{sec:HFlimit}
+
+As a corollary, let $n_i\in\{0,1\}$ for every $i$ (idempotent
+1-RDM). Then $h_i=1-n_i\in\{0,1\}$ as well, and for \emph{any} pair
+$i,j$ (same or different subspace) either $n_i=0$, $n_j=0$, $h_i=0$,
+or $h_j=0$. Hence
+\begin{equation}
+\sqrt{n_in_j}=0\ \text{or}\ 1\ \text{trivially},\qquad
+\sqrt{n_in_j\hi\hj}=0,\qquad n_in_j\hi\hj=0,\qquad
+n_i^dn_j^d-\sqrt{n_in_j\hi\hj}\pm\sqrt{n_i^dn_j^d}\to0,
+\end{equation}
+because in the strict single-determinant limit each subspace $\Om_p$
+contains exactly one occupied orbital ($n_i=1$) and the rest
+unoccupied ($n_j=0$); this kills $\PiMat^{\rm intra}_{ij}$ as well
+(one of $n_i,n_j$ vanishes for any intra-subspace pair with $i\ne j$
+in this limit). Consequently every $\PiMat$-dependent term in
+\eqref{eq:Ep}--\eqref{eq:Eqp} vanishes for all four functionals
+simultaneously, leaving
+\begin{equation}
+E\to2\sum_{i}^{N_e/2}h_{ii}+\sum_{i,j}^{N_e/2}\Big[2J_{ij}-(K_{ij}-K^G_{ij})-(L_{ij}-L^G_{ij})\Big],
+\end{equation}
+which is exactly the no-pair Dirac--Hartree--Fock energy, Eq.~(66) of
+the source paper. This confirms that PNOF5, PNOF7, PNOF7s, and GNOF
+all collapse to the same DHF limit, as stated in Sec.~3.6 of the
+source paper.
+
+\section{Summary table}
+\label{sec:summary}
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Functional & $\PiMat^{\rm inter}_{ij;pq}$ & Explicit $\Dtwo^{j\bar j}_{i\bar i}=\Dtwo^{\bar ii}_{\bar jj}$ \\
+\midrule
+PNOF5 & $0$ & $0$ \\
+PNOF7 & $-\sqrt{n_in_j\hi\hj}$ & $-\tfrac12\sqrt{n_in_j\hi\hj}$ \\
+PNOF7s & $-4n_in_j\hi\hj$ & $-2n_in_j\hi\hj$ \\
+GNOF & piecewise, Eq.~\eqref{eq:Pi-gnof} & $\tfrac12\PiMat^{\rm inter,\,GNOF}_{ij;pq}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+For every functional, $\Dtwo^{i\bar i}_{\bar jj}=\Dtwo^{j\bar j}_{\bar ii}
+=\Dtwo^{\bar ii}_{j\bar j}=\Dtwo^{\bar jj}_{i\bar i}
+=-\Dtwo^{j\bar j}_{i\bar i}$, and the ordinary
+Coulomb/exchange/spin-flip elements
+\eqref{eq:intra-coulomb}--\eqref{eq:diag-common} and
+\eqref{eq:inter-coulomb}--\eqref{eq:inter-lflip} are common to all
+four.
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+We have written down, fully explicitly and separately for PNOF5,
+PNOF7, PNOF7s, and GNOF, every reconstructed 2-RDM element
+$\Dtwo^{kl}_{ij}$ entering the relativistic no-pair natural-orbital
+energy expression. Substituting these explicit elements into Eq.~(64)
+and evaluating each of its six blocks in full detail reproduces,
+term by term and without any additional assumption, the published
+energy expressions Eqs.~(72)--(76) of Sec.~3.5.3 of SciPost Chem.\
+\textbf{1}, 004 (2022), and their common no-pair Dirac--Hartree--Fock
+limit, Eq.~(66).
+
+\end{document}
