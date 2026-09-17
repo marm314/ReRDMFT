@@ -6,6 +6,8 @@
 #include <cstddef>
 #include <stdexcept>
 
+#include "Cholesky_Decomposition.h"
+
 namespace rerdmft {
 
 namespace {
@@ -129,6 +131,17 @@ Tensor4<std::complex<double>> x2cMoTwoElectronTransformPhysics(
   const Tensor4<std::complex<double>> t2 = transformLeg2(t1, c_matrix);
   const Tensor4<std::complex<double>> t3 = transformLeg3(t2, c_matrix);
   return transformLeg4(t3, c_matrix);
+}
+
+Tensor4<std::complex<double>> x2cMoTwoElectronTransformPhysicsCholesky(
+    const Tensor4<double>& eri_ao_physics, const Matrix<std::complex<double>>& c_matrix,
+    double threshold) {
+  if (c_matrix.rows() != eri_ao_physics.dim0()) {
+    throw std::runtime_error(
+        "x2cMoTwoElectronTransformPhysicsCholesky: c_matrix row count does not match "
+        "eri_ao_physics's dimension");
+  }
+  return choleskyTransformEriMixed(eri_ao_physics, c_matrix, threshold);
 }
 
 }  // namespace rerdmft

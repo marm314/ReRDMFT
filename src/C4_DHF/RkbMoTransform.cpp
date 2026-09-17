@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <stdexcept>
 
+#include "Cholesky_Decomposition.h"
 #include "Matrix.h"
 
 namespace rerdmft {
@@ -147,6 +148,18 @@ Tensor4<std::complex<double>> rkbMoTwoElectronTransformPhysics(
   const Tensor4<std::complex<double>> t2 = transformLeg2(t1, c_dhf);
   const Tensor4<std::complex<double>> t3 = transformLeg3(t2, c_dhf);
   return transformLeg4(t3, c_dhf);
+}
+
+Tensor4<std::complex<double>> rkbMoTwoElectronTransformPhysicsCholesky(
+    const RkbTwoElectronTensor& eri_ao_physics, const Matrix<std::complex<double>>& c_dhf,
+    double threshold) {
+  if (c_dhf.rows() != eri_ao_physics.dim()) {
+    throw std::runtime_error(
+        "rkbMoTwoElectronTransformPhysicsCholesky: c_dhf row count does not match "
+        "eri_ao_physics's dimension");
+  }
+  const Tensor4<std::complex<double>> ao_dense = densify(eri_ao_physics);
+  return choleskyTransformEri(ao_dense, c_dhf, threshold);
 }
 
 Matrix<std::complex<double>> occupiedPositiveEnergyDensity(std::size_t rkb_dim, int n_electrons) {

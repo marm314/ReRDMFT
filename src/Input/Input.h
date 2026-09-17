@@ -172,6 +172,35 @@ class Input {
   // Directory (created if missing) that cache_integrals() cache files
   // are written to/read from.
   const std::string& cache_dir() const { return cache_dir_; }
+  // Optional; defaults to TRUE when the CHOLESKY keyword is absent --
+  // the DEFAULT option, per explicit design. When true, every two-
+  // electron integral basis TRANSFORMATION in this project (NON_REL's
+  // AO->MO transform, C4_DHF's RKB-spinor AO->MO transform, X2C_DHF's
+  // Large-spin-orbital AO->MO transform, and C4_DHF/RkbTwoElectron.cpp's
+  // own unrestricted- to restricted-kinetic-balance Small-basis
+  // projection) goes through a pivoted Cholesky decomposition of the
+  // SOURCE tensor first (Utils/Cholesky_Decomposition.h), transforming
+  // only the resulting (far fewer) Cholesky VECTORS instead of the full
+  // O(n^4) tensor, then reconstructing in the new basis -- reducing an
+  // O(n_old^4 * n_new)-scaling direct 4-leg transform to O(Nchol *
+  // n_old^3) (Nchol scaling empirically like O(n_old), not O(n_old^2)),
+  // at a numerically negligible accuracy cost controlled by the
+  // decomposition's own internal threshold (tight enough that CHOLESKY
+  // TRUE reproduces CHOLESKY FALSE's converged energies to the full
+  // displayed precision, not merely approximately). Setting CHOLESKY
+  // FALSE disables this entirely and falls back to this project's
+  // original direct 4-leg transform everywhere, unchanged.
+  bool cholesky() const { return cholesky_; }
+  // Residual-diagonal cutoff for the pivoted Cholesky decomposition above
+  // (Utils/Cholesky_Decomposition.h's own `threshold` parameter) -- below
+  // this, a pivot is considered numerical noise and decomposition stops.
+  // Defaults to 1e-10, tight enough in practice that CHOLESKY TRUE
+  // reproduces CHOLESKY FALSE's converged energies to full displayed
+  // precision on every tested example; exposed as a keyword so the user
+  // can loosen it (fewer Cholesky vectors, faster, less accurate) or
+  // tighten it (more vectors, slower, closer to exact) without a rebuild.
+  // Only meaningful when CHOLESKY is TRUE.
+  double cholesky_threshold() const { return cholesky_threshold_; }
   // Optional; defaults to "SD" when FUNCTIONAL is absent. Selects which
   // JK-only density matrix functional approximation (Occ_opt/JK_only.h,
   // Table 1 of Rodriguez-Mayorga et al., PCCP (2017)) main.cpp's
@@ -231,6 +260,8 @@ class Input {
   double energy_tolerance_ = 1e-8;
   double density_tolerance_ = 1e-6;
   bool cache_integrals_ = false;
+  bool cholesky_ = true;
+  double cholesky_threshold_ = 1e-10;
   std::string cache_dir_ = ".rerdmft_cache";
   std::string functional_ = "SD";
   bool has_functional_ = false;

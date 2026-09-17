@@ -167,6 +167,14 @@ void Input::read(const std::string& filename) {
         throw std::runtime_error("line " + std::to_string(line_number) +
                                   ": DENSITY_TOLERANCE must be positive");
       }
+    } else if (keyword == "CHOLESKY") {
+      cholesky_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "CHOLESKY_THRESHOLD") {
+      cholesky_threshold_ = parseDouble(iss, line_number, keyword);
+      if (!(cholesky_threshold_ > 0.0)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": CHOLESKY_THRESHOLD must be positive");
+      }
     } else if (keyword == "CACHE_INTEGRALS") {
       cache_integrals_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "CACHE_DIR") {

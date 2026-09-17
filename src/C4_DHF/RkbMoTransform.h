@@ -42,6 +42,20 @@ Matrix<std::complex<double>> rkbMoOneElectronTransform(
 Tensor4<std::complex<double>> rkbMoTwoElectronTransformPhysics(
     const RkbTwoElectronTensor& eri_ao_physics, const Matrix<std::complex<double>>& c_dhf);
 
+// Same result as rkbMoTwoElectronTransformPhysics above (verified to
+// agree to floating-point precision at the default threshold before
+// being trusted -- see main.cpp), computed via Utils/
+// Cholesky_Decomposition.h's pivoted Cholesky decomposition instead of
+// a direct 4-leg transform. RkbTwoElectronTensor's own Hermiticity
+// relation <A B|C D> = conj(<C D|A B>) (documented in RkbTwoElectron.h)
+// is exactly the bra=(A,B)/ket=(C,D) grouping choleskyDecomposeEri
+// requires, so this is a thin, direct pass-through -- densify then
+// choleskyTransformEri, no chemist/physics reindexing needed at all
+// (unlike NON_REL's own Cholesky counterpart).
+Tensor4<std::complex<double>> rkbMoTwoElectronTransformPhysicsCholesky(
+    const RkbTwoElectronTensor& eri_ao_physics, const Matrix<std::complex<double>>& c_dhf,
+    double threshold = 1e-10);
+
 // The idempotent 1-RDM, in the `c_dhf` MO basis, of the single Slater
 // determinant occupying the lowest `n_electrons` POSITIVE-energy
 // states -- NOT the lowest `n_electrons` states overall. The RKB

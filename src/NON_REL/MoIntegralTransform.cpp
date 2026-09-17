@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <stdexcept>
 
+#include "Cholesky_Decomposition.h"
+
 namespace rerdmft {
 
 namespace {
@@ -154,6 +156,30 @@ Tensor4<double> moTwoElectronTransformPhysics(const PackedTwoElectronTensor& eri
 
   // physics<p q|r s>_MO = chemist_mo(p,r,q,s) (physics<A B|C D> =
   // chemist(A,C,B,D)).
+  Tensor4<double> physics_mo(n_mo, n_mo, n_mo, n_mo, 0.0);
+  for (std::size_t p = 0; p < n_mo; ++p) {
+    for (std::size_t q = 0; q < n_mo; ++q) {
+      for (std::size_t r = 0; r < n_mo; ++r) {
+        for (std::size_t s = 0; s < n_mo; ++s) {
+          physics_mo(p, q, r, s) = chemist_mo(p, r, q, s);
+        }
+      }
+    }
+  }
+  return physics_mo;
+}
+
+Tensor4<double> moTwoElectronTransformPhysicsCholesky(const PackedTwoElectronTensor& eri_ao_chemist,
+                                                       const Matrix<double>& c, double threshold) {
+  if (c.rows() != eri_ao_chemist.dim()) {
+    throw std::runtime_error(
+        "moTwoElectronTransformPhysicsCholesky: c row count does not match eri_ao_chemist's "
+        "dimension");
+  }
+  const std::size_t n_mo = c.cols();
+  const Tensor4<double> ao_dense = densify(eri_ao_chemist);
+  const Tensor4<double> chemist_mo = choleskyTransformEri(ao_dense, c, threshold);
+
   Tensor4<double> physics_mo(n_mo, n_mo, n_mo, n_mo, 0.0);
   for (std::size_t p = 0; p < n_mo; ++p) {
     for (std::size_t q = 0; q < n_mo; ++q) {

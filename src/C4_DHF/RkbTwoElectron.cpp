@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "Cholesky_Decomposition.h"
 #include "ElectronRepulsion.h"
 
 namespace rerdmft {
@@ -204,11 +205,90 @@ Tensor4<std::complex<double>> transformPairToRkbSmall(
   return total;
 }
 
+Matrix<std::complex<double>> promoteToComplex(const Matrix<double>& m) {
+  Matrix<std::complex<double>> result(m.rows(), m.cols());
+  for (std::size_t i = 0; i < m.rows(); ++i) {
+    for (std::size_t j = 0; j < m.cols(); ++j) result(i, j) = std::complex<double>(m(i, j), 0.0);
+  }
+  return result;
+}
+
+// Projects a single (n_small x n_small) Cholesky vector V of the real
+// (Small,Small|Small,Small) chemist-notation tensor ss_ss into the
+// RKB-Small(y) "partner" flavor (row_offset = y*n_large), applying
+// EXACTLY the same bra-conjugated/ket-unconjugated, 2-spin-block-summed
+// projection transformPairToRkbSmall applies to a full tensor's leg pair
+// -- see the derivation in rkbTwoElectronIntegrals's own comment for why
+// this is valid to apply to a single Cholesky vector instead of the full
+// tensor. Costs O(n_small^2 * n_large) per spin block (two ordinary
+// matrix products), vs. transformPairToRkbSmall's O(n_small^2 * n_large *
+// n_small^2) when applied directly to ss_ss's own two electron-pair legs
+// (both legs still n_small before this transform touches them).
+Matrix<std::complex<double>> projectCholeskyVectorToRkbSmall(
+    const Matrix<double>& v, const Matrix<std::complex<double>>& rkb_coefficients,
+    std::size_t row_offset, std::size_t n_large, std::size_t n_small) {
+  const Matrix<std::complex<double>> v_complex = promoteToComplex(v);
+  Matrix<std::complex<double>> total(n_large, n_large, std::complex<double>(0.0, 0.0));
+  bool have_total = false;
+  for (std::size_t spin_offset : {std::size_t{0}, n_small}) {
+    const Matrix<std::complex<double>> c_spin =
+        subBlock(rkb_coefficients, row_offset, n_large, spin_offset, n_small);
+    const Matrix<std::complex<double>> c_spin_conj = conjMatrix(c_spin);
+    // W(p,q) = sum_{a,b} conj(c_spin(p,a)) * v(a,b) * c_spin(q,b)
+    //        = c_spin_conj * v_complex * transpose(c_spin), and
+    // transpose(c_spin) == dagger(c_spin_conj) (dagger conjugates AND
+    // transposes, and c_spin_conj is already conjugated once, so
+    // conjugating it again cancels out, leaving a plain transpose).
+    Matrix<std::complex<double>> contrib = c_spin_conj * (v_complex * dagger(c_spin_conj));
+    if (!have_total) {
+      total = std::move(contrib);
+      have_total = true;
+    } else {
+      const std::size_t len = total.rows() * total.cols();
+      std::complex<double>* t = total.data();
+      const std::complex<double>* s = contrib.data();
+      for (std::size_t i = 0; i < len; ++i) t[i] += s[i];
+    }
+  }
+  return total;
+}
+
+// Builds a dense Tensor4 as a sum of outer products of two equal-length
+// vector lists: result(p,q,r,s) = sum_L left[L](p,q) * right[L](r,s). Used
+// to reconstruct ss_Y1Y2[y1][y2] from the projected Cholesky vectors
+// W^{y1}, W^{y2} (see rkbTwoElectronIntegrals) -- NOT the same formula as
+// Cholesky_Decomposition.h's own choleskyReconstructEri (which conjugates
+// its second factor and uses the SAME vector list for both), since here
+// `left` and `right` are generally DIFFERENT projections of the SAME
+// underlying vector, and the electron-2 leg's own construction already
+// leaves V_L unconjugated (see this function's caller for the derivation).
+Tensor4<std::complex<double>> outerSumTensor(const std::vector<Matrix<std::complex<double>>>& left,
+                                              const std::vector<Matrix<std::complex<double>>>& right) {
+  const std::size_t n = left.front().rows();
+  Tensor4<std::complex<double>> result(n, n, n, n, std::complex<double>(0.0, 0.0));
+  for (std::size_t l = 0; l < left.size(); ++l) {
+    const Matrix<std::complex<double>>& a = left[l];
+    const Matrix<std::complex<double>>& b = right[l];
+    for (std::size_t p = 0; p < n; ++p) {
+      for (std::size_t q = 0; q < n; ++q) {
+        const std::complex<double> aval = a(p, q);
+        for (std::size_t r = 0; r < n; ++r) {
+          for (std::size_t s = 0; s < n; ++s) {
+            result(p, q, r, s) += aval * b(r, s);
+          }
+        }
+      }
+    }
+  }
+  return result;
+}
+
 }  // namespace
 
 RkbTwoElectronTensor rkbTwoElectronIntegrals(const std::vector<BasisFunction>& large_basis,
                                               const std::vector<BasisFunction>& small_basis,
-                                              const Matrix<std::complex<double>>& rkb_coefficients) {
+                                              const Matrix<std::complex<double>>& rkb_coefficients,
+                                              bool use_cholesky, double cholesky_threshold) {
   const std::size_t n_large = large_basis.size();
   const std::size_t n_small = small_basis.size();
   const std::size_t n = 4 * n_large;
@@ -228,27 +308,63 @@ RkbTwoElectronTensor rkbTwoElectronIntegrals(const std::vector<BasisFunction>& l
                                          n_small);
   }
 
-  // (RKB-Small(y1),RKB-Small(y1) | RKB-Small(y2),RKB-Small(y2)): transform
-  // ss_ss's electron-1 pair (legs 0,1) once per y1 -- reused for both y2
-  // choices -- then its electron-2 pair (legs 2,3) once per y2.
-  Tensor4<std::complex<double>> ss_sY1[2];
-  for (std::size_t y1 = 0; y1 < 2; ++y1) {
-    ss_sY1[y1] =
-        transformPairToRkbSmall(ss_ss, 0, 1, rkb_coefficients, y1 * n_large, n_large, n_small);
-  }
-  // ss_Y1Y2[1][0] (electron-1=beta-partner, electron-2=alpha-partner) is
-  // never computed directly: electron-exchange symmetry gives
-  //   ss_Y1Y2[1][0](p,q,r,s) = ss_Y1Y2[0][1](r,s,p,q),
-  // so it is recovered from ss_Y1Y2[0][1] by an index permutation instead
-  // of a second, equally expensive quarter-transform chain.
+  // (RKB-Small(y1),RKB-Small(y1) | RKB-Small(y2),RKB-Small(y2)): the
+  // dominant-cost piece (ss_ss has dimension n_small, typically >>
+  // n_large, e.g. 57 vs. 7 for water/STO-3G).
   Tensor4<std::complex<double>> ss_Y1Y2[2][2];
-  ss_Y1Y2[0][0] =
-      transformPairToRkbSmall(ss_sY1[0], 2, 3, rkb_coefficients, 0, n_large, n_small);
-  ss_Y1Y2[0][1] =
-      transformPairToRkbSmall(ss_sY1[0], 2, 3, rkb_coefficients, n_large, n_large, n_small);
-  ss_Y1Y2[1][1] =
-      transformPairToRkbSmall(ss_sY1[1], 2, 3, rkb_coefficients, n_large, n_large, n_small);
-  ss_Y1Y2[1][0] = swapElectronPairs(ss_Y1Y2[0][1]);
+  if (use_cholesky) {
+    // ss_ss(a,b,c,d) is a REAL, chemist-notation (ab|cd) tensor: its
+    // (0,1)/(2,3) leg-pair grouping IS the bra/ket grouping
+    // Cholesky_Decomposition.h requires (see its own header comment),
+    // so it decomposes directly: ss_ss(a,b,c,d) = sum_L V_L(a,b)*V_L(c,d).
+    // Since transformPairToRkbSmall's projection of a same-electron leg
+    // pair (bra index gets conj(c_spin), ket index gets un-conjugated
+    // c_spin, summed over the Small basis's own 2 spin blocks) is LINEAR
+    // in the tensor being transformed, it commutes with this sum: each
+    // Cholesky vector can be projected independently --
+    //   W_L^y(p,q) := sum_spin [conj(c_spin) * V_L * transpose(c_spin)](p,q)
+    // (projectCholeskyVectorToRkbSmall, y*n_large row offset) -- and the
+    // fully-transformed block follows as
+    //   ss_Y1Y2[y1][y2](p,q,r,s) = sum_L W_L^{y1}(p,q) * W_L^{y2}(r,s)
+    // (no swapElectronPairs shortcut needed: computing all four y1,y2
+    // combinations this way is already O(Nchol*n_large^4), cheaper than
+    // even one direct quarter-transform of the untouched ss_ss tensor).
+    const auto vectors = choleskyDecomposeEri(ss_ss, cholesky_threshold);
+    std::vector<Matrix<std::complex<double>>> w[2];
+    for (std::size_t y = 0; y < 2; ++y) {
+      w[y].reserve(vectors.size());
+      for (const auto& v : vectors) {
+        w[y].push_back(
+            projectCholeskyVectorToRkbSmall(v, rkb_coefficients, y * n_large, n_large, n_small));
+      }
+    }
+    for (std::size_t y1 = 0; y1 < 2; ++y1) {
+      for (std::size_t y2 = 0; y2 < 2; ++y2) {
+        ss_Y1Y2[y1][y2] = outerSumTensor(w[y1], w[y2]);
+      }
+    }
+  } else {
+    // Transform ss_ss's electron-1 pair (legs 0,1) once per y1 -- reused
+    // for both y2 choices -- then its electron-2 pair (legs 2,3) once
+    // per y2.
+    Tensor4<std::complex<double>> ss_sY1[2];
+    for (std::size_t y1 = 0; y1 < 2; ++y1) {
+      ss_sY1[y1] =
+          transformPairToRkbSmall(ss_ss, 0, 1, rkb_coefficients, y1 * n_large, n_large, n_small);
+    }
+    // ss_Y1Y2[1][0] (electron-1=beta-partner, electron-2=alpha-partner) is
+    // never computed directly: electron-exchange symmetry gives
+    //   ss_Y1Y2[1][0](p,q,r,s) = ss_Y1Y2[0][1](r,s,p,q),
+    // so it is recovered from ss_Y1Y2[0][1] by an index permutation
+    // instead of a second, equally expensive quarter-transform chain.
+    ss_Y1Y2[0][0] =
+        transformPairToRkbSmall(ss_sY1[0], 2, 3, rkb_coefficients, 0, n_large, n_small);
+    ss_Y1Y2[0][1] =
+        transformPairToRkbSmall(ss_sY1[0], 2, 3, rkb_coefficients, n_large, n_large, n_small);
+    ss_Y1Y2[1][1] =
+        transformPairToRkbSmall(ss_sY1[1], 2, 3, rkb_coefficients, n_large, n_large, n_small);
+    ss_Y1Y2[1][0] = swapElectronPairs(ss_Y1Y2[0][1]);
+  }
 
   // Assemble the full (4*nLarge)^4 physics-notation tensor <A B|C D> (only
   // the electron-exchange-unique half is actually stored -- see

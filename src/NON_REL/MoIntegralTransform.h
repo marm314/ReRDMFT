@@ -31,6 +31,22 @@ Matrix<double> moOneElectronTransform(const Matrix<double>& h_ao, const Matrix<d
 Tensor4<double> moTwoElectronTransformPhysics(const PackedTwoElectronTensor& eri_ao_chemist,
                                                const Matrix<double>& c);
 
+// Same result as moTwoElectronTransformPhysics above (verified to
+// agree to floating-point precision at the default threshold before
+// being trusted -- see main.cpp, CHOLESKY TRUE/FALSE both reproducing
+// the same converged energies), computed via Utils/
+// Cholesky_Decomposition.h's pivoted Cholesky decomposition instead of
+// a direct 4-leg transform: decomposes the (already-densified) CHEMIST-
+// notation AO tensor into Nchol vectors, transforms only those (much
+// smaller) vectors by `c`, reconstructs in the new (still chemist-
+// notation) basis, and converts to physics notation LAST (an O(n_mo^4)
+// reindex, not the O(n_ao^4) one a direct transform's own densify step
+// costs) -- reducing the dominant O(n_ao^4 * n_mo) leg-transform cost
+// to O(Nchol * n_ao^3), Nchol scaling empirically like O(n_ao).
+Tensor4<double> moTwoElectronTransformPhysicsCholesky(const PackedTwoElectronTensor& eri_ao_chemist,
+                                                       const Matrix<double>& c,
+                                                       double threshold = 1e-10);
+
 }  // namespace rerdmft
 
 #endif  // RERDMFT_MOINTEGRALTRANSFORM_H

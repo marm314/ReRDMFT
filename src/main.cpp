@@ -1040,13 +1040,14 @@ rerdmft::RkbTwoElectronTensor buildOrLoadC4SpinorEri(
       std::cout << "C4_DHF two-electron integrals: loaded from disk cache (" << path << ")\n";
       return cached;
     }
-    rerdmft::RkbTwoElectronTensor built =
-        rerdmft::rkbTwoElectronIntegrals(large_basis, small_basis, rkb_coefficients);
+    rerdmft::RkbTwoElectronTensor built = rerdmft::rkbTwoElectronIntegrals(
+        large_basis, small_basis, rkb_coefficients, input.cholesky(), input.cholesky_threshold());
     rerdmft::saveRkbTwoElectronTensor(path, fingerprint, built);
     std::cout << "C4_DHF two-electron integrals: wrote disk cache (" << path << ")\n";
     return built;
   }
-  return rerdmft::rkbTwoElectronIntegrals(large_basis, small_basis, rkb_coefficients);
+  return rerdmft::rkbTwoElectronIntegrals(large_basis, small_basis, rkb_coefficients,
+                                           input.cholesky(), input.cholesky_threshold());
 }
 
 void printAoList(const std::string& label,
@@ -1336,7 +1337,10 @@ int main(int argc, char** argv) {
       // Hessian_opt/HartreeExchangeGradient.h's simplified sums.
       const auto h_mo = rerdmft::moOneElectronTransform(h_core_nonrel, nonrel_hf_result.c_matrix);
       const auto eri_mo =
-          rerdmft::moTwoElectronTransformPhysics(nonrel_eri, nonrel_hf_result.c_matrix);
+          input.cholesky()
+              ? rerdmft::moTwoElectronTransformPhysicsCholesky(
+                    nonrel_eri, nonrel_hf_result.c_matrix, input.cholesky_threshold())
+              : rerdmft::moTwoElectronTransformPhysics(nonrel_eri, nonrel_hf_result.c_matrix);
       logTiming("NON_REL MO integral transform complete", t_start, t_checkpoint, timing_records);
 
       const std::size_t n_spatial = h_mo.rows();
@@ -1585,7 +1589,10 @@ int main(int argc, char** argv) {
       const auto h_x2c_mo =
           rerdmft::x2cMoOneElectronTransform(x2c_hamiltonian.h_x2c, x2c_hf_result.c_matrix);
       const auto eri_x2c_mo =
-          rerdmft::x2cMoTwoElectronTransformPhysics(eri_x2c_spin, x2c_hf_result.c_matrix);
+          input.cholesky()
+              ? rerdmft::x2cMoTwoElectronTransformPhysicsCholesky(
+                    eri_x2c_spin, x2c_hf_result.c_matrix, input.cholesky_threshold())
+              : rerdmft::x2cMoTwoElectronTransformPhysics(eri_x2c_spin, x2c_hf_result.c_matrix);
       logTiming("X2C-HF MO integral transform complete", t_start, t_checkpoint, timing_records);
 
       const std::size_t x2c_dim = h_x2c_mo.rows();
@@ -1780,7 +1787,10 @@ int main(int argc, char** argv) {
       // bases (e.g. h2.inp, cc-pVTZ, RKB dim ~120).
       const auto h_mo = rerdmft::rkbMoOneElectronTransform(h_rkb, dhf_result.c_dhf);
       const auto eri_mo =
-          rerdmft::rkbMoTwoElectronTransformPhysics(c4_spinor_eri, dhf_result.c_dhf);
+          input.cholesky()
+              ? rerdmft::rkbMoTwoElectronTransformPhysicsCholesky(
+                    c4_spinor_eri, dhf_result.c_dhf, input.cholesky_threshold())
+              : rerdmft::rkbMoTwoElectronTransformPhysics(c4_spinor_eri, dhf_result.c_dhf);
       logTiming("C4_DHF MO integral transform complete", t_start, t_checkpoint, timing_records);
 
       const std::size_t rkb_dim = h_mo.rows();

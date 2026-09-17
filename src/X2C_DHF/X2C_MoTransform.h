@@ -43,6 +43,20 @@ Matrix<std::complex<double>> x2cMoOneElectronTransform(const Matrix<std::complex
 Tensor4<std::complex<double>> x2cMoTwoElectronTransformPhysics(
     const Tensor4<double>& eri_ao_physics, const Matrix<std::complex<double>>& c_matrix);
 
+// Same result as x2cMoTwoElectronTransformPhysics above (verified to
+// agree to floating-point precision at the default threshold before
+// being trusted -- see main.cpp), computed via Utils/
+// Cholesky_Decomposition.h's pivoted Cholesky decomposition instead of
+// a direct 4-leg transform. `eri_ao_physics` is already dense and
+// already in physics notation, so this is a thin, direct pass-through
+// to choleskyTransformEriMixed (no notation conversion needed at all,
+// unlike NON_REL's own Cholesky counterpart) -- kept as its own named
+// function purely for API consistency with every other MO-transform
+// pair in this project.
+Tensor4<std::complex<double>> x2cMoTwoElectronTransformPhysicsCholesky(
+    const Tensor4<double>& eri_ao_physics, const Matrix<std::complex<double>>& c_matrix,
+    double threshold = 1e-10);
+
 }  // namespace rerdmft
 
 #endif  // RERDMFT_X2C_DHF_X2C_MOTRANSFORM_H
