@@ -242,6 +242,42 @@ class Input {
   // functional() is (Input.h stays independent of Occ_opt). Only
   // meaningful when has_functional() is true.
   const std::string& occupation_init() const { return occupation_init_; }
+  // Optional; defaults to 1 when PNOF_SUBSPACES is absent. How many
+  // independent PNOF-style (Piris) coupling subspaces to build
+  // (Occ_opt/Orb_subspaces.h), one per occupied orbital PAIR outward
+  // from HOMO: PNOF_SUBSPACES 1 (the default) builds just the HOMO
+  // subspace, PNOF_SUBSPACES 2 additionally builds a separate HOMO-1
+  // subspace, and so on -- where "pair" means a spin-orbital/spinor's
+  // own degenerate partner (NON_REL's alpha/beta partner, or X2C/
+  // C4_DHF's Kramers partner). Each subspace's own SIZE (how many
+  // unoccupied pairs it couples its occupied pair to) is set by
+  // pnof_coupling() below. The default PNOF_SUBSPACES=1 combined with
+  // pnof_coupling()'s own default of 2 is a genuine, meaningful
+  // configuration (plain HOMO/LUMO perfect pairing), not a "disabled"
+  // sentinel -- building the subspace table is currently the only thing
+  // this keyword feeds; it is not yet wired into the FUNCTIONAL/SQP
+  // occupation-optimization step itself, so nothing actually USES this
+  // value yet regardless of what it is set to. Must be at least 1; if
+  // combined with pnof_coupling() into a combination that asks for more
+  // occupied or unoccupied orbitals than the basis actually has,
+  // Occ_opt/Orb_subspaces.h's buildOrbitalSubspaces throws a
+  // std::runtime_error explaining exactly how many were requested vs.
+  // how many are available.
+  int pnof_subspaces() const { return pnof_subspaces_; }
+  // Optional; defaults to 2 when PNOF_COUPLING is absent. The SIZE of
+  // each PNOF subspace above, counted in orbital PAIRS: 1 occupied pair
+  // + (PNOF_COUPLING - 1) unoccupied pairs. PNOF_COUPLING 2 (the
+  // default) is plain perfect pairing (each subspace's occupied pair
+  // coupled to exactly one unoccupied pair, e.g. HOMO with LUMO alone);
+  // PNOF_COUPLING 3 couples each occupied pair to its TWO closest
+  // unoccupied pairs instead (e.g. HOMO with BOTH LUMO and LUMO+1), and
+  // so on. When pnof_subspaces() > 1, every subspace's unoccupied pairs
+  // are a DISJOINT block (see Occ_opt/Orb_subspaces.h) -- e.g.
+  // PNOF_SUBSPACES 2 + PNOF_COUPLING 3 couples HOMO with {LUMO,LUMO+1}
+  // and, separately, HOMO-1 with {LUMO+2,LUMO+3}. Must be at least 2;
+  // see pnof_subspaces()'s own comment for what happens if the
+  // requested combination exceeds the basis's available orbitals.
+  int pnof_coupling() const { return pnof_coupling_; }
 
  private:
   int n_electrons_ = 0;
@@ -268,6 +304,8 @@ class Input {
   bool has_functional_ = false;
   double temperature_ = 1000.0;
   std::string occupation_init_ = "PROPORTIONAL";
+  int pnof_subspaces_ = 1;
+  int pnof_coupling_ = 2;
 };
 
 }  // namespace rerdmft

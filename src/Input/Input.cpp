@@ -224,6 +224,18 @@ void Input::read(const std::string& filename) {
                                   "' (expected one of PROPORTIONAL, FERMI_DIRAC)");
       }
       occupation_init_ = upper;
+    } else if (keyword == "PNOF_SUBSPACES") {
+      pnof_subspaces_ = parseInt(iss, line_number, keyword);
+      if (pnof_subspaces_ < 1) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": PNOF_SUBSPACES must be at least 1");
+      }
+    } else if (keyword == "PNOF_COUPLING") {
+      pnof_coupling_ = parseInt(iss, line_number, keyword);
+      if (pnof_coupling_ < 2) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": PNOF_COUPLING must be at least 2");
+      }
     } else if (keyword == "SPEED_OF_LIGHT") {
       speed_of_light_ = parseDouble(iss, line_number, keyword);
       if (!(speed_of_light_ > 0.0)) {
