@@ -61,6 +61,47 @@ double maxPartnerDeviationFromPsi(const Matrix<std::complex<double>>& psi,
   return max_deviation;
 }
 
+// Per-pair phase of <psi_odd|Theta psi_even>_S -- shared by fixKramersPhase
+// and fixKramersPhaseLarge. Theta(psi_even) is guaranteed (Kramers'
+// theorem + the diagonalization's own orthogonality within the
+// degenerate pair) to be a PURE PHASE multiple of psi_odd already, so
+// this overlap's phase alone (its magnitude is ~1, given normalized
+// input) is exactly the correction each pair's odd column needs.
+std::vector<std::complex<double>> perPairOverlapPhase(const Matrix<std::complex<double>>& psi,
+                                                        const Matrix<double>& theta,
+                                                        const Matrix<double>& s_full) {
+  const std::size_t n_orig = psi.rows();
+  const std::size_t n_final = psi.cols();
+  const Matrix<std::complex<double>> theta_psi = toComplex(theta) * elementwiseConjugate(psi);
+  const Matrix<std::complex<double>> s_theta_psi = toComplex(s_full) * theta_psi;
+
+  std::vector<std::complex<double>> phases(n_final / 2, std::complex<double>(1.0, 0.0));
+  for (std::size_t k = 0; k + 1 < n_final; k += 2) {
+    std::complex<double> overlap(0.0, 0.0);
+    for (std::size_t r = 0; r < n_orig; ++r) {
+      overlap += std::conj(psi(r, k + 1)) * s_theta_psi(r, k);
+    }
+    const double mag = std::abs(overlap);
+    if (mag > 1e-12) phases[k / 2] = overlap / mag;
+  }
+  return phases;
+}
+
+// Multiplies each ODD column (2k+1) of `m` by `phases[k]`, leaving EVEN
+// columns untouched.
+Matrix<std::complex<double>> applyOddColumnPhases(const Matrix<std::complex<double>>& m,
+                                                    const std::vector<std::complex<double>>& phases) {
+  Matrix<std::complex<double>> result = m;
+  const std::size_t n_final = m.cols();
+  for (std::size_t k = 0; k + 1 < n_final; k += 2) {
+    const std::complex<double> phase = phases[k / 2];
+    for (std::size_t r = 0; r < m.rows(); ++r) {
+      result(r, k + 1) = m(r, k + 1) * phase;
+    }
+  }
+  return result;
+}
+
 }  // namespace
 
 double maxKramersPartnerDeviation(const Matrix<std::complex<double>>& eigenvectors,
@@ -148,6 +189,92 @@ double maxKramersPartnerDeviationLarge(const Matrix<std::complex<double>>& c_mat
   // which must first map H_RKB_ortho's own eigenvectors back through the
   // Large+Small RKB basis.
   return maxPartnerDeviationFromPsi(c_matrix, theta, s_full);
+}
+
+Matrix<std::complex<double>> fixKramersPhase(const Matrix<std::complex<double>>& eigenvectors,
+                                              const Matrix<std::complex<double>>& rkb_coefficients,
+                                              const Matrix<std::complex<double>>& x_full,
+                                              const Matrix<double>& s_large,
+                                              const Matrix<double>& s_small_ukb) {
+  const std::size_t n_large = s_large.rows();
+  const std::size_t n_small = s_small_ukb.rows();
+  const std::size_t n_orig = 2 * n_large + 2 * n_small;
+  const std::size_t n_final = eigenvectors.rows();
+
+  if (s_large.cols() != n_large || s_small_ukb.cols() != n_small ||
+      rkb_coefficients.rows() != 2 * n_large || rkb_coefficients.cols() != 2 * n_small ||
+      x_full.rows() != n_final || x_full.cols() != n_final || eigenvectors.cols() != n_final) {
+    throw std::runtime_error("fixKramersPhase: inconsistent input dimensions");
+  }
+
+  const Matrix<std::complex<double>> v = rkbEmbeddingMatrix(rkb_coefficients) * x_full;
+  const Matrix<std::complex<double>> psi = v * eigenvectors;
+
+  Matrix<double> theta(n_orig, n_orig, 0.0);
+  for (std::size_t i = 0; i < n_large; ++i) {
+    theta(n_large + i, i) = 1.0;
+    theta(i, n_large + i) = -1.0;
+  }
+  for (std::size_t i = 0; i < n_small; ++i) {
+    const std::size_t small_alpha = 2 * n_large + i;
+    const std::size_t small_beta = 2 * n_large + n_small + i;
+    theta(small_beta, small_alpha) = 1.0;
+    theta(small_alpha, small_beta) = -1.0;
+  }
+
+  Matrix<double> s_full(n_orig, n_orig, 0.0);
+  for (std::size_t i = 0; i < n_large; ++i) {
+    for (std::size_t j = 0; j < n_large; ++j) {
+      s_full(i, j) = s_large(i, j);
+      s_full(n_large + i, n_large + j) = s_large(i, j);
+    }
+  }
+  for (std::size_t i = 0; i < n_small; ++i) {
+    for (std::size_t j = 0; j < n_small; ++j) {
+      s_full(2 * n_large + i, 2 * n_large + j) = s_small_ukb(i, j);
+      s_full(2 * n_large + n_small + i, 2 * n_large + n_small + j) = s_small_ukb(i, j);
+    }
+  }
+
+  // Phases are computed from `psi` (the original AO representation,
+  // where Theta acts simply) but applied to `eigenvectors` itself: since
+  // psi = v * eigenvectors and v is linear, multiplying an eigenvector's
+  // own column by a phase multiplies its psi column by the same phase --
+  // so this reproduces the canonical psi_odd = Theta(psi_even) relation
+  // exactly, while also correctly phase-fixing c_dhf = rkbCoefficientMatrix(
+  // x_full, eigenvectors) downstream, since that construction is linear too.
+  const auto phases = perPairOverlapPhase(psi, theta, s_full);
+  return applyOddColumnPhases(eigenvectors, phases);
+}
+
+Matrix<std::complex<double>> fixKramersPhaseLarge(const Matrix<std::complex<double>>& c_matrix,
+                                                   const Matrix<double>& s_large) {
+  const std::size_t n_large = s_large.rows();
+  const std::size_t n_orig = 2 * n_large;
+
+  if (s_large.cols() != n_large || c_matrix.rows() != n_orig) {
+    throw std::runtime_error("fixKramersPhaseLarge: inconsistent input dimensions");
+  }
+
+  Matrix<double> theta(n_orig, n_orig, 0.0);
+  for (std::size_t i = 0; i < n_large; ++i) {
+    theta(n_large + i, i) = 1.0;
+    theta(i, n_large + i) = -1.0;
+  }
+
+  Matrix<double> s_full(n_orig, n_orig, 0.0);
+  for (std::size_t i = 0; i < n_large; ++i) {
+    for (std::size_t j = 0; j < n_large; ++j) {
+      s_full(i, j) = s_large(i, j);
+      s_full(n_large + i, n_large + j) = s_large(i, j);
+    }
+  }
+
+  // c_matrix's columns are already in the original [Large-alpha,
+  // Large-beta] AO representation, so no embedding is needed -- the
+  // phase can be applied directly to c_matrix itself.
+  const auto phases = perPairOverlapPhase(c_matrix, theta, s_full);
+  return applyOddColumnPhases(c_matrix, phases);
 }
 
 }  // namespace rerdmft

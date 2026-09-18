@@ -63,6 +63,56 @@ double maxKramersPartnerDeviation(const Matrix<std::complex<double>>& eigenvecto
 double maxKramersPartnerDeviationLarge(const Matrix<std::complex<double>>& c_matrix,
                                         const Matrix<double>& s_large);
 
+// Rotates `eigenvectors`' ODD columns (index 2k+1) by whatever complex
+// phase makes Theta*psi_even EXACTLY equal to the (rotated) psi_odd --
+// the CANONICAL Kramers phase convention (Theta|even> = |odd> exactly,
+// not merely "up to an overall phase" -- see this file's own
+// maxKramersPartnerDeviation, which only ever checks the ABSOLUTE VALUE
+// of that overlap and so is satisfied regardless of this phase).
+// LAPACK's own diagonalization of a degenerate eigenvalue has no reason
+// to respect this convention -- it returns SOME orthonormal basis of the
+// degenerate 2D eigenspace, with an uncontrolled relative phase between
+// the two columns. That is invisible to any downstream quantity built
+// only from EACH orbital separately (occupations, orbital energies,
+// densities, or a 2-RDM element that only ever touches ONE member of a
+// Kramers pair, like Occ_opt/PNOFs.h's own K_ij/L_ij), but corrupts any
+// quantity that MIXES a pair's own two members together in one integral
+// (e.g. Hessian_opt/PnofFock.h's L1/L2 pattern, eri(i,ibar,j,jbar)) --
+// confirmed directly: without this fix, that specific quantity picks up
+// a large, spurious, run-dependent imaginary part for X2C/C4_DHF's
+// genuinely complex spinors (never an issue for NON_REL's real
+// orbitals, where no such phase freedom exists in the first place).
+//
+// EVEN columns are left untouched; each ODD column is multiplied by a
+// single complex phase (magnitude 1, or 1+0i if the pair's own overlap
+// is degenerately small). This is an EXACT correction, not an
+// approximation: Theta(psi_even) is guaranteed, by Kramers' theorem
+// together with the diagonalization's own orthogonality within the
+// degenerate pair, to be a PURE PHASE multiple of psi_odd already (both
+// span the same 2D degenerate eigenspace, and Theta(psi_even) is
+// orthogonal to psi_even, exactly like psi_odd is) -- so this changes
+// neither the eigenvalue, the orthonormality, nor the span of the
+// eigenvector set, only the arbitrary relative phase within each pair.
+//
+// Same inputs, dimensions, and throw conditions as
+// maxKramersPartnerDeviation -- call this BEFORE building any coupled-
+// Kramers-pair quantity (Hessian_opt/PnofFock.h) from `eigenvectors`,
+// immediately after diagonalizing H_RKB_ortho and before
+// rkbCoefficientMatrix builds c_dhf from it.
+Matrix<std::complex<double>> fixKramersPhase(const Matrix<std::complex<double>>& eigenvectors,
+                                              const Matrix<std::complex<double>>& rkb_coefficients,
+                                              const Matrix<std::complex<double>>& x_full,
+                                              const Matrix<double>& s_large,
+                                              const Matrix<double>& s_small_ukb);
+
+// Same idea as fixKramersPhase, for the strictly two-component (X2C)
+// case -- same inputs, dimensions, and throw conditions as
+// maxKramersPartnerDeviationLarge. Call this on X2C_DHF/X2C_HF.h's own
+// converged `c_matrix` before it is used to build any coupled-Kramers-
+// pair quantity.
+Matrix<std::complex<double>> fixKramersPhaseLarge(const Matrix<std::complex<double>>& c_matrix,
+                                                   const Matrix<double>& s_large);
+
 }  // namespace rerdmft
 
 #endif  // RERDMFT_KRAMERSSYMMETRY_H

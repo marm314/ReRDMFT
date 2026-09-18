@@ -1,0 +1,32 @@
+# Example ReRDMFT input file: LiH at its experimental equilibrium bond
+# length (r_e = 1.5949 Angstrom, NIST CCCBDB), 6-31G basis (downloaded
+# from https://www.basissetexchange.org/, lih-6-31g.gbs) -- the 4-
+# component (C4_SPINOR) counterpart of lih_X2C_gnof_debug.inp, run
+# alongside NON_REL in the same file. Evaluates GNOF with TWO
+# independent PNOF coupling subspaces (PNOF_SUBSPACES 2): subspace 1
+# couples HOMO with LUMO, subspace 2 (a DISJOINT block of orbitals --
+# see Input.h's own pnof_subspaces()/pnof_coupling() header comments)
+# couples HOMO-1 with LUMO+1, PNOF_COUPLING 2 each (plain pairing, one
+# occupied pair to one unoccupied pair per subspace). LiH's 4 electrons
+# = exactly 2 occupied pairs (Li 1s core + the Li-H bonding pair), so
+# BOTH become frontier (active) geminals here -- no frozen core --
+# specifically to exercise Hessian_opt/PnofFock.h's generalized Fock/
+# gradient and the e^kappa orbital-rotation finite-difference check
+# (main.cpp's buildPnofFunctionalReport, DEBUG TRUE below) with MORE
+# THAN ONE active electron pair/geminal-pair coupling, for the
+# relativistic 4-component (C4_DHF) path specifically -- see
+# lih_X2C_gnof_debug.inp's own header comment for the analogous X2C
+# test and the Kramers-phase-convention background this exercises.
+NELEC 4
+BASIS lih-6-31g.gbs
+NON_RELATIVISTIC TRUE
+C4_SPINOR TRUE
+DEBUG TRUE
+FUNCTIONAL GNOF
+PNOF_SUBSPACES 2
+PNOF_COUPLING 2
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.594900
+END

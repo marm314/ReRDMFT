@@ -37,7 +37,9 @@
 #include "OccupationInit.h"
 #include "Orb_subspaces.h"
 #include "OrbitalGradient.h"
+#include "OrbitalRotationFiniteDifference.h"
 #include "PNOFs.h"
+#include "PnofFock.h"
 #include "RkbDensityMatrix.h"
 #include "RkbFockMatrix.h"
 #include "RkbHamiltonian.h"
@@ -824,7 +826,7 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
                                    std::size_t n_inactive_below, double n_electrons,
                                    double temperature_kelvin, const std::string& functional_name,
                                    const std::string& occupation_init_name,
-                                   double nuclear_repulsion_energy,
+                                   double nuclear_repulsion_energy, bool debug,
                                    std::chrono::steady_clock::time_point t_start,
                                    std::chrono::steady_clock::time_point& t_checkpoint,
                                    std::vector<TimingRecord>& timing_records) {
@@ -999,6 +1001,53 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
            "(expect close to "
         << n_electrons << "): " << std::setprecision(10) << displayed_occupation_sum
         << std::setprecision(6) << "\n";
+
+    // DEBUG-only: the orbital-rotation gradient at these OPTIMIZED (not,
+    // in general, orbital-stationary) occupations, cross-checked via
+    // Hessian_opt/OrbitalRotationFiniteDifference.h's e^kappa integral-
+    // rotation probe -- see buildPnofFunctionalReport's own, more
+    // elaborate version of this same check for why the finite-difference
+    // energy function must be built from the SAME two_rdm_h/two_rdm_x
+    // this functional's own analytic gradient uses (not some OTHER,
+    // Kramers/bar-symmetry-assuming energy formula) -- moot here, since
+    // JK_only's own two_rdm_h/two_rdm_x (Occ_opt/JK_only.h) are already a
+    // plain, unrestricted function of (p,q) and occupations alone, valid
+    // for ANY h/eri, not just a Kramers-symmetric one.
+    if (debug && n_active >= 2) {
+      const auto optimized_occ = embed(sqp_result.x);
+      const auto opt_two_rdm_h = rerdmft::jkHartreeCoupling(optimized_occ);
+      const auto opt_two_rdm_x = rerdmft::jkExchangeCoupling(functional, optimized_occ, f_l);
+      const auto fock =
+          rerdmft::hartreeExchangeFockMatrix(h, eri, optimized_occ, opt_two_rdm_h, opt_two_rdm_x);
+      const auto gradient = rerdmft::orbitalGradient(fock);
+      const rerdmft::RdmftEnergyFn<T> energy_fn = [&](const rerdmft::Matrix<T>& h_rot,
+                                                        const rerdmft::Tensor4<T>& eri_rot) {
+        return rerdmft::hartreeExchangeEnergy(h_rot, eri_rot, optimized_occ, opt_two_rdm_h,
+                                               opt_two_rdm_x);
+      };
+      // A pair straddling roughly the HOMO/LUMO boundary rather than two
+      // adjacent (typically spin/Kramers-degenerate, hence trivially
+      // gradient-free by symmetry) indices, for a more discriminating
+      // check.
+      const std::size_t p = n_inactive_below;
+      const std::size_t q = n_inactive_below + n_active / 2;
+      try {
+        const auto check =
+            rerdmft::orbitalRotationGradientCheck<T>(h, eri, gradient, energy_fn, p, q);
+        out << "\n  Hessian_opt e^kappa orbital-rotation gradient finite-difference check\n"
+               "  (hartreeExchangeFockMatrix's analytic gradient vs. rotated-integral energy\n"
+               "  probe, at the OPTIMIZED occupations above, orbital pair (" << p << "," << q
+            << ")):\n";
+        out << "    Analytic gradient g_pq:       " << std::setprecision(10) << check.analytic
+            << std::setprecision(6) << "\n";
+        out << "    Finite-difference dE/dt:      " << std::setprecision(10)
+            << check.finite_difference << std::setprecision(6) << "\n";
+        out << "    |difference| (expect small):  " << check.abs_diff << "\n";
+      } catch (const std::exception& e) {
+        out << "\n  Hessian_opt e^kappa orbital-rotation gradient finite-difference check FAILED: "
+            << e.what() << "\n";
+      }
+    }
   } catch (const std::exception& e) {
     out << "    FAILED: " << e.what() << "\n";
   }
@@ -1037,7 +1086,7 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
                                        const std::string& functional_name,
                                        double nuclear_repulsion_energy, int pnof_subspaces,
                                        int pnof_coupling, bool relativistic, bool sqp_pnof_occ,
-                                       std::chrono::steady_clock::time_point t_start,
+                                       bool debug, std::chrono::steady_clock::time_point t_start,
                                        std::chrono::steady_clock::time_point& t_checkpoint,
                                        std::vector<TimingRecord>& timing_records) {
   constexpr double kOccupationEpsilon = 1e-6;
@@ -1131,6 +1180,13 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
 
   const double initial_electronic_energy = value_fn(x0);
   const double initial_total_energy = initial_electronic_energy + nuclear_repulsion_energy;
+
+  // Filled with whichever occupations the optimization below actually
+  // converges to (SQP or LBFGS branch, whichever runs) -- x0's own
+  // initial-guess occupations if optimization fails, so the post-
+  // optimization gradient/finite-difference check below always has
+  // SOME valid, if not fully converged, occupation vector to run on.
+  std::vector<double> optimized_occ = embed(x0);
 
   std::ostringstream out;
   out << "\n"
@@ -1226,6 +1282,7 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
             << "): n = " << sqp_result.x[a - n_core] << "\n";
       }
       out << std::defaultfloat << std::setprecision(6);
+      optimized_occ = embed(sqp_result.x);
     } catch (const std::exception& e) {
       out << "    FAILED: " << e.what() << "\n";
     }
@@ -1346,8 +1403,75 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
             << "\n";
       }
       out << std::defaultfloat << std::setprecision(6);
+      optimized_occ = final_occ;
     } catch (const std::exception& e) {
       out << "    FAILED: " << e.what() << "\n";
+    }
+  }
+
+  // DEBUG-only: the orbital-rotation gradient at the OPTIMIZED (not, in
+  // general, orbital-stationary) occupations above, cross-checked via
+  // Hessian_opt/OrbitalRotationFiniteDifference.h's e^kappa integral-
+  // rotation probe -- the fractional-occupation generalization of this
+  // project's existing HF/DHF finite-difference checks (main.cpp's own
+  // finiteDifferenceCheckReport), which instead rotate the DENSITY at
+  // fixed integrals and so only apply to idempotent occupations. Uses
+  // Hessian_opt/PnofFock.h's own "cheap" pnofFockMatrix (validated above
+  // this function's own header comment) for the analytic gradient, and
+  // Occ_opt/PNOFs.h's already-independently-validated pnofElectronicEnergy
+  // (NOT PnofFock.h's own energy path) for the finite-difference energy,
+  // so the two sides of this check share no code besides the rotated
+  // integrals themselves.
+  if (debug) {
+    // A pair WITHIN the frontier (fractionally-occupied) subspace(s)
+    // when available -- exactly where a genuinely nonzero orbital-
+    // rotation gradient is expected, since occupation-only optimization
+    // never touches the orbitals -- falling back to the outermost
+    // core/deepest-virtual pair (frequently exactly zero by a Brillouin-
+    // type core/virtual decoupling, still a valid check) only if there
+    // is no second frontier geminal to pair the first one with.
+    const std::size_t p = geminals[n_core].i;
+    const std::size_t q = (n_frontier >= 2) ? geminals[n_core + 1].i : geminals.back().ibar;
+    // Uses Hessian_opt/PnofFock.h's OWN full_two_rdm/hartreeExchangeEnergy
+    // for the finite-difference energy too (NOT Occ_opt/PNOFs.h's
+    // pnofElectronicEnergy) -- a self-consistency check of the (h,eri) ->
+    // full_two_rdm -> Fock -> gradient pipeline, mirroring exactly how
+    // Hessian_opt/HartreeExchangeGradient.h's own gradient was validated
+    // (against random, unrelated 2-RDM coefficient matrices, not against
+    // any OTHER energy formula). pnofElectronicEnergy is NOT usable here:
+    // its own K_ij/L_ij read implicitly assumes eri retains full Kramers/
+    // bar symmetry (reading ONE bar-combination and algebraically
+    // doubling it to stand for all matching ones), which a rotation of
+    // JUST (p,q) -- without also rotating their Kramers partners
+    // (pbar,qbar) identically -- deliberately breaks; buildPnofFullTwoRdm's
+    // own two_rdm_h/x, by contrast, is evaluated via a genuine sum over
+    // EVERY actual-orbital (P,Q) pair independently, so it remains
+    // correct (and matches pnofElectronicEnergy exactly) whether or not
+    // that symmetry holds.
+    const auto full_two_rdm =
+        rerdmft::buildPnofFullTwoRdm(functional, geminals, optimized_occ, n_total, relativistic);
+    const rerdmft::RdmftEnergyFn<T> energy_fn = [&](const rerdmft::Matrix<T>& h_rot,
+                                                      const rerdmft::Tensor4<T>& eri_rot) {
+      return rerdmft::hartreeExchangeEnergy(h_rot, eri_rot, optimized_occ, full_two_rdm.two_rdm_h,
+                                             full_two_rdm.two_rdm_x);
+    };
+    const auto fock = rerdmft::pnofFockMatrix(functional, h, eri, geminals, optimized_occ,
+                                               relativistic);
+    const auto gradient = rerdmft::orbitalGradient(fock);
+    try {
+      const auto check =
+          rerdmft::orbitalRotationGradientCheck<T>(h, eri, gradient, energy_fn, p, q);
+      out << "\n  Hessian_opt e^kappa orbital-rotation gradient finite-difference check\n"
+             "  (pnofFockMatrix's cheap analytic gradient vs. rotated-integral energy probe,\n"
+             "  at the OPTIMIZED occupations above, orbital pair (" << p << "," << q << ")):\n";
+      out << "    Analytic gradient g_pq:       " << std::setprecision(10) << check.analytic
+          << std::setprecision(6) << "\n";
+      out << "    Finite-difference dE/dt:      " << std::setprecision(10)
+          << check.finite_difference << std::setprecision(6) << "\n";
+      out << "    |difference| (expect small):  " << check.abs_diff << "\n";
+    } catch (const std::exception& e) {
+      out << "\n  Hessian_opt e^kappa orbital-rotation gradient finite-difference check FAILED: "
+          << e.what() << "\n";
     }
   }
 
@@ -1879,12 +2003,13 @@ int main(int argc, char** argv) {
               "NON_REL", h_spin, eri_spin, 2 * n_spatial, 0, input.n_electrons(),
               input.functional(), nonrel_hf_result.nuclear_repulsion_energy,
               input.pnof_subspaces(), input.pnof_coupling(), /*relativistic=*/false,
-              input.sqp_pnof_occ(), t_start, t_checkpoint, timing_records);
+              input.sqp_pnof_occ(), input.debug(), t_start, t_checkpoint, timing_records);
         } else {
           nonrel_functional_report = buildFunctionalReport(
               "NON_REL", h_spin, eri_spin, nonrel_orbital_energies_spin, 0, input.n_electrons(),
               input.temperature(), input.functional(), input.occupation_init(),
-              nonrel_hf_result.nuclear_repulsion_energy, t_start, t_checkpoint, timing_records);
+              nonrel_hf_result.nuclear_repulsion_energy, input.debug(), t_start, t_checkpoint,
+              timing_records);
         }
       }
     }
@@ -1945,6 +2070,15 @@ int main(int argc, char** argv) {
           input.geometry(), input.mixing(), input.max_iterations(), input.energy_tolerance(),
           input.density_tolerance());
       logTiming("X2C-HF SCF complete", t_start, t_checkpoint, timing_records);
+
+      // Canonicalize each converged Kramers pair's relative phase
+      // (Theta|even> = |odd> EXACTLY -- see Utils/KramersSymmetry.h's
+      // own fixKramersPhaseLarge doc comment and C4_DHF's identical
+      // fixKramersPhase call above) BEFORE c_matrix is used for
+      // anything downstream. No effect on the density, energy, or any
+      // quantity that only ever touches one member of a pair at a time.
+      x2c_hf_result.c_matrix =
+          rerdmft::fixKramersPhaseLarge(x2c_hf_result.c_matrix, s_large);
 
       // Transform h_x2c and the (fixed) Large-component spin-orbital
       // two-electron integrals into the converged X2C-HF spinor
@@ -2123,14 +2257,14 @@ int main(int argc, char** argv) {
           x2c_functional_report = buildPnofFunctionalReport(
               "X2C_HF", h_x2c_mo, eri_x2c_mo, h_x2c_mo.rows(), 0, input.n_electrons(),
               input.functional(), x2c_hf_result.nuclear_repulsion_energy, input.pnof_subspaces(),
-              input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), t_start,
-              t_checkpoint, timing_records);
+              input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
+              t_start, t_checkpoint, timing_records);
         } else {
           x2c_functional_report = buildFunctionalReport(
               "X2C_HF", h_x2c_mo, eri_x2c_mo, x2c_hf_result.orbital_energies, 0,
               input.n_electrons(), input.temperature(), input.functional(),
-              input.occupation_init(), x2c_hf_result.nuclear_repulsion_energy, t_start,
-              t_checkpoint, timing_records);
+              input.occupation_init(), x2c_hf_result.nuclear_repulsion_energy, input.debug(),
+              t_start, t_checkpoint, timing_records);
         }
       }
     }
@@ -2150,6 +2284,23 @@ int main(int argc, char** argv) {
           input.mixing(), input.max_iterations(), input.energy_tolerance(),
           input.density_tolerance());
       logTiming("SCF loop complete", t_start, t_checkpoint, timing_records);
+
+      // Canonicalize each converged Kramers pair's relative phase
+      // (Theta|even> = |odd> EXACTLY, not merely up to an arbitrary
+      // phase -- see Utils/KramersSymmetry.h's own fixKramersPhase
+      // doc comment) BEFORE c_dhf is used for anything downstream.
+      // LAPACK's diagonalization of Fock_ortho's degenerate eigenvalues
+      // has no reason to respect this convention on its own, and any
+      // 2-RDM element that mixes a Kramers pair's own two members
+      // together in one integral (Hessian_opt/PnofFock.h's L1/L2
+      // pattern) is sensitive to the gap -- this has no effect on the
+      // density, energy, or any quantity that only ever touches one
+      // member of a pair at a time (occupations, orbital energies, the
+      // gradient/Hessian checks below), since multiplying one
+      // eigenvector by a unit-magnitude phase changes none of those.
+      dhf_result.fock_ortho_eigenvectors = rerdmft::fixKramersPhase(
+          dhf_result.fock_ortho_eigenvectors, rkb_coefficients, x_full, s_large, s_small_ukb);
+      dhf_result.c_dhf = x_full * dhf_result.fock_ortho_eigenvectors;
 
       // Transform h_RKB and the RKB spinor ERIs into the converged DHF
       // spinor ("natural spinor", here) MO basis spanned by c_dhf --
@@ -2358,14 +2509,14 @@ int main(int argc, char** argv) {
           dhf_functional_report = buildPnofFunctionalReport(
               "C4_DHF", h_mo, eri_mo, h_mo.rows() - n_negative, n_negative, input.n_electrons(),
               input.functional(), dhf_result.nuclear_repulsion_energy, input.pnof_subspaces(),
-              input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), t_start,
-              t_checkpoint, timing_records);
+              input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
+              t_start, t_checkpoint, timing_records);
         } else {
           dhf_functional_report = buildFunctionalReport(
               "C4_DHF", h_mo, eri_mo, dhf_orbital_energies_positive, n_negative,
               input.n_electrons(), input.temperature(), input.functional(),
-              input.occupation_init(), dhf_result.nuclear_repulsion_energy, t_start, t_checkpoint,
-              timing_records);
+              input.occupation_init(), dhf_result.nuclear_repulsion_energy, input.debug(),
+              t_start, t_checkpoint, timing_records);
         }
       }
     }
