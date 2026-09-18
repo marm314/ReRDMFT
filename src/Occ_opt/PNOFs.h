@@ -258,6 +258,94 @@ Matrix<double> pnofOccupationHessianFD(PnofFunctional functional, const Matrix<T
                                         const std::vector<PnofGeminal>& geminals,
                                         bool relativistic, double h_step = 1e-4);
 
+// ---------------------------------------------------------------------
+// Trigonometric ("gamma") occupation-number guess, adapted from
+// standalone_donof's reference restricted/spatial-orbital DoNOF code
+// (m_gammatodm2.F90::gamma_to_2rdm, m_rdmd.F90's Ngammas=Ncoupled*Npairs,
+// m_optocc.F90's own GAMMAs=pi/4 default guess) that this project's PNOF
+// functionals are themselves based on. Independent, UNCONSTRAINED angles
+// gamma_i map to occupations that sum to exactly 1 within a subspace and
+// lie in (0,1) for any REAL gamma_i -- i.e. an unconstrained
+// reparameterization of the sum=1 simplex -- used HERE only to build a
+// feasible SQP starting guess (main.cpp's buildPnofFunctionalReport),
+// not as optimization variables in their own right (DoNOF itself
+// optimizes directly over gamma; this project instead optimizes the
+// occupations subject to explicit box+equality constraints via
+// Utils/SQP.h, so gamma is only ever used up front, for x0).
+//
+// One subspace with `pnof_coupling` geminals (1 principal + coupling-1
+// unoccupied, Occ_opt/Orb_subspaces.h's own convention) needs exactly
+// `pnof_coupling - 1` independent gamma angles (DoNOF's own Ncoupled =
+// pnof_coupling-1, and Ngammas per subspace = Ncoupled): the first sets
+// the principal's own occupation via
+//   n_principal = 1/2 + 1/2*cos^2(gamma_0)
+// (DoNOF's own convention -- ranges [0.5, 1] as gamma_0 varies, since a
+// principal pair is by definition at least half-occupied); the
+// remaining `pnof_coupling - 2` angles then split the leftover hole
+// (1 - n_principal) among the subspace's virtuals via a nested
+// sin^2/cos^2 "stick-breaking" scheme (DoNOF's Ncoupled>1 branch,
+// m_gammatodm2.F90 lines ~138-232): virtual k (0-indexed) takes a
+// sin^2(gamma_{k+1}) fraction of whatever hole remains after virtuals
+// 0..k-1, and the LAST virtual simply receives whatever hole is left
+// over (no gamma of its own -- DoNOF reuses the second-to-last split's
+// own angle via its complementary cos^2 term, since sin^2+cos^2=1
+// already accounts for it exactly). Every partial sum telescopes
+// exactly regardless of the gamma values, which is the entire point of
+// the parameterization; for pnof_coupling=2 (DoNOF's Ncoupled=1,
+// "perfect pairing") there are no split angles at all and the single
+// virtual simply gets the whole hole, matching DoNOF's own dedicated
+// Ncoupled==1 branch exactly.
+//
+// Used in main.cpp's buildPnofFunctionalReport for TWO purposes: (1) a
+// feasible SQP starting guess (pnofDefaultGuessGammas below, occupations
+// only, no derivatives needed), and (2) as the actual UNCONSTRAINED
+// optimization variables of a second, alternative occupation-number
+// optimization via Utils/LBFGS.h (pnofSubspaceOccupationsFromGammasWithGradient
+// below, providing the d(occ)/d(gamma) Jacobian the chain rule needs) --
+// DoNOF's own approach (m_optocc.F90 optimizes directly over GAMMAs),
+// avoiding Utils/SQP.h's explicit box+equality machinery entirely, since
+// gamma already guarantees sum(n)=1 and 0<n<1 for ANY real gamma value.
+std::size_t pnofGammasPerSubspace(int pnof_coupling);
+
+// One occupation value per geminal of a single subspace (size
+// pnof_coupling: index 0 is the principal, indices 1..pnof_coupling-1
+// are its virtuals in order), from exactly
+// pnofGammasPerSubspace(pnof_coupling) angles. Throws
+// std::runtime_error if `pnof_coupling < 2` or `gammas.size() !=
+// pnof_coupling - 1`.
+std::vector<double> pnofSubspaceOccupationsFromGammas(int pnof_coupling,
+                                                       const std::vector<double>& gammas);
+
+// DoNOF's own default occupation guess (m_optocc.F90: `GAMMAs=pi/four`,
+// its comment reading "Perturbed occ. numbers (i.e. pi/4) -> occ(i<Fermi
+// level) = 0.75") -- every gamma angle set to pi/4, giving n_principal =
+// 0.75 and each split taking half of whatever hole remains (so the
+// virtuals decay geometrically: hole/2, hole/4, ..., with the last
+// virtual receiving whatever is left, equal to the second-to-last
+// share). Always strictly interior to (0,1) for any pnof_coupling in
+// the range this project's examples use, unlike a "start at exactly
+// n=1" HF-like guess, which is the whole reason DoNOF itself calls this
+// a "perturbed" rather than an aufbau start.
+std::vector<double> pnofDefaultGuessGammas(int pnof_coupling);
+
+// occ, plus the Jacobian d(occ[i])/d(gammas[k]) (size pnof_coupling x
+// (pnof_coupling-1)), needed to gamma-optimize occupations via
+// Utils/LBFGS.h's chain rule: d(E)/d(gamma_k) =
+// sum_i d(E)/d(occ[i]) * docc_dgamma(i,k). Derived by propagating the
+// SAME nested "remaining hole" recursion pnofSubspaceOccupationsFromGammas
+// itself uses, tracking d(remaining)/d(gamma_m) alongside `remaining`
+// at every step (verified against central finite differences of
+// pnofSubspaceOccupationsFromGammas before being trusted -- see this
+// file's own gamma/LBFGS cross-check). Same throw conditions as
+// pnofSubspaceOccupationsFromGammas.
+struct PnofSubspaceOccupationsWithGradient {
+  std::vector<double> occ;
+  Matrix<double> docc_dgamma;
+};
+
+PnofSubspaceOccupationsWithGradient pnofSubspaceOccupationsFromGammasWithGradient(
+    int pnof_coupling, const std::vector<double>& gammas);
+
 }  // namespace rerdmft
 
 #endif  // RERDMFT_OCC_OPT_PNOFS_H

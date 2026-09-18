@@ -103,6 +103,7 @@ anywhere on a line) are comments.
 | `TEMPERATURE` | double (> 0) | `1000` (Kelvin) | Electronic temperature used to smear orbital energies into fractional Fermi-Dirac occupations. Only consumed when `OCCUPATION_INIT FERMI_DIRAC` is selected; ignored (but still validated) otherwise. |
 | `PNOF_SUBSPACES` | int (>= 1) | `1` | Only meaningful when `FUNCTIONAL` is a PNOF name. How many independent coupling subspaces to build outward from HOMO (`Occ_opt/Orb_subspaces.h`): `1` builds just the HOMO subspace, `2` additionally builds a separate HOMO-1 subspace, and so on. Throws if this exceeds the number of occupied Kramers/spin pairs available. |
 | `PNOF_COUPLING` | int (>= 2) | `2` | Only meaningful when `FUNCTIONAL` is a PNOF name. The SIZE of each subspace, in Kramers/spin pairs: 1 occupied pair + (`PNOF_COUPLING` - 1) unoccupied pairs. `2` (the default) is plain HOMO-LUMO perfect pairing; `3` couples each occupied pair with its two closest unoccupied pairs (LUMO and LUMO+1); and so on. Every subspace's unoccupied pairs are a disjoint block (never shared between subspaces); throws if `PNOF_SUBSPACES * (PNOF_COUPLING - 1)` exceeds the number of unoccupied pairs available. |
+| `SQP_PNOF_OCC` | bool | `FALSE` | Only meaningful when `FUNCTIONAL` is a PNOF name. `FALSE` (the default): optimize the occupations via `Utils/LBFGS.h` over the UNCONSTRAINED gamma angles (`standalone_donof`'s own approach). `TRUE`: optimize via `Utils/SQP.h` over the occupations directly instead, subject to explicit box+equality constraints. The two methods solve the same problem and agree to full displayed precision whenever both converge cleanly (see the PNOF section below); only one runs per calculation, never both. |
 | `X2C` | bool | `FALSE` | Print the one-electron X2C decoupling report AND run the approximate X2C-HF SCF, both described below, printed between the `NON_RELATIVISTIC` and `C4_SPINOR` final reports. Independent of `C4_SPINOR` -- the underlying one-electron RKB Hamiltonian is always built regardless (it also seeds `C4_SPINOR`'s own SCF initial guess); this keyword gates running/printing the X2C-specific steps only. Combined with `DEBUG`, additional cross-checks are printed within the X2C sections (see below). |
 
 ## X2C decoupling and X2C-HF
@@ -244,30 +245,59 @@ the same converged `NON_REL`/`X2C`/`C4_DHF` orbitals:
    pair is deep core (pinned at n=1, interacting HF-like with
    everything) and every other unoccupied pair is deep virtual (n=0,
    excluded entirely).
-2. Build a feasible initial guess (each subspace's principal near 1,
-   its unoccupied pairs near 0) and optimize the GEMINAL occupations
-   (one variable per Kramers/spin pair -- both members of a pair always
-   share the same occupation, by construction, not by a separate
-   constraint) via `Occ_opt/SQP.h`, subject to `sum(n) = 1` per
-   subspace (2 electrons per subspace at full pairing) and
-   `0 < n_p < 1`.
-3. `PNOF5`/`PNOF7`/`PNOF7S` use a fully analytic gradient AND Hessian;
-   `GNOF`'s inter-subspace coupling term additionally depends on each
-   pair's own subspace principal occupation, so its Hessian is built
-   via central finite differences of the (still fully analytic)
-   gradient instead (`pnofOccupationHessianFD`).
+2. Build a feasible initial guess for every subspace via the same
+   trigonometric ("gamma") occupation-number parameterization as
+   `standalone_donof`'s reference DoNOF code (`Occ_opt/PNOFs.h`'s
+   `pnofSubspaceOccupationsFromGammas`/`pnofDefaultGuessGammas`):
+   independent angles map to occupations that automatically sum to 1
+   within a subspace for ANY angle, so DoNOF's own default guess (every
+   angle = pi/4, giving each principal pair n=0.75 and each successive
+   unoccupied pair half of what remains) is reused directly rather than
+   inventing a new ad hoc starting point.
+3. Optimize the GEMINAL occupations (one variable per Kramers/spin pair
+   -- both members of a pair always share the same occupation, by
+   construction, not by a separate constraint) via ONE of two methods,
+   selected by `SQP_PNOF_OCC`:
+   - `SQP_PNOF_OCC FALSE` (the **default**): `Utils/LBFGS.h` directly
+     over the UNCONSTRAINED gamma angles from step 2
+     (`Occ_opt/PNOFs.h`'s `pnofSubspaceOccupationsFromGammasWithGradient`)
+     -- the same approach `standalone_donof`'s reference DoNOF code
+     itself uses (`m_optocc.F90` optimizes directly over `GAMMAs`).
+     Since gamma guarantees `sum(n)=1` and `0<n<1` for ANY real angle,
+     this needs no box/equality-constrained QP subproblem at all -- the
+     chain rule turns `pnofOccupationGradient`'s geminal-indexed
+     gradient into a gamma-indexed one via each subspace's own Jacobian
+     (`docc(i)/dgamma(k)`, block-diagonal across subspaces).
+   - `SQP_PNOF_OCC TRUE`: `Utils/SQP.h` over the occupations directly,
+     subject to `sum(n) = 1` per subspace (2 electrons per subspace at
+     full pairing) and `0 < n_p < 1` as explicit box+equality
+     constraints.
+   Only one of the two runs per calculation; both solve the same
+   problem and agree to full displayed precision whenever both converge
+   cleanly.
+4. `PNOF5`/`PNOF7`/`PNOF7S` use a fully analytic gradient AND (for
+   `SQP_PNOF_OCC TRUE`) Hessian; `GNOF`'s inter-subspace coupling term
+   additionally depends on each pair's own subspace principal
+   occupation, so its `SQP_PNOF_OCC TRUE` Hessian is built via central
+   finite differences of the (still fully analytic) gradient instead
+   (`pnofOccupationHessianFD`) -- `SQP_PNOF_OCC FALSE`/`LBFGS.h` never
+   needs a Hessian at all.
 
 The default `PNOF_SUBSPACES 1`, `PNOF_COUPLING 2` (plain HOMO-LUMO
-pairing) converges cleanly for `NON_REL`, `X2C`, and `C4_DHF` alike.
-Larger `PNOF_SUBSPACES` (multiple simultaneous per-subspace equality
-constraints) can hit `Occ_opt/SQP.h`'s iteration cap without its
-`converged` flag ever firing, even though the returned occupations
-already satisfy the correct KKT stationarity condition (the projected
-gradient within each subspace's null space is zero) -- a known
-limitation of `SQP.h`'s own step-norm convergence check with multiple
-equality rows, not of the PNOF energy/gradient/Hessian themselves
-(each independently validated against finite differences to machine
-precision).
+pairing) converges cleanly for `NON_REL`, `X2C`, and `C4_DHF` alike,
+under either `SQP_PNOF_OCC` setting. Larger `PNOF_SUBSPACES` (multiple
+simultaneous per-subspace equality constraints for `SQP.h`, or a larger
+unconstrained problem for `LBFGS.h`) can hit either optimizer's
+iteration cap without its `converged` flag ever firing, even when the
+returned occupations already satisfy the correct KKT stationarity
+condition (for `SQP.h`, verified as the projected gradient within each
+subspace's null space being zero) -- a known limitation of each solver's
+own convergence check on this harder landscape, not of the PNOF
+energy/gradient/Hessian themselves (each independently validated against
+finite differences to machine precision); switching `SQP_PNOF_OCC` to
+compare the OTHER method's result is a useful cross-check in that case,
+since both have been observed to converge cleanly on cases where the
+other's flag did not fire.
 
 See `examples/water_gnof.inp` and `examples/co-sto-3g_gnof.inp` for
 worked `C4_SPINOR`/`NON_RELATIVISTIC` examples, or

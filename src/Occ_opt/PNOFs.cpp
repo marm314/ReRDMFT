@@ -698,4 +698,81 @@ template Matrix<double> pnofOccupationHessianFD(PnofFunctional,
                                                  const std::vector<double>&,
                                                  const std::vector<PnofGeminal>&, bool, double);
 
+std::size_t pnofGammasPerSubspace(int pnof_coupling) {
+  if (pnof_coupling < 2) {
+    throw std::runtime_error("pnofGammasPerSubspace: PNOF_COUPLING must be >= 2");
+  }
+  return static_cast<std::size_t>(pnof_coupling - 1);
+}
+
+std::vector<double> pnofSubspaceOccupationsFromGammas(int pnof_coupling,
+                                                       const std::vector<double>& gammas) {
+  const std::size_t n_coupled = pnofGammasPerSubspace(pnof_coupling);
+  if (gammas.size() != n_coupled) {
+    throw std::runtime_error(
+        "pnofSubspaceOccupationsFromGammas: expected exactly pnof_coupling-1 gamma angles");
+  }
+  std::vector<double> occ(1 + n_coupled, 0.0);
+  const double c = std::cos(gammas[0]);
+  occ[0] = 0.5 + 0.5 * c * c;
+  double remaining = 1.0 - occ[0];
+  for (std::size_t k = 0; k + 1 < n_coupled; ++k) {
+    const double s = std::sin(gammas[k + 1]);
+    occ[1 + k] = remaining * s * s;
+    remaining -= occ[1 + k];
+  }
+  occ[n_coupled] = remaining;
+  return occ;
+}
+
+std::vector<double> pnofDefaultGuessGammas(int pnof_coupling) {
+  const std::size_t n_coupled = pnofGammasPerSubspace(pnof_coupling);
+  constexpr double kPiOverFour = 0.7853981633974483;
+  return std::vector<double>(n_coupled, kPiOverFour);
+}
+
+PnofSubspaceOccupationsWithGradient pnofSubspaceOccupationsFromGammasWithGradient(
+    int pnof_coupling, const std::vector<double>& gammas) {
+  const std::size_t n_coupled = pnofGammasPerSubspace(pnof_coupling);
+  if (gammas.size() != n_coupled) {
+    throw std::runtime_error(
+        "pnofSubspaceOccupationsFromGammasWithGradient: expected exactly pnof_coupling-1 "
+        "gamma angles");
+  }
+  PnofSubspaceOccupationsWithGradient result;
+  result.occ.assign(1 + n_coupled, 0.0);
+  result.docc_dgamma = Matrix<double>(1 + n_coupled, n_coupled, 0.0);
+
+  const double c0 = std::cos(gammas[0]);
+  const double s0 = std::sin(gammas[0]);
+  result.occ[0] = 0.5 + 0.5 * c0 * c0;
+  result.docc_dgamma(0, 0) = -c0 * s0;  // d(occ[0])/d(gamma_0) = -0.5*sin(2*gamma_0)
+
+  double remaining = 1.0 - result.occ[0];
+  // d(remaining)/d(gamma_m) for every gamma index m, updated in place
+  // alongside `remaining` itself as the nested recursion proceeds.
+  std::vector<double> dremaining(n_coupled, 0.0);
+  dremaining[0] = -result.docc_dgamma(0, 0);
+
+  for (std::size_t j = 1; j < n_coupled; ++j) {
+    const double sj = std::sin(gammas[j]);
+    const double cj = std::cos(gammas[j]);
+    result.occ[j] = remaining * sj * sj;
+    for (std::size_t m = 0; m < n_coupled; ++m) {
+      result.docc_dgamma(j, m) = (m == j) ? remaining * 2.0 * sj * cj : dremaining[m] * sj * sj;
+    }
+    std::vector<double> dremaining_next(n_coupled);
+    for (std::size_t m = 0; m < n_coupled; ++m) {
+      dremaining_next[m] =
+          (m == j) ? -result.docc_dgamma(j, j) : dremaining[m] * cj * cj;
+    }
+    remaining -= result.occ[j];
+    dremaining = std::move(dremaining_next);
+  }
+  result.occ[n_coupled] = remaining;
+  for (std::size_t m = 0; m < n_coupled; ++m) result.docc_dgamma(n_coupled, m) = dremaining[m];
+
+  return result;
+}
+
 }  // namespace rerdmft

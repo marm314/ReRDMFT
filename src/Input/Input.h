@@ -278,6 +278,18 @@ class Input {
   // see pnof_subspaces()'s own comment for what happens if the
   // requested combination exceeds the basis's available orbitals.
   int pnof_coupling() const { return pnof_coupling_; }
+  // Optional; defaults to FALSE. PNOF occupation-number optimization
+  // (main.cpp's buildPnofFunctionalReport) defaults to L-BFGS over the
+  // UNCONSTRAINED gamma angles (Utils/LBFGS.h + Occ_opt/PNOFs.h's
+  // trigonometric parameterization, standalone_donof's own approach) --
+  // SQP_PNOF_OCC TRUE switches to the box+equality-constrained SQP
+  // solver (Utils/SQP.h) over the occupations directly instead. The two
+  // methods solve the SAME problem and agree to full displayed precision
+  // whenever both converge cleanly (see README.md's own PNOF section);
+  // gamma/LBFGS is the default because it needs no explicit constraint
+  // handling at all (gamma already guarantees sum(n)=1 and 0<n<1 for any
+  // real angle) and has empirically converged at least as reliably.
+  bool sqp_pnof_occ() const { return sqp_pnof_occ_; }
 
  private:
   int n_electrons_ = 0;
@@ -306,6 +318,7 @@ class Input {
   std::string occupation_init_ = "PROPORTIONAL";
   int pnof_subspaces_ = 1;
   int pnof_coupling_ = 2;
+  bool sqp_pnof_occ_ = false;
 };
 
 }  // namespace rerdmft

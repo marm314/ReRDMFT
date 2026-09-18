@@ -237,6 +237,8 @@ void Input::read(const std::string& filename) {
         throw std::runtime_error("line " + std::to_string(line_number) +
                                   ": PNOF_COUPLING must be at least 2");
       }
+    } else if (keyword == "SQP_PNOF_OCC") {
+      sqp_pnof_occ_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "SPEED_OF_LIGHT") {
       speed_of_light_ = parseDouble(iss, line_number, keyword);
       if (!(speed_of_light_ > 0.0)) {
