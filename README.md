@@ -98,9 +98,11 @@ anywhere on a line) are comments.
 | `CHOLESKY_THRESHOLD` | double (> 0) | `1e-10` | Residual-diagonal cutoff for the `CHOLESKY TRUE` decomposition: a pivot below this is treated as numerical noise and decomposition stops. Loosening it (e.g. `1e-6`) finds fewer Cholesky vectors (faster, less accurate); tightening it (e.g. `1e-13`) finds more (slower, closer to an exact reconstruction). Only meaningful when `CHOLESKY` is `TRUE`. |
 | `CACHE_INTEGRALS` | bool | `FALSE` | Cache the two-electron integral tensors to disk and reuse them on a later run with matching geometry+basis (see below). |
 | `CACHE_DIR` | string | `.rerdmft_cache` | Directory (created if missing) used by `CACHE_INTEGRALS`. |
-| `FUNCTIONAL` | string | *(none)* | Selects a JK-only density matrix functional approximation (`Occ_opt/JK_only.h`, Table 1 of Rodriguez-Mayorga et al., *Phys. Chem. Chem. Phys.* 2017) to evaluate on the converged `NON_REL`/`C4_DHF` orbitals: one of `SD`, `MBB` (or `MULLER`), `BBC2`, `CA`, `CGA`, `ML`, `MLSIC`, `GU`, `POWER`. Setting this triggers the whole RDMFT functional evaluation described below; with no `FUNCTIONAL` keyword at all, that step is skipped entirely (it is not gated by `DEBUG`). |
-| `OCCUPATION_INIT` | string | `PROPORTIONAL` | How to generate the initial fractional occupation numbers for `FUNCTIONAL` (see below). `PROPORTIONAL`: an aufbau (idempotent) reference redistributed proportionally into an interior box -- temperature-independent. `FERMI_DIRAC`: smeared at `TEMPERATURE` instead. Only meaningful when `FUNCTIONAL` is set. |
+| `FUNCTIONAL` | string | *(none)* | Selects a density matrix functional approximation to evaluate on the converged `NON_REL`/`X2C`/`C4_DHF` orbitals: either a JK-only functional (`Occ_opt/JK_only.h`, Table 1 of Rodriguez-Mayorga et al., *Phys. Chem. Chem. Phys.* 2017) -- one of `SD`, `MBB` (or `MULLER`), `BBC2`, `CA`, `CGA`, `ML`, `MLSIC`, `GU`, `POWER` -- or a Piris natural orbital functional (`Occ_opt/PNOFs.h`) -- one of `PNOF5`, `PNOF7`, `PNOF7S`, `GNOF`. Setting this triggers the whole RDMFT functional evaluation described below; with no `FUNCTIONAL` keyword at all, that step is skipped entirely (it is not gated by `DEBUG`). |
+| `OCCUPATION_INIT` | string | `PROPORTIONAL` | How to generate the initial fractional occupation numbers for a JK-only `FUNCTIONAL` (see below). `PROPORTIONAL`: an aufbau (idempotent) reference redistributed proportionally into an interior box -- temperature-independent. `FERMI_DIRAC`: smeared at `TEMPERATURE` instead. Only meaningful when `FUNCTIONAL` is one of the JK-only names (PNOF functionals build their own initial guess, see below). |
 | `TEMPERATURE` | double (> 0) | `1000` (Kelvin) | Electronic temperature used to smear orbital energies into fractional Fermi-Dirac occupations. Only consumed when `OCCUPATION_INIT FERMI_DIRAC` is selected; ignored (but still validated) otherwise. |
+| `PNOF_SUBSPACES` | int (>= 1) | `1` | Only meaningful when `FUNCTIONAL` is a PNOF name. How many independent coupling subspaces to build outward from HOMO (`Occ_opt/Orb_subspaces.h`): `1` builds just the HOMO subspace, `2` additionally builds a separate HOMO-1 subspace, and so on. Throws if this exceeds the number of occupied Kramers/spin pairs available. |
+| `PNOF_COUPLING` | int (>= 2) | `2` | Only meaningful when `FUNCTIONAL` is a PNOF name. The SIZE of each subspace, in Kramers/spin pairs: 1 occupied pair + (`PNOF_COUPLING` - 1) unoccupied pairs. `2` (the default) is plain HOMO-LUMO perfect pairing; `3` couples each occupied pair with its two closest unoccupied pairs (LUMO and LUMO+1); and so on. Every subspace's unoccupied pairs are a disjoint block (never shared between subspaces); throws if `PNOF_SUBSPACES * (PNOF_COUPLING - 1)` exceeds the number of unoccupied pairs available. |
 | `X2C` | bool | `FALSE` | Print the one-electron X2C decoupling report AND run the approximate X2C-HF SCF, both described below, printed between the `NON_RELATIVISTIC` and `C4_SPINOR` final reports. Independent of `C4_SPINOR` -- the underlying one-electron RKB Hamiltonian is always built regardless (it also seeds `C4_SPINOR`'s own SCF initial guess); this keyword gates running/printing the X2C-specific steps only. Combined with `DEBUG`, additional cross-checks are printed within the X2C sections (see below). |
 
 ## X2C decoupling and X2C-HF
@@ -227,6 +229,51 @@ See `examples/water_muller.inp` and `examples/co-sto-3g_muller.inp` for
 worked `C4_SPINOR`/`NON_RELATIVISTIC` examples, or
 `examples/water_X2C_muller.inp` for the `X2C` case (`FUNCTIONAL MULLER`
 throughout).
+
+## PNOF functionals and geminal occupation-number optimization
+
+Setting `FUNCTIONAL` to `PNOF5`, `PNOF7`, `PNOF7S`, or `GNOF` (the Piris
+natural orbital functionals, `Occ_opt/PNOFs.h`) instead of a JK-only
+name runs a different, subspace-based occupation-number optimization on
+the same converged `NON_REL`/`X2C`/`C4_DHF` orbitals:
+
+1. Partition the occupied/unoccupied Kramers (or, for `NON_REL`,
+   spin) pairs into `PNOF_SUBSPACES` independent coupling subspaces
+   (`Occ_opt/Orb_subspaces.h`), each with one occupied ("principal")
+   pair and `PNOF_COUPLING - 1` unoccupied pairs; every other occupied
+   pair is deep core (pinned at n=1, interacting HF-like with
+   everything) and every other unoccupied pair is deep virtual (n=0,
+   excluded entirely).
+2. Build a feasible initial guess (each subspace's principal near 1,
+   its unoccupied pairs near 0) and optimize the GEMINAL occupations
+   (one variable per Kramers/spin pair -- both members of a pair always
+   share the same occupation, by construction, not by a separate
+   constraint) via `Occ_opt/SQP.h`, subject to `sum(n) = 1` per
+   subspace (2 electrons per subspace at full pairing) and
+   `0 < n_p < 1`.
+3. `PNOF5`/`PNOF7`/`PNOF7S` use a fully analytic gradient AND Hessian;
+   `GNOF`'s inter-subspace coupling term additionally depends on each
+   pair's own subspace principal occupation, so its Hessian is built
+   via central finite differences of the (still fully analytic)
+   gradient instead (`pnofOccupationHessianFD`).
+
+The default `PNOF_SUBSPACES 1`, `PNOF_COUPLING 2` (plain HOMO-LUMO
+pairing) converges cleanly for `NON_REL`, `X2C`, and `C4_DHF` alike.
+Larger `PNOF_SUBSPACES` (multiple simultaneous per-subspace equality
+constraints) can hit `Occ_opt/SQP.h`'s iteration cap without its
+`converged` flag ever firing, even though the returned occupations
+already satisfy the correct KKT stationarity condition (the projected
+gradient within each subspace's null space is zero) -- a known
+limitation of `SQP.h`'s own step-norm convergence check with multiple
+equality rows, not of the PNOF energy/gradient/Hessian themselves
+(each independently validated against finite differences to machine
+precision).
+
+See `examples/water_gnof.inp` and `examples/co-sto-3g_gnof.inp` for
+worked `C4_SPINOR`/`NON_RELATIVISTIC` examples, or
+`examples/water_X2C_gnof.inp` for the `X2C` case (`FUNCTIONAL GNOF`,
+`PNOF_COUPLING 2` throughout) -- direct PNOF counterparts of the MULLER
+examples above.
 
 ## Two-electron integral disk cache
 

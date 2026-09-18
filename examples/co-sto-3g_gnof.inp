@@ -1,0 +1,16 @@
+# Example ReRDMFT input file: carbon monoxide (STO-3G), evaluating the
+# GNOF (Piris natural orbital functional, Occ_opt/PNOFs.h) RDMFT
+# functional -- see water_gnof.inp for the FUNCTIONAL/PNOF_COUPLING
+# keywords' own note (skipped entirely without FUNCTIONAL; not
+# DEBUG-gated when present; PNOF_SUBSPACES 1 by default).
+NELEC 14
+BASIS co-sto-3g.gbs
+C4_SPINOR TRUE
+NON_RELATIVISTIC TRUE
+FUNCTIONAL GNOF
+PNOF_COUPLING 2
+
+GEOMETRY
+C   0.000000   0.000000   0.000000
+O   0.000000   0.000000   1.128000
+END

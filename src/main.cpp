@@ -34,7 +34,9 @@
 #include "NuclearAttraction.h"
 #include "OccupationEnergy.h"
 #include "OccupationInit.h"
+#include "Orb_subspaces.h"
 #include "OrbitalGradient.h"
+#include "PNOFs.h"
 #include "RkbDensityMatrix.h"
 #include "RkbFockMatrix.h"
 #include "RkbHamiltonian.h"
@@ -806,6 +808,14 @@ std::string buildFullHessianReport(const std::string& label, const rerdmft::Matr
 // weakly/strongly occupied orbitals for a genuinely fractional-occupation
 // reference is its own open question, not needed by the MULLER-only
 // tests this was built for; revisit if a real BBC2 run is asked for.
+// True for the PNOF5/PNOF7/PNOF7s/GNOF functional names (Occ_opt/PNOFs.h),
+// which need buildPnofFunctionalReport below instead of
+// buildFunctionalReport's own JK_only-only path (Occ_opt/JK_only.h).
+bool isPnofFunctionalName(const std::string& functional_name) {
+  return functional_name == "PNOF5" || functional_name == "PNOF7" ||
+         functional_name == "PNOF7S" || functional_name == "GNOF";
+}
+
 template <typename T>
 std::string buildFunctionalReport(const std::string& label, const rerdmft::Matrix<T>& h,
                                    const rerdmft::Tensor4<T>& eri,
@@ -988,6 +998,216 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
            "(expect close to "
         << n_electrons << "): " << std::setprecision(10) << displayed_occupation_sum
         << std::setprecision(6) << "\n";
+  } catch (const std::exception& e) {
+    out << "    FAILED: " << e.what() << "\n";
+  }
+
+  return out.str();
+}
+
+// PNOF5/PNOF7/PNOF7s/GNOF occupation-number optimization (Occ_opt/PNOFs.h +
+// Occ_opt/Orb_subspaces.h + Utils/SQP.h), at FIXED orbitals/integrals --
+// the PNOF counterpart of buildFunctionalReport above (JK_only-only).
+// Dispatched separately from buildFunctionalReport because a PNOF energy
+// is a function of GEMINAL (Kramers/spin-pair) occupations subject to
+// PER-SUBSPACE sum(n)=1 constraints, not a single global sum(n)=
+// n_electrons constraint over independent per-orbital occupations.
+//
+// `n_active`/`n_inactive_below` follow buildFunctionalReport's own
+// convention (h/eri are always the FULL, un-sliced matrices; the active
+// window is [n_inactive_below, n_inactive_below+n_active)). `pair_of` is
+// always the adjacent-pair convention p <-> p xor 1 -- for X2C_HF/C4_DHF
+// this is directly the actual spinor array numbering; for NON_REL it is
+// an INTERLEAVED renumbering of the actual (block-layout) spin-orbital
+// array, converted back to real array indices right after
+// buildPnofGeminals returns (see the in-function comment below for why).
+//
+// Deep-core geminals (Orb_subspaces.h's `frozen_occupied`) are pinned at
+// EXACTLY n=1 and excluded from the SQP entirely; deep-virtual geminals
+// (`frozen_unoccupied`) never even become PnofGeminal entries (see
+// buildPnofGeminals) and are implicitly 0 throughout. Only the frontier
+// subspaces' own geminals (buildPnofGeminals emits these AFTER every
+// frozen_occupied geminal, `pnof_coupling` geminals per subspace, in
+// subspace order) are SQP variables.
+template <typename T>
+std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::Matrix<T>& h,
+                                       const rerdmft::Tensor4<T>& eri, std::size_t n_active,
+                                       std::size_t n_inactive_below, double n_electrons,
+                                       const std::string& functional_name,
+                                       double nuclear_repulsion_energy, int pnof_subspaces,
+                                       int pnof_coupling, bool relativistic,
+                                       std::chrono::steady_clock::time_point t_start,
+                                       std::chrono::steady_clock::time_point& t_checkpoint,
+                                       std::vector<TimingRecord>& timing_records) {
+  constexpr double kOccupationEpsilon = 1e-6;
+  const std::size_t n_total = h.rows();
+  const auto functional = rerdmft::parsePnofFunctional(functional_name);
+
+  // buildOrbitalSubspaces requires the occupied set to be exactly the
+  // first n_occ indices of whatever numbering `pair_of` is expressed in
+  // (Orb_subspaces.h's own precondition). NON_REL's actual array layout
+  // is BLOCK order [alpha_0..alpha_{n-1},beta_0..beta_{n-1}]
+  // (ClosedShellSpinOrbitals.h), in which the first n_occ block indices
+  // are NOT the occupied set whenever n_occ/2 < n_spatial (e.g. alpha_1
+  // is a virtual spin-orbital, yet comes before beta_0, an occupied one)
+  // -- exactly the caveat documented in Orb_subspaces.h's own header
+  // comment. Fixed here by working in an INTERLEAVED numbering
+  // q = 2*spatial_k + spin instead (spatial_0's alpha/beta first, then
+  // spatial_1's, ...): since ClosedShellSpinOrbitals.h duplicates each
+  // spatial orbital into a spin-degenerate alpha/beta pair, the
+  // occupied set genuinely IS "every spin of the lowest n_occ/2 spatial
+  // orbitals" -- an interleaved PREFIX -- with pair_of[q]=q^1, the SAME
+  // adjacent-pair convention X2C/C4_DHF already use. Geminal indices
+  // are converted from this interleaved numbering back to actual
+  // BLOCK-layout array indices right after buildPnofGeminals returns.
+  const std::size_t n_spatial = n_active / 2;
+  auto toActualIndex = [&](std::size_t q) -> std::size_t {
+    if (label != "NON_REL") return n_inactive_below + q;
+    const std::size_t spatial_k = q / 2;
+    const std::size_t spin = q % 2;
+    return (spin == 0) ? spatial_k : (n_spatial + spatial_k);
+  };
+
+  std::vector<std::size_t> pair_of(n_active);
+  for (std::size_t p = 0; p < n_active; ++p) pair_of[p] = p ^ 1;
+
+  const auto table =
+      rerdmft::buildOrbitalSubspaces(pair_of, n_active, n_electrons, pnof_subspaces, pnof_coupling);
+  auto geminals = rerdmft::buildPnofGeminals(table);
+  for (auto& g : geminals) {
+    const std::size_t q_i = g.i;
+    const std::size_t q_ibar = g.ibar;
+    g.i = toActualIndex(q_i);
+    g.ibar = toActualIndex(q_ibar);
+  }
+  logTiming(label + " PNOF orbital subspaces built (" + functional_name + ", PNOF_SUBSPACES " +
+                std::to_string(pnof_subspaces) + ", PNOF_COUPLING " +
+                std::to_string(pnof_coupling) + ")",
+            t_start, t_checkpoint, timing_records);
+
+  const std::size_t n_core = table.frozen_occupied.size();
+  const std::size_t n_frontier = geminals.size() - n_core;
+
+  // Feasible starting point: every subspace's principal near 1, its
+  // (pnof_coupling-1) virtuals near 0, each strictly inside (0,1) so the
+  // SQP never starts exactly on a box boundary (see buildFunctionalReport
+  // above for why: several Pi functions here have a divergent second
+  // derivative at n=0/1).
+  std::vector<double> x0(n_frontier);
+  for (int s = 0; s < pnof_subspaces; ++s) {
+    const std::size_t base = static_cast<std::size_t>(s) * static_cast<std::size_t>(pnof_coupling);
+    x0[base] = 1.0 - static_cast<double>(pnof_coupling - 1) * kOccupationEpsilon;
+    for (int v = 1; v < pnof_coupling; ++v) x0[base + static_cast<std::size_t>(v)] = kOccupationEpsilon;
+  }
+
+  auto embed = [&](const std::vector<double>& frontier) {
+    std::vector<double> full(n_total, 0.0);
+    for (std::size_t a = 0; a < n_core; ++a) {
+      full[geminals[a].i] = 1.0;
+      full[geminals[a].ibar] = 1.0;
+    }
+    for (std::size_t a = n_core; a < geminals.size(); ++a) {
+      const double n = frontier[a - n_core];
+      full[geminals[a].i] = n;
+      full[geminals[a].ibar] = n;
+    }
+    return full;
+  };
+  const rerdmft::SqpValueFn value_fn = [&](const std::vector<double>& x) {
+    const auto occ = embed(x);
+    const auto two_rdm = rerdmft::buildPnofTwoRdm(functional, geminals, occ, relativistic);
+    return rerdmft::pnofElectronicEnergy(functional, h, eri, occ, geminals, two_rdm, relativistic);
+  };
+  const rerdmft::SqpGradientFn gradient_fn = [&](const std::vector<double>& x) {
+    const auto full_grad =
+        rerdmft::pnofOccupationGradient(functional, h, eri, embed(x), geminals, relativistic);
+    return std::vector<double>(full_grad.begin() + static_cast<std::ptrdiff_t>(n_core),
+                                full_grad.end());
+  };
+  const rerdmft::SqpHessianFn hessian_fn = [&](const std::vector<double>& x) {
+    const auto full_hess =
+        (functional == rerdmft::PnofFunctional::kGnof)
+            // Step kept BELOW kOccupationEpsilon so a variable sitting
+            // exactly at the box boundary (common near convergence)
+            // never gets finite-differenced outside the valid [0,1]
+            // domain -- a step >= kOccupationEpsilon here caused
+            // pnofPiIntraD1/pnofPiInterD1's sqrt() to see a negative
+            // occupation and return NaN, which then made the SQP's KKT
+            // solve fail as singular.
+            ? rerdmft::pnofOccupationHessianFD(functional, h, eri, embed(x), geminals,
+                                                relativistic, 0.1 * kOccupationEpsilon)
+            : rerdmft::pnofOccupationHessian(functional, h, eri, embed(x), geminals, relativistic);
+    rerdmft::Matrix<double> active_hess(n_frontier, n_frontier);
+    for (std::size_t r = 0; r < n_frontier; ++r) {
+      for (std::size_t s = 0; s < n_frontier; ++s) {
+        active_hess(r, s) = full_hess(n_core + r, n_core + s);
+      }
+    }
+    return active_hess;
+  };
+
+  const double initial_electronic_energy = value_fn(x0);
+  const double initial_total_energy = initial_electronic_energy + nuclear_repulsion_energy;
+
+  std::ostringstream out;
+  out << "\n"
+      << label
+      << " PNOF fractional-occupation RDMFT functional evaluation (Occ_opt/PNOFs.h + "
+         "Occ_opt/Orb_subspaces.h, on the converged HF/DHF orbitals):\n";
+  out << "  Functional: " << functional_name << "   PNOF_SUBSPACES: " << pnof_subspaces
+      << "   PNOF_COUPLING: " << pnof_coupling << "\n";
+  out << "  Frozen-occupied (core) geminals: " << n_core
+      << "   Frontier (SQP) geminals: " << n_frontier << "\n";
+  out << "  Initial electronic energy: " << std::setprecision(10) << initial_electronic_energy
+      << std::setprecision(6) << " Hartree\n";
+  out << "  Initial total " << functional_name
+      << " energy: " << std::setprecision(10) << initial_total_energy << std::setprecision(6)
+      << " Hartree\n";
+
+  // Per-subspace equality constraint sum(n)=1 (2 electrons per subspace at
+  // full pair occupation, see this function's own header comment), plus
+  // the same interior box bounds as buildFunctionalReport's own SQP block.
+  rerdmft::Matrix<double> a_eq(static_cast<std::size_t>(pnof_subspaces), n_frontier, 0.0);
+  for (int s = 0; s < pnof_subspaces; ++s) {
+    const std::size_t base = static_cast<std::size_t>(s) * static_cast<std::size_t>(pnof_coupling);
+    for (int v = 0; v < pnof_coupling; ++v) {
+      a_eq(static_cast<std::size_t>(s), base + static_cast<std::size_t>(v)) = 1.0;
+    }
+  }
+  const std::vector<double> b_eq(static_cast<std::size_t>(pnof_subspaces), 1.0);
+  const std::vector<double> lb(n_frontier, kOccupationEpsilon);
+  const std::vector<double> ub(n_frontier, 1.0 - kOccupationEpsilon);
+
+  out << "\n  SQP occupation-number optimization (Utils/SQP.h, FIXED orbitals/integrals,\n"
+      << "  " << pnof_subspaces << " subspace(s), sum(n) = 1 per subspace, " << kOccupationEpsilon
+      << " <= n_p <= " << (1.0 - kOccupationEpsilon) << "):\n";
+  try {
+    const auto sqp_result = rerdmft::solveSqp(value_fn, gradient_fn, hessian_fn, a_eq, b_eq, lb, ub, x0);
+    logTiming(label + " PNOF SQP occupation-number optimization complete (" + functional_name + ")",
+              t_start, t_checkpoint, timing_records);
+    const double optimized_total_energy = sqp_result.objective_value + nuclear_repulsion_energy;
+    out << "    " << (sqp_result.converged ? "Converged" : "Did NOT converge") << " after "
+        << sqp_result.iterations << " iteration(s)\n";
+    out << "    Optimized electronic energy: " << std::setprecision(10)
+        << sqp_result.objective_value << std::setprecision(6) << " Hartree\n";
+    out << "    Optimized total " << functional_name << " energy: " << std::setprecision(10)
+        << optimized_total_energy << std::setprecision(6) << " Hartree ("
+        << (optimized_total_energy <= initial_total_energy ? "<=" : ">")
+        << " the initial-occupations value above, as expected for a minimization)\n";
+    out << "    Optimized geminal occupation numbers (n_p, both members of each Kramers/spin "
+           "pair share this value; fixed 5 decimals):\n";
+    out << std::fixed << std::setprecision(5);
+    for (std::size_t a = 0; a < n_core; ++a) {
+      out << "      core        geminal (" << geminals[a].i << "," << geminals[a].ibar
+          << "): n = 1.00000 (frozen)\n";
+    }
+    for (std::size_t a = n_core; a < geminals.size(); ++a) {
+      out << "      subspace " << std::setw(2) << geminals[a].subspace_id << " "
+          << (geminals[a].is_principal ? "principal" : "virtual  ") << " geminal ("
+          << geminals[a].i << "," << geminals[a].ibar
+          << "): n = " << sqp_result.x[a - n_core] << "\n";
+    }
+    out << std::defaultfloat << std::setprecision(6);
   } catch (const std::exception& e) {
     out << "    FAILED: " << e.what() << "\n";
   }
@@ -1515,10 +1735,18 @@ int main(int argc, char** argv) {
         for (std::size_t p = 0; p < 2 * n_spatial; ++p) {
           nonrel_orbital_energies_spin[p] = nonrel_hf_result.orbital_energies[p % n_spatial];
         }
-        nonrel_functional_report = buildFunctionalReport(
-            "NON_REL", h_spin, eri_spin, nonrel_orbital_energies_spin, 0, input.n_electrons(),
-            input.temperature(), input.functional(), input.occupation_init(),
-            nonrel_hf_result.nuclear_repulsion_energy, t_start, t_checkpoint, timing_records);
+        if (isPnofFunctionalName(input.functional())) {
+          nonrel_functional_report = buildPnofFunctionalReport(
+              "NON_REL", h_spin, eri_spin, 2 * n_spatial, 0, input.n_electrons(),
+              input.functional(), nonrel_hf_result.nuclear_repulsion_energy,
+              input.pnof_subspaces(), input.pnof_coupling(), /*relativistic=*/false, t_start,
+              t_checkpoint, timing_records);
+        } else {
+          nonrel_functional_report = buildFunctionalReport(
+              "NON_REL", h_spin, eri_spin, nonrel_orbital_energies_spin, 0, input.n_electrons(),
+              input.temperature(), input.functional(), input.occupation_init(),
+              nonrel_hf_result.nuclear_repulsion_energy, t_start, t_checkpoint, timing_records);
+        }
       }
     }
 
@@ -1752,11 +1980,19 @@ int main(int argc, char** argv) {
       // already eliminated the negative-energy branch entirely, so
       // there is nothing left to hold at exactly zero.
       if (input.has_functional()) {
-        x2c_functional_report = buildFunctionalReport(
-            "X2C_HF", h_x2c_mo, eri_x2c_mo, x2c_hf_result.orbital_energies, 0,
-            input.n_electrons(), input.temperature(), input.functional(),
-            input.occupation_init(), x2c_hf_result.nuclear_repulsion_energy, t_start,
-            t_checkpoint, timing_records);
+        if (isPnofFunctionalName(input.functional())) {
+          x2c_functional_report = buildPnofFunctionalReport(
+              "X2C_HF", h_x2c_mo, eri_x2c_mo, h_x2c_mo.rows(), 0, input.n_electrons(),
+              input.functional(), x2c_hf_result.nuclear_repulsion_energy, input.pnof_subspaces(),
+              input.pnof_coupling(), /*relativistic=*/true, t_start, t_checkpoint,
+              timing_records);
+        } else {
+          x2c_functional_report = buildFunctionalReport(
+              "X2C_HF", h_x2c_mo, eri_x2c_mo, x2c_hf_result.orbital_energies, 0,
+              input.n_electrons(), input.temperature(), input.functional(),
+              input.occupation_init(), x2c_hf_result.nuclear_repulsion_energy, t_start,
+              t_checkpoint, timing_records);
+        }
       }
     }
 
@@ -1979,11 +2215,19 @@ int main(int argc, char** argv) {
             dhf_result.orbital_energies.begin() +
                 static_cast<std::ptrdiff_t>(n_negative),
             dhf_result.orbital_energies.end());
-        dhf_functional_report = buildFunctionalReport(
-            "C4_DHF", h_mo, eri_mo, dhf_orbital_energies_positive, n_negative,
-            input.n_electrons(), input.temperature(), input.functional(),
-            input.occupation_init(), dhf_result.nuclear_repulsion_energy, t_start, t_checkpoint,
-            timing_records);
+        if (isPnofFunctionalName(input.functional())) {
+          dhf_functional_report = buildPnofFunctionalReport(
+              "C4_DHF", h_mo, eri_mo, h_mo.rows() - n_negative, n_negative, input.n_electrons(),
+              input.functional(), dhf_result.nuclear_repulsion_energy, input.pnof_subspaces(),
+              input.pnof_coupling(), /*relativistic=*/true, t_start, t_checkpoint,
+              timing_records);
+        } else {
+          dhf_functional_report = buildFunctionalReport(
+              "C4_DHF", h_mo, eri_mo, dhf_orbital_energies_positive, n_negative,
+              input.n_electrons(), input.temperature(), input.functional(),
+              input.occupation_init(), dhf_result.nuclear_repulsion_energy, t_start, t_checkpoint,
+              timing_records);
+        }
       }
     }
   } catch (const std::exception& e) {

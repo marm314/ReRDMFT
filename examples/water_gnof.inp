@@ -1,0 +1,24 @@
+# Example ReRDMFT input file: water molecule, evaluating the GNOF
+# (Piris natural orbital functional, Occ_opt/PNOFs.h) RDMFT functional
+# -- the PNOF counterpart of water_muller.inp's own JK-only MULLER run.
+# FUNCTIONAL does not need DEBUG -- setting it (as here) makes main.cpp
+# build the PNOF orbital subspaces (Occ_opt/Orb_subspaces.h;
+# PNOF_SUBSPACES 1 by default: just the HOMO subspace) with
+# PNOF_COUPLING 2 (HOMO coupled with LUMO alone), give each subspace a
+# feasible initial guess (principal near 1, its virtual near 0), and
+# then OPTIMIZE the geminal occupations at those same fixed orbitals
+# via Occ_opt/SQP.h subject to sum(n) = 1 per subspace -- all printed
+# right after each "Total ... energy" line. With NO FUNCTIONAL keyword
+# at all (see water.inp), this whole step is skipped entirely.
+NELEC 10
+BASIS water-sto-3g.gbs
+C4_SPINOR TRUE
+NON_RELATIVISTIC TRUE
+FUNCTIONAL GNOF
+PNOF_COUPLING 2
+
+GEOMETRY
+O   0.000000   0.000000   0.000000
+H   0.000000   0.757000   0.586000
+H   0.000000  -0.757000   0.586000
+END

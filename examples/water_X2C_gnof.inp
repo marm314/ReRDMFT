@@ -1,0 +1,23 @@
+# Example ReRDMFT input file: water molecule, evaluating the GNOF
+# (Piris natural orbital functional, Occ_opt/PNOFs.h) RDMFT functional
+# on the converged approximate X2C-HF spinors -- same idea as
+# water_gnof.inp/co-sto-3g_gnof.inp's own NON_REL/C4_DHF runs, just for
+# X2C (see README.md's "X2C decoupling and X2C-HF" section): the
+# converged X2C-HF orbitals/MO-basis integrals are held FIXED, the PNOF
+# orbital subspaces are built with PNOF_COUPLING 2 (HOMO coupled with
+# LUMO alone), and the geminal occupations are OPTIMIZED at those same
+# fixed orbitals via Occ_opt/SQP.h -- printed right after the X2C-HF
+# Hessian_opt cross-check section. Like NON_REL (and unlike C4_DHF),
+# every X2C-HF spinor competes for occupation, since X2C's own
+# decoupling already eliminated the negative-energy branch entirely.
+NELEC 10
+BASIS water-sto-3g.gbs
+X2C TRUE
+FUNCTIONAL GNOF
+PNOF_COUPLING 2
+
+GEOMETRY
+O   0.000000   0.000000   0.000000
+H   0.000000   0.757000   0.586000
+H   0.000000  -0.757000   0.586000
+END

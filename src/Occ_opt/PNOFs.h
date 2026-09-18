@@ -192,6 +192,72 @@ double pnofElectronicEnergyDirect(PnofFunctional functional, const Matrix<T>& h,
                                    const Tensor4<T>& eri, const std::vector<double>& occupations,
                                    const std::vector<PnofGeminal>& geminals, bool relativistic);
 
+// ---------------------------------------------------------------------
+// Occupation-number gradient/Hessian, for SQP-optimizing GEMINAL
+// occupations at FIXED orbitals (Utils/SQP.h), mirroring
+// Occ_opt/OccupationEnergy.h's jkFunctionalGradient/jkFunctionalHessian
+// for the existing JK_only functionals. Kramers/spin-pair occupation
+// symmetry (n_ibar = n_i) is enforced BY CONSTRUCTION here: there is one
+// gradient/Hessian entry per GEMINAL (geminals.size() of them), never
+// per actual orbital -- i's and ibar's own partial derivatives are
+// always summed together into geminal i's single slot (see the .cpp).
+// ---------------------------------------------------------------------
+
+// d(pnofElectronicEnergy)/d(n_a), one entry per geminal a. `occupations`
+// is the SAME full active-orbital-indexed vector pnofElectronicEnergy
+// itself takes (only occupations[geminals[*].i] is ever read).
+//
+// For GNOF specifically, Pi^inter's dependence on each pair's OWN
+// subspace-principal occupation (pnofPiInterGnof's n_principal_i/
+// n_principal_j, see that function's own comment) means a term between
+// two NON-principal (virtual) geminals in different subspaces
+// contributes to FOUR gradient entries, not two: the two geminals
+// directly involved, AND each one's own subspace principal (chain rule
+// through n_i^d/n_j^d) -- handled explicitly here, verified against
+// central finite differences of pnofElectronicEnergy before being
+// trusted (not merely assumed correct by construction, given how easy
+// this specific cross-coupling is to get wrong).
+template <typename T>
+std::vector<double> pnofOccupationGradient(PnofFunctional functional, const Matrix<T>& h,
+                                            const Tensor4<T>& eri,
+                                            const std::vector<double>& occupations,
+                                            const std::vector<PnofGeminal>& geminals,
+                                            bool relativistic);
+
+// Analytic Hessian, geminals.size() x geminals.size(). NOT implemented
+// for GNOF (throws std::runtime_error) -- its Pi^inter cross-subspace
+// coupling makes a fully general analytic second derivative
+// substantially more involved and error-prone to hand-derive than
+// PNOF5/PNOF7/PNOF7s's own self-contained (n_i,n_j)-only Pi^inter; use
+// pnofOccupationHessianFD below for GNOF instead (an explicit engineering
+// choice, not an oversight).
+template <typename T>
+Matrix<double> pnofOccupationHessian(PnofFunctional functional, const Matrix<T>& h,
+                                      const Tensor4<T>& eri,
+                                      const std::vector<double>& occupations,
+                                      const std::vector<PnofGeminal>& geminals,
+                                      bool relativistic);
+
+// Central finite-difference Hessian built from pnofOccupationGradient
+// (step `h_step` on each geminal occupation in turn, symmetrized to
+// guarantee an exactly-symmetric matrix regardless of finite-difference
+// truncation error): (grad(n + h_step*e_b) - grad(n - h_step*e_b)) /
+// (2*h_step), column b, for every geminal b -- works for ANY functional,
+// including GNOF, since it never needs to differentiate Pi^inter's
+// functional form directly. `h_step` defaults to 1e-4, appropriate for
+// occupations that stay an interior-box `kOccupationEpsilon` away from
+// the true [0,1] boundary (same reasoning as main.cpp's existing
+// JK_only SQP wiring: several of these functionals have a genuinely
+// divergent second derivative AT the true boundary, so a coarser step
+// avoids stepping outside the box while still resolving curvature well
+// away from it).
+template <typename T>
+Matrix<double> pnofOccupationHessianFD(PnofFunctional functional, const Matrix<T>& h,
+                                        const Tensor4<T>& eri,
+                                        const std::vector<double>& occupations,
+                                        const std::vector<PnofGeminal>& geminals,
+                                        bool relativistic, double h_step = 1e-4);
+
 }  // namespace rerdmft
 
 #endif  // RERDMFT_OCC_OPT_PNOFS_H

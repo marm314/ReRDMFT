@@ -47,6 +47,98 @@ std::unordered_map<std::size_t, double> principalOccupationBySubspace(
   return result;
 }
 
+// Same idea, but mapping subspace_id -> that principal's own GEMINAL
+// INDEX (not its occupation) -- needed so GNOF's gradient/Hessian can
+// find WHICH gradient/Hessian slot to add a "via principal" chain-rule
+// contribution to.
+std::unordered_map<std::size_t, std::size_t> principalIndexBySubspace(
+    const std::vector<PnofGeminal>& geminals) {
+  std::unordered_map<std::size_t, std::size_t> result;
+  for (std::size_t k = 0; k < geminals.size(); ++k) {
+    if (geminals[k].is_principal) result[geminals[k].subspace_id] = k;
+  }
+  return result;
+}
+
+// d(Pi_intra)/d(n_i), holding n_j fixed (doc/rel_pnofs.tex `eq:Pi-intra`,
+// Pi_intra = involves_principal ? -sqrt(n_i*n_j) : +sqrt(n_i*n_j)).
+double pnofPiIntraD1(double n_i, double n_j, bool involves_principal) {
+  const double d = (n_i > 0.0) ? 0.5 * std::sqrt(n_j / n_i) : 0.0;
+  return involves_principal ? -d : d;
+}
+
+// d(Pi_inter)/d(n_i), holding n_j fixed. PNOF5/7/7s only (see
+// pnofPiInter's own comment on why GNOF needs a different pair of
+// functions).
+double pnofPiInterD1(PnofFunctional functional, double n_i, double n_j) {
+  const double h_i = 1.0 - n_i;
+  const double h_j = 1.0 - n_j;
+  switch (functional) {
+    case PnofFunctional::kPnof5:
+      return 0.0;
+    case PnofFunctional::kPnof7: {
+      // Pi = -sqrt(p*q), p=n_i*h_i, q=n_j*h_j; d(p)/d(n_i) = h_i - n_i.
+      const double p = n_i * h_i;
+      const double q = n_j * h_j;
+      if (p <= 0.0 || q <= 0.0) return 0.0;
+      return -(h_i - n_i) * std::sqrt(q) / (2.0 * std::sqrt(p));
+    }
+    case PnofFunctional::kPnof7s:
+      return -4.0 * n_j * h_j * (h_i - n_i);
+    case PnofFunctional::kGnof:
+      throw std::runtime_error(
+          "pnofPiInterD1: GNOF needs pnofPiInterGnofPartials, not pnofPiInterD1");
+  }
+  throw std::runtime_error("pnofPiInterD1: unhandled PnofFunctional value");
+}
+
+// GNOF's Pi^inter, split into its two independent partial derivatives
+// (see PNOFs.h's own pnofOccupationGradient comment for why GNOF needs
+// two separate partials instead of one): *f1 = d(Pi)/d(n_i) holding
+// n_principal_i FIXED (the "direct" dependence -- through h_i=1-n_i and
+// n_i^d's own n_i prefactor); *f2 = d(Pi)/d(n_principal_i) holding n_i
+// FIXED (the "indirect" dependence -- through n_i^d's own h_p^d/h_p
+// exponential factor only; the sqrt(n_i*n_j*h_i*h_j) term never
+// references n_principal_i at all, so contributes nothing to *f2).
+void pnofPiInterGnofPartials(double n_i, double n_j, double n_principal_i, double n_principal_j,
+                              bool i_is_principal, bool j_is_principal, double* f1, double* f2) {
+  if (i_is_principal && j_is_principal) {
+    *f1 = 0.0;
+    *f2 = 0.0;
+    return;
+  }
+  constexpr double kC2 = (0.02 * 1.4142135623730951) * (0.02 * 1.4142135623730951);
+  const double h_i = 1.0 - n_i;
+  const double h_j = 1.0 - n_j;
+  const double h_principal_i = 1.0 - n_principal_i;
+  const double h_principal_j = 1.0 - n_principal_j;
+  const double e_pi = std::exp(-(h_principal_i * h_principal_i) / kC2);
+  const double n_i_d = n_i * e_pi;
+  const double n_j_d = gnofOccD(n_j, h_principal_j);
+  const double sign = (i_is_principal != j_is_principal) ? -1.0 : 1.0;  // base -cross vs +cross
+
+  // d(n_i^d)/d(n_i), n_principal_i fixed: = e_pi (computed directly, not
+  // via n_i_d/n_i, to stay well-defined at n_i=0).
+  const double dnid_dni = e_pi;
+  const double p = n_i * h_i;
+  const double q = n_j * h_j;
+  const double dsqrt_dni =
+      (p > 0.0 && q > 0.0) ? (h_i - n_i) * std::sqrt(q) / (2.0 * std::sqrt(p)) : 0.0;
+  const double dbase_dni = dnid_dni * n_j_d - dsqrt_dni;
+
+  // d(n_i^d)/d(n_principal_i), n_i fixed: = n_i_d * 2*h_principal_i/c^2
+  // (the sqrt(...) term does not depend on n_principal_i at all).
+  const double dnid_dnpi = n_i_d * 2.0 * h_principal_i / kC2;
+  const double dbase_dnpi = dnid_dnpi * n_j_d;
+
+  const double cross = std::sqrt(n_i_d * n_j_d);
+  const double dcross_dni = (cross > 0.0) ? dnid_dni * n_j_d / (2.0 * cross) : 0.0;
+  const double dcross_dnpi = (cross > 0.0) ? dnid_dnpi * n_j_d / (2.0 * cross) : 0.0;
+
+  *f1 = dbase_dni + sign * dcross_dni;
+  *f2 = dbase_dnpi + sign * dcross_dnpi;
+}
+
 }  // namespace
 
 PnofFunctional parsePnofFunctional(const std::string& name) {
@@ -297,6 +389,274 @@ double pnofElectronicEnergyDirect(PnofFunctional functional, const Matrix<T>& h,
   return energy;
 }
 
+namespace {
+
+// d^2(Pi_intra)/d(n_i)^2, holding n_j fixed.
+double pnofPiIntraD11(double n_i, double n_j, bool involves_principal) {
+  if (n_i <= 0.0) return 0.0;
+  const double d = -0.25 * std::sqrt(n_j) / (n_i * std::sqrt(n_i));  // -sqrt(n_j)/(4*n_i^1.5)
+  return involves_principal ? -d : d;
+}
+
+// d^2(Pi_intra)/d(n_i)d(n_j) (mixed).
+double pnofPiIntraD12(double n_i, double n_j, bool involves_principal) {
+  if (n_i <= 0.0 || n_j <= 0.0) return 0.0;
+  const double d = 0.25 / std::sqrt(n_i * n_j);
+  return involves_principal ? -d : d;
+}
+
+// d^2(Pi_inter)/d(n_i)^2, holding n_j fixed. PNOF5/7/7s only.
+double pnofPiInterD11(PnofFunctional functional, double n_i, double n_j) {
+  const double h_i = 1.0 - n_i;
+  const double h_j = 1.0 - n_j;
+  switch (functional) {
+    case PnofFunctional::kPnof5:
+      return 0.0;
+    case PnofFunctional::kPnof7: {
+      const double p = n_i * h_i;
+      const double q = n_j * h_j;
+      if (p <= 0.0 || q <= 0.0) return 0.0;
+      // Derived by hand (verified against finite differences before
+      // trusting): using 4p+(h_i-n_i)^2 = (h_i+n_i)^2 = 1 identically,
+      // this simplifies to a single term with no cancellation risk.
+      return std::sqrt(q) / (4.0 * p * std::sqrt(p));
+    }
+    case PnofFunctional::kPnof7s:
+      return 8.0 * n_j * h_j;
+    case PnofFunctional::kGnof:
+      throw std::runtime_error("pnofPiInterD11: GNOF's analytic Hessian is not implemented -- "
+                                "use pnofOccupationHessianFD instead");
+  }
+  throw std::runtime_error("pnofPiInterD11: unhandled PnofFunctional value");
+}
+
+// d^2(Pi_inter)/d(n_i)d(n_j) (mixed). PNOF5/7/7s only.
+double pnofPiInterD12(PnofFunctional functional, double n_i, double n_j) {
+  const double h_i = 1.0 - n_i;
+  const double h_j = 1.0 - n_j;
+  switch (functional) {
+    case PnofFunctional::kPnof5:
+      return 0.0;
+    case PnofFunctional::kPnof7: {
+      const double p = n_i * h_i;
+      const double q = n_j * h_j;
+      if (p <= 0.0 || q <= 0.0) return 0.0;
+      return -(h_i - n_i) * (h_j - n_j) / (4.0 * std::sqrt(p * q));
+    }
+    case PnofFunctional::kPnof7s:
+      return -4.0 * (h_i - n_i) * (h_j - n_j);
+    case PnofFunctional::kGnof:
+      throw std::runtime_error("pnofPiInterD12: GNOF's analytic Hessian is not implemented -- "
+                                "use pnofOccupationHessianFD instead");
+  }
+  throw std::runtime_error("pnofPiInterD12: unhandled PnofFunctional value");
+}
+
+}  // namespace
+
+template <typename T>
+std::vector<double> pnofOccupationGradient(PnofFunctional functional, const Matrix<T>& h,
+                                            const Tensor4<T>& eri,
+                                            const std::vector<double>& occupations,
+                                            const std::vector<PnofGeminal>& geminals,
+                                            bool relativistic) {
+  const std::size_t n = geminals.size();
+  if (n == 0) {
+    throw std::runtime_error("pnofOccupationGradient: no geminals given");
+  }
+  std::vector<double> n_gem(n);
+  for (std::size_t k = 0; k < n; ++k) n_gem[k] = occupations[geminals[k].i];
+  const auto principal_occ = principalOccupationBySubspace(geminals, occupations);
+  const auto principal_idx = principalIndexBySubspace(geminals);
+
+  std::vector<double> grad(n, 0.0);
+
+  // Diagonal (one-electron + self-interaction-free diagonal Hartree):
+  // d/dn_a[n_a*(2h_aa+J_aa)] = 2h_aa+J_aa.
+  for (std::size_t a = 0; a < n; ++a) {
+    const std::size_t i = geminals[a].i;
+    const T h_ii = h(i, i);
+    const T J_ii = eri(i, i, i, i);
+    checkNegligibleImag(h_ii, "h_ii");
+    checkNegligibleImag(J_ii, "J_ii");
+    grad[a] += 2.0 * realPartOf(h_ii) + realPartOf(J_ii);
+  }
+
+  for (std::size_t a = 0; a < n; ++a) {
+    for (std::size_t b = a + 1; b < n; ++b) {
+      const std::size_t i = geminals[a].i;
+      const std::size_t j = geminals[b].i;
+      const T J_val = eri(i, j, i, j);
+      const T K_val = eri(i, j, j, i);
+      checkNegligibleImag(J_val, "J_ij");
+      checkNegligibleImag(K_val, "K_ij");
+      const double J_ab = realPartOf(J_val);
+      const double K_ab = realPartOf(K_val);
+      double L_ab = 0.0;
+      if (relativistic) {
+        const T L_val = eri(geminals[a].ibar, j, j, geminals[a].ibar);
+        checkNegligibleImag(L_val, "L_ij");
+        L_ab = realPartOf(L_val);
+      }
+
+      const double n_a = n_gem[a];
+      const double n_b = n_gem[b];
+      const bool same_subspace = geminals[a].subspace_id == geminals[b].subspace_id;
+      const double contrib = K_ab + (relativistic ? L_ab : 0.0);
+
+      // NOTE the overall factor of 2 throughout this block: the energy
+      // sum (pnofElectronicEnergy) loops over BOTH ordered pairs (a,b)
+      // AND (b,a) separately, and buildPnofTwoRdm's two_rdm_h(a,b) =
+      // 2*(n_a*n_b-delta) (an extra factor of 2 relative to
+      // two_rdm_x/two_rdm_l1/l2) -- so the TOTAL unordered-pair energy
+      // contribution is 2*[2*n_a*n_b*J_ab - n_a*n_b*contrib +
+      // Pi(n_a,n_b)*contrib] for inter pairs (delta=0), and
+      // 2*[Pi_intra(n_a,n_b)*contrib] for intra pairs (delta=n_a*n_b
+      // makes the H/X bilinear part vanish exactly). Verified against
+      // central finite differences of pnofElectronicEnergy for all 4
+      // functionals, relativistic and non-relativistic, before trusting.
+      if (same_subspace) {
+        const bool involves_principal = geminals[a].is_principal || geminals[b].is_principal;
+        grad[a] += 2.0 * pnofPiIntraD1(n_a, n_b, involves_principal) * contrib;
+        grad[b] += 2.0 * pnofPiIntraD1(n_b, n_a, involves_principal) * contrib;
+      } else {
+        grad[a] += 2.0 * (2.0 * n_b * J_ab - n_b * K_ab - (relativistic ? n_b * L_ab : 0.0));
+        grad[b] += 2.0 * (2.0 * n_a * J_ab - n_a * K_ab - (relativistic ? n_a * L_ab : 0.0));
+
+        if (functional == PnofFunctional::kGnof) {
+          const double n_pa = principal_occ.at(geminals[a].subspace_id);
+          const double n_pb = principal_occ.at(geminals[b].subspace_id);
+          double f1_a = 0.0, f2_a = 0.0, f1_b = 0.0, f2_b = 0.0;
+          pnofPiInterGnofPartials(n_a, n_b, n_pa, n_pb, geminals[a].is_principal,
+                                   geminals[b].is_principal, &f1_a, &f2_a);
+          pnofPiInterGnofPartials(n_b, n_a, n_pb, n_pa, geminals[b].is_principal,
+                                   geminals[a].is_principal, &f1_b, &f2_b);
+          grad[a] += 2.0 * f1_a * contrib;
+          grad[b] += 2.0 * f1_b * contrib;
+          // "Via principal" chain-rule contributions: only meaningful
+          // when the geminal is NOT its own principal (otherwise this
+          // slot IS n_a/n_b itself, already fully covered by f1 above).
+          if (!geminals[a].is_principal) {
+            grad[principal_idx.at(geminals[a].subspace_id)] += 2.0 * f2_a * contrib;
+          }
+          if (!geminals[b].is_principal) {
+            grad[principal_idx.at(geminals[b].subspace_id)] += 2.0 * f2_b * contrib;
+          }
+        } else {
+          grad[a] += 2.0 * pnofPiInterD1(functional, n_a, n_b) * contrib;
+          grad[b] += 2.0 * pnofPiInterD1(functional, n_b, n_a) * contrib;
+        }
+      }
+    }
+  }
+  return grad;
+}
+
+template <typename T>
+Matrix<double> pnofOccupationHessian(PnofFunctional functional, const Matrix<T>& /*h*/,
+                                      const Tensor4<T>& eri,
+                                      const std::vector<double>& occupations,
+                                      const std::vector<PnofGeminal>& geminals,
+                                      bool relativistic) {
+  if (functional == PnofFunctional::kGnof) {
+    throw std::runtime_error(
+        "pnofOccupationHessian: GNOF's analytic Hessian is not implemented (its Pi^inter "
+        "cross-subspace coupling makes it substantially more involved than PNOF5/7/7s) -- use "
+        "pnofOccupationHessianFD instead");
+  }
+  const std::size_t n = geminals.size();
+  if (n == 0) {
+    throw std::runtime_error("pnofOccupationHessian: no geminals given");
+  }
+  std::vector<double> n_gem(n);
+  for (std::size_t k = 0; k < n; ++k) n_gem[k] = occupations[geminals[k].i];
+
+  Matrix<double> hess(n, n, 0.0);
+
+  for (std::size_t a = 0; a < n; ++a) {
+    for (std::size_t b = a + 1; b < n; ++b) {
+      const std::size_t i = geminals[a].i;
+      const std::size_t j = geminals[b].i;
+      const T J_val = eri(i, j, i, j);
+      const T K_val = eri(i, j, j, i);
+      checkNegligibleImag(J_val, "J_ij");
+      checkNegligibleImag(K_val, "K_ij");
+      const double J_ab = realPartOf(J_val);
+      const double K_ab = realPartOf(K_val);
+      double L_ab = 0.0;
+      if (relativistic) {
+        const T L_val = eri(geminals[a].ibar, j, j, geminals[a].ibar);
+        checkNegligibleImag(L_val, "L_ij");
+        L_ab = realPartOf(L_val);
+      }
+      const double contrib = K_ab + (relativistic ? L_ab : 0.0);
+
+      const double n_a = n_gem[a];
+      const double n_b = n_gem[b];
+      const bool same_subspace = geminals[a].subspace_id == geminals[b].subspace_id;
+
+      double off_diag;   // Hessian(a,b)
+      double d11_a_wrt_b;  // contributes to Hessian(a,a)
+      double d11_b_wrt_a;  // contributes to Hessian(b,b)
+      if (same_subspace) {
+        const bool involves_principal = geminals[a].is_principal || geminals[b].is_principal;
+        off_diag = 2.0 * pnofPiIntraD12(n_a, n_b, involves_principal) * contrib;
+        d11_a_wrt_b = 2.0 * pnofPiIntraD11(n_a, n_b, involves_principal) * contrib;
+        d11_b_wrt_a = 2.0 * pnofPiIntraD11(n_b, n_a, involves_principal) * contrib;
+      } else {
+        const double bilinear = 2.0 * J_ab - K_ab - (relativistic ? L_ab : 0.0);
+        off_diag = 2.0 * (bilinear + pnofPiInterD12(functional, n_a, n_b) * contrib);
+        d11_a_wrt_b = 2.0 * pnofPiInterD11(functional, n_a, n_b) * contrib;
+        d11_b_wrt_a = 2.0 * pnofPiInterD11(functional, n_b, n_a) * contrib;
+      }
+      hess(a, b) += off_diag;
+      hess(b, a) += off_diag;
+      hess(a, a) += d11_a_wrt_b;
+      hess(b, b) += d11_b_wrt_a;
+    }
+  }
+  return hess;
+}
+
+template <typename T>
+Matrix<double> pnofOccupationHessianFD(PnofFunctional functional, const Matrix<T>& h,
+                                        const Tensor4<T>& eri,
+                                        const std::vector<double>& occupations,
+                                        const std::vector<PnofGeminal>& geminals,
+                                        bool relativistic, double h_step) {
+  const std::size_t n = geminals.size();
+  if (n == 0) {
+    throw std::runtime_error("pnofOccupationHessianFD: no geminals given");
+  }
+  Matrix<double> hess(n, n, 0.0);
+  for (std::size_t b = 0; b < n; ++b) {
+    auto occ_plus = occupations;
+    auto occ_minus = occupations;
+    occ_plus[geminals[b].i] += h_step;
+    occ_plus[geminals[b].ibar] += h_step;
+    occ_minus[geminals[b].i] -= h_step;
+    occ_minus[geminals[b].ibar] -= h_step;
+    const auto grad_plus =
+        pnofOccupationGradient(functional, h, eri, occ_plus, geminals, relativistic);
+    const auto grad_minus =
+        pnofOccupationGradient(functional, h, eri, occ_minus, geminals, relativistic);
+    for (std::size_t a = 0; a < n; ++a) {
+      hess(a, b) = (grad_plus[a] - grad_minus[a]) / (2.0 * h_step);
+    }
+  }
+  // Symmetrize: finite-difference truncation error makes the raw result
+  // only approximately symmetric; SQP.h's QP subproblem assumes an
+  // exactly symmetric Hessian.
+  for (std::size_t a = 0; a < n; ++a) {
+    for (std::size_t b = a + 1; b < n; ++b) {
+      const double avg = 0.5 * (hess(a, b) + hess(b, a));
+      hess(a, b) = avg;
+      hess(b, a) = avg;
+    }
+  }
+  return hess;
+}
+
 template double pnofElectronicEnergy(PnofFunctional, const Matrix<double>&, const Tensor4<double>&,
                                       const std::vector<double>&,
                                       const std::vector<PnofGeminal>&, const PnofTwoRdm&, bool);
@@ -311,5 +671,31 @@ template double pnofElectronicEnergyDirect(PnofFunctional, const Matrix<std::com
                                             const Tensor4<std::complex<double>>&,
                                             const std::vector<double>&,
                                             const std::vector<PnofGeminal>&, bool);
+
+template std::vector<double> pnofOccupationGradient(PnofFunctional, const Matrix<double>&,
+                                                     const Tensor4<double>&,
+                                                     const std::vector<double>&,
+                                                     const std::vector<PnofGeminal>&, bool);
+template std::vector<double> pnofOccupationGradient(PnofFunctional,
+                                                     const Matrix<std::complex<double>>&,
+                                                     const Tensor4<std::complex<double>>&,
+                                                     const std::vector<double>&,
+                                                     const std::vector<PnofGeminal>&, bool);
+template Matrix<double> pnofOccupationHessian(PnofFunctional, const Matrix<double>&,
+                                               const Tensor4<double>&, const std::vector<double>&,
+                                               const std::vector<PnofGeminal>&, bool);
+template Matrix<double> pnofOccupationHessian(PnofFunctional, const Matrix<std::complex<double>>&,
+                                               const Tensor4<std::complex<double>>&,
+                                               const std::vector<double>&,
+                                               const std::vector<PnofGeminal>&, bool);
+template Matrix<double> pnofOccupationHessianFD(PnofFunctional, const Matrix<double>&,
+                                                 const Tensor4<double>&,
+                                                 const std::vector<double>&,
+                                                 const std::vector<PnofGeminal>&, bool, double);
+template Matrix<double> pnofOccupationHessianFD(PnofFunctional,
+                                                 const Matrix<std::complex<double>>&,
+                                                 const Tensor4<std::complex<double>>&,
+                                                 const std::vector<double>&,
+                                                 const std::vector<PnofGeminal>&, bool, double);
 
 }  // namespace rerdmft
