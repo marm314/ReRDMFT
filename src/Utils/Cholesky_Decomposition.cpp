@@ -125,29 +125,97 @@ Tensor4<std::complex<double>> reconstructBlas(
 // vector flattened over the (C,D) pair -- exactly Tensor4's own pair-index
 // flattening), and `pivot_col` holds each of those vectors' own value at
 // the current pivot (A*,B*) -- i.e. lmat's PIVOT-th COLUMN, hence "Lmat-
-// vs-pivot-column GEMV". CblasTrans/CblasConjTrans applied to `lmat`
-// computes exactly y(C,D) = sum_k Lmat(k,C,D) * pivot_col(k) (conjugated
-// on Lmat for T = complex<double>, a no-op for T = double), i.e. the
-// residual's sum_k V_k(A*,B*)*conj(V_k(C,D)) term for every (C,D) at once
-// -- turning a badly-cache-behaved scalar loop over separate heap-
-// allocated Matrix objects into one BLAS2 call over one contiguous buffer.
+// vs-pivot-column" correction. Computes exactly
+// row(C,D) -= sum_k conj(Lmat(k,C,D)) * pivot_col(k) for every (C,D) at
+// once, i.e. the residual's sum_k V_k(A*,B*)*conj(V_k(C,D)) term.
+//
+// Deliberately a PLAIN scalar loop, not a BLAS2 call (as an earlier
+// version of this function was, back when it was called once per pivot
+// against the FULL, growing set of every vector found so far): once the
+// batched algorithm below made `nchol` here always small and bounded (at
+// most kMaxQualified, the within-one-batch correction only -- every
+// PRIOR batch's contribution is handled separately, via ONE larger GEMM
+// per batch, see subtractConjTransGemm), calling into OpenBLAS
+// thousands of times (once per pivot) for such a tiny operand became the
+// actual bottleneck: OpenBLAS's own per-call thread-pool dispatch
+// overhead, roughly constant per call, ends up dominating the tiny
+// amount of real work in each call, an effect that only shows up at
+// realistic system sizes (confirmed by a live progress trace on a
+// pathologically slow real example before this was caught -- a small
+// synthetic test never has enough total pivots for the effect to be
+// visible in wall-clock time). A plain loop has no such per-call
+// overhead and still vectorizes fine under -O2 for a fixed, bounded
+// `nchol`.
 void subtractConjTransGemv(const double* lmat, std::size_t nchol, std::size_t n2,
                             const double* pivot_col, double* row) {
-  if (nchol == 0) return;
-  std::vector<double> y(n2, 0.0);
-  cblas_dgemv(CblasRowMajor, CblasTrans, static_cast<int>(nchol), static_cast<int>(n2), 1.0, lmat,
-              static_cast<int>(n2), pivot_col, 1, 0.0, y.data(), 1);
-  for (std::size_t i = 0; i < n2; ++i) row[i] -= y[i];
+  for (std::size_t k = 0; k < nchol; ++k) {
+    const double pk = pivot_col[k];
+    const double* lrow = lmat + k * n2;
+    for (std::size_t p = 0; p < n2; ++p) row[p] -= lrow[p] * pk;
+  }
 }
 
 void subtractConjTransGemv(const std::complex<double>* lmat, std::size_t nchol, std::size_t n2,
                             const std::complex<double>* pivot_col, std::complex<double>* row) {
+  for (std::size_t k = 0; k < nchol; ++k) {
+    const std::complex<double> pk = pivot_col[k];
+    const std::complex<double>* lrow = lmat + k * n2;
+    for (std::size_t p = 0; p < n2; ++p) row[p] -= std::conj(lrow[p]) * pk;
+  }
+}
+
+// Batched generalization of subtractConjTransGemv above, to a WHOLE
+// qualified batch of `batch_size` candidate pivots at once (eT's own
+// "efficient algorithm", Folkestad/Kjonstad/Koch, J. Chem. Phys. 150,
+// 194112 (2019), Eq. 10 -- see choleskyDecomposeEri's own header comment
+// for the full correspondence): `lmat_q` holds, for each of the
+// `batch_size` candidates, that PRIOR-ROUND vector's own value at that
+// candidate (an (nchol x batch_size) matrix, `lmat_q(k,j)` =
+// V_k(candidate_j) -- i.e. `batch_size` "pivot_col" vectors stacked as
+// columns), and `mtilde` ((batch_size x n2), ROW-MAJOR, one candidate's
+// full (C,D) row PER ROW -- deliberately NOT (n2 x batch_size), so both
+// filling it from the dense ERI tensor and reading a single candidate's
+// row back out are contiguous, cache-friendly copies rather than
+// strided ones) is updated in place, for every candidate row at once,
+// via ONE GEMM instead of `batch_size` separate GEMVs. This is what
+// turns the aggregate cost of subtracting every PRIOR vector's
+// contribution from O(Nchol^2 * n^2) (one GEMV of growing size per
+// pivot) into O(Nchol^2 * n^2 / batch_size) (one GEMM per batch of
+// `batch_size` pivots) -- the actual algorithmic improvement the eT
+// paper reports, not merely a constant-factor BLAS efficiency gain.
+//
+// CBLAS has no single "conjugate without transpose" operation, so
+// conjugating `lmat` itself (up to Nchol*n2 elements, the LARGE operand)
+// is avoided: instead this computes temp = ConjTrans(lmat_q) @ lmat
+// (conjugating the SMALL, batch_size*nchol operand via ConjTrans) and
+// then subtracts conj(temp) (an O(batch_size*n2) elementwise pass,
+// applied once per batch, not once per pivot) -- since
+// conj(ConjTrans(lmat_q) @ lmat) = lmat_q^T @ conj(lmat), the quantity
+// this function actually needs (a no-op conjugate on the whole
+// expression for T = double, exactly like every other conjugate() call
+// in this file).
+void subtractConjTransGemm(const double* lmat, std::size_t nchol, std::size_t n2,
+                            const double* lmat_q, std::size_t batch_size, double* mtilde) {
   if (nchol == 0) return;
-  std::vector<std::complex<double>> y(n2, std::complex<double>(0.0, 0.0));
+  std::vector<double> temp(batch_size * n2);
+  cblas_dgemm(CblasRowMajor, CblasTrans, CblasNoTrans, static_cast<int>(batch_size),
+              static_cast<int>(n2), static_cast<int>(nchol), 1.0, lmat_q,
+              static_cast<int>(batch_size), lmat, static_cast<int>(n2), 0.0, temp.data(),
+              static_cast<int>(n2));
+  for (std::size_t i = 0; i < batch_size * n2; ++i) mtilde[i] -= temp[i];
+}
+
+void subtractConjTransGemm(const std::complex<double>* lmat, std::size_t nchol, std::size_t n2,
+                            const std::complex<double>* lmat_q, std::size_t batch_size,
+                            std::complex<double>* mtilde) {
+  if (nchol == 0) return;
+  std::vector<std::complex<double>> temp(batch_size * n2);
   const std::complex<double> alpha(1.0, 0.0), beta(0.0, 0.0);
-  cblas_zgemv(CblasRowMajor, CblasConjTrans, static_cast<int>(nchol), static_cast<int>(n2), &alpha,
-              lmat, static_cast<int>(n2), pivot_col, 1, &beta, y.data(), 1);
-  for (std::size_t i = 0; i < n2; ++i) row[i] -= y[i];
+  cblas_zgemm(CblasRowMajor, CblasConjTrans, CblasNoTrans, static_cast<int>(batch_size),
+              static_cast<int>(n2), static_cast<int>(nchol), &alpha, lmat_q,
+              static_cast<int>(batch_size), lmat, static_cast<int>(n2), &beta, temp.data(),
+              static_cast<int>(n2));
+  for (std::size_t i = 0; i < batch_size * n2; ++i) mtilde[i] -= std::conj(temp[i]);
 }
 
 }  // namespace
@@ -177,64 +245,170 @@ std::vector<Matrix<T>> choleskyDecomposeEri(const Tensor4<T>& eri, double thresh
     }
   }
 
-  // Cholesky vectors found so far, stacked as ROWS of one growing (Nchol x
-  // n2) contiguous buffer -- see subtractConjTransGemv above for why this
-  // replaces an O(Nchol_so_far) scalar loop per residual point with a
-  // single GEMV per iteration.
-  std::vector<T> lmat;
-  std::vector<T> row(n2);
+  // eT's own "efficient algorithm" (Folkestad, Kjonstad, Koch, J. Chem.
+  // Phys. 150, 194112 (2019), Eqs. (8)-(14)): rather than picking ONE
+  // pivot per outer iteration and subtracting every PRIOR vector's
+  // contribution from its row via a single GEMV (this file's own
+  // earlier approach, whose aggregate cost is O(Nchol^2*n^2) since the
+  // k-th pivot's GEMV already costs O(k*n^2)), pick a whole BATCH of
+  // "qualified" candidate pivots at once -- every index within a factor
+  // `kSpanFactor` of the current largest diagonal, up to `kMaxQualified`
+  // of them -- and subtract every PRIOR BATCH's vectors' contribution
+  // from ALL of them together via ONE GEMM (subtractConjTransGemm
+  // above). This is a genuine algorithmic improvement, not just a BLAS
+  // efficiency trick: it cuts the aggregate cost of that subtraction
+  // step to O(Nchol^2*n^2 / kMaxQualified). Only the (bounded, cheap)
+  // correction for vectors already built EARLIER IN THE SAME BATCH still
+  // needs a per-pivot GEMV (against just that batch's own, at most
+  // kMaxQualified, vectors -- reusing subtractConjTransGemv unchanged,
+  // pointed at the tail of `lmat`).
+  //
+  // Deliberately NOT adopted from eT: their algorithm also permanently
+  // drops (treats as exactly zero) any vector's value at AO pairs whose
+  // OWN diagonal has already fallen below the threshold, to save memory
+  // at the ~80000-AO scale their paper targets. This project always
+  // keeps every Cholesky vector's FULL n-by-n value (every (C,D) pair,
+  // not just currently-"active" ones), so choleskyReconstructEri still
+  // reproduces the original tensor to within `threshold` EVERYWHERE, not
+  // just at the pivot points -- unnecessary for the system sizes this
+  // project targets, and avoiding it keeps this function's own accuracy
+  // guarantee unchanged from before this batching was added.
+  //
+  // `kSpanFactor` matches the eT paper's own example value; a smaller
+  // batch/looser span factor makes this closer to strict one-pivot-at-
+  // a-time greedy selection (marginally fewer total vectors, less
+  // speedup), a larger one trades a small increase in Nchol for more
+  // speedup -- both remain exact to `threshold` regardless, since pivot
+  // ORDER only affects Nchol (efficiency), never the accuracy of the
+  // resulting factorization.
+  constexpr std::size_t kMaxQualified = 64;
+  constexpr double kSpanFactor = 1e-2;
+
+  std::vector<T> lmat;  // (nchol_so_far x n2), rows = vectors found so far
   const std::size_t max_iterations = (max_vectors > 0) ? std::min(max_vectors, n2) : n2;
-  for (std::size_t iter = 0; iter < max_iterations; ++iter) {
-    std::size_t pivot = 0;
-    double pivot_value = diag[0];
+  std::size_t nchol_so_far = 0;
+
+  std::vector<std::size_t> candidates;
+  std::vector<T> mtilde;
+  std::vector<T> lmat_q;
+  std::vector<double> qdiag;
+  std::vector<T> row(n2);
+  std::vector<T> pivot_col;
+
+  while (nchol_so_far < max_iterations) {
+    std::size_t dmax_idx = 0;
     for (std::size_t i = 1; i < n2; ++i) {
-      if (diag[i] > pivot_value) {
-        pivot_value = diag[i];
-        pivot = i;
-      }
+      if (diag[i] > diag[dmax_idx]) dmax_idx = i;
     }
-    if (pivot_value < threshold) break;
-    if (pivot_value < -kNegativeDiagonalTolerance) {
+    const double dmax = diag[dmax_idx];
+    if (dmax < -kNegativeDiagonalTolerance) {
       throw std::runtime_error(
           "choleskyDecomposeEri: encountered a significantly negative residual diagonal -- eri "
           "is not Hermitian positive semi-definite");
     }
-    const std::size_t a_star = pivot / n;
-    const std::size_t b_star = pivot % n;
-    const double inv_sqrt_pivot = 1.0 / std::sqrt(pivot_value);
+    if (dmax < threshold) break;
 
-    for (std::size_t c = 0; c < n; ++c) {
-      for (std::size_t d = 0; d < n; ++d) {
-        row[c * n + d] = eri(a_star, b_star, c, d);
-      }
-    }
-
-    const std::size_t nchol_so_far = lmat.size() / n2;
-    if (nchol_so_far > 0) {
-      // pivot_col[k] = the k-th already-found vector's own value at
-      // (A*,B*) -- lmat's column `pivot` (pivot == a_star*n+b_star by
-      // construction).
-      std::vector<T> pivot_col(nchol_so_far);
-      for (std::size_t k = 0; k < nchol_so_far; ++k) {
-        pivot_col[k] = lmat[k * n2 + pivot];
-      }
-      subtractConjTransGemv(lmat.data(), nchol_so_far, n2, pivot_col.data(), row.data());
-    }
-
-    // The defining sum eri(A,B,C,D) = sum_k V_k(A,B)*conj(V_k(C,D)) gives,
-    // at the pivot row (a*,b*): residual(C,D) = V_k(a*,b*) *
-    // conj(V_k(C,D)) for the NEW vector k. Solving for V_k(C,D) itself
-    // (not conj(V_k(C,D))) needs an EXTRA conjugate here on top of
-    // dividing by the (real) sqrt(pivot) -- verified by direct hand
-    // substitution (and the numerical test that caught its absence)
-    // before trusting this, since it is easy to get backwards for a
-    // genuinely complex decomposition (real T makes conjugate() a no-op,
-    // silently hiding the bug there).
+    // Qualified batch: every currently-significant index within
+    // kSpanFactor of dmax, largest first, capped at kMaxQualified and at
+    // the remaining vector budget.
+    candidates.clear();
     for (std::size_t i = 0; i < n2; ++i) {
-      row[i] = conjugate(row[i]) * T(inv_sqrt_pivot);
-      diag[i] -= realPart(row[i] * conjugate(row[i]));
+      if (diag[i] >= kSpanFactor * dmax) candidates.push_back(i);
     }
-    lmat.insert(lmat.end(), row.begin(), row.end());
+    std::sort(candidates.begin(), candidates.end(),
+              [&](std::size_t a, std::size_t b) { return diag[a] > diag[b]; });
+    const std::size_t remaining_budget = max_iterations - nchol_so_far;
+    const std::size_t batch_size = std::min({candidates.size(), kMaxQualified, remaining_budget});
+    candidates.resize(batch_size);
+
+    // Mtilde(j,p) = eri(candidates[j], p) for every p in 0..n2 (the FULL
+    // pair-index range, per this function's own header comment above),
+    // stored ROW-MAJOR as (batch_size x n2) -- one candidate's full
+    // (C,D) row per row of `mtilde`, so this fill is a plain contiguous
+    // copy straight out of the dense tensor's own row-major storage
+    // (eri.data() + q*n2 is exactly eri(A*,B*,:,:) flattened, since
+    // (C,D) are the tensor's fastest-varying dimensions and q already
+    // IS the flat (A*,B*) pair index) -- no per-element index
+    // arithmetic, unlike an (n2 x batch_size) layout, which would need
+    // either a division per element or a strided write. candidates[j]
+    // (the PIVOT/batch index) goes in the tensor's FIRST pair of slots
+    // and p (the eventual (C,D) output index) in the SECOND, exactly
+    // matching the original single-pivot algorithm's own
+    // `eri(a_star, b_star, c, d)` read order -- getting this backwards
+    // is invisible for T = double (eri(P,Q) == eri(Q,P) trivially there,
+    // since conjugate() is a no-op) but wrong for T = complex<double>
+    // (eri(P,Q) = conj(eri(Q,P)) in general) -- caught by a dedicated
+    // complex numerical test, exactly the kind of bug this file's own
+    // header comment already warns about for the conjugate step below.
+    mtilde.assign(batch_size * n2, T(0));
+    for (std::size_t j = 0; j < batch_size; ++j) {
+      const T* eri_row = eri.data() + candidates[j] * n2;
+      std::copy(eri_row, eri_row + n2, mtilde.data() + j * n2);
+    }
+    if (nchol_so_far > 0) {
+      lmat_q.assign(nchol_so_far * batch_size, T(0));
+      for (std::size_t k = 0; k < nchol_so_far; ++k) {
+        for (std::size_t j = 0; j < batch_size; ++j) {
+          lmat_q[k * batch_size + j] = lmat[k * n2 + candidates[j]];
+        }
+      }
+      subtractConjTransGemm(lmat.data(), nchol_so_far, n2, lmat_q.data(), batch_size,
+                             mtilde.data());
+    }
+
+    // Sequential in-batch construction (Eqs. (11)-(13)): each pivot only
+    // needs correcting for vectors already built EARLIER IN THIS SAME
+    // BATCH (a cheap GEMV against at most kMaxQualified rows), since
+    // every PRIOR batch's contribution is already subtracted into
+    // `mtilde` above.
+    qdiag.resize(batch_size);
+    for (std::size_t j = 0; j < batch_size; ++j) qdiag[j] = diag[candidates[j]];
+    std::vector<bool> built(batch_size, false);
+    const std::size_t batch_start = nchol_so_far;
+    std::size_t built_count = 0;
+
+    while (built_count < batch_size && nchol_so_far < max_iterations) {
+      std::size_t jstar = batch_size;
+      for (std::size_t j = 0; j < batch_size; ++j) {
+        if (!built[j] && (jstar == batch_size || qdiag[j] > qdiag[jstar])) jstar = j;
+      }
+      if (jstar == batch_size) break;
+      if (qdiag[jstar] < -kNegativeDiagonalTolerance) {
+        throw std::runtime_error(
+            "choleskyDecomposeEri: encountered a significantly negative residual diagonal -- eri "
+            "is not Hermitian positive semi-definite");
+      }
+      if (qdiag[jstar] < threshold) break;
+
+      std::copy(mtilde.data() + jstar * n2, mtilde.data() + jstar * n2 + n2, row.data());
+      if (built_count > 0) {
+        pivot_col.resize(built_count);
+        for (std::size_t c = 0; c < built_count; ++c) {
+          pivot_col[c] = lmat[(batch_start + c) * n2 + candidates[jstar]];
+        }
+        subtractConjTransGemv(lmat.data() + batch_start * n2, built_count, n2, pivot_col.data(),
+                               row.data());
+      }
+
+      // Same conjugate-then-normalize convention as the original
+      // single-pivot algorithm (see its own comment, preserved from
+      // before this batching was added): solving V_k(C,D) itself out of
+      // the defining sum's conj(V_k(C,D)) factor needs this extra
+      // conjugate on top of dividing by sqrt(pivot).
+      const double inv_sqrt_pivot = 1.0 / std::sqrt(qdiag[jstar]);
+      for (std::size_t p = 0; p < n2; ++p) {
+        row[p] = conjugate(row[p]) * T(inv_sqrt_pivot);
+        diag[p] -= realPart(row[p] * conjugate(row[p]));
+      }
+      lmat.insert(lmat.end(), row.begin(), row.end());
+      built[jstar] = true;
+      ++built_count;
+      ++nchol_so_far;
+      for (std::size_t j = 0; j < batch_size; ++j) {
+        if (!built[j]) qdiag[j] = diag[candidates[j]];
+      }
+    }
+    if (built_count == 0) break;  // safety net; should not trigger since dmax's own index always qualifies
   }
 
   const std::size_t nchol_final = lmat.size() / n2;

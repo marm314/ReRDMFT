@@ -57,24 +57,42 @@ namespace rerdmft {
 //
 // Algorithm (Beebe-Linderberg / the standard "pivoted Cholesky
 // decomposition of the ERI matrix" used throughout quantum chemistry for
-// exactly this cost-reduction purpose -- not a novel method): starting
+// exactly this cost-reduction purpose -- not a novel method; the SAME
+// base algorithm the eT program uses, confirmed against Folkestad,
+// Kjonstad, Koch, J. Chem. Phys. 150, 194112 (2019), whose Eqs. (1),
+// (4)-(6) are exactly this file's own eri(A,B,C,D) = sum_L V_L(A,B) *
+// conj(V_L(C,D)) / diagonal-pivot / rank-1-update formulation): starting
 // from the exact diagonal D[(A,B)] = eri(A,B,A,B) (always real and
 // >= 0), repeatedly (1) pick the pivot (A*,B*) with the LARGEST current
 // residual diagonal, (2) stop once that maximum drops below
 // `threshold` (or `max_vectors` vectors have been found, if given and
-// positive), (3) otherwise read the corresponding ROW of the ORIGINAL
-// tensor, eri(A*, B*, C, D) for all (C,D) (an O(n^2) slice, since the
-// full dense tensor is already available), subtract off the already-
-// found vectors' own contribution to that row, take the COMPLEX
-// CONJUGATE of the result (needed to solve V_k(C,D) out of the defining
-// sum's own conj(V_k(C,D)) factor -- a no-op for T = double, but easy
-// to get backwards for T = complex<double> since a real-only test would
-// never catch its absence; verified by direct hand substitution and a
-// dedicated complex numerical test before trusting this), and divide by
-// sqrt(D[(A*,B*)]) to get the next vector V_k, then (4) update every
-// remaining residual diagonal by subtracting |V_k(C,D)|^2. Each
-// iteration costs O(n^2) given the tensor is already dense in memory,
-// so the WHOLE decomposition costs O(Nchol * n^2) -- empirically
+// positive) -- `threshold` bounds the largest diagonal residual, which
+// by Cauchy-Schwarz bounds every OFF-diagonal residual too, exactly the
+// eT paper's own accuracy argument -- (3) otherwise read the
+// corresponding ROW of the ORIGINAL tensor, eri(A*, B*, C, D) for all
+// (C,D) (an O(n^2) slice, since the full dense tensor is already
+// available), subtract off the already-found vectors' own contribution
+// to that row, take the COMPLEX CONJUGATE of the result (needed to
+// solve V_k(C,D) out of the defining sum's own conj(V_k(C,D)) factor --
+// a no-op for T = double, but easy to get backwards for T =
+// complex<double> since a real-only test would never catch its absence;
+// verified by direct hand substitution and a dedicated complex
+// numerical test before trusting this), and divide by sqrt(D[(A*,B*)])
+// to get the next vector V_k, then (4) update every remaining residual
+// diagonal by subtracting |V_k(C,D)|^2.
+//
+// Step (3)'s "subtract off the already-found vectors' own contribution"
+// is, in the .cpp, done via eT's OWN "efficient algorithm" (same paper,
+// Eqs. (8)-(14)): rather than doing it one pivot at a time (cost
+// O(k*n^2) for the k-th pivot, O(Nchol^2*n^2) in aggregate), a whole
+// BATCH of "qualified" candidate pivots (every index within a small
+// factor of the current largest diagonal) is corrected against every
+// PRIOR BATCH at once via a single GEMM, cutting that aggregate cost to
+// O(Nchol^2*n^2 / batch_size) -- see choleskyDecomposeEri's own .cpp
+// comment for the batching details and for what is DELIBERATELY not
+// adopted from eT's paper (their additional memory-saving approximation
+// of dropping vector values at already-insignificant AO pairs, aimed at
+// their ~80000-AO target scale, unneeded here). Regardless of batching,
 // Nchol scales roughly linearly with n for a fixed `threshold` (NOT
 // quadratically, i.e. NOT with the O(n^2) dimension of M itself), so
 // this is O(n^3) overall: strictly cheaper than the O(n^4) tensor it
