@@ -42,6 +42,23 @@ Matrix<T> jkOnlyFockMatrix(const Matrix<T>& h, const Tensor4<T>& eri,
                             const std::vector<double>& occupations,
                             const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x);
 
+// Orbital-rotation gradient for JK_only functionals, built DIRECTLY from
+// the energy E = sum_a n_a h_aa + (1/2) sum_ab H_ab <ab|ab>
+// - (1/2) sum_ab X_ab <ab|ba> (H=`two_rdm_h`, X=`two_rdm_x`, fixed
+// symmetric couplings) as in doc/orbital_hessian_jk_only.pdf (Eqs. 3-4),
+// with no generalized-Fock intermediate and no 2-RDM antisymmetry
+// assumption. First-order coefficient of kappa_pq
+//   C_pq = (n_p-n_q) h_qp + sum_t (H_pt-H_qt) <tq|tp> - sum_t (X_pt-X_qt) <qt|tp>
+// (the PDF's g_pq for H_ab=n_a n_b is -C_pq; its X is its f), returned in
+// THIS project's convention, identical to OrbitalGradient.h's
+// orbitalGradient(jkOnlyFockMatrix(...)): g_pq = 2*conj(C_pq), only
+// p >= q stored (upper triangle left 0), Re(g_pq) = dE/dkappa_pq for the
+// real step kappa_pq=+t, kappa_qp=-t. O(n^3) for the whole matrix.
+template <typename T>
+Matrix<T> jkOnlyOrbitalGradient(const Matrix<T>& h, const Tensor4<T>& eri,
+                                 const std::vector<double>& occupations,
+                                 const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x);
+
 // The electronic energy (one- + two-electron; caller adds nuclear
 // repulsion separately) for the same ansatz as jkOnlyFockMatrix.
 // Returned as `double` even for T = std::complex<double> (via

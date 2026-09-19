@@ -49,6 +49,50 @@ Matrix<T> jkOnlyFockMatrix(const Matrix<T>& h, const Tensor4<T>& eri,
   return f;
 }
 
+namespace {
+double conjugateValue(double x) { return x; }
+std::complex<double> conjugateValue(std::complex<double> x) { return std::conj(x); }
+}  // namespace
+
+template <typename T>
+Matrix<T> jkOnlyOrbitalGradient(const Matrix<T>& h, const Tensor4<T>& eri,
+                                 const std::vector<double>& occupations,
+                                 const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x) {
+  const std::size_t n = h.rows();
+  if (h.cols() != n) {
+    throw std::runtime_error("jkOnlyOrbitalGradient: h is not square");
+  }
+  if (eri.dim0() != n || eri.dim1() != n || eri.dim2() != n || eri.dim3() != n) {
+    throw std::runtime_error("jkOnlyOrbitalGradient: eri dimensions inconsistent with h");
+  }
+  if (occupations.size() != n || two_rdm_h.rows() != n || two_rdm_h.cols() != n ||
+      two_rdm_x.rows() != n || two_rdm_x.cols() != n) {
+    throw std::runtime_error("jkOnlyOrbitalGradient: occupations/couplings inconsistent with h");
+  }
+
+  Matrix<T> g(n, n, T{});
+#pragma omp parallel for collapse(2)
+  for (std::size_t p = 0; p < n; ++p) {
+    for (std::size_t q = 0; q < n; ++q) {
+      if (q > p) continue;
+      T c = T(occupations[p] - occupations[q]) * h(q, p);
+      for (std::size_t t = 0; t < n; ++t) {
+        c += T(two_rdm_h(p, t) - two_rdm_h(q, t)) * eri(t, q, t, p) -
+             T(two_rdm_x(p, t) - two_rdm_x(q, t)) * eri(q, t, t, p);
+      }
+      g(p, q) = T(2.0) * conjugateValue(c);
+    }
+  }
+  return g;
+}
+
+template Matrix<double> jkOnlyOrbitalGradient(const Matrix<double>&, const Tensor4<double>&,
+                                               const std::vector<double>&, const Matrix<double>&,
+                                               const Matrix<double>&);
+template Matrix<std::complex<double>> jkOnlyOrbitalGradient(
+    const Matrix<std::complex<double>>&, const Tensor4<std::complex<double>>&,
+    const std::vector<double>&, const Matrix<double>&, const Matrix<double>&);
+
 template <typename T>
 double jkOnlyEnergy(const Matrix<T>& h, const Tensor4<T>& eri,
                      const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,

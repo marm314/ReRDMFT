@@ -1,0 +1,79 @@
+\documentclass[11pt]{article}
+\usepackage{amsmath,amssymb}
+\usepackage[margin=1in]{geometry}
+
+\title{Orbital Rotation Gradient and Hessian for a General JK-only Functional}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section*{Setup}
+
+Fixed natural occupations $n_p$, $D_{pq}=n_p\delta_{pq}$. A JK-only two-electron
+energy functional with a general symmetric occupation-coupling function
+$f(n_a,n_b)=f(n_b,n_a)$, $f(n,n)=n$, replacing the two-particle density matrix
+elements as
+\begin{equation}
+\Gamma_{pqpq} = \tfrac12\,n_p n_q \quad (\text{Hartree/direct}), \qquad
+\Gamma_{pqqp} = -\tfrac12\,f(n_p,n_q) \quad (\text{exchange}),
+\end{equation}
+so that
+\begin{equation}
+E_2 = \tfrac12\sum_{pq} n_p n_q\,\langle pq|pq\rangle
+\;-\; \tfrac12\sum_{pq} f(n_p,n_q)\,\langle pq|qp\rangle .
+\end{equation}
+
+The M\"uller functional is the special case $f(n_a,n_b)=\sqrt{n_a n_b}$.
+
+\bigskip
+\noindent\textbf{Important:} this $\Gamma$ does \emph{not} satisfy the
+fermionic antisymmetry $\Gamma_{pqrs}=-\Gamma_{qprs}$ of a genuine two-particle
+density matrix (it is an $N$-representability-violating reconstruction, valid
+only in the idempotent/integer-occupation limit). The gradient and Hessian
+below are therefore derived directly from the explicit energy expression
+above (differentiating each integral leg under orbital rotation), \emph{not}
+from the operator-commutator machinery used for the general $\Gamma$ case,
+since that machinery relied on antisymmetry at two separate steps.
+
+\section*{Gradient}
+
+Define
+\begin{equation}
+V_{qp} \;\equiv\; h_{qp} + \sum_t n_t\,\langle tq|tp\rangle .
+\end{equation}
+
+\begin{equation}
+\boxed{\,
+g_{pq} \;=\; (n_q-n_p)\,V_{qp}
+\;+\; \sum_t \big[f(n_p,n_t)-f(n_q,n_t)\big]\,\langle qt|tp\rangle
+\,}
+\end{equation}
+
+\section*{Hessian}
+
+\begin{align}
+G_{pq,rs} \;=\;\;
+& (n_q-n_p)\Big[-\delta_{qr}\,V_{sp} + \delta_{ps}\,V_{qr}
++ (n_s-n_r)\,\langle sq|rp\rangle\Big] \notag\\[4pt]
+& -\,\delta_{qr}\sum_t \big[f(n_p,n_t)-f(n_r,n_t)\big]\,\langle st|tp\rangle
+\;+\; \delta_{ps}\sum_t \big[f(n_s,n_t)-f(n_q,n_t)\big]\,\langle qt|tr\rangle \notag\\[4pt]
+& +\,\big[f(n_p,n_s)-f(n_p,n_r)-f(n_q,n_s)+f(n_q,n_r)\big]\,\langle qs|rp\rangle
+\end{align}
+
+\bigskip
+\noindent\textbf{Special case (M\"uller):} set $f(n_a,n_b)=\sqrt{n_an_b}$
+everywhere above.
+
+\bigskip
+\noindent\textbf{Status note.} This derivation does not rely on 2-RDM
+antisymmetry (appropriately, since the JK-only $\Gamma$ lacks it), but it has
+\emph{not} been independently cross-checked by a second derivation route or a
+symbolic tool. Given the nonlinear occupation-coupling $f$ and the amount of
+index bookkeeping, a numerical finite-difference validation of
+$E(\boldsymbol\kappa)$ against this gradient and Hessian (small system,
+generic fractional occupations, both for $f=\sqrt{\phantom{x}}$ and at least
+one other $f$) is strongly recommended before use in production code.
+
+\end{document}
