@@ -87,6 +87,31 @@ double jkOnlyEnergy(const Matrix<T>& h, const Tensor4<T>& eri,
   return energy;
 }
 
+template <typename T>
+Tensor4<T> jkOnlyDenseTwoRdm(std::size_t n, const Matrix<double>& two_rdm_h,
+                              const Matrix<double>& two_rdm_x) {
+  if (two_rdm_h.rows() != n || two_rdm_h.cols() != n) {
+    throw std::runtime_error("jkOnlyDenseTwoRdm: two_rdm_h dimensions inconsistent with n");
+  }
+  if (two_rdm_x.rows() != n || two_rdm_x.cols() != n) {
+    throw std::runtime_error("jkOnlyDenseTwoRdm: two_rdm_x dimensions inconsistent with n");
+  }
+  Tensor4<T> gamma(n, n, n, n, T{});
+  for (std::size_t p = 0; p < n; ++p) {
+    for (std::size_t q = 0; q < n; ++q) {
+      gamma(p, q, p, q) += T(0.5 * two_rdm_h(p, q));
+      gamma(p, q, q, p) -= T(0.5 * two_rdm_x(p, q));
+    }
+  }
+  return gamma;
+}
+
+template Tensor4<double> jkOnlyDenseTwoRdm(std::size_t n, const Matrix<double>& two_rdm_h,
+                                            const Matrix<double>& two_rdm_x);
+template Tensor4<std::complex<double>> jkOnlyDenseTwoRdm(std::size_t n,
+                                                           const Matrix<double>& two_rdm_h,
+                                                           const Matrix<double>& two_rdm_x);
+
 template double jkOnlyEnergy(const Matrix<double>& h, const Tensor4<double>& eri,
                               const std::vector<double>& occupations,
                               const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x);

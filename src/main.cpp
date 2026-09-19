@@ -829,7 +829,7 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
                                    std::size_t n_inactive_below, double n_electrons,
                                    double temperature_kelvin, const std::string& functional_name,
                                    const std::string& occupation_init_name,
-                                   double nuclear_repulsion_energy, bool debug,
+                                   double nuclear_repulsion_energy, bool debug, int verbose,
                                    std::chrono::steady_clock::time_point t_start,
                                    std::chrono::steady_clock::time_point& t_checkpoint,
                                    std::vector<TimingRecord>& timing_records) {
@@ -1048,6 +1048,49 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
       } catch (const std::exception& e) {
         out << "\n  Hessian_opt e^kappa orbital-rotation gradient finite-difference check FAILED: "
             << e.what() << "\n";
+      }
+
+      // General (dense 2-RDM, O(n^6) per Fock build) cross-check: builds
+      // the SAME H/X-only 2-RDM ansatz as jkOnlyFockMatrix, but as an
+      // EXPLICIT dense Tensor4 (Hessian_opt/JkOnlyFock.h's
+      // jkOnlyDenseTwoRdm), fed into GeneralizedFock.h's fully general
+      // generalizedFockMatrix + OrbitalGradient.h's own orbitalGradient
+      // -- no ansatz-specific shortcut anywhere in this path. Diagnostic
+      // step for the still-open JK_only relativistic Hessian bug
+      // (project_jk_only_relativistic_hessian_gap.md): confirms whether
+      // the GRADIENT (not yet known broken, unlike the Hessian) is
+      // correct when built the expensive, assumption-free way too, for
+      // JK_only's own non-idempotent, non-Kramers-bar-uniform 2-RDM.
+      // Only run at VERBOSE > 0 (same convention as every other
+      // dense-2-RDM cross-check in this file) since O(n^6) is not cheap
+      // even at water/STO-3G's size.
+      if (verbose > 0) {
+        try {
+          const auto dense_gamma =
+              rerdmft::jkOnlyDenseTwoRdm<T>(n_total, opt_two_rdm_h, opt_two_rdm_x);
+          rerdmft::Matrix<T> d_diag(n_total, n_total, T{});
+          for (std::size_t i = 0; i < n_total; ++i) d_diag(i, i) = T(optimized_occ[i]);
+          const auto fock_general = rerdmft::generalizedFockMatrix(h, eri, d_diag, dense_gamma);
+          const auto gradient_general = rerdmft::orbitalGradient(fock_general);
+          const auto check_general =
+              rerdmft::orbitalRotationGradientCheck<T>(h, eri, gradient_general, energy_fn, p, q);
+          out << "\n  General (dense 2-RDM) e^kappa orbital-rotation gradient finite-difference "
+                 "check\n"
+                 "  (generalizedFockMatrix fed jkOnlyDenseTwoRdm's explicit dense Gamma vs.\n"
+                 "  rotated-integral energy probe, SAME orbital pair (" << p << "," << q
+              << ")):\n";
+          out << "    Analytic gradient g_pq (general):  " << std::setprecision(10)
+              << check_general.analytic << std::setprecision(6) << "\n";
+          out << "    Finite-difference dE/dt:           " << std::setprecision(10)
+              << check_general.finite_difference << std::setprecision(6) << "\n";
+          out << "    |difference| (expect small):       " << check_general.abs_diff << "\n";
+          out << "    |cheap - general| (expect ~0):     "
+              << std::abs(gradient(p, q) - gradient_general(p, q)) << "\n";
+        } catch (const std::exception& e) {
+          out << "\n  General (dense 2-RDM) e^kappa orbital-rotation gradient finite-difference "
+                 "check FAILED: "
+              << e.what() << "\n";
+        }
       }
 
       // The analytic orbital-rotation HESSIAN ("the Hessian expression
@@ -2121,8 +2164,8 @@ int main(int argc, char** argv) {
           nonrel_functional_report = buildFunctionalReport(
               "NON_REL", h_spin, eri_spin, nonrel_orbital_energies_spin, 0, input.n_electrons(),
               input.temperature(), input.functional(), input.occupation_init(),
-              nonrel_hf_result.nuclear_repulsion_energy, input.debug(), t_start, t_checkpoint,
-              timing_records);
+              nonrel_hf_result.nuclear_repulsion_energy, input.debug(), input.verbose(), t_start,
+              t_checkpoint, timing_records);
         }
       }
     }
@@ -2377,7 +2420,7 @@ int main(int argc, char** argv) {
               "X2C_HF", h_x2c_mo, eri_x2c_mo, x2c_hf_result.orbital_energies, 0,
               input.n_electrons(), input.temperature(), input.functional(),
               input.occupation_init(), x2c_hf_result.nuclear_repulsion_energy, input.debug(),
-              t_start, t_checkpoint, timing_records);
+              input.verbose(), t_start, t_checkpoint, timing_records);
         }
       }
     }
@@ -2629,7 +2672,7 @@ int main(int argc, char** argv) {
               "C4_DHF", h_mo, eri_mo, dhf_orbital_energies_positive, n_negative,
               input.n_electrons(), input.temperature(), input.functional(),
               input.occupation_init(), dhf_result.nuclear_repulsion_energy, input.debug(),
-              t_start, t_checkpoint, timing_records);
+              input.verbose(), t_start, t_checkpoint, timing_records);
         }
       }
     }

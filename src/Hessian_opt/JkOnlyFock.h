@@ -51,6 +51,21 @@ double jkOnlyEnergy(const Matrix<T>& h, const Tensor4<T>& eri,
                      const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
                      const Matrix<double>& two_rdm_x);
 
+// Builds the EXPLICIT, dense two_rdm_pqrs tensor for JK_only's H/X-only
+// ansatz (the same one jkOnlyFockMatrix/jkOnlyEnergy substitute
+// directly into, never materializing it):
+//   two_rdm_pqrs = (1/2) [ two_rdm_h(p,q) delta_pr delta_qs
+//                          - two_rdm_x(p,q) delta_ps delta_qr ]
+// For feeding GeneralizedFock.h's fully general generalizedFockMatrix
+// (and, later, GeneralizedHessian.h's generalizedOrbitalHessianElement)
+// with a genuinely dense, non-idempotent, non-Kramers-bar-uniform
+// 2-RDM -- the O(n^4)-storage, O(n^6)-per-Fock-build counterpart to the
+// O(n)-per-element cheap path, used ONLY for cross-checking (diagnosing
+// the JK_only relativistic Hessian gap), never in a production path.
+template <typename T>
+Tensor4<T> jkOnlyDenseTwoRdm(std::size_t n, const Matrix<double>& two_rdm_h,
+                              const Matrix<double>& two_rdm_x);
+
 }  // namespace rerdmft
 
 #endif  // RERDMFT_JKONLYFOCK_H
