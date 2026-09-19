@@ -43,9 +43,11 @@ double jkFunctionalEnergy(const Matrix<T>& h, const Tensor4<T>& eri,
     for (std::size_t q = 0; q < n; ++q) {
       const double j_pq = std::real(eri(p, q, p, q));
       const double k_pq = std::real(eri(p, q, q, p));
+      const double f_h =
+          jkHartreeFunction(functional, occupations[p], occupations[q], p, q, f_l, power_alpha);
       const double f_x = jkExchangeFunction(functional, occupations[p], occupations[q], p, q,
                                              f_l, power_alpha);
-      two_electron += j_pq * occupations[p] * occupations[q] - k_pq * f_x;
+      two_electron += j_pq * f_h - k_pq * f_x;
     }
   }
   energy += 0.5 * two_electron;
@@ -67,9 +69,11 @@ std::vector<double> jkFunctionalGradient(const Matrix<T>& h, const Tensor4<T>& e
     for (std::size_t q = 0; q < n; ++q) {
       const double j_rq = std::real(eri(r, q, r, q));
       const double k_rq = std::real(eri(r, q, q, r));
-      const double d1 =
+      const double d1_h = jkHartreeFunctionD1(functional, occupations[r], occupations[q], r, q,
+                                               f_l, power_alpha);
+      const double d1_x =
           jkExchangeFunctionD1(functional, occupations[r], occupations[q], r, q, f_l, power_alpha);
-      sum += j_rq * occupations[q] - k_rq * d1;
+      sum += j_rq * d1_h - k_rq * d1_x;
     }
     gradient[r] = sum;
   }
@@ -90,18 +94,23 @@ Matrix<double> jkFunctionalHessian(const Matrix<T>& h, const Tensor4<T>& eri,
     for (std::size_t s = 0; s < n; ++s) {
       const double j_rs = std::real(eri(r, s, r, s));
       const double k_rs = std::real(eri(r, s, s, r));
-      const double d12 = jkExchangeFunctionD12(functional, occupations[r], occupations[s], r, s,
-                                                f_l, power_alpha);
-      double value = j_rs - k_rs * d12;
+      const double d12_h = jkHartreeFunctionD12(functional, occupations[r], occupations[s], r, s,
+                                                 f_l, power_alpha);
+      const double d12_x = jkExchangeFunctionD12(functional, occupations[r], occupations[s], r, s,
+                                                  f_l, power_alpha);
+      double value = j_rs * d12_h - k_rs * d12_x;
       if (r == s) {
         double diag_sum = 0.0;
         for (std::size_t q = 0; q < n; ++q) {
+          const double j_rq = std::real(eri(r, q, r, q));
           const double k_rq = std::real(eri(r, q, q, r));
-          const double d11 = jkExchangeFunctionD11(functional, occupations[r], occupations[q], r,
-                                                     q, f_l, power_alpha);
-          diag_sum += k_rq * d11;
+          const double d11_h = jkHartreeFunctionD11(functional, occupations[r], occupations[q], r,
+                                                      q, f_l, power_alpha);
+          const double d11_x = jkExchangeFunctionD11(functional, occupations[r], occupations[q], r,
+                                                       q, f_l, power_alpha);
+          diag_sum += j_rq * d11_h - k_rq * d11_x;
         }
-        value -= diag_sum;
+        value += diag_sum;
       }
       hessian(r, s) = value;
     }

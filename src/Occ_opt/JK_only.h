@@ -15,11 +15,12 @@ namespace rerdmft {
 // doi:10.1039/C7CP03349D, Table 1 (f(n_i,n_j) functions, see the paper's
 // eqn (5)). These functionals only modify the EXCHANGE part of the
 // 2-RDM relative to the trivial single-determinant (SD) approximation
-// -- the Hartree/Coulomb part is always the plain occupation-number
-// product n_i*n_j, for every functional listed here (see the paper's
-// own text: "those that only modify the exchange part of the
-// functional and those that modify both" -- Table 1 covers only the
-// FORMER group; PNOFs, the latter group, are NOT covered by this file).
+// -- the Hartree/Coulomb part is the plain occupation-number product
+// n_i*n_j for EVERY functional here EXCEPT `kMullerAs` (see its own
+// comment below) -- see the paper's own text: "those that only modify
+// the exchange part of the functional and those that modify both" --
+// Table 1 covers only the FORMER group; PNOFs, the latter group, are
+// NOT covered by this file.
 enum class JkFunctional {
   kSd,      // Single-determinant / HF: f = n_i*n_j.
   kMbb,     // Muller / Buijse-Baerends: f = sqrt(n_i*n_j).
@@ -30,6 +31,32 @@ enum class JkFunctional {
   kMlsic,   // Marques-Lathiotakis, self-interaction corrected.
   kGu,      // Goedecker-Umrigar.
   kPower,   // (n_i*n_j)^alpha.
+  // Muller, ANTISYMMETRIZED: g(n_i,n_j) = (n_i*n_j - sqrt(n_i*n_j))/2,
+  // used for BOTH the Hartree AND exchange coupling (two_rdm_h(p,q) =
+  // two_rdm_x(p,q) = g(n_p,n_q)), NOT just Table 1's own exchange-only
+  // f(n_i,n_j) = sqrt(n_i*n_j). Project-internal, not from the PCCP
+  // 2017 paper: g is Hartree's own n_i*n_j minus Muller's own
+  // sqrt(n_i*n_j) (an earlier variant used their AVERAGE instead --
+  // see project memory, project_jk_only.md, for why this form was
+  // tried next: the averaged version's SQP occupation optimization did
+  // not converge for water/STO-3G, landing on the box boundary after
+  // 100 iterations, unlike every other functional here), and setting
+  // two_rdm_h == two_rdm_x this way
+  // makes the resulting dense 2-RDM ansatz Gamma_pqrs = g(n_p,n_q)
+  // [delta_pr delta_qs - delta_ps delta_qr] GENUINELY antisymmetric
+  // (Gamma_pqrs = -Gamma_qprs EXACTLY, for ANY occupations, fractional
+  // or not) -- confirmed to be exactly what
+  // GeneralizedHessian.h's boxed orbital-rotation Hessian (Eq. 9)
+  // needs to reproduce the true numerical Hessian for a fractional-
+  // occupation ansatz (see project memory,
+  // project_jk_only_relativistic_hessian_gap.md's "DEFINITIVE, fully
+  // controlled confirmation" entry: plain Muller's own two_rdm_h !=
+  // two_rdm_x breaks antisymmetry and gives a large, confirmed Hessian
+  // defect; substituting two_rdm_x=two_rdm_h at the SAME fractional
+  // occupations fixes it exactly). `kMullerAs` is the ONLY functional
+  // in this file whose Hartree coupling is NOT plain n_i*n_j -- see
+  // `jkHartreeFunction`'s own comment.
+  kMullerAs,
 };
 
 // f(n_i,n_j) itself (Table 1), for the exchange part of the 2-RDM. `i`,
@@ -47,12 +74,42 @@ enum class JkFunctional {
 double jkExchangeFunction(JkFunctional functional, double n_i, double n_j, std::size_t i,
                            std::size_t j, std::size_t f_l = 0, double power_alpha = 1.0);
 
-// two_rdm_H(p,q) = n_p * n_q for every (p,q) -- identical for all
-// functionals in this file (see the class comment above): the plain
-// Hartree/Coulomb coupling matrix expected by
+// f_H(n_i,n_j): the Hartree/Coulomb coupling function itself. For
+// every functional here EXCEPT `kMullerAs`, this is plain n_i*n_j
+// (matching `jkExchangeFunction`'s own `kSd` row exactly). For
+// `kMullerAs`, it is the SAME g(n_i,n_j) = (n_i*n_j - sqrt(n_i*n_j))/2
+// as `jkExchangeFunction`'s own `kMullerAs` row -- i.e. `kMullerAs` is
+// the one functional in this file where `jkHartreeFunction ==
+// jkExchangeFunction` identically, by deliberate construction (see the
+// enum's own comment for why). `i`,`j`,`f_l`,`power_alpha` are threaded
+// through purely for signature parity with `jkExchangeFunction` --
+// none of them affect this function's value for ANY functional listed
+// here (unlike `jkExchangeFunction`, where `i`,`j`,`f_l` matter for
+// `kBbc2` specifically).
+double jkHartreeFunction(JkFunctional functional, double n_i, double n_j, std::size_t i,
+                          std::size_t j, std::size_t f_l = 0, double power_alpha = 1.0);
+
+// D1/D11/D12 of `jkHartreeFunction`, mirroring `jkExchangeFunctionD1`/
+// `D11`/`D12`'s own meaning exactly (partials of the Hartree coupling
+// function itself now, not the exchange one). For every functional
+// except `kMullerAs`: D1=n_j, D11=0, D12=1 (the trivial derivatives of
+// n_i*n_j). For `kMullerAs`: identical to `jkExchangeFunctionD1`/`D11`/
+// `D12`'s own `kMullerAs` values (same underlying function g).
+double jkHartreeFunctionD1(JkFunctional functional, double n_i, double n_j, std::size_t i,
+                            std::size_t j, std::size_t f_l = 0, double power_alpha = 1.0);
+double jkHartreeFunctionD11(JkFunctional functional, double n_i, double n_j, std::size_t i,
+                             std::size_t j, std::size_t f_l = 0, double power_alpha = 1.0);
+double jkHartreeFunctionD12(JkFunctional functional, double n_i, double n_j, std::size_t i,
+                             std::size_t j, std::size_t f_l = 0, double power_alpha = 1.0);
+
+// two_rdm_H(p,q) = jkHartreeFunction(functional, n_p, n_q, p, q, f_l,
+// power_alpha) for every (p,q) -- n_p*n_q for every functional here
+// except `kMullerAs` (see that function's own comment): the Hartree/
+// Coulomb coupling matrix expected by
 // Hessian_opt/HartreeExchangeGradient.h's/HartreeExchangeHessian.h's
 // `two_rdm_h` parameter.
-Matrix<double> jkHartreeCoupling(const std::vector<double>& occupations);
+Matrix<double> jkHartreeCoupling(JkFunctional functional, const std::vector<double>& occupations,
+                                  std::size_t f_l = 0, double power_alpha = 1.0);
 
 // two_rdm_X(p,q) = jkExchangeFunction(functional, n_p, n_q, p, q, f_l,
 // power_alpha) for every (p,q) -- Table 1's own f(n_i,n_j), fed

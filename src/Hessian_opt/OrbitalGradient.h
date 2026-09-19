@@ -13,7 +13,7 @@ namespace rerdmft {
 // Chemistry", Eq. (8.32) (p. 124): g_pq = f_qp - f*_pq, with F here
 // playing the role of Dyall's f -- but note the factor of 2 in front is
 // a DELIBERATE departure from Dyall's own (unscaled) equation. It is
-// there so that g_pq equals dE/dt EXACTLY for the single real
+// there so that g_pq equals dE/dkappa EXACTLY for the single real
 // orbital-rotation degree of freedom t used throughout this project's
 // exponential parametrization (Hessian_opt/SpinorRotation.h's U_rot =
 // exp(-kappa), one independent real t per antisymmetric-Hermitian pair

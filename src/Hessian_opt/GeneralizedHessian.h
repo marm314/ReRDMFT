@@ -9,7 +9,7 @@
 namespace rerdmft {
 
 // Builds one element of the orbital-rotation Hessian
-//   Hess_pq,rs = d^2E/dt_pq dt_rs
+//   Hess_pq,rs = d^2E/dkappa_pq dkappa_rs
 // for the SAME single-real-parameter exponential-rotation convention
 // already used by OrbitalGradient.h's orbitalGradient (Hessian_opt/
 // SpinorRotation.h's U_rot = exp(-kappa), kappa_pq = +t / kappa_qp = -t
@@ -45,7 +45,7 @@ namespace rerdmft {
 // leading factor of i, rather than to opposite values, exactly as
 // already established for the gradient's own imaginary direction; see
 // main.cpp's finiteDifferenceCheckReport for that derivation). The
-// MIXED real/imaginary second derivative (d^2E/dt_pq dy_rs) is a
+// MIXED real/imaginary second derivative (d^2E/dkappa_pq dy_rs) is a
 // separate, distinctly-signed combination not implemented here --
 // only the "pure" real-real and imaginary-imaginary diagonal blocks of
 // the full complex Hessian are covered so far.

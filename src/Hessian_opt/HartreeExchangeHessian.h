@@ -11,7 +11,7 @@
 namespace rerdmft {
 
 // Builds one element of the orbital-rotation Hessian
-//   Hess_pq,rs = d^2E/dt_pq dt_rs
+//   Hess_pq,rs = d^2E/dkappa_pq dkappa_rs
 // directly from GeneralizedHessian.h's own "boxed" formula, assuming --
 // exactly as HartreeExchangeGradient.h's hartreeExchangeFockMatrix does
 // for the gradient -- the 1-RDM D is diagonal (`occupations`, general,
@@ -114,7 +114,7 @@ T hartreeExchangeHessianElementImag(const Matrix<T>& h, const Tensor4<T>& eri,
                                      std::size_t p, std::size_t q, std::size_t r, std::size_t s);
 
 // The MIXED real/imaginary second derivative,
-//   Hess^{ty}_pq,rs = d^2E/dt_pq dy_rs
+//   Hess^{ty}_pq,rs = d^2E/dkappa_pq dy_rs
 // (t_pq = Re(kappa_pq)-direction on the FIRST pair, y_rs = Im(kappa_rs)-
 // direction on the SECOND pair) -- the block GeneralizedHessian.h's own
 // derivation history flagged as "not implemented" (only the pure
@@ -132,7 +132,7 @@ T hartreeExchangeHessianElementImag(const Matrix<T>& h, const Tensor4<T>& eri,
 // OPPOSITE of the naive reading of the symbol names above. This was
 // caught by, not just avoided by, the numerical check below (an
 // earlier version of this derivation had the two pairs' roles swapped
-// and reproduced d^2E/dy_pq dt_rs instead -- exactly right in
+// and reproduced d^2E/dy_pq dkappa_rs instead -- exactly right in
 // magnitude, wrong in which pair got which direction -- until the
 // finite-difference comparison caught it): a real-vs-imaginary-step
 // mixed-direction 2D finite difference (t on (p,q), y on (r,s)) against
@@ -148,7 +148,7 @@ T hartreeExchangeHessianElementImag(const Matrix<T>& h, const Tensor4<T>& eri,
 // magnitude check (imaginary part ~1e-16-1e-17, floating-point
 // roundoff, at both test points).
 //
-// The OTHER mixed direction, Hess^{yt}_pq,rs = d^2E/dy_pq dt_rs, is NOT
+// The OTHER mixed direction, Hess^{yt}_pq,rs = d^2E/dy_pq dkappa_rs, is NOT
 // a new function: by Schwarz's theorem (mixed partials commute for any
 // smooth function, regardless of which physical pair each one belongs
 // to), Hess^{yt}_pq,rs = Hess^{ty}_rs,pq -- i.e. just call this same
@@ -255,7 +255,7 @@ Matrix<T> hartreeExchangeHessianMatrix(
 // 1.82e-11 (floating-point roundoff) at DENSITY_TOLERANCE=1e-13/
 // ENERGY_TOLERANCE=1e-14. This is expected, not a bug: `Hess_pq,rs` is
 // built from the SAME double-commutator formula validated (against
-// finite differences) to equal the true `d^2E/dt_pq dt_rs` for one
+// finite differences) to equal the true `d^2E/dkappa_pq dkappa_rs` for one
 // FIXED (p,q,r,s) ordering at a time; Schwarz's theorem guarantees the
 // two orderings agree only where the reference state is an actual
 // stationary point (converged SCF; the standard setting a

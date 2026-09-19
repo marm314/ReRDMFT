@@ -10,7 +10,7 @@
 namespace rerdmft {
 
 // Cheap orbital-rotation Hessian element for JK_only functionals
-// (Occ_opt/JK_only.h), Hess_pq,rs = d^2E/dt_pq dt_rs, for the SAME
+// (Occ_opt/JK_only.h), Hess_pq,rs = d^2E/dkappa_pq dkappa_rs, for the SAME
 // diagonal-D, Hartree/exchange-only 2-RDM ansatz HartreeExchangeHessian.h's
 // hartreeExchangeHessianElement uses with an empty pair_of:
 //   two_rdm_pqrs = (1/2) [ two_rdm_h(p,q) delta_pr delta_qs

@@ -15,7 +15,7 @@ namespace rerdmft {
 
 // The "cheap" (no dense 2-RDM tensor, no O(n^2)-per-element general
 // contraction) orbital-rotation Hessian element for a PNOF functional,
-//   Hess_pq,rs = d^2E/dt_pq dt_rs,
+//   Hess_pq,rs = d^2E/dkappa_pq dkappa_rs,
 // reusing Hessian_opt/HartreeExchangeHessian.h's own
 // hartreeExchangeHessianElement, INCLUDING its L1/L2 pair-term
 // extension: PnofFock.h's own buildPnofFullTwoRdm/buildPnofPairOf

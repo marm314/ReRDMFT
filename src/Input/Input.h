@@ -206,8 +206,8 @@ class Input {
   // JK-only density matrix functional approximation (Occ_opt/JK_only.h,
   // Table 1 of Rodriguez-Mayorga et al., PCCP (2017)) main.cpp's
   // buildFunctionalReport evaluates on the converged HF/DHF orbitals --
-  // one of SD, MBB (or MULLER), BBC2, CA, CGA, ML, MLSIC, GU, POWER
-  // (case-insensitive; validated against this exact list, throws
+  // one of SD, MBB (or MULLER), BBC2, CA, CGA, ML, MLSIC, GU, POWER,
+  // MULLER_AS (case-insensitive; validated against this exact list, throws
   // otherwise). Stored as a plain string rather than Occ_opt's own
   // JkFunctional enum so that Input.h stays independent of Occ_opt.
   // The default here is never actually USED for that evaluation --

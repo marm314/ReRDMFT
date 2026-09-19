@@ -90,6 +90,26 @@ void csanyiGoedeckerAriasDerivatives(double a, double b, double& d1, double& d11
   d12 = 0.5 + psi * (1.0 - b) / sqrt_q;
 }
 
+double mbbD1(double a, double b) { return 0.5 * std::sqrt(b / a); }
+double mbbD11(double a, double b) { return -0.25 * std::sqrt(b) * std::pow(a, -1.5); }
+double mbbD12(double a, double b) { return 0.25 / std::sqrt(a * b); }
+
+// g(a,b) = (a*b - sqrt(a*b))/2 -- kMullerAs's own function, used for
+// BOTH Hartree and exchange (see JK_only.h's enum comment). Derivatives
+// via the chain rule on the sqrt(a*b) term (mbbD1/D11/D12 above are
+// exactly that term's own partials, entering with a MINUS sign here)
+// plus the trivial a*b term's own (D1=b, D11=0, D12=1), both halved:
+//   D1  = 0.5*(b - mbbD1(a,b))
+//   D11 = -0.5*mbbD11(a,b)
+//   D12 = 0.5*(1 - mbbD12(a,b))
+// Verified by hand against direct differentiation of g itself before
+// use (see JK_only.h's enum comment for the derivation), not just
+// assembled from the pieces above without checking.
+double mullerAsValue(double a, double b) { return 0.5 * (a * b - std::sqrt(a * b)); }
+double mullerAsD1(double a, double b) { return 0.5 * (b - mbbD1(a, b)); }
+double mullerAsD11(double a, double b) { return -0.5 * mbbD11(a, b); }
+double mullerAsD12(double a, double b) { return 0.5 * (1.0 - mbbD12(a, b)); }
+
 }  // namespace
 
 double jkExchangeFunction(JkFunctional functional, double n_i, double n_j, std::size_t i,
@@ -131,17 +151,12 @@ double jkExchangeFunction(JkFunctional functional, double n_i, double n_j, std::
 
     case JkFunctional::kPower:
       return std::pow(n_i * n_j, power_alpha);
+
+    case JkFunctional::kMullerAs:
+      return mullerAsValue(n_i, n_j);
   }
   throw std::runtime_error("jkExchangeFunction: unhandled JkFunctional");
 }
-
-namespace {
-
-double mbbD1(double a, double b) { return 0.5 * std::sqrt(b / a); }
-double mbbD11(double a, double b) { return -0.25 * std::sqrt(b) * std::pow(a, -1.5); }
-double mbbD12(double a, double b) { return 0.25 / std::sqrt(a * b); }
-
-}  // namespace
 
 double jkExchangeFunctionD1(JkFunctional functional, double n_i, double n_j, std::size_t i,
                              std::size_t j, std::size_t f_l, double power_alpha) {
@@ -214,6 +229,9 @@ double jkExchangeFunctionD1(JkFunctional functional, double n_i, double n_j, std
       const double x = n_i * n_j;
       return power_alpha * std::pow(x, power_alpha - 1.0) * n_j;
     }
+
+    case JkFunctional::kMullerAs:
+      return mullerAsD1(n_i, n_j);
   }
   throw std::runtime_error("jkExchangeFunctionD1: unhandled JkFunctional");
 }
@@ -271,6 +289,9 @@ double jkExchangeFunctionD11(JkFunctional functional, double n_i, double n_j, st
       const double x = n_i * n_j;
       return power_alpha * (power_alpha - 1.0) * std::pow(x, power_alpha - 2.0) * n_j * n_j;
     }
+
+    case JkFunctional::kMullerAs:
+      return mullerAsD11(n_i, n_j);
   }
   throw std::runtime_error("jkExchangeFunctionD11: unhandled JkFunctional");
 }
@@ -328,16 +349,45 @@ double jkExchangeFunctionD12(JkFunctional functional, double n_i, double n_j, st
       const double x = n_i * n_j;
       return power_alpha * power_alpha * std::pow(x, power_alpha - 1.0);
     }
+
+    case JkFunctional::kMullerAs:
+      return mullerAsD12(n_i, n_j);
   }
   throw std::runtime_error("jkExchangeFunctionD12: unhandled JkFunctional");
 }
 
-Matrix<double> jkHartreeCoupling(const std::vector<double>& occupations) {
+double jkHartreeFunction(JkFunctional functional, double n_i, double n_j, std::size_t /*i*/,
+                          std::size_t /*j*/, std::size_t /*f_l*/, double /*power_alpha*/) {
+  if (functional == JkFunctional::kMullerAs) return mullerAsValue(n_i, n_j);
+  return n_i * n_j;
+}
+
+double jkHartreeFunctionD1(JkFunctional functional, double n_i, double n_j, std::size_t /*i*/,
+                            std::size_t /*j*/, std::size_t /*f_l*/, double /*power_alpha*/) {
+  if (functional == JkFunctional::kMullerAs) return mullerAsD1(n_i, n_j);
+  return n_j;
+}
+
+double jkHartreeFunctionD11(JkFunctional functional, double n_i, double n_j, std::size_t /*i*/,
+                             std::size_t /*j*/, std::size_t /*f_l*/, double /*power_alpha*/) {
+  if (functional == JkFunctional::kMullerAs) return mullerAsD11(n_i, n_j);
+  return 0.0;
+}
+
+double jkHartreeFunctionD12(JkFunctional functional, double n_i, double n_j, std::size_t /*i*/,
+                             std::size_t /*j*/, std::size_t /*f_l*/, double /*power_alpha*/) {
+  if (functional == JkFunctional::kMullerAs) return mullerAsD12(n_i, n_j);
+  return 1.0;
+}
+
+Matrix<double> jkHartreeCoupling(JkFunctional functional, const std::vector<double>& occupations,
+                                  std::size_t f_l, double power_alpha) {
   const std::size_t n = occupations.size();
   Matrix<double> result(n, n);
   for (std::size_t p = 0; p < n; ++p) {
     for (std::size_t q = 0; q < n; ++q) {
-      result(p, q) = occupations[p] * occupations[q];
+      result(p, q) =
+          jkHartreeFunction(functional, occupations[p], occupations[q], p, q, f_l, power_alpha);
     }
   }
   return result;
@@ -367,6 +417,7 @@ JkFunctional parseJkFunctional(const std::string& name) {
   if (upper == "MLSIC") return JkFunctional::kMlsic;
   if (upper == "GU") return JkFunctional::kGu;
   if (upper == "POWER") return JkFunctional::kPower;
+  if (upper == "MULLER_AS") return JkFunctional::kMullerAs;
   throw std::runtime_error("parseJkFunctional: unrecognized functional name '" + name + "'");
 }
 

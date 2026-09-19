@@ -39,7 +39,7 @@ struct OrbitalRotationGradientCheck {
 // INTEGRALS via IntegralRotation.h's rotateIntegrals instead, at a
 // single real rotation angle t along kappa_pq = t, kappa_qp = -t (the
 // SAME (p,q) real parametrization OrbitalGradient.h's own g_pq =
-// 2*(F_qp - conj(F_pq)) is built to satisfy g_pq = dE/dt for exactly),
+// 2*(F_qp - conj(F_pq)) is built to satisfy g_pq = dE/dkappa for exactly),
 // central-differenced:
 //   finite_difference = [E(h(+t),eri(+t)) - E(h(-t),eri(-t))] / (2t)
 // compared against g_pq's own real part (g_pq is guaranteed real for a
@@ -80,7 +80,7 @@ struct OrbitalRotationHessianCheck {
 // Hessian_opt/HartreeExchangeHessian.h's hartreeExchangeHessianElement)
 // at a FIXED set of occupations -- the same e^kappa integral-rotation
 // idea as orbitalRotationGradientCheck above, one derivative order
-// higher: `Hess_pq,rs = d^2E/dt_pq dt_rs = d(g_pq)/dt_rs`, so this
+// higher: `Hess_pq,rs = d^2E/dkappa_pq dkappa_rs = d(g_pq)/dkappa_rs`, so this
 // rotates by kappa_rs = +-t (the SECOND pair (r,s), the direction the
 // derivative is taken along), evaluates the FULL analytic gradient
 // matrix at each rotated point via the caller-supplied `gradient_fn`,

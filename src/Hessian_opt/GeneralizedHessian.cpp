@@ -129,7 +129,7 @@ T generalizedOrbitalHessianElement(const Matrix<T>& h, const Tensor4<T>& eri, co
   // Antisymmetrize both pairs (p,q) and (r,s), matching how
   // OrbitalGradient.h's orbitalGradient antisymmetrizes (p,q) alone --
   // see GeneralizedHessian.h for why this specific 4-term combination
-  // is d^2E/dt_pq dt_rs, not the tex's bare G_pq,rs alone.
+  // is d^2E/dkappa_pq dkappa_rs, not the tex's bare G_pq,rs alone.
   return rawHessianTerm(h, eri, d, two_rdm, fock, p, q, r, s) -
          rawHessianTerm(h, eri, d, two_rdm, fock, p, q, s, r) -
          rawHessianTerm(h, eri, d, two_rdm, fock, q, p, r, s) +
