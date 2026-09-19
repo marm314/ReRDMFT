@@ -18,6 +18,19 @@ double realPart(std::complex<double> x) { return x.real(); }
 double conjugate(double x) { return x; }
 std::complex<double> conjugate(std::complex<double> x) { return std::conj(x); }
 
+// OrbitalGradient.h's own gradient only stores the p >= q "lower
+// triangle" (g(p,q) for p < q is left at its default-constructed zero,
+// by that file's own documented convention) -- reconstruct via
+// g_pq = -conj(g_qp) when the caller asks for an upper-triangle entry,
+// rather than silently reading the placeholder zero. Shared by
+// orbitalRotationGradientCheck (reading its own `gradient` argument) and
+// orbitalRotationHessianCheck (reading each rotated point's own,
+// freshly-built gradient matrix).
+template <typename T>
+T readGradientElement(const Matrix<T>& gradient, std::size_t p, std::size_t q) {
+  return (p >= q) ? gradient(p, q) : -conjugate(gradient(q, p));
+}
+
 }  // namespace
 
 template <typename T>
@@ -45,12 +58,7 @@ OrbitalRotationGradientCheck<T> orbitalRotationGradientCheck(const Matrix<T>& h,
   const double e_plus = energy_fn(rot_plus.h, rot_plus.eri);
   const double e_minus = energy_fn(rot_minus.h, rot_minus.eri);
 
-  // OrbitalGradient.h's own gradient only stores the p >= q "lower
-  // triangle" (g(p,q) for p < q is left at its default-constructed
-  // zero, by that file's own documented convention) -- reconstruct via
-  // g_pq = -conj(g_qp) when the caller asks for an upper-triangle entry,
-  // rather than silently reading the placeholder zero.
-  const T analytic_pq = (p >= q) ? gradient(p, q) : -conjugate(gradient(q, p));
+  const T analytic_pq = readGradientElement(gradient, p, q);
 
   OrbitalRotationGradientCheck<T> result;
   result.finite_difference = (e_plus - e_minus) / (2.0 * step);
@@ -66,5 +74,45 @@ template OrbitalRotationGradientCheck<std::complex<double>> orbitalRotationGradi
     const Matrix<std::complex<double>>&, const Tensor4<std::complex<double>>&,
     const Matrix<std::complex<double>>&, const RdmftEnergyFn<std::complex<double>>&, std::size_t,
     std::size_t, double);
+
+template <typename T>
+OrbitalRotationHessianCheck<T> orbitalRotationHessianCheck(const Matrix<T>& h,
+                                                             const Tensor4<T>& eri,
+                                                             T hessian_element,
+                                                             const RdmftGradientFn<T>& gradient_fn,
+                                                             std::size_t p, std::size_t q,
+                                                             std::size_t r, std::size_t s,
+                                                             double step) {
+  const std::size_t n = h.rows();
+  if (h.cols() != n || p >= n || q >= n || r >= n || s >= n || p == q || r == s) {
+    throw std::runtime_error("orbitalRotationHessianCheck: inconsistent input dimensions");
+  }
+
+  auto buildKappa = [&](double t) {
+    Matrix<T> kappa(n, n, T{});
+    kappa(r, s) = T(t);
+    kappa(s, r) = T(-t);
+    return kappa;
+  };
+
+  const auto rot_plus = rotateIntegrals(h, eri, spinorRotationMatrix(buildKappa(step)));
+  const auto rot_minus = rotateIntegrals(h, eri, spinorRotationMatrix(buildKappa(-step)));
+  const T g_pq_plus = readGradientElement(gradient_fn(rot_plus.h, rot_plus.eri), p, q);
+  const T g_pq_minus = readGradientElement(gradient_fn(rot_minus.h, rot_minus.eri), p, q);
+
+  OrbitalRotationHessianCheck<T> result;
+  result.finite_difference = realPart((g_pq_plus - g_pq_minus) / T(2.0 * step));
+  result.analytic = realPart(hessian_element);
+  result.abs_diff = std::abs(result.analytic - result.finite_difference);
+  return result;
+}
+
+template OrbitalRotationHessianCheck<double> orbitalRotationHessianCheck(
+    const Matrix<double>&, const Tensor4<double>&, double, const RdmftGradientFn<double>&,
+    std::size_t, std::size_t, std::size_t, std::size_t, double);
+template OrbitalRotationHessianCheck<std::complex<double>> orbitalRotationHessianCheck(
+    const Matrix<std::complex<double>>&, const Tensor4<std::complex<double>>&,
+    std::complex<double>, const RdmftGradientFn<std::complex<double>>&, std::size_t, std::size_t,
+    std::size_t, std::size_t, double);
 
 }  // namespace rerdmft

@@ -82,6 +82,76 @@ T rawHartreeExchangeHessianTerm(const Matrix<T>& h, const Tensor4<T>& eri,
   return term;
 }
 
+// The L1/L2 (PNOF-style pair-term) contribution to GeneralizedHessian.h's
+// own boxed G_pq,rs, on top of rawHartreeExchangeHessianTerm's H/X-only
+// one above -- see HartreeExchangeHessian.h's own header for the
+// derivation method and validation. Substituting the ansatz's pair
+// terms, `two_rdm(A,pair_of(A),C,pair_of(C)) += two_rdm_l1(A,C) +
+// two_rdm_l2(A,pair_of(C))` (the two individually-named contributions
+// ALWAYS occur together at this same tensor entry -- see
+// HartreeExchangeGradient.cpp's own F_pq derivation, which combines
+// them the identical way), into each of the boxed formula's six raw
+// two-electron sums and collapsing every double sum the delta pattern
+// allows (exactly as the base H/X derivation did) gives, term by term
+// (using the boxed formula's own six terms in order):
+//   -2 sum_uv <uv|pr> Gamma_uvsq
+//     -> only when q==pair_of(s): -2 sum_u <u,pair_of(u)|pr>
+//        [two_rdm_l1(u,s) + two_rdm_l2(u,q)]
+//   +2 sum_ut <us|pt> Gamma_ruqt - 2 sum_ut <su|pt> Gamma_ruqt
+//     -> both collapse to u=pair_of(r), t=pair_of(q) UNCONDITIONALLY:
+//        [+2<pair_of(r),s|p,pair_of(q)> - 2<s,pair_of(r)|p,pair_of(q)>]
+//        * [two_rdm_l1(r,q) + two_rdm_l2(r,pair_of(q))]
+//   +2 sum_ut <uq|rt> Gamma_pust - 2 sum_uw <uq|wr> Gamma_pusw
+//     -> both collapse to u=pair_of(p), t/w=pair_of(s) UNCONDITIONALLY:
+//        [+2<pair_of(p),q|r,pair_of(s)> - 2<pair_of(p),q|pair_of(s),r>]
+//        * [two_rdm_l1(p,s) + two_rdm_l2(p,pair_of(s))]
+//   +2 sum_wt <sq|wt> Gamma_rpwt
+//     -> only when p==pair_of(r): +2 sum_w <sq|w,pair_of(w)>
+//        [two_rdm_l1(r,w) + two_rdm_l2(r,pair_of(w))]
+// Verified against generalizedOrbitalHessianElement fed an explicit
+// dense Tensor4 built from the identical full (H+X+L1+L2) ansatz, on
+// random data (T=double and T=complex<double>, all four two_rdm_*
+// matrices deliberately unequal/asymmetric/unrelated to any occupation
+// formula), to machine precision -- see this file's own validation
+// notes (not committed).
+template <typename T>
+T rawL1L2HessianTerm(const Tensor4<T>& eri, const std::vector<std::size_t>& pair_of,
+                      const Matrix<double>& two_rdm_l1, const Matrix<double>& two_rdm_l2,
+                      std::size_t n, std::size_t p_, std::size_t q_, std::size_t r_,
+                      std::size_t s_) {
+  T term{};
+
+  if (q_ == pair_of[s_]) {
+    T sum{};
+    for (std::size_t u = 0; u < n; ++u) {
+      sum += eri(u, pair_of[u], p_, r_) * T(two_rdm_l1(u, s_) + two_rdm_l2(u, q_));
+    }
+    term -= T(2.0) * sum;
+  }
+
+  {
+    const T coeff = T(two_rdm_l1(r_, q_) + two_rdm_l2(r_, pair_of[q_]));
+    term += T(2.0) * eri(pair_of[r_], s_, p_, pair_of[q_]) * coeff;
+    term -= T(2.0) * eri(s_, pair_of[r_], p_, pair_of[q_]) * coeff;
+  }
+
+  {
+    const T coeff = T(two_rdm_l1(p_, s_) + two_rdm_l2(p_, pair_of[s_]));
+    term += T(2.0) * eri(pair_of[p_], q_, r_, pair_of[s_]) * coeff;
+    term -= T(2.0) * eri(pair_of[p_], q_, pair_of[s_], r_) * coeff;
+  }
+
+  if (p_ == pair_of[r_]) {
+    T sum{};
+    for (std::size_t w = 0; w < n; ++w) {
+      sum += eri(s_, q_, w, pair_of[w]) * T(two_rdm_l1(r_, w) + two_rdm_l2(r_, pair_of[w]));
+    }
+    term += T(2.0) * sum;
+  }
+
+  return term;
+}
+
 template <typename T>
 void checkHartreeExchangeHessianDimensions(const Matrix<T>& h, const Tensor4<T>& eri,
                                             const std::vector<double>& occupations,
@@ -119,21 +189,43 @@ T hartreeExchangeHessianElement(const Matrix<T>& h, const Tensor4<T>& eri,
                                  const std::vector<double>& occupations,
                                  const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x,
                                  const Matrix<T>& fock, std::size_t p, std::size_t q,
-                                 std::size_t r, std::size_t s) {
+                                 std::size_t r, std::size_t s,
+                                 const std::vector<std::size_t>& pair_of,
+                                 const Matrix<double>& two_rdm_l1,
+                                 const Matrix<double>& two_rdm_l2) {
   const std::size_t n = h.rows();
   checkHartreeExchangeHessianDimensions(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, p, q,
                                          r, s, "hartreeExchangeHessianElement");
 
   // Antisymmetrize both pairs, matching GeneralizedHessian.h's own
   // combination -- see that header for why.
-  return rawHartreeExchangeHessianTerm(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, p, q, r,
-                                        s) -
-         rawHartreeExchangeHessianTerm(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, p, q, s,
-                                        r) -
-         rawHartreeExchangeHessianTerm(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, q, p, r,
-                                        s) +
-         rawHartreeExchangeHessianTerm(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, q, p, s,
-                                        r);
+  T result = rawHartreeExchangeHessianTerm(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, p,
+                                            q, r, s) -
+             rawHartreeExchangeHessianTerm(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, p,
+                                            q, s, r) -
+             rawHartreeExchangeHessianTerm(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, q,
+                                            p, r, s) +
+             rawHartreeExchangeHessianTerm(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, q,
+                                            p, s, r);
+
+  if (!pair_of.empty()) {
+    if (pair_of.size() != n) {
+      throw std::runtime_error("hartreeExchangeHessianElement: pair_of size inconsistent with h");
+    }
+    if (two_rdm_l1.rows() != n || two_rdm_l1.cols() != n) {
+      throw std::runtime_error(
+          "hartreeExchangeHessianElement: two_rdm_l1 dimensions inconsistent with h");
+    }
+    if (two_rdm_l2.rows() != n || two_rdm_l2.cols() != n) {
+      throw std::runtime_error(
+          "hartreeExchangeHessianElement: two_rdm_l2 dimensions inconsistent with h");
+    }
+    result += rawL1L2HessianTerm(eri, pair_of, two_rdm_l1, two_rdm_l2, n, p, q, r, s) -
+              rawL1L2HessianTerm(eri, pair_of, two_rdm_l1, two_rdm_l2, n, p, q, s, r) -
+              rawL1L2HessianTerm(eri, pair_of, two_rdm_l1, two_rdm_l2, n, q, p, r, s) +
+              rawL1L2HessianTerm(eri, pair_of, two_rdm_l1, two_rdm_l2, n, q, p, s, r);
+  }
+  return result;
 }
 
 template <typename T>
@@ -159,18 +251,18 @@ T hartreeExchangeHessianElementImag(const Matrix<T>& h, const Tensor4<T>& eri,
                                           s, r));
 }
 
-template double hartreeExchangeHessianElement(const Matrix<double>& h,
-                                               const Tensor4<double>& eri,
-                                               const std::vector<double>& occupations,
-                                               const Matrix<double>& two_rdm_h,
-                                               const Matrix<double>& two_rdm_x,
-                                               const Matrix<double>& fock, std::size_t p,
-                                               std::size_t q, std::size_t r, std::size_t s);
+template double hartreeExchangeHessianElement(
+    const Matrix<double>& h, const Tensor4<double>& eri, const std::vector<double>& occupations,
+    const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x, const Matrix<double>& fock,
+    std::size_t p, std::size_t q, std::size_t r, std::size_t s,
+    const std::vector<std::size_t>& pair_of, const Matrix<double>& two_rdm_l1,
+    const Matrix<double>& two_rdm_l2);
 template std::complex<double> hartreeExchangeHessianElement(
     const Matrix<std::complex<double>>& h, const Tensor4<std::complex<double>>& eri,
     const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
     const Matrix<double>& two_rdm_x, const Matrix<std::complex<double>>& fock, std::size_t p,
-    std::size_t q, std::size_t r, std::size_t s);
+    std::size_t q, std::size_t r, std::size_t s, const std::vector<std::size_t>& pair_of,
+    const Matrix<double>& two_rdm_l1, const Matrix<double>& two_rdm_l2);
 template double hartreeExchangeHessianElementImag(const Matrix<double>& h,
                                                    const Tensor4<double>& eri,
                                                    const std::vector<double>& occupations,
@@ -248,7 +340,9 @@ template <typename T>
 Matrix<T> hartreeExchangeHessianMatrix(
     const Matrix<T>& h, const Tensor4<T>& eri, const std::vector<double>& occupations,
     const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x, const Matrix<T>& fock,
-    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices) {
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices,
+    const std::vector<std::size_t>& pair_of, const Matrix<double>& two_rdm_l1,
+    const Matrix<double>& two_rdm_l2) {
   const std::size_t n_pairs = pair_indices.size();
   Matrix<T> hess(n_pairs, n_pairs, T{});
   // Each (I,J) owns its own disjoint output position and only reads the
@@ -258,8 +352,9 @@ Matrix<T> hartreeExchangeHessianMatrix(
     for (std::size_t big_j = 0; big_j < n_pairs; ++big_j) {
       const auto& [p, q] = pair_indices[big_i];
       const auto& [r, s] = pair_indices[big_j];
-      hess(big_i, big_j) =
-          hartreeExchangeHessianElement(h, eri, occupations, two_rdm_h, two_rdm_x, fock, p, q, r, s);
+      hess(big_i, big_j) = hartreeExchangeHessianElement(
+          h, eri, occupations, two_rdm_h, two_rdm_x, fock, p, q, r, s, pair_of, two_rdm_l1,
+          two_rdm_l2);
     }
   }
   return hess;
@@ -268,12 +363,16 @@ Matrix<T> hartreeExchangeHessianMatrix(
 template Matrix<double> hartreeExchangeHessianMatrix(
     const Matrix<double>& h, const Tensor4<double>& eri, const std::vector<double>& occupations,
     const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x, const Matrix<double>& fock,
-    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices,
+    const std::vector<std::size_t>& pair_of, const Matrix<double>& two_rdm_l1,
+    const Matrix<double>& two_rdm_l2);
 template Matrix<std::complex<double>> hartreeExchangeHessianMatrix(
     const Matrix<std::complex<double>>& h, const Tensor4<std::complex<double>>& eri,
     const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
     const Matrix<double>& two_rdm_x, const Matrix<std::complex<double>>& fock,
-    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices,
+    const std::vector<std::size_t>& pair_of, const Matrix<double>& two_rdm_l1,
+    const Matrix<double>& two_rdm_l2);
 
 Matrix<double> hartreeExchangeJointHessianMatrix(
     const Matrix<std::complex<double>>& h, const Tensor4<std::complex<double>>& eri,

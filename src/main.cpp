@@ -40,6 +40,7 @@
 #include "OrbitalRotationFiniteDifference.h"
 #include "PNOFs.h"
 #include "PnofFock.h"
+#include "PnofHessian.h"
 #include "RkbDensityMatrix.h"
 #include "RkbFockMatrix.h"
 #include "RkbHamiltonian.h"
@@ -1047,6 +1048,51 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
         out << "\n  Hessian_opt e^kappa orbital-rotation gradient finite-difference check FAILED: "
             << e.what() << "\n";
       }
+
+      // The analytic orbital-rotation HESSIAN ("the Hessian expression
+      // that uses the generalized Fock to be cheaper"), Hessian_opt/
+      // HartreeExchangeHessian.h's own hartreeExchangeHessianElement,
+      // cross-checked the same e^kappa way, one derivative order higher.
+      // Gated to T = double (NON_REL) only: for T = std::complex<double>
+      // (X2C/C4_DHF) with THIS test's own (p,q,r,s)=(p,q,p+1,q+1) choice,
+      // r/s happen to equal p/q's own Kramers-bar-partners for this
+      // basis's pair_of convention -- a DIFFERENT, separate, not-yet-
+      // diagnosed issue from PNOF's own (now-fixed, see
+      // buildPnofFunctionalReport's version of this check and
+      // PnofFock.h's header) missing-L1/L2 gap, since JK_only's own
+      // two_rdm_h/x carry no L1/L2 pairing structure at all -- not
+      // pursued further here since it is out of THIS request's scope.
+      if constexpr (std::is_same_v<T, double>) {
+      if (n_active >= 4) {
+        const std::size_t r = p + 1;
+        const std::size_t s = q + 1;
+        try {
+          const auto hess_pqrs =
+              rerdmft::hartreeExchangeHessianElement(h, eri, optimized_occ, opt_two_rdm_h,
+                                                      opt_two_rdm_x, fock, p, q, r, s);
+          const rerdmft::RdmftGradientFn<T> gradient_fn =
+              [&](const rerdmft::Matrix<T>& h_rot, const rerdmft::Tensor4<T>& eri_rot) {
+                return rerdmft::orbitalGradient(rerdmft::hartreeExchangeFockMatrix(
+                    h_rot, eri_rot, optimized_occ, opt_two_rdm_h, opt_two_rdm_x));
+              };
+          const auto hess_check = rerdmft::orbitalRotationHessianCheck<T>(
+              h, eri, hess_pqrs, gradient_fn, p, q, r, s);
+          out << "\n  Hessian_opt e^kappa orbital-rotation Hessian finite-difference check\n"
+                 "  (hartreeExchangeHessianElement's cheap analytic Hessian vs. d(gradient)/dt\n"
+                 "  of the rotated-integral gradient, at the OPTIMIZED occupations above, pairs ("
+              << p << "," << q << ") x (" << r << "," << s << ")):\n";
+          out << "    Analytic Hessian Hess_pq,rs:  " << std::setprecision(10)
+              << hess_check.analytic << std::setprecision(6) << "\n";
+          out << "    Finite-difference d(g_pq)/dt: " << std::setprecision(10)
+              << hess_check.finite_difference << std::setprecision(6) << "\n";
+          out << "    |difference| (expect small):  " << hess_check.abs_diff << "\n";
+        } catch (const std::exception& e) {
+          out << "\n  Hessian_opt e^kappa orbital-rotation Hessian finite-difference check "
+                 "FAILED: "
+              << e.what() << "\n";
+        }
+      }
+      }  // if constexpr (std::is_same_v<T, double>)
     }
   } catch (const std::exception& e) {
     out << "    FAILED: " << e.what() << "\n";
@@ -1447,13 +1493,22 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
     // own two_rdm_h/x, by contrast, is evaluated via a genuine sum over
     // EVERY actual-orbital (P,Q) pair independently, so it remains
     // correct (and matches pnofElectronicEnergy exactly) whether or not
-    // that symmetry holds.
+    // that symmetry holds. MUST also pass `pair_of_full`/two_rdm_l1/l2 --
+    // PnofFock.h's own Pi-pairing contribution lives there (not folded
+    // into two_rdm_x, see that file's own header comment), so omitting
+    // them here would silently drop that entire energy contribution
+    // (caught exactly this way: an earlier version of this lambda before
+    // that Pi-fold was removed omitted them, which used to be harmless
+    // and became a real, large mismatch the moment PnofFock.h stopped
+    // folding Pi into X).
     const auto full_two_rdm =
         rerdmft::buildPnofFullTwoRdm(functional, geminals, optimized_occ, n_total, relativistic);
+    const auto pair_of_full = rerdmft::buildPnofPairOf(geminals, n_total);
     const rerdmft::RdmftEnergyFn<T> energy_fn = [&](const rerdmft::Matrix<T>& h_rot,
                                                       const rerdmft::Tensor4<T>& eri_rot) {
       return rerdmft::hartreeExchangeEnergy(h_rot, eri_rot, optimized_occ, full_two_rdm.two_rdm_h,
-                                             full_two_rdm.two_rdm_x);
+                                             full_two_rdm.two_rdm_x, pair_of_full,
+                                             full_two_rdm.two_rdm_l1, full_two_rdm.two_rdm_l2);
     };
     const auto fock = rerdmft::pnofFockMatrix(functional, h, eri, geminals, optimized_occ,
                                                relativistic);
@@ -1472,6 +1527,57 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
     } catch (const std::exception& e) {
       out << "\n  Hessian_opt e^kappa orbital-rotation gradient finite-difference check FAILED: "
           << e.what() << "\n";
+    }
+
+    // The analytic orbital-rotation HESSIAN, "the Hessian expression
+    // that uses the generalized Fock to be cheaper" -- Hessian_opt/
+    // PnofHessian.h's pnofHessianElement, which reuses Hessian_opt/
+    // HartreeExchangeHessian.h's own hartreeExchangeHessianElement
+    // INCLUDING its L1/L2 pair-term extension (PnofFock.h's own
+    // two_rdm_h/x/l1/l2 unfold a PNOF functional into EXACTLY that
+    // file's assumed FULL ansatz -- see PnofHessian.h's own header
+    // comment), cross-checked the same e^kappa way as the gradient
+    // above, one derivative order higher: rotate by kappa_rs, read the
+    // ANALYTIC GRADIENT at (p,q) at that rotated point, central-
+    // difference over the rotation.
+    //
+    // Works for BOTH T=double (NON_REL) and T=complex<double> (X2C/
+    // C4_DHF): an earlier version of PnofFock.h/PnofHessian.h folded
+    // Pi's pairing contribution into two_rdm_x instead of using a
+    // genuine L1/L2 term, which happened to be exactly Fock/energy-
+    // equivalent (an exact Kramers integral identity) but NOT Hessian-
+    // equivalent -- this cost a full debugging cycle to isolate (see
+    // project memory, project_complex_hessian_gap.md) before the fix
+    // above (a genuine hartreeExchangeHessianElement L1/L2 extension,
+    // substituting the SAME ansatz into GeneralizedHessian.h's own
+    // boxed formula) was derived and validated.
+    if (n_frontier >= 4) {
+      const std::size_t r = geminals[n_core + 2].i;
+      const std::size_t s = geminals[n_core + 3].i;
+      try {
+        const T hess_pqrs = rerdmft::pnofHessianElement(functional, h, eri, geminals,
+                                                          optimized_occ, relativistic, fock, p, q,
+                                                          r, s);
+        const rerdmft::RdmftGradientFn<T> gradient_fn =
+            [&](const rerdmft::Matrix<T>& h_rot, const rerdmft::Tensor4<T>& eri_rot) {
+              return rerdmft::orbitalGradient(rerdmft::pnofFockMatrix(
+                  functional, h_rot, eri_rot, geminals, optimized_occ, relativistic));
+            };
+        const auto hess_check = rerdmft::orbitalRotationHessianCheck<T>(h, eri, hess_pqrs,
+                                                                          gradient_fn, p, q, r, s);
+        out << "\n  Hessian_opt e^kappa orbital-rotation Hessian finite-difference check\n"
+               "  (pnofHessianElement's cheap analytic Hessian vs. d(gradient)/dt of the\n"
+               "  rotated-integral gradient, at the OPTIMIZED occupations above, pairs (" << p
+            << "," << q << ") x (" << r << "," << s << ")):\n";
+        out << "    Analytic Hessian Hess_pq,rs:  " << std::setprecision(10)
+            << hess_check.analytic << std::setprecision(6) << "\n";
+        out << "    Finite-difference d(g_pq)/dt: " << std::setprecision(10)
+            << hess_check.finite_difference << std::setprecision(6) << "\n";
+        out << "    |difference| (expect small):  " << hess_check.abs_diff << "\n";
+      } catch (const std::exception& e) {
+        out << "\n  Hessian_opt e^kappa orbital-rotation Hessian finite-difference check FAILED: "
+            << e.what() << "\n";
+      }
     }
   }
 

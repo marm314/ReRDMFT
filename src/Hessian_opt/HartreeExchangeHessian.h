@@ -50,22 +50,61 @@ namespace rerdmft {
 // `two_rdm_x` follow EXACTLY HartreeExchangeGradient.h's own
 // conventions -- see that header.
 //
+// Optional `pair_of`/`two_rdm_l1`/`two_rdm_l2` (default empty ==
+// unused, exactly like `hartreeExchangeFockMatrix`'s own parameters of
+// the same name/meaning) extend the 2-RDM ansatz with the SAME PNOF-
+// style pair terms, `two_rdm(p,pbar,q,qbar) += two_rdm_l1(p,q)`,
+// `two_rdm(p,pbar,qbar,q) += two_rdm_l2(p,q)`. **This extension is
+// REQUIRED, not optional in practice, for any 2-RDM that genuinely has
+// nonzero L1/L2 pairing entries** (e.g. Hessian_opt/PnofFock.h's own
+// PNOF 2-RDM): substituting ONLY the H/X part of the ansatz into
+// GeneralizedHessian.h's boxed Eq. 9 and leaving out a physically
+// nonzero L1/L2 part gives an INCORRECT Hessian element, even though
+// the SAME omission has NO effect on the Fock matrix/gradient/energy
+// (an exact integral identity for Kramers-paired spinors,
+// `eri(p,pbar,q,qbar) = eri(p,q,q,p)`, makes the Fock/energy blind to
+// whether Pi-pairing weight sits at the L1/L2 tensor position or is
+// folded into `two_rdm_x` instead -- Eq. 9's Hessian, fixing all four
+// indices explicitly, is not similarly forgiving). Discovered and
+// derived by the SAME direct-substitution method as the base H/X
+// formula: substitute the FULL ansatz's `two_rdm(p,pbar,q,qbar)=
+// two_rdm_l1(p,q)`/`two_rdm(p,pbar,qbar,q)=two_rdm_l2(p,q)` into each
+// of GeneralizedHessian.h's own six raw exchange-type sums, collapsing
+// the double sums the same way the base derivation did (see the .cpp);
+// verified against `generalizedOrbitalHessianElement` fed an
+// EXPLICIT, densely-built Tensor4 using the identical full ansatz, on
+// random data (both `T=double` and `T=complex<double>`, with
+// `two_rdm_h`/`two_rdm_x`/`two_rdm_l1`/`two_rdm_l2` deliberately
+// unequal, asymmetric, and unrelated to any occupation-number formula
+// -- the same validation style as the base H/X-only formula's own),
+// to machine precision.
+//
+// `fock` must still be `hartreeExchangeFockMatrix`'s own output, called
+// WITH the same `pair_of`/`two_rdm_l1`/`two_rdm_l2` this time (its
+// existing L1/L2 extension, already validated -- see that header).
+//
 // `hartreeExchangeHessianElementImag` is the analogous cheap path for
 // GeneralizedHessian.h's generalizedOrbitalHessianElementImag (the
 // IMAGINARY-step direction, only meaningful for T =
 // std::complex<double> -- see that header for the derivation and the
 // same "compiles for T = double but not meaningful there" caveat).
+// Does NOT yet have an L1/L2 extension (not derived/needed yet -- ask
+// before assuming it is safe to use with a nonzero `two_rdm_l1`/
+// `two_rdm_l2`, it will silently omit their contribution).
 //
 // Works for either a real (T = double) or complex (T = std::complex
 // <double>) orbital basis -- explicit instantiations for both are
-// provided in the .cpp. `two_rdm_h`/`two_rdm_x` are always real
-// (Matrix<double>) regardless of T.
+// provided in the .cpp. `two_rdm_h`/`two_rdm_x`/`two_rdm_l1`/
+// `two_rdm_l2` are always real (Matrix<double>) regardless of T.
 template <typename T>
 T hartreeExchangeHessianElement(const Matrix<T>& h, const Tensor4<T>& eri,
                                  const std::vector<double>& occupations,
                                  const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x,
                                  const Matrix<T>& fock, std::size_t p, std::size_t q,
-                                 std::size_t r, std::size_t s);
+                                 std::size_t r, std::size_t s,
+                                 const std::vector<std::size_t>& pair_of = {},
+                                 const Matrix<double>& two_rdm_l1 = Matrix<double>(),
+                                 const Matrix<double>& two_rdm_l2 = Matrix<double>());
 
 template <typename T>
 T hartreeExchangeHessianElementImag(const Matrix<T>& h, const Tensor4<T>& eri,
@@ -149,11 +188,17 @@ std::vector<std::pair<std::size_t, std::size_t>> hessianPairIndices(std::size_t 
 // costs (O(n^6) for a dense eigensolver on the O(n^2)-dimensional
 // result) -- usable for a small-to-moderate basis (e.g. water/STO-3G),
 // not a production Newton-Raphson step on a realistic basis.
+// Optional `pair_of`/`two_rdm_l1`/`two_rdm_l2`, same meaning and
+// default as `hartreeExchangeHessianElement`'s own -- passed through to
+// every element.
 template <typename T>
 Matrix<T> hartreeExchangeHessianMatrix(
     const Matrix<T>& h, const Tensor4<T>& eri, const std::vector<double>& occupations,
     const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x, const Matrix<T>& fock,
-    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices,
+    const std::vector<std::size_t>& pair_of = {},
+    const Matrix<double>& two_rdm_l1 = Matrix<double>(),
+    const Matrix<double>& two_rdm_l2 = Matrix<double>());
 
 // The FULL, JOINT, real-parameter orbital-rotation Hessian for a
 // complex (relativistic, spin-orbit-coupled) spinor basis -- the

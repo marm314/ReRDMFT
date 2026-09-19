@@ -97,6 +97,7 @@ G_{pq,rs} \;=\;\;
 \;-\; 2\sum_{uw} \langle uq|wr\rangle\,\Gamma_{pusw}
 \;+\; 2\sum_{wt} \langle sq|wt\rangle\,\Gamma_{rpwt}
 \end{aligned}}
+\label{eq:g-boxed}
 \end{align}
 
 \section*{Real/imaginary directional blocks}
@@ -114,7 +115,7 @@ each real product:
 
 \begin{align}
 \text{Hess}_{pq,rs} &= \frac{\partial^2 E}{\partial t_{pq}\,\partial t_{rs}}
-= G_{pq,rs} - G_{pq,sr} - G_{qp,rs} + G_{qp,sr}, \\[4pt]
+= G_{pq,rs} - G_{pq,sr} - G_{qp,rs} + G_{qp,sr}, \label{eq:hess-real} \\[4pt]
 \text{Hess}^{yy}_{pq,rs} &= \frac{\partial^2 E}{\partial y_{pq}\,\partial y_{rs}}
 = -\big(G_{pq,rs} + G_{pq,sr} + G_{qp,rs} + G_{qp,sr}\big), \\[4pt]
 \text{Hess}^{ty}_{pq,rs} &= \frac{\partial^2 E}{\partial t_{pq}\,\partial y_{rs}}
@@ -156,5 +157,142 @@ of the mixed block, and assembling all three blocks into one joint matrix for an
 actual Newton-Raphson/NEO step (currently only $\text{Hess}_{pq,rs}$ alone is ever
 assembled into a diagonalizable matrix, for the minimum/saddle-point diagnostic in
 \texttt{main.cpp}'s \texttt{HESSIAN\_4C}).
+
+\section{Cheap ansatz for PNOF functionals: $G_{pq,rs}$ in terms of
+two\_rdm\_H, two\_rdm\_X, and the pair terms L1/L2}
+\label{sec:pnof-hessian}
+
+\subsection*{The ansatz}
+
+Every PNOF functional this project implements (\texttt{Hessian\_opt/PnofFock.h})
+is handled by the SAME cheap diagonal-$D$ 2-RDM ansatz already used for
+the ordinary Hartree/exchange gradient (\texttt{Hessian\_opt/HartreeExchangeGradient.h}),
+extended with two further ``pair'' terms:
+\begin{equation}
+\Gamma_{pqrs} \;=\;
+\tfrac12\Big[\mathrm{H}_{pq}\,\delta_{pr}\delta_{qs} - \mathrm{X}_{pq}\,\delta_{ps}\delta_{qr}\Big]
+\;+\; \delta_{q,\bar p}\,\delta_{s,\bar r}\Big[L^{1}_{pr} + L^{2}_{p\bar r}\Big],
+\label{eq:pnof-ansatz}
+\end{equation}
+where $\mathrm{H}_{pq}\equiv\texttt{two\_rdm\_h}(p,q)$, $\mathrm{X}_{pq}\equiv
+\texttt{two\_rdm\_x}(p,q)$, $L^{1}_{pq}\equiv\texttt{two\_rdm\_l1}(p,q)$,
+$L^{2}_{pq}\equiv\texttt{two\_rdm\_l2}(p,q)$ (all real, independent of the
+orbital basis being real or complex), and $\bar p\equiv\texttt{pair\_of}(p)$
+is $p$'s Kramers/spin partner. Equation~\eqref{eq:pnof-ansatz} says: the
+plain Hartree/exchange part fires at $(p,q,r,s)=(p,q,p,q)$ and $(p,q,q,p)$
+as usual; the pair part fires ONLY when $q=\bar p$ AND $s=\bar r$ (i.e.\ the
+first PAIR $(p,q)$ and the third/fourth PAIR $(r,s)$ are each a Kramers/spin
+pair themselves), where it evaluates to $L^{1}_{pr}+L^{2}_{p\bar r}$ --
+BOTH $L^1$ and $L^2$ contribute at that SAME tensor entry, evaluated at
+different index pairs ($L^1$ at $(p,r)$, $L^2$ at $(p,\bar r)$), exactly
+as\\ \texttt{HartreeExchangeGradient.cpp}'s own $F_{pq}$ derivation already
+uses them. For a PNOF functional, $\mathrm{H}_{pq}=\mathrm{X}_{pq}$
+(uniform across every Kramers/spin bar-combination of a geminal pair,
+doc/rel\_pnofs.tex's own \texttt{eq:coulomb-elems}) and $L^{1}_{pq}=
+-L^{2}_{pq}=\pm\Pi_{\text{rep}(p),\text{rep}(q)}/2$ (sign $+$ at matching
+bar-parity, $-$ at mismatched) -- see \texttt{PnofFock.h}'s own header
+comment for the full derivation from doc/rel\_pnofs.tex's Eqs.~98c--f.
+
+\subsection*{Hartree/exchange contribution to $G_{pq,rs}$}
+
+Substituting only the $\mathrm{H}/\mathrm{X}$ part of
+Eq.~\eqref{eq:pnof-ansatz} into the boxed $G_{pq,rs}$ of
+Eq.~\eqref{eq:g-boxed} (already implemented,
+\texttt{Hessian\_opt/HartreeExchangeHessian.h}'s \texttt{hartreeExchangeHessianElement},
+before this section's own L1/L2 extension) collapses every double sum
+there to a single one, exactly as\\ \texttt{hartreeExchangeFockMatrix}'s own
+gradient derivation already does for $F_{pq}$:
+\begin{equation}
+\begin{aligned}
+G^{\mathrm{HX}}_{pq,rs} \;=\;\;
+& \delta_{qr}\,F_{sp} \;+\; \delta_{sp}\,F^{*}_{rq}
+\;-\; \delta_{qr}\,h_{sp}\,D_{rq} \;-\; \delta_{sp}\,h_{qr}\,D_{ps} \\[4pt]
+& +\,\delta_{qr}\sum_{u}\mathrm{H}_{ru}\big[\langle us|pu\rangle-\langle su|pu\rangle\big]
+\;+\;\delta_{sp}\sum_{u}\mathrm{H}_{pu}\big[\langle uq|ru\rangle-\langle uq|ur\rangle\big] \\[4pt]
+& +\,\langle sq|pr\rangle\Big[\mathrm{X}_{rq}-\mathrm{H}_{sq}+\mathrm{X}_{ps}-\mathrm{X}_{rp}\Big]
+\;+\,\langle sq|rp\rangle\Big[\mathrm{H}_{rp}+\mathrm{X}_{qs}-\mathrm{X}_{ps}-\mathrm{X}_{rq}\Big].
+\end{aligned}
+\label{eq:pnof-hx-term}
+\end{equation}
+
+\subsection*{Pair (L1/L2) contribution to $G_{pq,rs}$}
+
+Substituting only the pair part of Eq.~\eqref{eq:pnof-ansatz} into the
+SAME six two-electron sums of the boxed $G_{pq,rs}$ and collapsing each
+double sum via its own $\delta_{q,\bar p}\delta_{s,\bar r}$-type
+constraint (four of the six collapse completely to a SINGLE eri times a
+SINGLE $L^1+L^2$ coefficient; the other two collapse only conditionally,
+leaving one remaining sum, exactly when the OUTER indices already satisfy
+the pair condition) gives a genuinely new contribution, not obtainable
+from Eq.~\eqref{eq:pnof-hx-term} alone:
+\begin{equation}
+\begin{aligned}
+G^{\mathrm{L}}_{pq,rs} \;=\;\;
+& -\,2\,[q=\bar s]\sum_{u}\langle u\bar u|pr\rangle\Big[L^{1}_{us}+L^{2}_{uq}\Big] \\[4pt]
+& +\,2\langle \bar r s|p\bar q\rangle\Big[L^{1}_{rq}+L^{2}_{r\bar q}\Big]
+\;-\,2\langle s\bar r|p\bar q\rangle\Big[L^{1}_{rq}+L^{2}_{r\bar q}\Big] \\[4pt]
+& +\,2\langle \bar p q|r\bar s\rangle\Big[L^{1}_{ps}+L^{2}_{p\bar s}\Big]
+\;-\,2\langle \bar p q|\bar s r\rangle\Big[L^{1}_{ps}+L^{2}_{p\bar s}\Big] \\[4pt]
+& +\,2\,[p=\bar r]\sum_{w}\langle sq|w\bar w\rangle\Big[L^{1}_{rw}+L^{2}_{r\bar w}\Big],
+\end{aligned}
+\label{eq:pnof-l1l2-term}
+\end{equation}
+where $[\,\cdot\,]$ is the Iverson bracket (1 if the condition holds, 0
+otherwise) -- the first and last lines vanish identically unless the
+OUTER pair $(q,s)$ or $(p,r)$ already happens to satisfy the SAME
+Kramers/spin-pair relation the ansatz itself requires, in which case a
+single sum over the remaining free index survives; the middle two lines
+(four raw terms, pairwise sharing the SAME $L^1+L^2$ coefficient) are
+UNCONDITIONAL, contributing to every $(p,q,r,s)$.
+
+\subsection*{Combined result}
+
+\begin{equation}
+G_{pq,rs} \;=\; G^{\mathrm{HX}}_{pq,rs} \;+\; G^{\mathrm{L}}_{pq,rs},
+\label{eq:pnof-full-g}
+\end{equation}
+and the real-step Hessian follows exactly as in Eq.~\eqref{eq:hess-real}
+(this file's own $(+,-,-,+)$ antisymmetrization over the two pairs, applied
+to the COMBINED $G_{pq,rs}$ of Eq.~\eqref{eq:pnof-full-g}, not to
+$G^{\mathrm{HX}}$ and $G^{\mathrm{L}}$ separately -- though since the
+antisymmetrization is linear, applying it to each piece and adding is
+equivalent, which is exactly how \texttt{Hessian\_opt/HartreeExchangeHessian.cpp}'s
+own implementation is structured, two independent raw-term helpers summed
+before/after antisymmetrizing).
+
+\subsection*{Status}
+
+Implemented in \texttt{Hessian\_opt/HartreeExchangeHessian.h}'s
+\texttt{hartreeExchangeHessianElement} (optional \texttt{pair\_of}/
+\texttt{two\_rdm\_l1}/\texttt{two\_rdm\_l2} arguments, default empty
+reducing to Eq.~\eqref{eq:pnof-hx-term} alone) and wired into PNOF via
+\texttt{Hessian\_opt/PnofHessian.h}. Only the REAL-step block
+$\text{Hess}_{pq,rs}$ (Eq.~\eqref{eq:hess-real}) has this L1/L2
+extension so far -- $\text{Hess}^{yy}_{pq,rs}$ and
+$\text{Hess}^{ty}_{pq,rs}$ do not yet. Validated two ways: (i) against
+\texttt{GeneralizedHessian.h}'s fully general \texttt{generalizedOrbitalHessianElement},
+fed an explicit dense $\Gamma$ built from the SAME Eq.~\eqref{eq:pnof-ansatz}
+ansatz, on random data ($T=$ real and complex, $\mathrm{H}$/$\mathrm{X}$/
+$L^1$/$L^2$ deliberately unequal and unrelated to any occupation-number
+formula) -- machine precision across every tested $(p,q,r,s)$ quadruple;
+(ii) against a genuine e$^{\boldsymbol\kappa}$ finite-difference probe
+(\texttt{Hessian\_opt/OrbitalRotationFiniteDifference.h}) on real,
+converged LiH/6-31G SCF data for BOTH the X2C and 4-component (C4\_DHF)
+paths -- machine precision ($\sim 10^{-14}$) there too, confirmed
+robust across multiple $(p,q,r,s)$ quadruple choices including ones
+where $(r,s)$ are $(p,q)$'s own Kramers-bar-partners.
+
+Before this L1/L2 extension existed, PNOF's own \texttt{PnofFock.h}
+instead folded $\Pi$ (the geminal pairing coefficient) directly into
+$\mathrm{X}_{pq}$ and used no L1/L2 terms at all. That simplification is
+EXACTLY energy- and Fock-equivalent for a Kramers-symmetric spinor basis
+(an exact integral identity, $\langle p\bar p|q\bar q\rangle=\langle
+pq|qp\rangle$ and $\langle p\bar p|\bar q q\rangle=-\langle\bar p q|q\bar
+p\rangle$, confirmed numerically to machine precision) but is NOT
+Hessian-equivalent: $G_{pq,rs}$ fixes all four indices explicitly, so it
+sees the difference between weight sitting at the $\mathrm{X}_{pq}$
+tensor position versus the $L^{1}_{pq}$/$L^{2}_{pq}$ one, even though
+$F_{pq}$ and $E$ do not. This is why the L1/L2 extension above is
+necessary, not merely convenient, for a correct PNOF Hessian.
 
 \end{document}

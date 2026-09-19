@@ -57,6 +57,50 @@ OrbitalRotationGradientCheck<T> orbitalRotationGradientCheck(const Matrix<T>& h,
                                                                std::size_t p, std::size_t q,
                                                                double step = 1e-4);
 
+// The FULL analytic orbital-rotation gradient matrix (OrbitalGradient.h's
+// own p>=q "lower triangle" storage convention) at FIXED occupations, as
+// a function of the (h, eri) it is evaluated on -- e.g.
+// [&](const Matrix<T>& h, const Tensor4<T>& eri) { return orbitalGradient(
+// pnofFockMatrix(functional, h, eri, geminals, occupations, relativistic));
+// } for a PNOF functional. Used by orbitalRotationHessianCheck below to
+// probe the SECOND derivative by finite-differencing the FIRST.
+template <typename T>
+using RdmftGradientFn = std::function<Matrix<T>(const Matrix<T>&, const Tensor4<T>&)>;
+
+template <typename T>
+struct OrbitalRotationHessianCheck {
+  double analytic = 0.0;
+  double finite_difference = 0.0;
+  double abs_diff = 0.0;
+};
+
+// Genuinely independent validation of an analytic orbital-rotation
+// Hessian ELEMENT (`hessian_element`, e.g.
+// Hessian_opt/PnofHessian.h's pnofHessianElement or
+// Hessian_opt/HartreeExchangeHessian.h's hartreeExchangeHessianElement)
+// at a FIXED set of occupations -- the same e^kappa integral-rotation
+// idea as orbitalRotationGradientCheck above, one derivative order
+// higher: `Hess_pq,rs = d^2E/dt_pq dt_rs = d(g_pq)/dt_rs`, so this
+// rotates by kappa_rs = +-t (the SECOND pair (r,s), the direction the
+// derivative is taken along), evaluates the FULL analytic gradient
+// matrix at each rotated point via the caller-supplied `gradient_fn`,
+// reads its (p,q) element (reconstructing `g_pq = -conj(g_qp)` for an
+// upper-triangle (p,q) request, exactly like orbitalRotationGradientCheck
+// does for its own gradient argument), and central-differences:
+//   finite_difference = [g_pq(kappa_rs=+t) - g_pq(kappa_rs=-t)] / (2t)
+// compared against `hessian_element`'s own real part (guaranteed real
+// for physical Hermitian input, exactly like every other Hessian
+// element in this project -- see HartreeExchangeHessian.h's own
+// header). `(p,q)` and `(r,s)` may each be given in either order.
+template <typename T>
+OrbitalRotationHessianCheck<T> orbitalRotationHessianCheck(const Matrix<T>& h,
+                                                             const Tensor4<T>& eri,
+                                                             T hessian_element,
+                                                             const RdmftGradientFn<T>& gradient_fn,
+                                                             std::size_t p, std::size_t q,
+                                                             std::size_t r, std::size_t s,
+                                                             double step = 1e-4);
+
 }  // namespace rerdmft
 
 #endif  // RERDMFT_ORBITALROTATIONFINITEDIFFERENCE_H

@@ -118,7 +118,10 @@ Matrix<T> hartreeExchangeFockMatrix(const Matrix<T>& h, const Tensor4<T>& eri,
 template <typename T>
 double hartreeExchangeEnergy(const Matrix<T>& h, const Tensor4<T>& eri,
                               const std::vector<double>& occupations,
-                              const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x) {
+                              const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x,
+                              const std::vector<std::size_t>& pair_of,
+                              const Matrix<double>& two_rdm_l1,
+                              const Matrix<double>& two_rdm_l2) {
   const std::size_t n = h.rows();
   if (h.cols() != n) {
     throw std::runtime_error("hartreeExchangeEnergy: h is not square");
@@ -135,6 +138,18 @@ double hartreeExchangeEnergy(const Matrix<T>& h, const Tensor4<T>& eri,
   if (two_rdm_x.rows() != n || two_rdm_x.cols() != n) {
     throw std::runtime_error("hartreeExchangeEnergy: two_rdm_x dimensions inconsistent with h");
   }
+  const bool have_l = !pair_of.empty();
+  if (have_l) {
+    if (pair_of.size() != n) {
+      throw std::runtime_error("hartreeExchangeEnergy: pair_of size inconsistent with h");
+    }
+    if (two_rdm_l1.rows() != n || two_rdm_l1.cols() != n) {
+      throw std::runtime_error("hartreeExchangeEnergy: two_rdm_l1 dimensions inconsistent with h");
+    }
+    if (two_rdm_l2.rows() != n || two_rdm_l2.cols() != n) {
+      throw std::runtime_error("hartreeExchangeEnergy: two_rdm_l2 dimensions inconsistent with h");
+    }
+  }
 
   double energy = 0.0;
   for (std::size_t p = 0; p < n; ++p) {
@@ -142,26 +157,39 @@ double hartreeExchangeEnergy(const Matrix<T>& h, const Tensor4<T>& eri,
   }
 
   double two_electron = 0.0;
-#pragma omp parallel for collapse(2) reduction(+ : two_electron)
+  double pair_energy = 0.0;
+#pragma omp parallel for collapse(2) reduction(+ : two_electron, pair_energy)
   for (std::size_t p = 0; p < n; ++p) {
     for (std::size_t q = 0; q < n; ++q) {
       two_electron +=
           std::real(eri(p, q, p, q)) * two_rdm_h(p, q) - std::real(eri(p, q, q, p)) * two_rdm_x(p, q);
+      if (have_l) {
+        const std::size_t pbar = pair_of[p];
+        const std::size_t qbar = pair_of[q];
+        pair_energy += std::real(eri(p, pbar, q, qbar)) * two_rdm_l1(p, q) +
+                       std::real(eri(p, pbar, qbar, q)) * two_rdm_l2(p, q);
+      }
     }
   }
-  energy += 0.5 * two_electron;
+  energy += 0.5 * two_electron + pair_energy;
   return energy;
 }
 
 template double hartreeExchangeEnergy(const Matrix<double>& h, const Tensor4<double>& eri,
                                        const std::vector<double>& occupations,
                                        const Matrix<double>& two_rdm_h,
-                                       const Matrix<double>& two_rdm_x);
+                                       const Matrix<double>& two_rdm_x,
+                                       const std::vector<std::size_t>& pair_of,
+                                       const Matrix<double>& two_rdm_l1,
+                                       const Matrix<double>& two_rdm_l2);
 template double hartreeExchangeEnergy(const Matrix<std::complex<double>>& h,
                                        const Tensor4<std::complex<double>>& eri,
                                        const std::vector<double>& occupations,
                                        const Matrix<double>& two_rdm_h,
-                                       const Matrix<double>& two_rdm_x);
+                                       const Matrix<double>& two_rdm_x,
+                                       const std::vector<std::size_t>& pair_of,
+                                       const Matrix<double>& two_rdm_l1,
+                                       const Matrix<double>& two_rdm_l2);
 
 template Matrix<double> hartreeExchangeFockMatrix(const Matrix<double>& h,
                                                     const Tensor4<double>& eri,

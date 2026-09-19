@@ -78,26 +78,41 @@ Matrix<T> hartreeExchangeFockMatrix(const Matrix<T>& h, const Tensor4<T>& eri,
 // The ELECTRONIC energy (one- + two-electron; the caller adds nuclear
 // repulsion separately, matching every other *_result.electronic_energy/
 // nuclear_repulsion_energy/total_energy split in this project) for the
-// SAME diagonal-D, Hartree/exchange-only 2-RDM ansatz
-// hartreeExchangeFockMatrix itself uses (no L1/L2 pair terms -- not
-// needed by any caller yet):
+// SAME diagonal-D 2-RDM ansatz hartreeExchangeFockMatrix itself uses:
 //   E = sum_p occupations[p] * h(p,p)
 //       + (1/2) * sum_pq [ eri(p,q,p,q)*two_rdm_h(p,q)
 //                           - eri(p,q,q,p)*two_rdm_x(p,q) ]
-// Derived by substituting the SAME two_rdm_pqrs ansatz as
-// hartreeExchangeFockMatrix's own header comment
-// (two_rdm_pqrs = (1/2)[two_rdm_h(p,q) delta_pr delta_qs -
-// two_rdm_x(p,q) delta_ps delta_qr]) into
+//       + sum_pq [ eri(p,pbar,q,qbar)*two_rdm_l1(p,q)
+//                  + eri(p,pbar,qbar,q)*two_rdm_l2(p,q) ]
+// (last line only when `pair_of` is supplied -- omitted by default,
+// exactly like hartreeExchangeFockMatrix's own optional L1/L2
+// parameters). Derived by substituting the SAME full two_rdm_pqrs
+// ansatz as hartreeExchangeFockMatrix's own header comment (H/X part
+// PLUS `two_rdm(p,pbar,q,qbar) += two_rdm_l1(p,q)`,
+// `two_rdm(p,pbar,qbar,q) += two_rdm_l2(p,q)`) into
 // E = sum_pq h_pq D_qp + sum_pqrs eri(p,q,r,s) two_rdm_pqrs, with
 // D_qp = occupations[q] delta_qp (diagonal) -- an O(n^2) sum, matching
-// this ansatz's cheap cost elsewhere. For idempotent HF/DHF occupations
-// (two_rdm_h = two_rdm_x = the occupation outer product), this reduces
-// EXACTLY to the standard spin-orbital/spinor HF two-electron energy
-// (1/2) sum_{i,j occupied} [<ij|ij> - <ij|ji>] -- confirmed numerically
+// this ansatz's cheap cost elsewhere (the L1/L2 sum needs NO extra 1/2,
+// unlike the H/X sum, since two_rdm_l1/l2 -- unlike two_rdm_h/x -- are
+// already literal Gamma_pqrs tensor entries with no ansatz-level
+// doubling). For idempotent HF/DHF occupations (two_rdm_h = two_rdm_x =
+// the occupation outer product, no L1/L2), this reduces EXACTLY to the
+// standard spin-orbital/spinor HF two-electron energy (1/2)
+// sum_{i,j occupied} [<ij|ij> - <ij|ji>] -- confirmed numerically
 // against the already-converged HF/DHF SCF's own `electronic_energy`
 // (a completely different, AO-basis Fock-trace formula) before this was
 // trusted for a genuinely fractional-occupation (Occ_opt/JK_only.h)
-// evaluation.
+// evaluation. The L1/L2 extension itself is validated against
+// GeneralizedFock.h's own dense-2-RDM energy contraction on random
+// data, the same way the Fock/Hessian L1/L2 extensions were.
+//
+// **Required, not optional in practice, whenever the caller's own
+// two_rdm_h/x/l1/l2 genuinely has nonzero L1/L2 entries** (e.g.
+// Hessian_opt/PnofFock.h's own PNOF 2-RDM) -- omitting a nonzero L1/L2
+// here silently drops that entire energy contribution, exactly as it
+// would silently drop it from the Fock matrix if
+// hartreeExchangeFockMatrix's own `pair_of`/`two_rdm_l1`/`two_rdm_l2`
+// were left out.
 //
 // Returned as `double` even for T = std::complex<double> (via
 // std::real, valid for real T too) -- the energy is guaranteed real for
@@ -106,7 +121,10 @@ Matrix<T> hartreeExchangeFockMatrix(const Matrix<T>& h, const Tensor4<T>& eri,
 template <typename T>
 double hartreeExchangeEnergy(const Matrix<T>& h, const Tensor4<T>& eri,
                               const std::vector<double>& occupations,
-                              const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x);
+                              const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x,
+                              const std::vector<std::size_t>& pair_of = {},
+                              const Matrix<double>& two_rdm_l1 = Matrix<double>(),
+                              const Matrix<double>& two_rdm_l2 = Matrix<double>());
 
 }  // namespace rerdmft
 

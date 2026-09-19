@@ -32,6 +32,8 @@ PnofFullTwoRdm buildPnofFullTwoRdm(PnofFunctional functional,
   PnofFullTwoRdm result;
   result.two_rdm_h = Matrix<double>(n_total, n_total, 0.0);
   result.two_rdm_x = Matrix<double>(n_total, n_total, 0.0);
+  result.two_rdm_l1 = Matrix<double>(n_total, n_total, 0.0);
+  result.two_rdm_l2 = Matrix<double>(n_total, n_total, 0.0);
 
   const auto principal_occ = principalOccupationBySubspaceLocal(geminals, occupations);
   const std::size_t n_gem = geminals.size();
@@ -71,19 +73,18 @@ PnofFullTwoRdm buildPnofFullTwoRdm(PnofFunctional functional,
       }
 
       // H (Coulomb, J-type) is uniform across every bar-combination of
-      // (i/ibar, j/jbar) -- all four "bra equals ket" combinations equal
-      // the SAME value (doc/rel_pnofs.tex's own `eq:coulomb-elems` first
-      // relation). X (exchange) uses the SAME uniform value at MATCHING
-      // bar-parity combinations (P,Q both representatives or both bar-
-      // partners), but with Occ_opt/PNOFs.h's Pi-pairing coefficient
-      // FOLDED DIRECTLY IN (subtracted, since PNOFs.cpp's own energy
-      // adds two_rdm_l1(a,b)*K_ij on top of its -two_rdm_x(a,b)*K_ij --
-      // see this file's header comment for the full derivation and why
-      // this is NOT Hessian_opt/HartreeExchangeGradient.h's separate,
-      // unrelated L1/L2 pairing-integral pattern). MISMATCHED bar-parity
-      // combinations get the analogous, genuinely relativistic-only
-      // L_ij-based contribution, gated by `relativistic` exactly like
-      // Occ_opt/PNOFs.cpp's own row-5/row-7 gating.
+      // (i/ibar, j/jbar) -- doc/rel_pnofs.tex's own `eq:coulomb-elems`
+      // first relation. X (exchange) is the SAME uniform value at
+      // MATCHING bar-parity combinations (P,Q both representatives or
+      // both bar-partners), unconditionally; at MISMATCHED bar-parity,
+      // only when `relativistic` (the genuinely relativistic-only
+      // L_ij-type contribution, doc's own `eq:lflip-elems`). Pi's own
+      // pairing contribution is a SEPARATE, independent 2-RDM entry
+      // (Hessian_opt/HartreeExchangeGradient.h's own L1/L2 pattern,
+      // `eri(P,Pbar,Q,Qbar)`/`eri(P,Pbar,Qbar,Q)`) -- NOT folded into X
+      // (see this file's header comment for why an earlier version's
+      // "fold into X" simplification, while exactly energy/Fock-
+      // equivalent, is NOT Hessian-equivalent).
       const std::array<std::size_t, 2> a_members = {i, ibar};
       const std::array<std::size_t, 2> b_members = {j, jbar};
       for (std::size_t pp = 0; pp < 2; ++pp) {
@@ -96,15 +97,31 @@ PnofFullTwoRdm buildPnofFullTwoRdm(PnofFunctional functional,
           result.two_rdm_h(Q, P) = h_x_value;
 
           if (matching_parity || relativistic) {
-            const double x_value = h_x_value - pi;
-            result.two_rdm_x(P, Q) = x_value;
-            result.two_rdm_x(Q, P) = x_value;
+            result.two_rdm_x(P, Q) = h_x_value;
+            result.two_rdm_x(Q, P) = h_x_value;
           }
+
+          const double l1_signed = matching_parity ? (pi / 2.0) : (-pi / 2.0);
+          result.two_rdm_l1(P, Q) = l1_signed;
+          result.two_rdm_l1(Q, P) = l1_signed;
+          result.two_rdm_l2(P, Q) = -l1_signed;
+          result.two_rdm_l2(Q, P) = -l1_signed;
         }
       }
     }
   }
   return result;
+}
+
+std::vector<std::size_t> buildPnofPairOf(const std::vector<PnofGeminal>& geminals,
+                                          std::size_t n_total) {
+  std::vector<std::size_t> pair_of(n_total);
+  for (std::size_t p = 0; p < n_total; ++p) pair_of[p] = p;
+  for (const auto& g : geminals) {
+    pair_of[g.i] = g.ibar;
+    pair_of[g.ibar] = g.i;
+  }
+  return pair_of;
 }
 
 template <typename T>
@@ -113,7 +130,9 @@ Matrix<T> pnofFockMatrix(PnofFunctional functional, const Matrix<T>& h, const Te
                           const std::vector<double>& occupations, bool relativistic) {
   const std::size_t n = h.rows();
   const auto full = buildPnofFullTwoRdm(functional, geminals, occupations, n, relativistic);
-  return hartreeExchangeFockMatrix(h, eri, occupations, full.two_rdm_h, full.two_rdm_x);
+  const auto pair_of = buildPnofPairOf(geminals, n);
+  return hartreeExchangeFockMatrix(h, eri, occupations, full.two_rdm_h, full.two_rdm_x, pair_of,
+                                    full.two_rdm_l1, full.two_rdm_l2);
 }
 
 template Matrix<double> pnofFockMatrix(PnofFunctional, const Matrix<double>&,
