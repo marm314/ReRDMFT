@@ -1,0 +1,329 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb,mathtools,bm}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage[dvipsnames]{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black]{hyperref}
+
+\newcommand{\bH}{\mathbf{H}}
+\newcommand{\bL}{\mathbf{L}}
+\newcommand{\bg}{\mathbf{g}}
+\newcommand{\bx}{\mathbf{x}}
+\newcommand{\bz}{\mathbf{z}}
+\newcommand{\bb}{\mathbf{b}}
+\newcommand{\bu}{\mathbf{u}}
+\newcommand{\be}{\mathbf{e}}
+\newcommand{\bd}{\boldsymbol{\Delta}}
+\newcommand{\bk}{\boldsymbol{\kappa}}
+\newcommand{\bG}{\mathbf{G}}
+\newcommand{\bX}{\mathbf{X}}
+\newcommand{\bP}{\mathbf{P}}
+\newcommand{\by}{\mathbf{y}}
+\newcommand{\blam}{\boldsymbol{\lambda}}
+\newcommand{\bone}{\mathbf{1}}
+\DeclareMathOperator{\diag}{diag}
+
+\title{The Norm-Extended Optimization (NEO) Algorithm\\
+for Second-Order Restricted-Step Orbital Optimization\\
+{\large Method-independent summary: level shifting, trust region, saddle-point targeting}}
+\author{Compiled from Jensen \& J\o rgensen, J.\ Chem.\ Phys.\ \textbf{80}, 1204 (1984) [JJ84];\\
+Jensen, Dyall, Saue \& F\ae gri, J.\ Chem.\ Phys.\ \textbf{104}, 4083 (1996) [JDSF96];\\
+Thyssen, Fleig \& Jensen, J.\ Chem.\ Phys.\ \textbf{129}, 034109 (2008) [TFJ08];\\
+Nottoli, Gauss \& Lipparini, J.\ Chem.\ Theory Comput.\ (2021) [NGL21]}
+\date{}
+
+\begin{document}
+\maketitle
+\tableofcontents
+
+%======================================================================
+\section{Scope}
+%======================================================================
+This note summarizes the norm-extended optimization (NEO) algorithm as a \emph{generic} second-order, restricted-step (trust-region)
+optimizer for orbital rotations. Nothing below assumes a particular electronic-structure method and nothing assumes that the energy is
+invariant under any subset of rotations: the parameter vector is simply whatever set of rotation parameters the method treats as variables, all on the same footing.
+Only three ingredients from the method are required, all evaluated at the current expansion point (CEP):
+\begin{enumerate}[nosep]
+ \item the energy $E$,
+ \item the gradient $\bg$ with respect to the rotation parameters,
+ \item Hessian--vector products $\bH\bb$ (analytic, or by directional differentiation of the gradient).
+\end{enumerate}
+The original derivation [JJ84] uses configuration amplitudes as the ``norm'' variable that is carried alongside the orbital rotations. Here that role is played by
+a single auxiliary scalar; this is exactly the ``augmented Hessian'' special case discussed in [JJ84, Sec.~II.H] and it retains all NEO properties:
+\begin{enumerate}[nosep]
+ \item \textbf{Quadratic local convergence}, as for Newton--Raphson (NR), because the level shift that appears is $\mathcal O(\|\bg\|^2)$.
+ \item \textbf{Control of the Hessian index}: the $i$-th eigenvector of the extended matrix gives a step towards a stationary point whose Hessian has exactly $i-1$ negative eigenvalues. Minima ($i=1$) and \emph{saddle points of any prescribed order} are handled by the same algorithm.
+ \item \textbf{Built-in trust-region compatibility}: an extra scalar $\alpha$ rescales the level shift monotonically and allows any step length to be enforced.
+ \item \textbf{Matrix-free}: only $\bH\bb$ products are needed.
+\end{enumerate}
+
+%======================================================================
+\section{Setup and notation}
+%======================================================================
+At macro-iteration $k$ the current orbitals $C^{(k)}$ (the CEP) are updated through the unitary exponential map
+\begin{equation}
+ C=C^{(k)}\,e^{R(\bk)},\qquad R(\bk)^\dagger=-R(\bk),\qquad R\ \text{linear in the real parameter vector }\bk\in\mathbb R^n .
+\end{equation}
+Complex rotation parameters are represented by their real and imaginary parts (see Sec.~\ref{sec:complex} for the doubled complex form).
+The energy as a function of the parameters is $f(\bk)=E[C^{(k)}e^{R(\bk)}]$; the CEP is $\bk=\mathbf 0$ (the orbitals are re-referenced after each step, so the expansion is always about $\mathbf 0$).
+Define
+\begin{equation}
+ f_0=f(\mathbf 0),\qquad \bg=\nabla f(\mathbf 0)\in\mathbb R^n,\qquad \bH=\nabla\nabla^Tf(\mathbf 0)\in\mathbb R^{n\times n}.
+\end{equation}
+\textbf{Important:} $\bH$ is the Hessian of $f(\bk)$ in \emph{this} parametrization, including the contribution from the second-order term $R^2/2$ of the exponential.
+If it is obtained as a directional derivative of the gradient evaluated at $C^{(k)}e^{R(\eta\bb)}$ this is automatically the case.
+The second-order model and step are
+\begin{equation}
+ q(\bx)=f_0+\bg^T\bx+\tfrac12\bx^T\bH\bx,\qquad \bd=\bx\ \text{(the step in parameter space)}.
+\end{equation}
+Eigenvalues of $\bH$ are $\epsilon_1\le\dots\le\epsilon_n$. Nothing is assumed about them: $\bH$ may be indefinite (and this is the situation of interest for saddle points), and it may have zero eigenvalues.
+
+%======================================================================
+\section{The NEO eigenproblem}
+%======================================================================
+
+\subsection{Extended matrix}
+Introduce the extended vector $\bz=(z_0;\bx)\in\mathbb R^{n+1}$ and the extended (``augmented Hessian'') matrix
+\begin{equation}
+ \bL(\alpha)=\begin{pmatrix}0&\alpha\,\bg^T\\ \alpha\,\bg&\bH\end{pmatrix},\qquad
+ \bL\equiv\bL(1).\label{eq:L}
+\end{equation}
+Note that the second-order model is a Rayleigh-type form of $\bL$ on the slice $z_0=1$:
+\begin{equation}
+ q(\bx)-f_0=\tfrac12\,\bz^T\bL\,\bz,\qquad \bz=(1;\bx).
+\end{equation}
+Properties (verified directly from \eqref{eq:L}, with $\be_0=(1;\mathbf 0)$ the ``CEP vector'' and $\bG_e=(0;\bg)$):
+\begin{equation}
+ \bL\be_0=\bG_e,\qquad \be_0^T\bL\be_0=0 .\label{eq:Lprops}
+\end{equation}
+Hence, as long as $\bg\neq\mathbf 0$, $\bL$ has both positive and negative eigenvalues (at least one negative). $\be_0$ is an eigenvector of $\bL$ iff $\bg=\mathbf 0$.
+In the NEO formulation of [JJ84] the corresponding statements are $\bX^T\bL\bX=0$ and $\bL\bX=\bG$, with $\bX$ the normalized CI-amplitude vector.
+
+\subsection{Eigenproblem and the level-shifted Newton equation}
+Solve for the $i$-th eigenpair (ascending order) of $\bL(\alpha)$ with $z_0\neq0$ and normalize $z_0=1$, $\bz=(1;\bx)$:
+\begin{equation}
+ \bL(\alpha)\bz=\lambda\bz\quad\Longleftrightarrow\quad
+ \begin{cases}\alpha\,\bg^T\bx=\lambda,\\[2pt] \alpha\,\bg+\bH\bx=\lambda\bx.\end{cases}\label{eq:eigsys}
+\end{equation}
+The second row gives $(\bH-\lambda\bone)\bx=-\alpha\bg$, so that with the step $\bd=\bx/\alpha$
+\begin{equation}
+ \boxed{\ \bd=-(\bH-\lambda\bone)^{-1}\bg,\qquad \lambda=\alpha\,\bg^T\bx=\alpha^2\bg^T\bd=-\alpha^2\,\bg^T(\bH-\lambda\bone)^{-1}\bg\ }\label{eq:neostep}
+\end{equation}
+i.e.\ \textbf{a Newton--Raphson step with the Hessian level-shifted by the self-consistently determined shift $\lambda$}.
+The last relation is a secular equation for $\lambda$ (it can be solved directly if the spectrum of $\bH$ is available, but in a matrix-free setting one just diagonalizes $\bL$ iteratively).
+With $\alpha=1$ the shift satisfies $\lambda=-\bg^T(\bH-\lambda\bone)^{-1}\bg=\mathcal O(\|\bg\|^2)$; for $\lambda=0$ one recovers the NR step $-\bH^{-1}\bg$. In normalized-eigenvector language (unit-norm $\bz$) the step is $\bd=(z_0\alpha)^{-1}\bz_{1:n}$; equivalently, rescale to $z_0=1$.
+
+\subsection{Interlacing and the Hessian index}
+$\bL(\alpha)$ is $\bH$ bordered by a row and column, so by Cauchy interlacing, for every $\alpha$ (including $\alpha\to\pm\infty$),
+\begin{equation}
+ \lambda_1\le\epsilon_1\le\lambda_2\le\epsilon_2\le\cdots\le\epsilon_n\le\lambda_{n+1}.\label{eq:interlace}
+\end{equation}
+Hence $\epsilon_{i-1}\le\lambda_i\le\epsilon_i$, and the shifted matrix $\bH-\lambda_i\bone$ has \emph{exactly $i-1$ negative eigenvalues}. The NEO step is therefore a stationary point of the level-shifted quadratic model with prescribed signature: the energy is maximized along $i-1$ Hessian directions and minimized along the remaining ones. Consequently
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Target & Eigenvector of $\bL$ used\\
+\midrule
+Minimum & lowest ($i=1$)\\
+Saddle point of order $m$ (Hessian with $m$ negative eigenvalues) & $i=m+1$\\
+\bottomrule
+\end{tabular}
+\end{center}
+The index is followed through the position of the selected eigenvalue in the spectrum of $\bL$, without diagonalizing $\bH$.
+The algorithm is \emph{not} restricted to minima; only the eigenvector index and the trust-radius rule (Sec.~\ref{sec:ratio}) change for saddle points.
+(A typical example is a problem where the energy must be maximized with respect to $m$ known directions and minimized with respect to all others; the target index is then $m+1$ and the converged Hessian has $m$ negative eigenvalues.)
+
+\smallskip\noindent\emph{Caveat.} If $\bg$ is exactly orthogonal to an eigenvector of $\bH$ (e.g.\ by symmetry), the corresponding $\epsilon_j$ is also an eigenvalue of $\bL$ with $z_0=0$; such decoupled eigenvectors do not carry a step and must be deflated or counted explicitly when the index $i$ is chosen. Only eigenvectors with $z_0\neq0$ define steps.
+
+\subsection{Quadratic convergence}
+The step \eqref{eq:neostep} equals the NR step for $\bH-\lambda\bone$. Expanding $\bg$ and $\bH$ around the stationary point with error $\bm\varepsilon^{(k)}$: the NR error terms are quadratic in $\bm\varepsilon^{(k)}$, and the shift contributes terms that are of third and higher order because $\lambda=\mathcal O(\|\bg\|^2)=\mathcal O(\|\bm\varepsilon\|^2)$ (for $\alpha=1$). So the local convergence rate is quadratic, as for NR without any level shift.
+
+\subsection{Predicted energy change}
+For any $\alpha$, with $\bx$ from \eqref{eq:eigsys} ($z_0=1$) and step $\bd=\bx/\alpha$,
+\begin{equation}
+ \Delta q=\bg^T\bd+\tfrac12\bd^T\bH\bd=\frac{\lambda}{2\alpha^2}\big(1+\|\bx\|^2\big)=\frac{\lambda}{2}\big(\alpha^{-2}+\|\bd\|^2\big),\qquad
+ \|\bd\|=\|\bx\|/\alpha .\label{eq:dq}
+\end{equation}
+For $\alpha=1$ and a unit-norm eigenvector $\bz$: $\Delta q=\lambda/(2z_0^2)$. (Derivation in App.~\ref{app:dq}.) This is the ``predicted'' change used in the trust-region ratio.
+In practice $\Delta q$ can also be evaluated as $\bg^T\bd+\tfrac12\bd^T\bH\bd$ directly, reusing the stored $\bH\bb$ products of the Davidson subspace (since $\bd$ lies in that subspace).
+
+%======================================================================
+\section{Restricted step and level shifting}\label{sec:trust}
+%======================================================================
+
+\subsection{Trust-region subproblem}
+The model is only trustworthy for $\|\bd\|\le h_k$ (trust radius). If no acceptable stationary point exists inside, the optimum lies on the boundary $\|\bd\|=h_k$, found from the Lagrangian
+\begin{equation}
+ \mathcal L(\bd)=f_0+\bg^T\bd+\tfrac12\bd^T\bH\bd-\tfrac{\nu}{2}(\bd^T\bd-h_k^2)\ \Longrightarrow\ 
+ \bd(\nu)=-(\bH-\nu\bone)^{-1}\bg,
+\end{equation}
+\begin{equation}
+ \Delta^2(\nu)=\bd(\nu)^T\bd(\nu)=\sum_{j=1}^n\frac{\gamma_j^2}{(\epsilon_j-\nu)^2}=h_k^2,\qquad \gamma_j=\bu_j^T\bg,\ \ \bH\bu_j=\epsilon_j\bu_j. \label{eq:steplen}
+\end{equation}
+$\Delta^2(\nu)$ has asymptotes at the $\epsilon_j$; the roots of $\Delta^2(\nu)=h_k^2$ are the candidate shifts. This is the Levenberg--Marquardt / restricted-step framework; NEO provides the shift through an eigenproblem, and the parameter $\alpha$ lets it be tuned.
+
+\paragraph{Conditions on $\nu$ for a stationary point of order $i-1$.} With $\epsilon_0=-\infty$, $\epsilon_{n+1}=+\infty$:
+\begin{align}
+ &\text{(1)}\quad \epsilon_{i-1}<\nu<\epsilon_i,\label{eq:c1}\\
+ &\text{(2)}\quad \tfrac12\epsilon_{i-1}<\nu<\tfrac12\epsilon_i.\label{eq:c2}
+\end{align}
+Condition (1) makes the first-order energy $E^{[1]}=f_0+\bg^T\bd$ give a positive contribution from Hessian modes $1,\dots,i-1$ (maximized) and a negative one from modes $i,\dots,n$ (minimized). Condition (2) enforces the same sign pattern for the second-order energy $q$.
+For a minimum, $\nu$ is taken from the left-most branch of $\Delta^2(\nu)$ ($\nu<\epsilon_1$), which is unique and guarantees convergence. For saddles both conditions may not be simultaneously satisfiable (when $\tfrac12\epsilon_{i-1}>\epsilon_i$ or $\epsilon_{i-1}>\tfrac12\epsilon_i$); the remedy in the literature is a coordinate scaling of the variables (Simons et al.) requiring the lowest $i$ eigenvalues of $\bH$. For a minimum no scaling is needed.
+For saddle points there may be no boundary stationary point with the correct structure; then a $\nu$ in the desired range is chosen and the step scaled down to the boundary.
+Note that changing $\nu$ changes the direction as well as the length of the step (for shorter steps the gradient term dominates the Hessian term).
+
+\subsection{Level shifting inside NEO: the role of $\alpha$}
+With $\alpha=1$ the eigenproblem produces the shift $\lambda_i$; property \eqref{eq:interlace} guarantees condition (1) for any target index. If $\|\bd\|\le h_k$ the step is accepted (and is optimal because of quadratic convergence). Otherwise the shift is changed by rescaling the coupling to the gradient through $\alpha>1$: from \eqref{eq:neostep},
+\begin{equation}
+ (\bH-\lambda_i^\alpha\bone)\bd=-\bg,\qquad \lambda^\alpha_i=-\alpha^2\bg^T(\bH-\lambda_i^\alpha\bone)^{-1}\bg .
+\end{equation}
+Properties (Appendix~A of [JJ84], specialized here):
+\begin{itemize}[nosep]
+ \item Interlacing \eqref{eq:interlace} holds for every $\alpha$, so $\lambda^\alpha_i$ always lies in $[\epsilon_{i-1},\epsilon_i]$: it is the only shift in the correct domain for order $i-1$.
+ \item $\alpha=0$: $\bL(0)=\diag(0,\bH)$, eigenvalues $\lambda^0=\{0\}\cup\{\epsilon_j\}$.  $\alpha=1$: plain NEO.
+ \item $\alpha\to\infty$: $\bL(\alpha)\approx\alpha\begin{pmatrix}0&\bg^T\\ \bg&0\end{pmatrix}$ with eigenvalues $\pm\alpha\|\bg\|$ (eigenvectors $\propto(1;\pm\bg/\|\bg\|)$). Hence $\lambda_1^\alpha\to-\infty$, $\lambda^\alpha_{n+1}\to+\infty$, with steps along $-\bg$ (steepest descent) and $+\bg$ (steepest ascent), as expected. Intermediate roots stay bracketed by $\epsilon$'s.
+ \item Monotonicity: differentiating the secular equation,
+ \begin{equation}
+  \alpha\frac{\partial\lambda_i^\alpha}{\partial\alpha}=2\Big[1+\alpha^2\bg^T(\bH-\lambda_i^\alpha\bone)^{-2}\bg\Big]^{-1}\lambda^\alpha_i,
+ \end{equation}
+ so $\lambda_i^\alpha$ is a monotonic function of $\alpha$ (its sign is that of $\lambda^\alpha_i$, and the bracket is positive) and every admissible shift corresponds to a unique $\alpha$. For the lowest state $\lambda_1^\alpha$ decreases monotonically from $\lambda_1$ to $-\infty$ as $\alpha:1\to\infty$.
+\end{itemize}
+\textbf{Choice of $\alpha$} ($\alpha\ge1$ suffices, since $\alpha=1$ is the quadratically convergent choice):
+\begin{enumerate}[nosep]
+ \item Solve with $\alpha=1$. If $\|\bd\|\le h_k$, accept.
+ \item Otherwise find $\alpha>1$ such that $\|\bd_\alpha\|=\|\bx_\alpha\|/\alpha\approx h_k$ (within about $10\%$). A one-dimensional root search on $\alpha$ is enough since the map is monotonic.
+\end{enumerate}
+For a saddle target ($i>1$) the required $\alpha$ is the one that brings $\lambda^\alpha_i$ into the range dictated by conditions (1)--(2).
+Efficient implementation: once the Davidson subspace has converged for the projected matrix, changing $\alpha$ only changes the reduced matrix (see Sec.~\ref{sec:direct}); the new eigenpairs converge in very few additional micro-iterations. The same scaling is used in [NGL21]: $\bL(\alpha)$ with step $\bx_0+\alpha^{-1}\bP\by(\alpha)$ and $\|\bx(\alpha)-\bx_0\|=R_t$.
+
+%======================================================================
+\section{Trust radius update: convergence ratio and Fletcher's algorithm}\label{sec:ratio}
+%======================================================================
+After a trial step, compare the true energy change with the change predicted by the second-order model. The \textbf{ratio}
+\begin{equation}
+ \boxed{\ r_k=\frac{E(\bx_k)-E(\bx_{k-1})}{q(\bx_k)-E(\bx_{k-1})}=\frac{\Delta E_k}{\Delta q_k}\ }
+\end{equation}
+with, for a step $\bd$ from the CEP,
+\begin{equation}
+ \Delta q=\bg^T\bd+\tfrac12\bd^T\bH\bd,\qquad \Delta E=E(\text{after step})-E(\text{CEP})=\Delta q+R^{(2)},
+\end{equation}
+($R^{(2)}$ the remainder beyond second order; $\Delta q$ is given by \eqref{eq:dq} for a NEO step). The closer $r_k$ is to $1$, the more quadratic the energy surface. Suggested initial radius $h_0=0.5$ ($\approx\pi/6$ for orbital-rotation angles); never accept $h_k>0.75$ ($\approx\pi/4$), since a second-order expansion cannot describe rotations larger than that.
+
+\subsection{Minimization}
+\begin{enumerate}[nosep,label=(\roman*)]
+ \item $r_k<0.25$: $h_k=\tfrac23h_{k-1}$;
+ \item $0.25<r_k<0.75$: $h_k=h_{k-1}$;
+ \item $r_k>0.75$: $h_k=\min(1.2\,h_{k-1},\,0.75)$;
+ \item $r_k<0$: \textbf{reject} the step (energy increased), and recompute a step inside a smaller radius $\tfrac23h_{k-1}$.
+\end{enumerate}
+
+\subsection{Saddle points}
+Here the energy change is a cancellation of positive (maximized modes) and negative (minimized modes) contributions, so $r_k\gg1$ cannot be trusted; the acceptance window is made symmetric about $r=1$. With parameters $a_h=1.2$, $r_{\min}=0.7$, $r_{\rm good}=0.85$ (values from the literature; the algorithm is insensitive to them):
+\begin{enumerate}[nosep,label=(\roman*)]
+ \item $r_{\min}<r_k<r_{\rm good}$ or $2-r_{\rm good}<r_k<2-r_{\min}$: $h_k=h_{k-1}$;
+ \item $r_{\rm good}<r_k<2-r_{\rm good}$: $h_k=\min(a_h\,h_{k-1},\,0.75)$;
+ \item $r_k<r_{\min}$ or $r_k>2-r_{\min}$: reject the step and recompute with $h_k=h_{k-1}/a_h$.
+\end{enumerate}
+A rejected step is redone with the same gradient and Hessian information (only $\alpha$ changes), so back-stepping is cheap: the Davidson subspace and stored products can be reused [TFJ08].
+
+%======================================================================
+\section{Direct (matrix-free) implementation}\label{sec:direct}
+%======================================================================
+\subsection{Extended matrix--vector product}
+For a trial vector $\bb=(b_0;\bb_x)$,
+\begin{equation}
+ \bL(\alpha)\bb=\begin{pmatrix}\alpha\,\bg^T\bb_x\\ \alpha\,b_0\,\bg+\bH\bb_x\end{pmatrix},
+\end{equation}
+so a single Hessian--vector product $\bH\bb_x$ per trial vector is needed; the rest is a scalar product and a vector addition. Changing $\alpha$ costs only $\bL(\alpha)\bb=\bL(1)\bb+(\alpha-1)\begin{pmatrix}\bg^T\bb_x\\ b_0\bg\end{pmatrix}$, i.e.\ it needs no new Hessian products. Store $\bH\bb_j$ for the subspace, then all reduced matrices for any $\alpha$ are obtained by projection:
+\begin{equation}
+ \bL^{\rm red}_{jl}(\alpha)=\bb_j^T\bL(\alpha)\bb_l .
+\end{equation}
+
+\subsection{Hessian--vector products}
+Options, all avoiding explicit Hessian formation:
+\begin{itemize}[nosep]
+ \item analytic (method-dependent) one-index-transformed expressions;
+ \item directional finite differences of the gradient with the \emph{same} exponential parametrization,
+ \begin{equation}
+  \bH\bb\simeq\frac{\bg(\eta\bb)-\bg(-\eta\bb)}{2\eta},\qquad \bg(\bk)=\nabla f(\bk)\ \text{evaluated at}\ C^{(k)}e^{R(\bk)},
+ \end{equation}
+ (central differences are preferable to forward differences for accuracy of the eigenvalue/index; $\eta$ is chosen small but well above round-off; all other variables of the method are held fixed).
+\end{itemize}
+Because the gradient is taken with respect to $\bk$ in the exponential map, the finite-difference Hessian automatically includes the second-order exponential term.
+
+\subsection{Davidson iteration for the extended eigenproblem}
+\begin{enumerate}[nosep]
+ \item Trial space initialization: $\be_0=(1;\mathbf 0)$ and $(0;\bg)$ (the two starting vectors recommended in [JJ84]). For saddle/excited targets, add previously converged eigenvectors from the last macro-iteration.
+ \item Reduced matrix $\bL^{\rm red}(\alpha)$, diagonalize, select the $i$-th ascending eigenpair (Ritz value $\theta_i$, coefficient vector). A block (simultaneous-expansion, Liu) Davidson with all $i$ lowest roots is recommended when $i>1$, since $\bL$ may have many small eigenvalues and single-root iterations may converge slowly. Track the root by overlap with the previous macro-iteration if needed.
+ \item Residual $\mathbf r=\bL\bz-\theta_i\bz$; stop when $\|\mathbf r\|$ is below the micro tolerance; otherwise precondition (e.g.\ with the diagonal of $\bH$: $r_p/(\theta_i-H_{pp})$-type update) and add the new vector.
+ \item The micro-tolerance only needs to match the accuracy of the macro-iteration (typically tied to $\|\bg\|$); 3--10 Hessian-product-evaluations per macro-iteration are common in the original applications.
+\end{enumerate}
+
+%======================================================================
+\section{Complex parameters and mixed-type trial vectors}\label{sec:complex}
+%======================================================================
+\paragraph{Complex rotation parameters.} If the method has complex rotation parameters $\kappa_j$ (anti-Hermitian generator $R$), there are two equivalent treatments.
+(a) Split into real and imaginary parts and use the real algebra above; the index counts and the trust radius refer to this real parameter space. (b) Use the doubled vector $\blam=(\bk;\bk^*)$ with gradient $\mathbf E^{[1]}=(\partial E/\partial\bk^*;\partial E/\partial\bk)$ and Hermitian Hessian
+\begin{equation}
+ \mathbf E^{[2]}=\begin{pmatrix}\partial^2E/\partial\bk^*\partial\bk&\partial^2E/\partial\bk^*\partial\bk^*\\ \partial^2E/\partial\bk\partial\bk&\partial^2E/\partial\bk\partial\bk^*\end{pmatrix},\qquad
+ \bL(\alpha)=\begin{pmatrix}0&\alpha\,\mathbf E^{[1]\dagger}\\ \alpha\,\mathbf E^{[1]}&\mathbf E^{[2]}\end{pmatrix}
+\end{equation}
+(Hermitian). All statements of Secs.~3--5 hold with transposes replaced by adjoints; the doubled Hessian has the same spectrum as the real Hessian in the (real, imaginary) representation, so index counts coincide, provided the eigenvectors respect the conjugation structure $\blam=(\bk;\bk^*)$ (as in [JDSF96], where this doubled form was used).
+
+\paragraph{Known maximization directions (pure-type trial vectors).} In problems where a known set of directions must be \emph{maximized} while all others are minimized (a saddle point of known order $m$ with identified negative-curvature subspace), it is helpful to control the minimax structure by keeping each trial vector \emph{purely} inside that subspace or purely inside its orthogonal complement [JDSF96, TFJ08]. With $p$ trial vectors of the first type, the restricted-step shift for the $s$-th target state must fall in $\epsilon^{\rm red}_{p+s-1}<\nu<\epsilon^{\rm red}_{p+s}$ (reduced Hessian eigenvalues); the NEO analogue is to select the $(p+s)$-th eigenvalue of the reduced extended matrix. This is the same as choosing $i=m+1$ once the subspace contains all $m$ maximization directions. If the negative-curvature subspace is not known in advance, use $i=m+1$ without this device.
+
+%======================================================================
+\section{Consolidated algorithm}
+%======================================================================
+\begin{enumerate}[label=\textbf{Step \arabic*.},leftmargin=*,nosep]
+ \item \textbf{Inputs}: orbitals $C^{(k)}$; target order $m$ (number of negative Hessian eigenvalues at the solution; $m=0$ for minima), eigenvector index $i=m+1$; trust radius $h_k$; thresholds.
+ \item Evaluate $E$ and $\bg$ at the CEP. If $\|\bg\|<$ tolerance: converged; verify that the final Hessian (or the position of the converged root) corresponds to order $m$.
+ \item If $k>1$: compute $r_{k-1}=\Delta E/\Delta q$ and update $h_k$ (or reject the last step and back-step) using Sec.~\ref{sec:ratio}.
+ \item Micro-iterations: Davidson on $\bL(\alpha=1)$ (Sec.~\ref{sec:direct}), selecting the $i$-th ascending eigenvalue; set $\bx$ from $z_0=1$, step $\bd=\bx$.
+ \item If $\|\bd\|>h_k$: increase $\alpha$ (monotonic root search on the reduced matrix) until $\|\bd_\alpha\|=\|\bx_\alpha\|/\alpha\approx h_k$; $\bd=\bx_\alpha/\alpha$.
+ \item Compute $\Delta q=\bg^T\bd+\tfrac12\bd^T\bH\bd$ from stored products.
+ \item Update orbitals: $C^{(k+1)}=C^{(k)}\,e^{R(\bd)}$; set $k\leftarrow k+1$; go to Step 2.
+\end{enumerate}
+
+%======================================================================
+\section{Practical checks}
+%======================================================================
+\begin{itemize}[nosep]
+ \item Model consistency: $\be_0^T\bL\be_0=0$ and $\bL\be_0=(0;\bg)$; eigenvalue interlacing \eqref{eq:interlace} against a dense $\bH$ on small test cases.
+ \item Step identity: the NEO step equals $-(\bH-\lambda_i\bone)^{-1}\bg$ with $\lambda_i=\alpha\bg^T\bx$; and $\bH-\lambda_i\bone$ has $i-1$ negative eigenvalues.
+ \item Monotonic behaviour of $\lambda_i^\alpha$ and $\|\bd_\alpha\|$ with $\alpha$.
+ \item Predicted change \eqref{eq:dq} equals $\bg^T\bd+\tfrac12\bd^T\bH\bd$.
+ \item Gradient/Hessian consistency: finite difference of the energy versus $\bg$, and of $\bg$ versus $\bH\bb$, using the exponential map.
+ \item Quadratic decrease of $\|\bg\|$ for $\alpha=1$ near convergence; if it is only linear, the Hessian--vector products (or the exponential-map second-order term) are inconsistent with the gradient.
+ \item Relation to trust-region Newton--CG (Steihaug--Toint): both solve the same trust-region model; NEO obtains the boundary step and the index information from an eigenproblem, while truncated CG only detects negative curvature and terminates on the boundary; for prescribed-index saddle points, NEO gives direct control through $i$ and $\alpha$.
+\end{itemize}
+
+%======================================================================
+\appendix
+\section{Derivations}
+%======================================================================
+\subsection{Predicted energy change}\label{app:dq}
+From \eqref{eq:eigsys} with $z_0=1$: $\alpha\bg^T\bx=\lambda$ and $\bH\bx=\lambda\bx-\alpha\bg$. Then
+\begin{equation}
+ \bx^T\bH\bx=\lambda\|\bx\|^2-\alpha\bg^T\bx=\lambda\|\bx\|^2-\lambda .
+\end{equation}
+With $\bd=\bx/\alpha$:
+\begin{equation}
+ \Delta q=\bg^T\bd+\tfrac12\bd^T\bH\bd=\frac{\lambda}{\alpha^2}+\frac{\lambda\|\bx\|^2-\lambda}{2\alpha^2}=\frac{\lambda}{2\alpha^2}\big(1+\|\bx\|^2\big).
+\end{equation}
+For a unit-norm eigenvector $\bz$, $\|\bz\|^2=z_0^2(1+\|\bx\|^2)=1$, so at $\alpha=1$: $\Delta q=\lambda/(2z_0^2)$.
+
+\subsection{Secular equation and monotonicity in $\alpha$}
+From $(\bH-\lambda\bone)\bd=-\bg$ and $\lambda=\alpha^2\bg^T\bd$: $\lambda=-\alpha^2\bg^T(\bH-\lambda\bone)^{-1}\bg$. Differentiating with respect to $\alpha$, using $\partial_\alpha(\bH-\lambda\bone)^{-1}=(\bH-\lambda\bone)^{-2}\,\partial_\alpha\lambda$:
+\begin{equation}
+ \partial_\alpha\lambda=\frac{2\lambda}{\alpha}-\alpha^2\bg^T(\bH-\lambda\bone)^{-2}\bg\ \partial_\alpha\lambda
+ \ \Longrightarrow\
+ \alpha\,\partial_\alpha\lambda=\frac{2\lambda}{1+\alpha^2\bg^T(\bH-\lambda\bone)^{-2}\bg}.
+\end{equation}
+The denominator is positive, so $\alpha\partial_\alpha\lambda$ has the sign of $\lambda$; for the lowest root ($\lambda<0$) $\lambda$ decreases monotonically with $\alpha>0$.
+
+\subsection{Step-length function}
+Expanding $\bg=\sum_j\gamma_j\bu_j$ in the eigenvectors of $\bH$: $\bd(\nu)=-\sum_j\gamma_j(\epsilon_j-\nu)^{-1}\bu_j$, hence $\|\bd(\nu)\|^2=\sum_j\gamma_j^2/(\epsilon_j-\nu)^2$, which is increasing in $|\nu-\epsilon_j|^{-1}$ near each asymptote and monotonic on the branch $\nu<\epsilon_1$; this branch has a single root of $\|\bd\|=h_k$ (for $\bg$ not orthogonal to the lowest eigenvector), and corresponds to the minimum-seeking trust-region step.
+
+\end{document}
