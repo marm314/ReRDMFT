@@ -1,7 +1,9 @@
 #ifndef RERDMFT_JKONLYHESSIAN_H
 #define RERDMFT_JKONLYHESSIAN_H
 
+#include <complex>
 #include <cstddef>
+#include <utility>
 #include <vector>
 
 #include "Matrix.h"
@@ -62,6 +64,64 @@ T jkOnlyHessianElement(const Matrix<T>& h, const Tensor4<T>& eri,
                         const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
                         const Matrix<double>& two_rdm_x, std::size_t p, std::size_t q,
                         std::size_t r, std::size_t s);
+
+// The FULL dense real-step orbital-rotation Hessian over the independent
+// pairs `pair_indices` (Hessian_opt/HartreeExchangeHessian.h's
+// hessianPairIndices): element (I,J) = jkOnlyHessianElement at (p,q) =
+// pair_indices[I], (r,s) = pair_indices[J]. NOT symmetrized (the bare G
+// combination is asymmetric off orbital stationarity by an amount
+// tracking the orbital gradient) -- the caller symmetrizes before
+// diagonalizing. O(n^5) total.
+template <typename T>
+Matrix<T> jkOnlyHessianMatrix(const Matrix<T>& h, const Tensor4<T>& eri,
+                               const std::vector<double>& occupations,
+                               const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x,
+                               const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);
+
+// IMAGINARY-step (y = Im kappa_pq: kappa_pq=kappa_qp=iy) and MIXED
+// real/imaginary second derivatives, complex spinors only, from the SAME
+// bare G_pq,rs as jkOnlyHessianElement (each block is a fixed sign
+// combination of it -- see HartreeExchangeHessian.h for the general
+// statement):
+//   jkOnlyHessianElementImag(pq;rs)  = SS_yy(pq;rs)
+//                                    = -(G_pq,rs+G_pq,sr+G_qp,rs+G_qp,sr)
+//   jkOnlyHessianElementMixed(pq,rs) = i(G_rs,pq+G_rs,qp-G_sr,pq-G_sr,qp)
+//                                    = SS_ty(rs;pq) (hartreeExchange
+//                                      HessianElementMixed's convention),
+// where SS_ab(I;J) = d/da_J of the b-component gradient of pair I
+// (sequential derivative, exactly what a finite difference of the
+// gradient at a rotated point measures). Values are real for physical
+// input (the returned complex has roundoff imaginary part).
+template <typename T>
+T jkOnlyHessianElementImag(const Matrix<T>& h, const Tensor4<T>& eri,
+                            const std::vector<double>& occupations,
+                            const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x,
+                            std::size_t p, std::size_t q, std::size_t r, std::size_t s);
+template <typename T>
+T jkOnlyHessianElementMixed(const Matrix<T>& h, const Tensor4<T>& eri,
+                             const std::vector<double>& occupations,
+                             const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x,
+                             std::size_t p, std::size_t q, std::size_t r, std::size_t s);
+
+// The TRUE symmetric Hessian of E over the joint real orbital-rotation
+// parameters [t_0..t_{n-1}, y_0..y_{n-1}] (t_I = Re kappa_pq:
+// kappa_pq=+t, kappa_qp=-t; y_I = Im kappa_pq: kappa_pq=kappa_qp=iy; pairs
+// p>q in `pair_indices`), i.e. the Hessian of E(exp(-kappa)) at kappa=0 --
+// what a Newton-Raphson orbital step needs. Off orbital stationarity the
+// bare G_pq,rs combinations are only SEQUENTIAL derivatives (not
+// symmetric), so each block is symmetrized from the same bare G:
+//   tt(I,J) = (1/2)[SS_tt(I;J)+SS_tt(J;I)]
+//   yy(I,J) = (1/2)[SS_yy(I;J)+SS_yy(J;I)]
+//   ty(I,J) = (1/2)[SS_ty(I;J)+SS_yt(J;I)],
+//   SS_ty(pq;rs) = i(G_pq,rs+G_pq,sr-G_qp,rs-G_qp,sr),
+//   SS_yt(pq;rs) = i(G_pq,rs-G_pq,sr+G_qp,rs-G_qp,sr).
+// Real symmetric 2*n_pairs matrix (real parts). Complex orbitals only.
+// O(n^5).
+Matrix<double> jkOnlyJointHessianMatrix(
+    const Matrix<std::complex<double>>& h, const Tensor4<std::complex<double>>& eri,
+    const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
+    const Matrix<double>& two_rdm_x,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);
 
 }  // namespace rerdmft
 

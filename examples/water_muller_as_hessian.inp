@@ -1,0 +1,28 @@
+# Example ReRDMFT input file: water, MULLER_AS (antisymmetric Muller) JK-only functional
+# (Occ_opt/JK_only.h), followed -- HESSIAN_FUNCTIONAL TRUE -- by the FULL
+# orbital-rotation Hessian of that functional at the OPTIMIZED
+# occupations, diagonalized to count negative/near-zero/positive
+# eigenvalues. Same idea as HESSIAN_NON_REL/HESSIAN_X2C/HESSIAN_4C for
+# HF/DHF, but for the fractional-occupation functional: Hessian_opt/
+# JkOnlyHessian.h's jkOnlyHessianMatrix (the direct rederivation of
+# doc/orbital_hessian_jk_only.pdf, valid for every JK-only functional,
+# real and complex orbitals). Runs for all three SCF paths below:
+# NON_REL (real spin-orbitals), X2C (complex spinors, no negative-energy
+# branch) and C4_DHF (complex 4-component spinors; the Hessian spans the
+# FULL RKB space including the negative-energy branch, held at zero
+# occupation, so it is expected to show many negative eigenvalues).
+# The point is stationary w.r.t. the occupations only (orbitals stay the
+# converged HF/DHF ones), so the report also prints the orbital gradient.
+NELEC 10
+BASIS water-sto-3g.gbs
+NON_RELATIVISTIC TRUE
+X2C TRUE
+C4_SPINOR TRUE
+FUNCTIONAL MULLER_AS
+HESSIAN_FUNCTIONAL TRUE
+
+GEOMETRY
+O   0.000000   0.000000   0.000000
+H   0.000000   0.757000   0.586000
+H   0.000000  -0.757000   0.586000
+END

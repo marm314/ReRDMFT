@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <ctime>
 #include <iomanip>
+#include <functional>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -830,6 +831,403 @@ bool isPnofFunctionalName(const std::string& functional_name) {
          functional_name == "PNOF7S" || functional_name == "GNOF";
 }
 
+// Full real-step orbital-rotation Hessian of a JK-only or PNOF functional
+// at the OPTIMIZED occupations (HESSIAN_FUNCTIONAL, see Input.h): the
+// fractional-occupation analogue of buildFullHessianReport (which covers
+// HF/DHF only). `hess` is the raw, unsymmetrized matrix over the
+// independent pairs p>q (jkOnlyHessianMatrix / pnofHessianMatrix); it is
+// real for physical input (the real-step parameters are real numbers),
+// so only its real part is used (max|Im| reported), and it is symmetrized
+// as (H+H^T)/2 before diagonalization -- the bare Hess_pq,rs is
+// asymmetric off orbital stationarity by an amount tracking the orbital
+// gradient (see HartreeExchangeHessian.h), and the symmetric part IS the
+// Hessian in these coordinates. NOTE the point is stationary w.r.t. the
+// OCCUPATIONS only (orbitals are the converged HF/DHF ones), so
+// `max_gradient` (max |g_pq|, printed) is generally nonzero and the
+// eigenvalue signs describe local curvature of E along rotations at this
+// point, not a stationary-point classification.
+template <typename T>
+std::string functionalFullHessianReport(const std::string& label, const std::string& what,
+                                         const rerdmft::Matrix<T>& hess, double max_gradient,
+                                         std::chrono::steady_clock::time_point t_start,
+                                         std::chrono::steady_clock::time_point& t_checkpoint,
+                                         std::vector<TimingRecord>& timing_records) {
+  const std::size_t m = hess.rows();
+  rerdmft::Matrix<double> sym(m, m, 0.0);
+  double max_asym = 0.0, max_imag = 0.0;
+  for (std::size_t i = 0; i < m; ++i) {
+    for (std::size_t j = 0; j < m; ++j) {
+      const double a = std::real(hess(i, j));
+      const double b = std::real(hess(j, i));
+      sym(i, j) = 0.5 * (a + b);
+      max_asym = std::max(max_asym, std::abs(a - b));
+      max_imag = std::max(max_imag, std::abs(std::imag(std::complex<double>(hess(i, j)))));
+    }
+  }
+  logTiming(label + " full " + what + " orbital-rotation Hessian built and symmetrized (" +
+                std::to_string(m) + "x" + std::to_string(m) + ")",
+            t_start, t_checkpoint, timing_records);
+  const auto eigenvalues = rerdmft::diagonalizeSymmetric(sym).eigenvalues;
+  logTiming(label + " full " + what + " Hessian diagonalized", t_start, t_checkpoint,
+            timing_records);
+
+  constexpr double kZeroTolerance = 1e-6;
+  std::size_t n_negative = 0, n_near_zero = 0, n_positive = 0;
+  for (const double e : eigenvalues) {
+    if (e < -kZeroTolerance) ++n_negative;
+    else if (e > kZeroTolerance) ++n_positive;
+    else ++n_near_zero;
+  }
+  std::ostringstream out;
+  out << "\n  Full orbital-rotation Hessian of the " << what << " functional at the OPTIMIZED\n"
+      << "  occupations (" << m << "x" << m << ", real-step pairs p>q, symmetrized):\n";
+  out << "    Eigenvalues: " << n_negative << " negative, " << n_near_zero
+      << " near-zero (|lambda| <= " << kZeroTolerance << "), " << n_positive << " positive\n";
+  out << "    min eigenvalue: " << std::setprecision(10) << eigenvalues.front()
+      << "   max eigenvalue: " << eigenvalues.back() << std::setprecision(6) << "\n";
+  out << "    lowest 6 eigenvalues:" << std::setprecision(4);
+  for (std::size_t k = 0; k < std::min<std::size_t>(6, eigenvalues.size()); ++k) {
+    out << " " << eigenvalues[k];
+  }
+  out << std::setprecision(6) << "\n";
+  out << "    max |g_pq| (orbital gradient; nonzero: orbitals are the HF/DHF ones, only the\n"
+         "    occupations are optimized): "
+      << max_gradient << "   max |H - H^T|: " << max_asym << "   max |Im H|: " << max_imag
+      << "\n";
+  out << "    "
+      << (n_negative == 0
+              ? "No negative curvature (locally a minimum w.r.t. orbital rotations)."
+              : "Negative curvature along " + std::to_string(n_negative) +
+                    " orbital-rotation direction(s) (saddle-like: orbital relaxation lowers the "
+                    "energy).")
+      << "\n";
+  return out.str();
+}
+
+// ---------------------------------------------------------------------
+// Validation of the real-real (tt), imaginary-imaginary (yy) and mixed
+// real-imaginary (ty) orbital-rotation Hessian blocks (and the joint
+// real gradient vector / joint symmetric Hessian matrix a Newton-Raphson
+// step needs) for a functional family (JK_only or PNOF), complex spinors
+// only. Parameters per pair (p>q): t (kappa_pq=+t, kappa_qp=-t) and y
+// (kappa_pq=kappa_qp=iy). All checks are against FINITE DIFFERENCES:
+//  * gradient: joint vector [Re g, Im g] vs. central differences of the
+//    ENERGY along t and along y at rotated integrals;
+//  * sequential blocks: analytic tt/yy/mixed elements vs. central
+//    differences of the (independent, reference) gradient at rotated
+//    integrals, FDab(I;J) = d/da_J [b-component gradient of pair I];
+//  * joint symmetric matrix vs. the symmetrization built from those same
+//    finite differences (tt,yy: (FD(I;J)+FD(J;I))/2; ty: (FDty(I;J) +
+//    FDyt(J;I))/2), and vs. 2D finite differences of the ENERGY along
+//    exp(-(x K_a + y K_b)) (the true second derivative), optionally.
+// ---------------------------------------------------------------------
+template <typename T>
+struct JointRotations {
+  std::vector<std::pair<std::size_t, std::size_t>> pairs;
+  double step = 1e-4;
+  std::vector<rerdmft::RotatedIntegrals<T>> t_plus, t_minus, y_plus, y_minus;
+};
+
+template <typename T>
+rerdmft::Matrix<T> jointGeneratorMatrix(std::size_t n, std::size_t p, std::size_t q, bool imag,
+                                         double scale) {
+  rerdmft::Matrix<T> k(n, n, T{});
+  if constexpr (!std::is_same_v<T, double>) {
+    if (imag) {
+      k(p, q) = T(0.0, scale);
+      k(q, p) = T(0.0, scale);
+    } else {
+      k(p, q) = T(scale);
+      k(q, p) = T(-scale);
+    }
+  }
+  return k;
+}
+
+template <typename T>
+JointRotations<T> buildJointRotations(const rerdmft::Matrix<T>& h, const rerdmft::Tensor4<T>& eri,
+                                       const std::vector<std::pair<std::size_t, std::size_t>>& pairs,
+                                       double step) {
+  JointRotations<T> rot;
+  rot.pairs = pairs;
+  rot.step = step;
+  const std::size_t n = h.rows();
+  for (const auto& [p, q] : pairs) {
+    for (const bool imag : {false, true}) {
+      auto& plus = imag ? rot.y_plus : rot.t_plus;
+      auto& minus = imag ? rot.y_minus : rot.t_minus;
+      plus.push_back(rerdmft::rotateIntegrals(
+          h, eri, rerdmft::spinorRotationMatrix(jointGeneratorMatrix<T>(n, p, q, imag, step))));
+      minus.push_back(rerdmft::rotateIntegrals(
+          h, eri, rerdmft::spinorRotationMatrix(jointGeneratorMatrix<T>(n, p, q, imag, -step))));
+    }
+  }
+  return rot;
+}
+
+// Test pairs for the joint-block checks: the two largest-|g| active pairs
+// plus a pair sharing exactly one orbital index (s) with the first one
+// (p,q) -- (s,x) -- chosen to maximize |g(q or p, x)|: for such pairs the
+// sequential second derivatives are asymmetric by an amount proportional
+// to the gradient of the THIRD pair formed by the two non-shared indices,
+// so only this choice makes the check discriminate between the raw
+// (sequential) blocks and the symmetrized joint Hessian.
+template <typename T>
+std::vector<std::pair<std::size_t, std::size_t>> selectJointTestPairs(
+    const rerdmft::Matrix<T>& gradient, std::size_t lo, std::size_t hi) {
+  std::vector<std::pair<double, std::pair<std::size_t, std::size_t>>> ranked;
+  for (std::size_t p = lo; p < hi; ++p) {
+    for (std::size_t q = lo; q < p; ++q) ranked.push_back({std::abs(gradient(p, q)), {p, q}});
+  }
+  std::sort(ranked.rbegin(), ranked.rend());
+  std::vector<std::pair<std::size_t, std::size_t>> pairs;
+  if (ranked.size() < 3) return pairs;
+  pairs = {ranked[0].second, ranked[1].second};
+  auto grad_abs = [&](std::size_t a, std::size_t b) {
+    return a == b ? 0.0 : std::abs(gradient(std::max(a, b), std::min(a, b)));
+  };
+  double best = -1.0;
+  std::pair<std::size_t, std::size_t> best_pair = ranked[2].second;
+  const auto p0 = pairs[0];
+  for (std::size_t k = 2; k < ranked.size(); ++k) {
+    const auto& c = ranked[k].second;
+    for (const std::size_t shared : {p0.first, p0.second}) {
+      if (c.first != shared && c.second != shared) continue;
+      const std::size_t other0 = (shared == p0.first) ? p0.second : p0.first;
+      const std::size_t x = (c.first == shared) ? c.second : c.first;
+      if (x == other0) continue;
+      const double driver = grad_abs(other0, x) + 0.01 * ranked[k].first;
+      if (driver > best) {
+        best = driver;
+        best_pair = c;
+      }
+    }
+  }
+  pairs.push_back(best_pair);
+  return pairs;
+}
+
+template <typename T>
+struct JointCheckCallbacks {
+  using GradFn = std::function<rerdmft::Matrix<T>(const rerdmft::Matrix<T>&,
+                                                   const rerdmft::Tensor4<T>&)>;
+  GradFn gradient_new;   // analytic gradient under test
+  GradFn gradient_ref;   // independent gradient used for the sequential finite differences
+  std::function<double(const rerdmft::Matrix<T>&, const rerdmft::Tensor4<T>&)> energy;
+  std::function<T(std::size_t, std::size_t, std::size_t, std::size_t)> hess_tt, hess_yy,
+      hess_mixed;
+  std::function<rerdmft::Matrix<double>(
+      const std::vector<std::pair<std::size_t, std::size_t>>&)> joint;
+};
+
+struct JointCheckResult {
+  double grad_t = 0, grad_y = 0, tt = 0, yy = 0, mixed = 0, joint_vs_fd = 0, joint_asym = 0;
+  double max_hess = 0, max_imag = 0, energy2d = -1.0, energy2d_scale = 0.0, seq_asym = 0.0,
+         tt_sym = 0, yy_sym = 0, mixed_sym = 0, tt_T = 0, yy_T = 0, mixed_T = 0;
+  std::size_t n_energy2d = 0;
+};
+
+template <typename T>
+JointCheckResult jointBlocksCheck(const rerdmft::Matrix<T>& h, const rerdmft::Tensor4<T>& eri,
+                                   const JointRotations<T>& rot, const JointCheckCallbacks<T>& cb,
+                                   bool with_energy_2d, bool all_2d = true) {
+  JointCheckResult res;
+  if constexpr (std::is_same_v<T, double>) {
+    return res;
+  } else {
+    const auto& pairs = rot.pairs;
+    const std::size_t k_pairs = pairs.size();
+    const std::size_t n = h.rows();
+    const double s1 = rot.step;
+
+    // gradient vs energy finite differences
+    const auto g0 = cb.gradient_new(h, eri);
+    const auto joint_g = rerdmft::jointOrbitalGradient(g0, pairs);
+    for (std::size_t k = 0; k < k_pairs; ++k) {
+      const double fd_t = (cb.energy(rot.t_plus[k].h, rot.t_plus[k].eri) -
+                           cb.energy(rot.t_minus[k].h, rot.t_minus[k].eri)) / (2.0 * s1);
+      const double fd_y = (cb.energy(rot.y_plus[k].h, rot.y_plus[k].eri) -
+                           cb.energy(rot.y_minus[k].h, rot.y_minus[k].eri)) / (2.0 * s1);
+      res.grad_t = std::max(res.grad_t, std::abs(joint_g[k] - fd_t));
+      res.grad_y = std::max(res.grad_y, std::abs(joint_g[k_pairs + k] - fd_y));
+    }
+
+    // sequential finite differences of the reference gradient
+    auto comp = [&](const rerdmft::Matrix<T>& g, std::size_t a, bool imag) {
+      const std::complex<double> v(g(pairs[a].first, pairs[a].second));
+      return imag ? v.imag() : v.real();
+    };
+    std::vector<std::vector<double>> fd_tt(k_pairs, std::vector<double>(k_pairs)),
+        fd_yt = fd_tt, fd_ty = fd_tt, fd_yy = fd_tt;
+    for (std::size_t b = 0; b < k_pairs; ++b) {
+      const auto gtp = cb.gradient_ref(rot.t_plus[b].h, rot.t_plus[b].eri);
+      const auto gtm = cb.gradient_ref(rot.t_minus[b].h, rot.t_minus[b].eri);
+      const auto gyp = cb.gradient_ref(rot.y_plus[b].h, rot.y_plus[b].eri);
+      const auto gym = cb.gradient_ref(rot.y_minus[b].h, rot.y_minus[b].eri);
+      for (std::size_t a = 0; a < k_pairs; ++a) {
+        fd_tt[a][b] = (comp(gtp, a, false) - comp(gtm, a, false)) / (2.0 * s1);
+        fd_yt[a][b] = (comp(gtp, a, true) - comp(gtm, a, true)) / (2.0 * s1);
+        fd_ty[a][b] = (comp(gyp, a, false) - comp(gym, a, false)) / (2.0 * s1);
+        fd_yy[a][b] = (comp(gyp, a, true) - comp(gym, a, true)) / (2.0 * s1);
+      }
+    }
+    // analytic sequential elements vs. FD
+    for (std::size_t a = 0; a < k_pairs; ++a) {
+      for (std::size_t b = 0; b < k_pairs; ++b) {
+        const auto [p, q] = pairs[a];
+        const auto [r, s] = pairs[b];
+        const std::complex<double> htt(cb.hess_tt(p, q, r, s));
+        const std::complex<double> hyy(cb.hess_yy(p, q, r, s));
+        // Mixed(pq,rs) = d/dy_pq of the t-gradient of pair (r,s) = FDty(rs;pq)
+        const std::complex<double> hmx(cb.hess_mixed(r, s, p, q));
+        // ... and vs. the SYMMETRIZED finite differences (true second derivative)
+        res.tt_sym = std::max(res.tt_sym,
+                              std::abs(htt.real() - 0.5 * (fd_tt[a][b] + fd_tt[b][a])));
+        res.yy_sym = std::max(res.yy_sym,
+                              std::abs(hyy.real() - 0.5 * (fd_yy[a][b] + fd_yy[b][a])));
+        res.mixed_sym = std::max(res.mixed_sym,
+                                 std::abs(hmx.real() - 0.5 * (fd_ty[a][b] + fd_yt[b][a])));
+        // ... and vs. the TRANSPOSED sequential derivative (roles of the two pairs swapped)
+        res.tt_T = std::max(res.tt_T, std::abs(htt.real() - fd_tt[b][a]));
+        res.yy_T = std::max(res.yy_T, std::abs(hyy.real() - fd_yy[b][a]));
+        res.mixed_T = std::max(res.mixed_T, std::abs(hmx.real() - fd_yt[b][a]));
+        res.tt = std::max(res.tt, std::abs(htt.real() - fd_tt[a][b]));
+        res.yy = std::max(res.yy, std::abs(hyy.real() - fd_yy[a][b]));
+        res.mixed = std::max(res.mixed, std::abs(hmx.real() - fd_ty[a][b]));
+        res.max_hess = std::max({res.max_hess, std::abs(fd_tt[a][b]), std::abs(fd_yy[a][b]),
+                                 std::abs(fd_ty[a][b]), std::abs(fd_yt[a][b])});
+        res.max_imag = std::max({res.max_imag, std::abs(htt.imag()), std::abs(hyy.imag()),
+                                 std::abs(hmx.imag())});
+      }
+    }
+    for (std::size_t a = 0; a < k_pairs; ++a) {
+      for (std::size_t b = 0; b < k_pairs; ++b) {
+        res.seq_asym = std::max({res.seq_asym, std::abs(fd_tt[a][b] - fd_tt[b][a]),
+                                 std::abs(fd_yy[a][b] - fd_yy[b][a]),
+                                 std::abs(fd_ty[a][b] - fd_yt[b][a])});
+      }
+    }
+    // joint symmetric matrix vs. symmetrized finite differences
+    const auto joint = cb.joint(pairs);
+    for (std::size_t a = 0; a < k_pairs; ++a) {
+      for (std::size_t b = 0; b < k_pairs; ++b) {
+        const double ref_tt = 0.5 * (fd_tt[a][b] + fd_tt[b][a]);
+        const double ref_yy = 0.5 * (fd_yy[a][b] + fd_yy[b][a]);
+        const double ref_ty = 0.5 * (fd_ty[a][b] + fd_yt[b][a]);  // (t_a, y_b)
+        res.joint_vs_fd = std::max({res.joint_vs_fd, std::abs(joint(a, b) - ref_tt),
+                                    std::abs(joint(k_pairs + a, k_pairs + b) - ref_yy),
+                                    std::abs(joint(a, k_pairs + b) - ref_ty)});
+      }
+    }
+    for (std::size_t i = 0; i < joint.rows(); ++i) {
+      for (std::size_t j = 0; j < joint.cols(); ++j) {
+        res.joint_asym = std::max(res.joint_asym, std::abs(joint(i, j) - joint(j, i)));
+      }
+    }
+
+    // true second derivative: 2D finite differences of the ENERGY along
+    // exp(-(x K_a + y K_b))
+    if (with_energy_2d) {
+      constexpr double s2 = 1e-3;
+      auto energy_at = [&](std::size_t a, bool ia, std::size_t b, bool ib, double x, double y) {
+        rerdmft::Matrix<T> kappa = jointGeneratorMatrix<T>(n, pairs[a].first, pairs[a].second, ia, x);
+        const auto kb = jointGeneratorMatrix<T>(n, pairs[b].first, pairs[b].second, ib, y);
+        for (std::size_t i = 0; i < n; ++i)
+          for (std::size_t j = 0; j < n; ++j) kappa(i, j) += kb(i, j);
+        const auto rt = rerdmft::rotateIntegrals(h, eri, rerdmft::spinorRotationMatrix(kappa));
+        return cb.energy(rt.h, rt.eri);
+      };
+      auto second = [&](std::size_t a, bool ia, std::size_t b, bool ib) {
+        return (energy_at(a, ia, b, ib, s2, s2) - energy_at(a, ia, b, ib, s2, -s2) -
+                energy_at(a, ia, b, ib, -s2, s2) + energy_at(a, ia, b, ib, -s2, -s2)) /
+               (4.0 * s2 * s2);
+      };
+      res.energy2d = 0.0;
+      auto record = [&](double numeric, double analytic) {
+        res.energy2d = std::max(res.energy2d, std::abs(numeric - analytic));
+        res.energy2d_scale = std::max(res.energy2d_scale, std::abs(numeric));
+        ++res.n_energy2d;
+      };
+      // mixed (t_a,y_b): all combinations when the family is cheap
+      // (`all_2d`), otherwise the diagonal, the disjoint pair and the
+      // shared-index pair only; plus tt/yy between the first pair and the
+      // shared-index (last) pair.
+      for (std::size_t a = 0; a < k_pairs; ++a) {
+        for (std::size_t b = 0; b < k_pairs; ++b) {
+          if (!all_2d && !((a == 0 && b == 0) || (a == 0 && b == 1) || (a == k_pairs - 1 && b == 0))) {
+            continue;
+          }
+          record(second(a, false, b, true), joint(a, k_pairs + b));
+        }
+      }
+      for (std::size_t a = 0; a < k_pairs; ++a) {
+        for (std::size_t b = a + 1; b < k_pairs; ++b) {
+          if (!all_2d && !(a == 0 && b == k_pairs - 1)) continue;
+          record(second(a, false, b, false), joint(a, b));
+          record(second(a, true, b, true), joint(k_pairs + a, k_pairs + b));
+        }
+      }
+    }
+    return res;
+  }
+}
+
+inline std::string formatJointCheck(const JointCheckResult& r) {
+  std::ostringstream out;
+  out << std::scientific << std::setprecision(2) << "      gradient [Re g, Im g] vs energy FD: dE/dt "
+      << r.grad_t << ", dE/dy " << r.grad_y << "\n"
+      << "      raw blocks vs sequential FD [d/dkappa_rs of gradient of pair pq]: tt " << r.tt << ", yy " << r.yy << ", mixed " << r.mixed
+      << "  (vs symmetrized FD: tt " << r.tt_sym << ", yy " << r.yy_sym << ", mixed "
+      << r.mixed_sym << "; vs transposed-sequential FD: tt " << r.tt_T << ", yy " << r.yy_T
+      << ", mixed " << r.mixed_T << ")\n      joint symmetric matrix vs symmetrized FD: " << r.joint_vs_fd << " (|H|max "
+      << r.max_hess << ", sequential-FD asymmetry (shared-index pairs) " << r.seq_asym
+      << ", max|Im| " << r.max_imag << ")\n";
+  if (r.energy2d >= 0.0) {
+    out << "      joint matrix vs 2D energy FD (true d2E/dx dy, " << r.n_energy2d
+        << " elements, |d2E|max " << r.energy2d_scale << "): " << r.energy2d << "\n";
+  }
+  out << std::defaultfloat << std::setprecision(6);
+  return out.str();
+}
+
+// Complex-spinor extension of the HESSIAN_FUNCTIONAL report: the JOINT
+// real gradient vector [dE/dt; dE/dy] (jointOrbitalGradient) and joint
+// symmetric Hessian over [t; y] (jkOnlyJointHessianMatrix /
+// pnofJointHessianMatrix) -- exactly the two objects a Newton-Raphson
+// orbital step consumes -- with the eigenvalue count of the joint Hessian.
+inline std::string functionalJointHessianReport(
+    const std::string& label, const std::string& what, const rerdmft::Matrix<double>& joint,
+    const std::vector<double>& joint_gradient, std::chrono::steady_clock::time_point t_start,
+    std::chrono::steady_clock::time_point& t_checkpoint,
+    std::vector<TimingRecord>& timing_records) {
+  const auto eigenvalues = rerdmft::diagonalizeSymmetric(joint).eigenvalues;
+  logTiming(label + " joint (t,y) " + what + " Hessian diagonalized", t_start, t_checkpoint,
+            timing_records);
+  constexpr double kZeroTolerance = 1e-6;
+  std::size_t n_neg = 0, n_zero = 0, n_pos = 0;
+  for (const double e : eigenvalues) {
+    if (e < -kZeroTolerance) ++n_neg;
+    else if (e > kZeroTolerance) ++n_pos;
+    else ++n_zero;
+  }
+  double gnorm = 0.0, gmax = 0.0;
+  for (const double g : joint_gradient) {
+    gnorm += g * g;
+    gmax = std::max(gmax, std::abs(g));
+  }
+  std::ostringstream out;
+  out << "\n  JOINT (real t + imaginary y) orbital-rotation Hessian of the " << what
+      << " functional at the\n  OPTIMIZED occupations (" << joint.rows() << "x" << joint.rows()
+      << ", symmetric true second derivative; with the joint gradient the input of a\n"
+         "  Newton-Raphson orbital step):\n";
+  out << "    Eigenvalues: " << n_neg << " negative, " << n_zero << " near-zero (|lambda| <= "
+      << kZeroTolerance << "), " << n_pos << " positive; min " << std::setprecision(10)
+      << eigenvalues.front() << ", max " << eigenvalues.back() << std::setprecision(6) << "\n";
+  out << "    Joint gradient [dE/dt; dE/dy]: norm " << std::sqrt(gnorm) << ", max |component| "
+      << gmax << "\n";
+  return out.str();
+}
+
 // Validates Hessian_opt/JkOnlyFock.h's jkOnlyOrbitalGradient and
 // Hessian_opt/JkOnlyHessian.h's jkOnlyHessianElement (the rederivation of
 // doc/orbital_hessian_jk_only.pdf) for EVERY JkFunctional, at generic
@@ -882,17 +1280,9 @@ std::string jkOnlyRotationValidationReport(const rerdmft::Matrix<T>& h,
   const auto hc_mbb = rerdmft::jkHartreeCoupling(JkFunctional::kMbb, occ, f_l, kPowerAlpha);
   const auto x_mbb = rerdmft::jkExchangeCoupling(JkFunctional::kMbb, occ, f_l, kPowerAlpha);
   const auto g_mbb = rerdmft::jkOnlyOrbitalGradient(h, eri, occ, hc_mbb, x_mbb);
-  std::vector<std::pair<double, std::pair<std::size_t, std::size_t>>> ranked;
-  for (std::size_t p = n_inactive_below; p < n_inactive_below + n_active; ++p) {
-    for (std::size_t q = n_inactive_below; q < p; ++q) {
-      ranked.push_back({std::abs(g_mbb(p, q)), {p, q}});
-    }
-  }
-  std::sort(ranked.rbegin(), ranked.rend());
-  if (ranked.size() < 3) return out.str();
-  const std::vector<std::pair<std::size_t, std::size_t>> pairs = {
-      ranked[0].second, ranked[1].second, ranked[2].second};
-  out << "    test pairs (largest |g| at these occupations):";
+  const auto pairs = selectJointTestPairs(g_mbb, n_inactive_below, n_inactive_below + n_active);
+  if (pairs.size() < 3) return out.str();
+  out << "    test pairs (2 largest |g| + a shared-index pair with the largest driving gradient):";
   for (const auto& pr : pairs) out << " (" << pr.first << "," << pr.second << ")";
   out << "\n";
 
@@ -908,6 +1298,14 @@ std::string jkOnlyRotationValidationReport(const rerdmft::Matrix<T>& h,
         h, eri, rerdmft::spinorRotationMatrix(buildKappa(pr.first, pr.second, kStep))));
     rot_minus.push_back(rerdmft::rotateIntegrals(
         h, eri, rerdmft::spinorRotationMatrix(buildKappa(pr.first, pr.second, -kStep))));
+  }
+
+  // Complex spinors only: the imaginary-step (y) and mixed (t,y) blocks.
+  JointRotations<T> joint_rot;
+  if constexpr (!std::is_same_v<T, double>) {
+    joint_rot = buildJointRotations(h, eri, pairs, kStep);
+    out << "    (complex spinors: also the imaginary-imaginary and real-imaginary blocks, the\n"
+           "     joint gradient vector and the joint symmetric Hessian over [t; y])\n";
   }
 
   for (const auto& [functional, name] : functionals) {
@@ -967,6 +1365,34 @@ std::string jkOnlyRotationValidationReport(const rerdmft::Matrix<T>& h,
         << "   Hessian: |analytic-FD|max=" << max_hess_diff << " (|H|max=" << max_hess
         << ", " << n_quad << " quadruples, max|Im|=" << max_imag << ")\n"
         << std::defaultfloat << std::setprecision(6);
+
+    if constexpr (!std::is_same_v<T, double>) {
+      JointCheckCallbacks<T> cb;
+      cb.gradient_new = [&](const rerdmft::Matrix<T>& hh, const rerdmft::Tensor4<T>& ee) {
+        return rerdmft::jkOnlyOrbitalGradient(hh, ee, occ, hc, xc);
+      };
+      cb.gradient_ref = [&](const rerdmft::Matrix<T>& hh, const rerdmft::Tensor4<T>& ee) {
+        return rerdmft::orbitalGradient(rerdmft::jkOnlyFockMatrix(hh, ee, occ, hc, xc));
+      };
+      cb.energy = [&](const rerdmft::Matrix<T>& hh, const rerdmft::Tensor4<T>& ee) {
+        return rerdmft::jkOnlyEnergy(hh, ee, occ, hc, xc);
+      };
+      cb.hess_tt = [&](std::size_t a, std::size_t b, std::size_t c, std::size_t d) {
+        return rerdmft::jkOnlyHessianElement(h, eri, occ, hc, xc, a, b, c, d);
+      };
+      cb.hess_yy = [&](std::size_t a, std::size_t b, std::size_t c, std::size_t d) {
+        return rerdmft::jkOnlyHessianElementImag(h, eri, occ, hc, xc, a, b, c, d);
+      };
+      cb.hess_mixed = [&](std::size_t a, std::size_t b, std::size_t c, std::size_t d) {
+        return rerdmft::jkOnlyHessianElementMixed(h, eri, occ, hc, xc, a, b, c, d);
+      };
+      cb.joint = [&](const std::vector<std::pair<std::size_t, std::size_t>>& pr) {
+        return rerdmft::jkOnlyJointHessianMatrix(h, eri, occ, hc, xc, pr);
+      };
+      const bool with_2d =
+          functional == JkFunctional::kMbb || functional == JkFunctional::kMullerAs;
+      out << formatJointCheck(jointBlocksCheck<T>(h, eri, joint_rot, cb, with_2d));
+    }
   }
   return out.str();
 }
@@ -979,6 +1405,7 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
                                    double temperature_kelvin, const std::string& functional_name,
                                    const std::string& occupation_init_name,
                                    double nuclear_repulsion_energy, bool debug, int verbose,
+                                   bool full_hessian,
                                    std::chrono::steady_clock::time_point t_start,
                                    std::chrono::steady_clock::time_point& t_checkpoint,
                                    std::vector<TimingRecord>& timing_records) {
@@ -1831,11 +2258,127 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
         out << jkOnlyRotationValidationReport<T>(h, eri, n_inactive_below, n_active, n_electrons);
       }
     }
+
+    // HESSIAN_FUNCTIONAL: full orbital-rotation Hessian at the optimized
+    // occupations, diagonalized (see functionalFullHessianReport).
+    if (full_hessian) {
+      try {
+        const auto occ_opt = embed(sqp_result.x);
+        const auto hc_opt = rerdmft::jkHartreeCoupling(functional, occ_opt, f_l);
+        const auto xc_opt = rerdmft::jkExchangeCoupling(functional, occ_opt, f_l);
+        const auto pair_indices = rerdmft::hessianPairIndices(n_total);
+        const auto hess_full =
+            rerdmft::jkOnlyHessianMatrix(h, eri, occ_opt, hc_opt, xc_opt, pair_indices);
+        const auto g_opt = rerdmft::jkOnlyOrbitalGradient(h, eri, occ_opt, hc_opt, xc_opt);
+        double max_g = 0.0;
+        for (std::size_t p = 0; p < n_total; ++p) {
+          for (std::size_t q = 0; q <= p; ++q) max_g = std::max(max_g, std::abs(g_opt(p, q)));
+        }
+        out << functionalFullHessianReport<T>(label, "JK-only (" + functional_name + ")",
+                                               hess_full, max_g, t_start, t_checkpoint,
+                                               timing_records);
+        if constexpr (!std::is_same_v<T, double>) {
+          const auto joint_hess =
+              rerdmft::jkOnlyJointHessianMatrix(h, eri, occ_opt, hc_opt, xc_opt, pair_indices);
+          out << functionalJointHessianReport(label, "JK-only (" + functional_name + ")",
+                                               joint_hess,
+                                               rerdmft::jointOrbitalGradient(g_opt, pair_indices),
+                                               t_start, t_checkpoint, timing_records);
+        }
+      } catch (const std::exception& e) {
+        out << "\n  Full orbital-rotation Hessian FAILED: " << e.what() << "\n";
+      }
+    }
   } catch (const std::exception& e) {
     out << "    FAILED: " << e.what() << "\n";
   }
 
   return out.str();
+}
+
+// PNOF counterpart of the joint-block validation above (complex spinors
+// only): tt/yy/mixed blocks, the joint gradient vector and the joint
+// symmetric Hessian of Hessian_opt/PnofHessian.h (L1/L2 pair terms
+// included) against finite differences, at (a) generic FRACTIONAL
+// frontier-geminal occupations (deterministic, inside (0,1)) for a strong
+// signal and (b) the run's own OPTIMIZED occupations. The test pairs are
+// the two largest-|g| active pairs at (a) plus the largest one sharing an
+// orbital index with the first; the 2D energy check (true second
+// derivative) is done for (a) only, to bound the number of integral
+// rotations.
+template <typename T>
+std::string pnofJointBlocksReport(rerdmft::PnofFunctional functional,
+                                   const rerdmft::Matrix<T>& h, const rerdmft::Tensor4<T>& eri,
+                                   const std::vector<rerdmft::PnofGeminal>& geminals,
+                                   std::size_t n_core, std::size_t n_inactive_below,
+                                   std::size_t n_active, bool relativistic,
+                                   const std::vector<double>& optimized_occ) {
+  std::ostringstream out;
+  if constexpr (std::is_same_v<T, double>) {
+    return out.str();
+  } else {
+    const std::size_t n_total = h.rows();
+    std::vector<double> synth(n_total, 0.0);
+    for (std::size_t a = 0; a < n_core; ++a) synth[geminals[a].i] = synth[geminals[a].ibar] = 1.0;
+    for (std::size_t a = n_core; a < geminals.size(); ++a) {
+      const double n = 0.15 + 0.7 * std::fmod(0.6180339887498949 * (a - n_core + 1), 1.0);
+      synth[geminals[a].i] = synth[geminals[a].ibar] = n;
+    }
+    const auto pair_of = rerdmft::buildPnofPairOf(geminals, n_total);
+
+    const auto g_synth = rerdmft::orbitalGradient(
+        rerdmft::pnofFockMatrix(functional, h, eri, geminals, synth, relativistic));
+    const auto pairs = selectJointTestPairs(g_synth, n_inactive_below, n_inactive_below + n_active);
+    if (pairs.size() < 3) return out.str();
+
+    out << "\n  PNOF orbital-rotation blocks (real-real tt, imaginary-imaginary yy, real-imaginary\n"
+           "  mixed), joint gradient vector [dE/dt; dE/dy] and joint symmetric Hessian over [t; y]\n"
+           "  (Hessian_opt/PnofHessian.h, L1/L2 included) vs. finite differences (dkappa step 1e-4);\n"
+           "  test pairs:";
+    for (const auto& pr : pairs) out << " (" << pr.first << "," << pr.second << ")";
+    out << "\n";
+
+    const auto rot = buildJointRotations(h, eri, pairs, 1e-4);
+    const std::vector<std::pair<std::string, const std::vector<double>*>> sets = {
+        {"generic fractional occupations", &synth}, {"optimized occupations", &optimized_occ}};
+    bool first = true;
+    for (const auto& [name, occ_ptr] : sets) {
+      const auto& occ = *occ_ptr;
+      const auto full = rerdmft::buildPnofFullTwoRdm(functional, geminals, occ, n_total, relativistic);
+      const auto fock0 = rerdmft::pnofFockMatrix(functional, h, eri, geminals, occ, relativistic);
+      JointCheckCallbacks<T> cb;
+      auto grad = [&](const rerdmft::Matrix<T>& hh, const rerdmft::Tensor4<T>& ee) {
+        return rerdmft::orbitalGradient(
+            rerdmft::pnofFockMatrix(functional, hh, ee, geminals, occ, relativistic));
+      };
+      cb.gradient_new = grad;
+      cb.gradient_ref = grad;
+      cb.energy = [&](const rerdmft::Matrix<T>& hh, const rerdmft::Tensor4<T>& ee) {
+        return rerdmft::hartreeExchangeEnergy(hh, ee, occ, full.two_rdm_h, full.two_rdm_x, pair_of,
+                                               full.two_rdm_l1, full.two_rdm_l2);
+      };
+      cb.hess_tt = [&](std::size_t a, std::size_t b, std::size_t c, std::size_t d) {
+        return rerdmft::pnofHessianElement(functional, h, eri, geminals, occ, relativistic, fock0,
+                                            a, b, c, d);
+      };
+      cb.hess_yy = [&](std::size_t a, std::size_t b, std::size_t c, std::size_t d) {
+        return rerdmft::pnofHessianElementImag(functional, h, eri, geminals, occ, relativistic,
+                                                fock0, a, b, c, d);
+      };
+      cb.hess_mixed = [&](std::size_t a, std::size_t b, std::size_t c, std::size_t d) {
+        return rerdmft::pnofHessianElementMixed(functional, h, eri, geminals, occ, relativistic,
+                                                 fock0, a, b, c, d);
+      };
+      cb.joint = [&](const std::vector<std::pair<std::size_t, std::size_t>>& pr) {
+        return rerdmft::pnofJointHessianMatrix(functional, h, eri, geminals, occ, relativistic,
+                                                fock0, pr);
+      };
+      out << "    " << name << ":\n"
+          << formatJointCheck(jointBlocksCheck<T>(h, eri, rot, cb, /*with_energy_2d=*/first, /*all_2d=*/false));
+      first = false;
+    }
+    return out.str();
+  }
 }
 
 // PNOF5/PNOF7/PNOF7s/GNOF occupation-number optimization (Occ_opt/PNOFs.h +
@@ -1869,7 +2412,8 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
                                        const std::string& functional_name,
                                        double nuclear_repulsion_energy, int pnof_subspaces,
                                        int pnof_coupling, bool relativistic, bool sqp_pnof_occ,
-                                       bool debug, std::chrono::steady_clock::time_point t_start,
+                                       bool debug, int verbose, bool full_hessian,
+                                       std::chrono::steady_clock::time_point t_start,
                                        std::chrono::steady_clock::time_point& t_checkpoint,
                                        std::vector<TimingRecord>& timing_records) {
   constexpr double kOccupationEpsilon = 1e-6;
@@ -2315,6 +2859,46 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
         out << "\n  Hessian_opt e^kappa orbital-rotation Hessian finite-difference check FAILED: "
             << e.what() << "\n";
       }
+    }
+  }
+
+  if constexpr (!std::is_same_v<T, double>) {
+    if (debug && verbose > 0 && n_active >= 4) {
+      try {
+        out << pnofJointBlocksReport<T>(functional, h, eri, geminals, n_core, n_inactive_below,
+                                         n_active, relativistic, optimized_occ);
+      } catch (const std::exception& e) {
+        out << "\n  PNOF joint-block validation FAILED: " << e.what() << "\n";
+      }
+    }
+  }
+
+  // HESSIAN_FUNCTIONAL: full orbital-rotation Hessian at the optimized
+  // occupations, diagonalized (see functionalFullHessianReport).
+  if (full_hessian) {
+    try {
+      const auto fock_full = rerdmft::pnofFockMatrix(functional, h, eri, geminals, optimized_occ,
+                                                       relativistic);
+      const auto pair_indices = rerdmft::hessianPairIndices(n_total);
+      const auto hess_full = rerdmft::pnofHessianMatrix(functional, h, eri, geminals,
+                                                          optimized_occ, relativistic, fock_full,
+                                                          pair_indices);
+      const auto g_full = rerdmft::orbitalGradient(fock_full);
+      double max_g = 0.0;
+      for (std::size_t p = 0; p < n_total; ++p) {
+        for (std::size_t q = 0; q <= p; ++q) max_g = std::max(max_g, std::abs(g_full(p, q)));
+      }
+      out << functionalFullHessianReport<T>(label, "PNOF (" + functional_name + ")", hess_full,
+                                             max_g, t_start, t_checkpoint, timing_records);
+      if constexpr (!std::is_same_v<T, double>) {
+        const auto joint_hess = rerdmft::pnofJointHessianMatrix(
+            functional, h, eri, geminals, optimized_occ, relativistic, fock_full, pair_indices);
+        out << functionalJointHessianReport(label, "PNOF (" + functional_name + ")", joint_hess,
+                                             rerdmft::jointOrbitalGradient(g_full, pair_indices),
+                                             t_start, t_checkpoint, timing_records);
+      }
+    } catch (const std::exception& e) {
+      out << "\n  Full orbital-rotation Hessian FAILED: " << e.what() << "\n";
     }
   }
 
@@ -2846,13 +3430,13 @@ int main(int argc, char** argv) {
               "NON_REL", h_spin, eri_spin, 2 * n_spatial, 0, input.n_electrons(),
               input.functional(), nonrel_hf_result.nuclear_repulsion_energy,
               input.pnof_subspaces(), input.pnof_coupling(), /*relativistic=*/false,
-              input.sqp_pnof_occ(), input.debug(), t_start, t_checkpoint, timing_records);
+              input.sqp_pnof_occ(), input.debug(), input.verbose(), input.hessian_functional(), t_start, t_checkpoint, timing_records);
         } else {
           nonrel_functional_report = buildFunctionalReport(
               "NON_REL", h_spin, eri_spin, nonrel_orbital_energies_spin, 0, input.n_electrons(),
               input.temperature(), input.functional(), input.occupation_init(),
-              nonrel_hf_result.nuclear_repulsion_energy, input.debug(), input.verbose(), t_start,
-              t_checkpoint, timing_records);
+              nonrel_hf_result.nuclear_repulsion_energy, input.debug(), input.verbose(),
+              input.hessian_functional(), t_start, t_checkpoint, timing_records);
         }
       }
     }
@@ -3101,13 +3685,14 @@ int main(int argc, char** argv) {
               "X2C_HF", h_x2c_mo, eri_x2c_mo, h_x2c_mo.rows(), 0, input.n_electrons(),
               input.functional(), x2c_hf_result.nuclear_repulsion_energy, input.pnof_subspaces(),
               input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
-              t_start, t_checkpoint, timing_records);
+              input.verbose(), input.hessian_functional(), t_start, t_checkpoint, timing_records);
         } else {
           x2c_functional_report = buildFunctionalReport(
               "X2C_HF", h_x2c_mo, eri_x2c_mo, x2c_hf_result.orbital_energies, 0,
               input.n_electrons(), input.temperature(), input.functional(),
               input.occupation_init(), x2c_hf_result.nuclear_repulsion_energy, input.debug(),
-              input.verbose(), t_start, t_checkpoint, timing_records);
+              input.verbose(), input.hessian_functional(), t_start, t_checkpoint,
+              timing_records);
         }
       }
     }
@@ -3353,13 +3938,14 @@ int main(int argc, char** argv) {
               "C4_DHF", h_mo, eri_mo, h_mo.rows() - n_negative, n_negative, input.n_electrons(),
               input.functional(), dhf_result.nuclear_repulsion_energy, input.pnof_subspaces(),
               input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
-              t_start, t_checkpoint, timing_records);
+              input.verbose(), input.hessian_functional(), t_start, t_checkpoint, timing_records);
         } else {
           dhf_functional_report = buildFunctionalReport(
               "C4_DHF", h_mo, eri_mo, dhf_orbital_energies_positive, n_negative,
               input.n_electrons(), input.temperature(), input.functional(),
               input.occupation_init(), dhf_result.nuclear_repulsion_energy, input.debug(),
-              input.verbose(), t_start, t_checkpoint, timing_records);
+              input.verbose(), input.hessian_functional(), t_start, t_checkpoint,
+              timing_records);
         }
       }
     }

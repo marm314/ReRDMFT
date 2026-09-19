@@ -1,0 +1,25 @@
+# Example ReRDMFT input file: water, X2C spinors, MULLER JK-only
+# functional, DEBUG TRUE. Besides the usual checks, the JK_only
+# orbital-rotation validation report (main.cpp's
+# jkOnlyRotationValidationReport) tests, for EVERY JK-only functional at
+# generic fractional occupations and for complex spinors, the real-real
+# (tt), imaginary-imaginary (yy) and real-imaginary (mixed) Hessian
+# blocks, the joint real gradient vector [dE/dt; dE/dy] and the joint
+# symmetric Hessian over [t; y] (Hessian_opt/JkOnlyHessian.h's
+# jkOnlyJointHessianMatrix, the input of a Newton-Raphson orbital step)
+# against finite differences of the gradient and, for MULLER/MULLER_AS,
+# 2D finite differences of the energy (the true second derivative).
+# HESSIAN_FUNCTIONAL TRUE additionally diagonalizes the full real-step and
+# the joint (t,y) Hessians at the optimized occupations.
+NELEC 10
+BASIS water-sto-3g.gbs
+X2C TRUE
+FUNCTIONAL MULLER
+DEBUG TRUE
+HESSIAN_FUNCTIONAL TRUE
+
+GEOMETRY
+O   0.000000   0.000000   0.000000
+H   0.000000   0.757000   0.586000
+H   0.000000  -0.757000   0.586000
+END

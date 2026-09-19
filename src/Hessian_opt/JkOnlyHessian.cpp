@@ -40,6 +40,17 @@ T rawJkOnlyG(const Matrix<T>& h, const Tensor4<T>& eri, const std::vector<double
   return term;
 }
 
+template <typename T>
+void checkJkOnlyArgs(const Matrix<T>& h, const Tensor4<T>& eri, const std::vector<double>& occ,
+                      const Matrix<double>& hc, const Matrix<double>& xc, const char* caller) {
+  const std::size_t n = h.rows();
+  if (h.cols() != n || eri.dim0() != n || eri.dim1() != n || eri.dim2() != n ||
+      eri.dim3() != n || occ.size() != n || hc.rows() != n || hc.cols() != n ||
+      xc.rows() != n || xc.cols() != n) {
+    throw std::runtime_error(std::string(caller) + ": inconsistent input dimensions");
+  }
+}
+
 }  // namespace
 
 template <typename T>
@@ -70,6 +81,33 @@ T jkOnlyHessianElement(const Matrix<T>& h, const Tensor4<T>& eri,
          rawJkOnlyG(h, eri, occupations, two_rdm_h, two_rdm_x, n, q, p, s, r);
 }
 
+template <typename T>
+Matrix<T> jkOnlyHessianMatrix(const Matrix<T>& h, const Tensor4<T>& eri,
+                               const std::vector<double>& occupations,
+                               const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x,
+                               const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices) {
+  const std::size_t n_pairs = pair_indices.size();
+  Matrix<T> hess(n_pairs, n_pairs, T{});
+#pragma omp parallel for collapse(2)
+  for (std::size_t big_i = 0; big_i < n_pairs; ++big_i) {
+    for (std::size_t big_j = 0; big_j < n_pairs; ++big_j) {
+      const auto& [p, q] = pair_indices[big_i];
+      const auto& [r, s] = pair_indices[big_j];
+      hess(big_i, big_j) = jkOnlyHessianElement(h, eri, occupations, two_rdm_h, two_rdm_x, p, q, r, s);
+    }
+  }
+  return hess;
+}
+
+template Matrix<double> jkOnlyHessianMatrix(
+    const Matrix<double>&, const Tensor4<double>&, const std::vector<double>&,
+    const Matrix<double>&, const Matrix<double>&,
+    const std::vector<std::pair<std::size_t, std::size_t>>&);
+template Matrix<std::complex<double>> jkOnlyHessianMatrix(
+    const Matrix<std::complex<double>>&, const Tensor4<std::complex<double>>&,
+    const std::vector<double>&, const Matrix<double>&, const Matrix<double>&,
+    const std::vector<std::pair<std::size_t, std::size_t>>&);
+
 template double jkOnlyHessianElement(const Matrix<double>& h, const Tensor4<double>& eri,
                                       const std::vector<double>& occupations,
                                       const Matrix<double>& two_rdm_h,
@@ -79,5 +117,84 @@ template std::complex<double> jkOnlyHessianElement(
     const Matrix<std::complex<double>>& h, const Tensor4<std::complex<double>>& eri,
     const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
     const Matrix<double>& two_rdm_x, std::size_t p, std::size_t q, std::size_t r, std::size_t s);
+
+template <typename T>
+T jkOnlyHessianElementImag(const Matrix<T>& h, const Tensor4<T>& eri,
+                            const std::vector<double>& occupations,
+                            const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x,
+                            std::size_t p, std::size_t q, std::size_t r, std::size_t s) {
+  checkJkOnlyArgs(h, eri, occupations, two_rdm_h, two_rdm_x, "jkOnlyHessianElementImag");
+  const std::size_t n = h.rows();
+  auto g = [&](std::size_t a, std::size_t b, std::size_t c, std::size_t d) {
+    return rawJkOnlyG(h, eri, occupations, two_rdm_h, two_rdm_x, n, a, b, c, d);
+  };
+  return -(g(p, q, r, s) + g(p, q, s, r) + g(q, p, r, s) + g(q, p, s, r));
+}
+
+template <typename T>
+T jkOnlyHessianElementMixed(const Matrix<T>& h, const Tensor4<T>& eri,
+                             const std::vector<double>& occupations,
+                             const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x,
+                             std::size_t p, std::size_t q, std::size_t r, std::size_t s) {
+  checkJkOnlyArgs(h, eri, occupations, two_rdm_h, two_rdm_x, "jkOnlyHessianElementMixed");
+  const std::size_t n = h.rows();
+  auto g = [&](std::size_t a, std::size_t b, std::size_t c, std::size_t d) {
+    return rawJkOnlyG(h, eri, occupations, two_rdm_h, two_rdm_x, n, a, b, c, d);
+  };
+  return T(0.0, 1.0) * (g(r, s, p, q) + g(r, s, q, p) - g(s, r, p, q) - g(s, r, q, p));
+}
+
+Matrix<double> jkOnlyJointHessianMatrix(
+    const Matrix<std::complex<double>>& h, const Tensor4<std::complex<double>>& eri,
+    const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
+    const Matrix<double>& two_rdm_x,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices) {
+  using C = std::complex<double>;
+  checkJkOnlyArgs(h, eri, occupations, two_rdm_h, two_rdm_x, "jkOnlyJointHessianMatrix");
+  const std::size_t n = h.rows();
+  const std::size_t n_pairs = pair_indices.size();
+  Matrix<double> hess(2 * n_pairs, 2 * n_pairs, 0.0);
+  const C im(0.0, 1.0);
+  // Each unordered (I,J), I <= J, owns four disjoint output positions.
+#pragma omp parallel for schedule(dynamic)
+  for (std::size_t big_i = 0; big_i < n_pairs; ++big_i) {
+    for (std::size_t big_j = big_i; big_j < n_pairs; ++big_j) {
+      const auto& [p, q] = pair_indices[big_i];
+      const auto& [r, s] = pair_indices[big_j];
+      auto g = [&](std::size_t a, std::size_t b, std::size_t c, std::size_t d) {
+        return rawJkOnlyG(h, eri, occupations, two_rdm_h, two_rdm_x, n, a, b, c, d);
+      };
+      const C g_pq_rs = g(p, q, r, s), g_pq_sr = g(p, q, s, r);
+      const C g_qp_rs = g(q, p, r, s), g_qp_sr = g(q, p, s, r);
+      const C g_rs_pq = g(r, s, p, q), g_rs_qp = g(r, s, q, p);
+      const C g_sr_pq = g(s, r, p, q), g_sr_qp = g(s, r, q, p);
+
+      const double tt_ij = (g_pq_rs - g_pq_sr - g_qp_rs + g_qp_sr).real();
+      const double tt_ji = (g_rs_pq - g_rs_qp - g_sr_pq + g_sr_qp).real();
+      const double yy_ij = -(g_pq_rs + g_pq_sr + g_qp_rs + g_qp_sr).real();
+      const double yy_ji = -(g_rs_pq + g_rs_qp + g_sr_pq + g_sr_qp).real();
+      const double ty_ij = 0.5 * (im * (g_pq_rs + g_pq_sr - g_qp_rs - g_qp_sr) +
+                                   im * (g_rs_pq - g_rs_qp + g_sr_pq - g_sr_qp)).real();
+      const double ty_ji = 0.5 * (im * (g_rs_pq + g_rs_qp - g_sr_pq - g_sr_qp) +
+                                   im * (g_pq_rs - g_pq_sr + g_qp_rs - g_qp_sr)).real();
+
+      hess(big_i, big_j) = hess(big_j, big_i) = 0.5 * (tt_ij + tt_ji);
+      hess(n_pairs + big_i, n_pairs + big_j) = hess(n_pairs + big_j, n_pairs + big_i) =
+          0.5 * (yy_ij + yy_ji);
+      hess(big_i, n_pairs + big_j) = hess(n_pairs + big_j, big_i) = ty_ij;
+      hess(big_j, n_pairs + big_i) = hess(n_pairs + big_i, big_j) = ty_ji;
+    }
+  }
+  return hess;
+}
+
+template std::complex<double> jkOnlyHessianElementImag(
+    const Matrix<std::complex<double>>&, const Tensor4<std::complex<double>>&,
+    const std::vector<double>&, const Matrix<double>&, const Matrix<double>&, std::size_t,
+    std::size_t, std::size_t, std::size_t);
+template std::complex<double> jkOnlyHessianElementMixed(
+    const Matrix<std::complex<double>>&, const Tensor4<std::complex<double>>&,
+    const std::vector<double>&, const Matrix<double>&, const Matrix<double>&, std::size_t,
+    std::size_t, std::size_t, std::size_t);
 
 }  // namespace rerdmft

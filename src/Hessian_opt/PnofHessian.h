@@ -1,6 +1,7 @@
 #ifndef RERDMFT_PNOFHESSIAN_H
 #define RERDMFT_PNOFHESSIAN_H
 
+#include <complex>
 #include <cstddef>
 #include <utility>
 #include <vector>
@@ -68,6 +69,55 @@ Matrix<T> pnofHessianMatrix(PnofFunctional functional, const Matrix<T>& h, const
                              const std::vector<double>& occupations, bool relativistic,
                              const Matrix<T>& fock,
                              const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);
+
+// CONVENTION NOTE (measured, main.cpp's pnofJointBlocksReport): off orbital
+// stationarity the bare G_pq,rs of Eq. 9 (used by pnofHessianElement and
+// the two functions below) is the TRANSPOSED sequential derivative
+// relative to jkOnlyHessianElement's: pnofHessianElement(pq,rs) and
+// pnofHessianElementImag(pq,rs) equal d/dkappa_pq of the gradient of pair
+// (r,s) (agreement ~1e-9 vs finite differences of the gradient),
+// pnofHessianElementMixed(pq,rs) equals d/dt_pq of the y-gradient of
+// pair (r,s). They coincide with the true symmetric second derivative for
+// pairs sharing no orbital index and at stationary points, but differ
+// from it by half the (gradient-proportional) asymmetry for shared-index
+// pairs at a non-stationary point (e.g. fixed HF orbitals with optimized
+// occupations). pnofJointHessianMatrix below sums both orders and is
+// convention independent -- USE IT (or symmetrize) for a Newton step.
+//
+// IMAGINARY-step (y = Im kappa_pq: kappa_pq=kappa_qp=iy) second derivative
+//   -(G_pq,rs+G_pq,sr+G_qp,rs+G_qp,sr)
+// and the MIXED real/imaginary one, hartreeExchangeHessianElementMixed's
+// own formula i(G_rs,pq+G_rs,qp-G_sr,pq-G_sr,qp), for a PNOF functional,
+// including the L1/L2 pair terms. Complex spinors only
+// (T = std::complex<double>). Thin wrappers over HartreeExchangeHessian.h,
+// exactly like pnofHessianElement (see the convention note above for
+// what they measure off stationarity).
+template <typename T>
+T pnofHessianElementImag(PnofFunctional functional, const Matrix<T>& h, const Tensor4<T>& eri,
+                          const std::vector<PnofGeminal>& geminals,
+                          const std::vector<double>& occupations, bool relativistic,
+                          const Matrix<T>& fock, std::size_t p, std::size_t q, std::size_t r,
+                          std::size_t s);
+template <typename T>
+T pnofHessianElementMixed(PnofFunctional functional, const Matrix<T>& h, const Tensor4<T>& eri,
+                           const std::vector<PnofGeminal>& geminals,
+                           const std::vector<double>& occupations, bool relativistic,
+                           const Matrix<T>& fock, std::size_t p, std::size_t q, std::size_t r,
+                           std::size_t s);
+
+// The TRUE symmetric Hessian of E over the joint real parameters
+// [t_I..., y_I...] (t_I=Re kappa_pq, y_I=Im kappa_pq, pairs p>q in
+// `pair_indices`) at these occupations -- the matrix a Newton-Raphson
+// orbital step needs -- for a PNOF functional; see
+// hartreeExchangeSymmetricJointHessianMatrix for the exact definition
+// (each block symmetrized from the same bare G_pq,rs, L1/L2 included).
+// `fock` = pnofFockMatrix(...)'s own output. Complex spinors only.
+Matrix<double> pnofJointHessianMatrix(
+    PnofFunctional functional, const Matrix<std::complex<double>>& h,
+    const Tensor4<std::complex<double>>& eri, const std::vector<PnofGeminal>& geminals,
+    const std::vector<double>& occupations, bool relativistic,
+    const Matrix<std::complex<double>>& fock,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);
 
 }  // namespace rerdmft
 

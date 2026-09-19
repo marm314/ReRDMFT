@@ -136,6 +136,22 @@ class Input {
   // it), so this is expected to show a genuine MINIMUM (no negative
   // eigenvalues), same as hessian_non_rel(), NOT a saddle point.
   bool hessian_x2c() const { return hessian_x2c_; }
+  // Optional; defaults to false when the HESSIAN_FUNCTIONAL keyword is
+  // absent. Only meaningful together with FUNCTIONAL (JK-only or PNOF,
+  // Occ_opt/): after the occupation-number optimization at fixed
+  // orbitals, builds the FULL real-step orbital-rotation Hessian of
+  // THAT functional (Hessian_opt/JkOnlyHessian.h's jkOnlyHessianMatrix
+  // for JK-only, PnofHessian.h's pnofHessianMatrix for PNOF) at the
+  // optimized occupations, symmetrizes it, diagonalizes it, and reports
+  // the number of negative/near-zero/positive eigenvalues -- the
+  // fractional-occupation analogue of hessian_non_rel()/hessian_x2c()/
+  // hessian_4c(), applied to whichever SCF paths (NON_REL, X2C,
+  // C4_DHF) run the FUNCTIONAL step. The point is stationary w.r.t. the
+  // occupations only (orbitals stay the converged HF/DHF ones), so the
+  // report also prints the orbital gradient norm and the Hessian's
+  // asymmetry. Expensive (O(n^5) build + O(n^6) diagonalization), hence
+  // its own opt-in keyword.
+  bool hessian_functional() const { return hessian_functional_; }
   // Optional; defaults to 0.4 when the MIXING keyword is absent. Linear
   // density-matrix mixing weight for the C4_DHF SCF loop (C4_DHF/C4_DHF.h):
   // the density fed into the next iteration's Fock build is
@@ -304,6 +320,7 @@ class Input {
   bool hessian_non_rel_ = false;
   bool hessian_4c_ = false;
   bool hessian_x2c_ = false;
+  bool hessian_functional_ = false;
   double mixing_ = 0.4;
   int max_iterations_ = 100;
   double energy_tolerance_ = 1e-8;

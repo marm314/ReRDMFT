@@ -182,6 +182,32 @@ void checkHartreeExchangeHessianDimensions(const Matrix<T>& h, const Tensor4<T>&
   }
 }
 
+// The full BARE G_pq,rs = H/X part (+ L1/L2 pair part when `pair_of` is
+// non-empty) that every Hessian combination below is built from.
+template <typename T>
+T rawFullBareG(const Matrix<T>& h, const Tensor4<T>& eri, const std::vector<double>& occupations,
+               const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x,
+               const Matrix<T>& fock, std::size_t n, std::size_t p, std::size_t q, std::size_t r,
+               std::size_t s, const std::vector<std::size_t>& pair_of,
+               const Matrix<double>& two_rdm_l1, const Matrix<double>& two_rdm_l2) {
+  T g = rawHartreeExchangeHessianTerm(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, p, q, r,
+                                       s);
+  if (!pair_of.empty()) g += rawL1L2HessianTerm(eri, pair_of, two_rdm_l1, two_rdm_l2, n, p, q, r, s);
+  return g;
+}
+
+void checkPairTerms(const std::vector<std::size_t>& pair_of, const Matrix<double>& two_rdm_l1,
+                     const Matrix<double>& two_rdm_l2, std::size_t n, const char* caller) {
+  if (pair_of.empty()) return;
+  if (pair_of.size() != n) {
+    throw std::runtime_error(std::string(caller) + ": pair_of size inconsistent with h");
+  }
+  if (two_rdm_l1.rows() != n || two_rdm_l1.cols() != n || two_rdm_l2.rows() != n ||
+      two_rdm_l2.cols() != n) {
+    throw std::runtime_error(std::string(caller) + ": two_rdm_l1/l2 dimensions inconsistent with h");
+  }
+}
+
 }  // namespace
 
 template <typename T>
@@ -233,22 +259,22 @@ T hartreeExchangeHessianElementImag(const Matrix<T>& h, const Tensor4<T>& eri,
                                      const std::vector<double>& occupations,
                                      const Matrix<double>& two_rdm_h,
                                      const Matrix<double>& two_rdm_x, const Matrix<T>& fock,
-                                     std::size_t p, std::size_t q, std::size_t r,
-                                     std::size_t s) {
+                                     std::size_t p, std::size_t q, std::size_t r, std::size_t s,
+                                     const std::vector<std::size_t>& pair_of,
+                                     const Matrix<double>& two_rdm_l1,
+                                     const Matrix<double>& two_rdm_l2) {
   const std::size_t n = h.rows();
   checkHartreeExchangeHessianDimensions(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, p, q,
                                          r, s, "hartreeExchangeHessianElementImag");
+  checkPairTerms(pair_of, two_rdm_l1, two_rdm_l2, n, "hartreeExchangeHessianElementImag");
+  auto bare = [&](std::size_t a, std::size_t b, std::size_t c, std::size_t d) {
+    return rawFullBareG(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, a, b, c, d, pair_of,
+                        two_rdm_l1, two_rdm_l2);
+  };
 
   // See GeneralizedHessian.h: ALL FOUR terms add, plus an overall minus
   // sign -- the same combination as generalizedOrbitalHessianElementImag.
-  return -(rawHartreeExchangeHessianTerm(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, p, q,
-                                          r, s) +
-           rawHartreeExchangeHessianTerm(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, p, q,
-                                          s, r) +
-           rawHartreeExchangeHessianTerm(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, q, p,
-                                          r, s) +
-           rawHartreeExchangeHessianTerm(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, q, p,
-                                          s, r));
+  return -(bare(p, q, r, s) + bare(p, q, s, r) + bare(q, p, r, s) + bare(q, p, s, r));
 }
 
 template double hartreeExchangeHessianElement(
@@ -263,18 +289,18 @@ template std::complex<double> hartreeExchangeHessianElement(
     const Matrix<double>& two_rdm_x, const Matrix<std::complex<double>>& fock, std::size_t p,
     std::size_t q, std::size_t r, std::size_t s, const std::vector<std::size_t>& pair_of,
     const Matrix<double>& two_rdm_l1, const Matrix<double>& two_rdm_l2);
-template double hartreeExchangeHessianElementImag(const Matrix<double>& h,
-                                                   const Tensor4<double>& eri,
-                                                   const std::vector<double>& occupations,
-                                                   const Matrix<double>& two_rdm_h,
-                                                   const Matrix<double>& two_rdm_x,
-                                                   const Matrix<double>& fock, std::size_t p,
-                                                   std::size_t q, std::size_t r, std::size_t s);
+template double hartreeExchangeHessianElementImag(
+    const Matrix<double>& h, const Tensor4<double>& eri, const std::vector<double>& occupations,
+    const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x, const Matrix<double>& fock,
+    std::size_t p, std::size_t q, std::size_t r, std::size_t s,
+    const std::vector<std::size_t>& pair_of, const Matrix<double>& two_rdm_l1,
+    const Matrix<double>& two_rdm_l2);
 template std::complex<double> hartreeExchangeHessianElementImag(
     const Matrix<std::complex<double>>& h, const Tensor4<std::complex<double>>& eri,
     const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
     const Matrix<double>& two_rdm_x, const Matrix<std::complex<double>>& fock, std::size_t p,
-    std::size_t q, std::size_t r, std::size_t s);
+    std::size_t q, std::size_t r, std::size_t s, const std::vector<std::size_t>& pair_of,
+    const Matrix<double>& two_rdm_l1, const Matrix<double>& two_rdm_l2);
 
 // See the header for the derivation and its numerical validation.
 // Writing kappa_pq=t+iy, kappa_qp=-t+iy (t on the FIRST pair) and
@@ -300,30 +326,31 @@ T hartreeExchangeHessianElementMixed(const Matrix<T>& h, const Tensor4<T>& eri,
                                       const std::vector<double>& occupations,
                                       const Matrix<double>& two_rdm_h,
                                       const Matrix<double>& two_rdm_x, const Matrix<T>& fock,
-                                      std::size_t p, std::size_t q, std::size_t r,
-                                      std::size_t s) {
+                                      std::size_t p, std::size_t q, std::size_t r, std::size_t s,
+                                      const std::vector<std::size_t>& pair_of,
+                                      const Matrix<double>& two_rdm_l1,
+                                      const Matrix<double>& two_rdm_l2) {
   const std::size_t n = h.rows();
   checkHartreeExchangeHessianDimensions(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, p, q,
                                          r, s, "hartreeExchangeHessianElementMixed");
+  checkPairTerms(pair_of, two_rdm_l1, two_rdm_l2, n, "hartreeExchangeHessianElementMixed");
+  auto bare = [&](std::size_t a, std::size_t b, std::size_t c, std::size_t d) {
+    return rawFullBareG(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, a, b, c, d, pair_of,
+                        two_rdm_l1, two_rdm_l2);
+  };
 
   // (r,s), not (p,q), is the pair whose order gets flipped for the
-  // sign pattern -- see the comment above.
-  return T(0.0, 1.0) *
-         (rawHartreeExchangeHessianTerm(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, r, s,
-                                         p, q) +
-          rawHartreeExchangeHessianTerm(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, r, s,
-                                         q, p) -
-          rawHartreeExchangeHessianTerm(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, s, r,
-                                         p, q) -
-          rawHartreeExchangeHessianTerm(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, s, r,
-                                         q, p));
+  // sign pattern -- see the comment above. In sequential terms this is
+  // SS_ty(rs;pq) = d/dy_pq of the t-component gradient of pair (r,s).
+  return T(0.0, 1.0) * (bare(r, s, p, q) + bare(r, s, q, p) - bare(s, r, p, q) - bare(s, r, q, p));
 }
 
 template std::complex<double> hartreeExchangeHessianElementMixed(
     const Matrix<std::complex<double>>& h, const Tensor4<std::complex<double>>& eri,
     const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
     const Matrix<double>& two_rdm_x, const Matrix<std::complex<double>>& fock, std::size_t p,
-    std::size_t q, std::size_t r, std::size_t s);
+    std::size_t q, std::size_t r, std::size_t s, const std::vector<std::size_t>& pair_of,
+    const Matrix<double>& two_rdm_l1, const Matrix<double>& two_rdm_l2);
 
 std::vector<std::pair<std::size_t, std::size_t>> hessianPairIndices(std::size_t n) {
   std::vector<std::pair<std::size_t, std::size_t>> pairs;
@@ -401,6 +428,57 @@ Matrix<double> hartreeExchangeJointHessianMatrix(
       hess(n_pairs + big_i, n_pairs + big_j) = yy.real();
       hess(big_i, n_pairs + big_j) = ty.real();
       hess(n_pairs + big_j, big_i) = ty.real();
+    }
+  }
+  return hess;
+}
+
+Matrix<double> hartreeExchangeSymmetricJointHessianMatrix(
+    const Matrix<std::complex<double>>& h, const Tensor4<std::complex<double>>& eri,
+    const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
+    const Matrix<double>& two_rdm_x, const Matrix<std::complex<double>>& fock,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices,
+    const std::vector<std::size_t>& pair_of, const Matrix<double>& two_rdm_l1,
+    const Matrix<double>& two_rdm_l2) {
+  using C = std::complex<double>;
+  const std::size_t n = h.rows();
+  const std::size_t n_pairs = pair_indices.size();
+  checkHartreeExchangeHessianDimensions(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, 0, 0,
+                                         0, 0, "hartreeExchangeSymmetricJointHessianMatrix");
+  checkPairTerms(pair_of, two_rdm_l1, two_rdm_l2, n, "hartreeExchangeSymmetricJointHessianMatrix");
+  Matrix<double> hess(2 * n_pairs, 2 * n_pairs, 0.0);
+  const C im(0.0, 1.0);
+  // Each unordered (I,J), I <= J, owns four disjoint output positions.
+#pragma omp parallel for schedule(dynamic)
+  for (std::size_t big_i = 0; big_i < n_pairs; ++big_i) {
+    for (std::size_t big_j = big_i; big_j < n_pairs; ++big_j) {
+      const auto& [p, q] = pair_indices[big_i];
+      const auto& [r, s] = pair_indices[big_j];
+      auto bare = [&](std::size_t a, std::size_t b, std::size_t c, std::size_t d) {
+        return rawFullBareG(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, a, b, c, d,
+                            pair_of, two_rdm_l1, two_rdm_l2);
+      };
+      const C g_pq_rs = bare(p, q, r, s), g_pq_sr = bare(p, q, s, r);
+      const C g_qp_rs = bare(q, p, r, s), g_qp_sr = bare(q, p, s, r);
+      const C g_rs_pq = bare(r, s, p, q), g_rs_qp = bare(r, s, q, p);
+      const C g_sr_pq = bare(s, r, p, q), g_sr_qp = bare(s, r, q, p);
+
+      const double tt_ij = (g_pq_rs - g_pq_sr - g_qp_rs + g_qp_sr).real();
+      const double tt_ji = (g_rs_pq - g_rs_qp - g_sr_pq + g_sr_qp).real();
+      const double yy_ij = -(g_pq_rs + g_pq_sr + g_qp_rs + g_qp_sr).real();
+      const double yy_ji = -(g_rs_pq + g_rs_qp + g_sr_pq + g_sr_qp).real();
+      // mixed(t_I, y_J) = (1/2)[SS_ty(I;J) + SS_yt(J;I)]
+      const double ty_ij = 0.5 * (im * (g_pq_rs + g_pq_sr - g_qp_rs - g_qp_sr) +
+                                   im * (g_rs_pq - g_rs_qp + g_sr_pq - g_sr_qp)).real();
+      // mixed(t_J, y_I) = (1/2)[SS_ty(J;I) + SS_yt(I;J)]
+      const double ty_ji = 0.5 * (im * (g_rs_pq + g_rs_qp - g_sr_pq - g_sr_qp) +
+                                   im * (g_pq_rs - g_pq_sr + g_qp_rs - g_qp_sr)).real();
+
+      hess(big_i, big_j) = hess(big_j, big_i) = 0.5 * (tt_ij + tt_ji);
+      hess(n_pairs + big_i, n_pairs + big_j) = hess(n_pairs + big_j, n_pairs + big_i) =
+          0.5 * (yy_ij + yy_ji);
+      hess(big_i, n_pairs + big_j) = hess(n_pairs + big_j, big_i) = ty_ij;
+      hess(big_j, n_pairs + big_i) = hess(n_pairs + big_i, big_j) = ty_ji;
     }
   }
   return hess;

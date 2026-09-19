@@ -1,6 +1,12 @@
 #ifndef RERDMFT_ORBITALGRADIENT_H
 #define RERDMFT_ORBITALGRADIENT_H
 
+#include <utility>
+
+#include <vector>
+
+#include <cstddef>
+
 #include "Matrix.h"
 
 namespace rerdmft {
@@ -39,6 +45,19 @@ namespace rerdmft {
 // provided in the .cpp. `fock` must be square.
 template <typename T>
 Matrix<T> orbitalGradient(const Matrix<T>& fock);
+
+// The joint REAL gradient vector matching the parameter ordering of the
+// joint Hessian matrices (jkOnlyJointHessianMatrix, pnofJointHessianMatrix,
+// hartreeExchangeSymmetricJointHessianMatrix): [dE/dt_I..., dE/dy_I...] over
+// `pair_indices` (pairs p>q), with t_I = Re kappa_pq (kappa_pq=+t,
+// kappa_qp=-t) and y_I = Im kappa_pq (kappa_pq=kappa_qp=iy). From the
+// (p>=q-stored) complex `gradient` of orbitalGradient: dE/dt = Re g_pq and
+// dE/dy = +Im g_pq (verified against finite differences of the energy,
+// see main.cpp's jointBlocksValidationReport). For T = double there is
+// no y direction and only the n_pairs real entries are returned.
+template <typename T>
+std::vector<double> jointOrbitalGradient(
+    const Matrix<T>& gradient, const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);
 
 }  // namespace rerdmft
 

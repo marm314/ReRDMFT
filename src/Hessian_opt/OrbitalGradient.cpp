@@ -1,5 +1,7 @@
 #include "OrbitalGradient.h"
 
+#include <type_traits>
+
 #include <complex>
 #include <cstddef>
 #include <stdexcept>
@@ -42,5 +44,27 @@ Matrix<T> orbitalGradient(const Matrix<T>& fock) {
 
 template Matrix<double> orbitalGradient(const Matrix<double>& fock);
 template Matrix<std::complex<double>> orbitalGradient(const Matrix<std::complex<double>>& fock);
+
+template <typename T>
+std::vector<double> jointOrbitalGradient(
+    const Matrix<T>& gradient,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices) {
+  const std::size_t n_pairs = pair_indices.size();
+  const bool has_imag = !std::is_same_v<T, double>;
+  std::vector<double> result(has_imag ? 2 * n_pairs : n_pairs, 0.0);
+  for (std::size_t k = 0; k < n_pairs; ++k) {
+    const auto [p, q] = pair_indices[k];
+    if (p < q) throw std::runtime_error("jointOrbitalGradient: pairs must have p > q");
+    const std::complex<double> g(gradient(p, q));
+    result[k] = g.real();
+    if (has_imag) result[n_pairs + k] = g.imag();
+  }
+  return result;
+}
+
+template std::vector<double> jointOrbitalGradient(
+    const Matrix<double>&, const std::vector<std::pair<std::size_t, std::size_t>>&);
+template std::vector<double> jointOrbitalGradient(
+    const Matrix<std::complex<double>>&, const std::vector<std::pair<std::size_t, std::size_t>>&);
 
 }  // namespace rerdmft

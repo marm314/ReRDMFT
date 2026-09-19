@@ -1,6 +1,7 @@
 #ifndef RERDMFT_HARTREEEXCHANGEHESSIAN_H
 #define RERDMFT_HARTREEEXCHANGEHESSIAN_H
 
+#include <complex>
 #include <cstddef>
 #include <utility>
 #include <vector>
@@ -87,10 +88,12 @@ namespace rerdmft {
 // GeneralizedHessian.h's generalizedOrbitalHessianElementImag (the
 // IMAGINARY-step direction, only meaningful for T =
 // std::complex<double> -- see that header for the derivation and the
-// same "compiles for T = double but not meaningful there" caveat).
-// Does NOT yet have an L1/L2 extension (not derived/needed yet -- ask
-// before assuming it is safe to use with a nonzero `two_rdm_l1`/
-// `two_rdm_l2`, it will silently omit their contribution).
+// same "compiles for T = double but not meaningful there" caveat). It
+// and the Mixed element below now ALSO accept the optional
+// `pair_of`/`two_rdm_l1`/`two_rdm_l2` (all three blocks are fixed sign
+// combinations of the same bare G_pq,rs, whose L1/L2 part is
+// rawL1L2HessianTerm); validated for PNOF against finite differences of
+// the gradient (see main.cpp's pnofJointBlocksReport).
 //
 // Works for either a real (T = double) or complex (T = std::complex
 // <double>) orbital basis -- explicit instantiations for both are
@@ -106,12 +109,20 @@ T hartreeExchangeHessianElement(const Matrix<T>& h, const Tensor4<T>& eri,
                                  const Matrix<double>& two_rdm_l1 = Matrix<double>(),
                                  const Matrix<double>& two_rdm_l2 = Matrix<double>());
 
+// Optional `pair_of`/`two_rdm_l1`/`two_rdm_l2` (default empty == unused),
+// same meaning as for hartreeExchangeHessianElement: they add the PNOF
+// pair-term contribution to the BARE G_pq,rs that both this function and
+// the Mixed one below combine (see rawL1L2HessianTerm in the .cpp).
+// Required whenever the 2-RDM has nonzero L1/L2 entries.
 template <typename T>
 T hartreeExchangeHessianElementImag(const Matrix<T>& h, const Tensor4<T>& eri,
                                      const std::vector<double>& occupations,
                                      const Matrix<double>& two_rdm_h,
                                      const Matrix<double>& two_rdm_x, const Matrix<T>& fock,
-                                     std::size_t p, std::size_t q, std::size_t r, std::size_t s);
+                                     std::size_t p, std::size_t q, std::size_t r, std::size_t s,
+                                     const std::vector<std::size_t>& pair_of = {},
+                                     const Matrix<double>& two_rdm_l1 = Matrix<double>(),
+                                     const Matrix<double>& two_rdm_l2 = Matrix<double>());
 
 // The MIXED real/imaginary second derivative,
 //   Hess^{ty}_pq,rs = d^2E/dkappa_pq dy_rs
@@ -159,7 +170,38 @@ T hartreeExchangeHessianElementMixed(const Matrix<T>& h, const Tensor4<T>& eri,
                                       const std::vector<double>& occupations,
                                       const Matrix<double>& two_rdm_h,
                                       const Matrix<double>& two_rdm_x, const Matrix<T>& fock,
-                                      std::size_t p, std::size_t q, std::size_t r, std::size_t s);
+                                      std::size_t p, std::size_t q, std::size_t r, std::size_t s,
+                                      const std::vector<std::size_t>& pair_of = {},
+                                      const Matrix<double>& two_rdm_l1 = Matrix<double>(),
+                                      const Matrix<double>& two_rdm_l2 = Matrix<double>());
+
+// The TRUE (symmetric) second-derivative matrix of the energy with
+// respect to the real orbital-rotation parameters [t_0..t_{n-1},
+// y_0..y_{n-1}] (t_I = Re kappa_pq: kappa_pq=+t, kappa_qp=-t; y_I =
+// Im kappa_pq: kappa_pq=kappa_qp=iy; pairs p>q in `pair_indices`), i.e.
+// the Hessian of E(exp(-kappa)) at kappa=0 in these coordinates -- what
+// a Newton-Raphson step needs. Off orbital stationarity the bare
+// G_pq,rs combinations above are NOT symmetric (they are SEQUENTIAL
+// derivatives, d/dkappa_rs of the gradient measured after rotating), so
+// this symmetrizes each block from the same bare G (with its L1/L2 part
+// when `pair_of`/`two_rdm_l1`/`two_rdm_l2` are given):
+//   tt(I,J) = (1/2)[SS_tt(I;J)+SS_tt(J;I)],  SS_tt(pq;rs) = G_pq,rs-G_pq,sr-G_qp,rs+G_qp,sr
+//   yy(I,J) = (1/2)[SS_yy(I;J)+SS_yy(J;I)],  SS_yy(pq;rs) = -(G_pq,rs+G_pq,sr+G_qp,rs+G_qp,sr)
+//   ty(I,J) = (1/2)[SS_ty(I;J)+SS_yt(J;I)],  SS_ty(pq;rs) = i(G_pq,rs+G_pq,sr-G_qp,rs-G_qp,sr),
+//                                            SS_yt(pq;rs) = i(G_pq,rs-G_pq,sr+G_qp,rs-G_qp,sr)
+// (SS_ab(I;J) = d/da_J of the b-component gradient of pair I). Returned
+// as a real symmetric 2*n_pairs matrix (real parts; the imaginary parts
+// are roundoff for physical input). Complex orbitals only. O(n^5).
+// Independent of hartreeExchangeJointHessianMatrix below, which keeps its
+// original (unsymmetrized, converged-SCF-oriented) convention.
+Matrix<double> hartreeExchangeSymmetricJointHessianMatrix(
+    const Matrix<std::complex<double>>& h, const Tensor4<std::complex<double>>& eri,
+    const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
+    const Matrix<double>& two_rdm_x, const Matrix<std::complex<double>>& fock,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices,
+    const std::vector<std::size_t>& pair_of = {},
+    const Matrix<double>& two_rdm_l1 = Matrix<double>(),
+    const Matrix<double>& two_rdm_l2 = Matrix<double>());
 
 // The independent real-step orbital-rotation parameters are exactly
 // the (p,q) pairs with p > q (see OrbitalGradient.h) -- this lists them

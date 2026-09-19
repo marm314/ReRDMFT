@@ -1,0 +1,25 @@
+# Example ReRDMFT input file: LiH, X2C spinors, GNOF (two coupling
+# subspaces, see lih_X2C_gnof_debug.inp), DEBUG TRUE + VERBOSE 1: the PNOF
+# counterpart of water_X2C_muller_joint_blocks.inp -- validates the
+# real-real, imaginary-imaginary and real-imaginary orbital-rotation
+# Hessian blocks (Hessian_opt/PnofHessian.h, L1/L2 pair terms included),
+# the joint gradient vector and the joint symmetric Hessian over [t; y]
+# against finite differences of the gradient and of the energy, at
+# generic fractional frontier occupations and at the optimized ones.
+# (The same input with C4_SPINOR TRUE instead of X2C takes ~1 minute:
+# many integral rotations at the larger 4-component basis.)
+NELEC 4
+BASIS lih-6-31g.gbs
+NON_RELATIVISTIC TRUE
+X2C TRUE
+DEBUG TRUE
+VERBOSE 1
+FUNCTIONAL GNOF
+PNOF_SUBSPACES 2
+PNOF_COUPLING 2
+HESSIAN_FUNCTIONAL TRUE
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.594900
+END
