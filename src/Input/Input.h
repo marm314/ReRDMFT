@@ -1,6 +1,7 @@
 #ifndef RERDMFT_INPUT_H
 #define RERDMFT_INPUT_H
 
+#include <iosfwd>
 #include <string>
 #include <vector>
 
@@ -306,6 +307,12 @@ class Input {
   // handling at all (gamma already guarantees sum(n)=1 and 0<n<1 for any
   // real angle) and has empirically converged at least as reliably.
   bool sqp_pnof_occ() const { return sqp_pnof_occ_; }
+
+  // Prints the current value of EVERY input variable (one per line, after
+  // the geometry), so a run's output records exactly what was in effect.
+  // MAINTENANCE: whenever a new input keyword/member is added to Input,
+  // add it to Input::print in Input.cpp too.
+  void print(std::ostream& out) const;
 
  private:
   int n_electrons_ = 0;

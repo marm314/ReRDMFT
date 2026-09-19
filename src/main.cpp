@@ -4074,6 +4074,8 @@ int main(int argc, char** argv) {
                << atom.x << "  " << std::setw(12) << atom.y << "  "
                << std::setw(12) << atom.z << "\n";
   }
+  input.print(std::cout);
+  std::cout << std::fixed << std::setprecision(6);
 
   const std::size_t n_large = spinor_basis.nLarge();
   const std::size_t n_small = spinor_basis.nSmall();

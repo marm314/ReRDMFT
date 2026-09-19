@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <fstream>
+#include <iomanip>
+#include <ostream>
 #include <sstream>
 #include <stdexcept>
 #include <vector>
@@ -283,6 +285,48 @@ void Input::read(const std::string& filename) {
   if (geometry_.empty()) {
     throw std::runtime_error("missing or empty GEOMETRY block");
   }
+}
+
+void Input::print(std::ostream& out) const {
+  const std::ios_base::fmtflags saved_flags = out.flags();
+  const std::streamsize saved_precision = out.precision();
+  out << std::defaultfloat << std::setprecision(10);
+  const auto flag = [](bool value) { return value ? "TRUE" : "FALSE"; };
+  const auto line = [&out](const char* name) -> std::ostream& {
+    return out << "  " << std::left << std::setw(22) << name << std::right << " ";
+  };
+
+  out << "Input variables (current status):\n";
+  line("NELEC") << n_electrons_ << "\n";
+  line("BASIS") << basis_file_ << "\n";
+  line("DEBUG") << flag(debug_) << "\n";
+  line("VERBOSE") << verbose_ << "\n";
+  line("NON_RELATIVISTIC") << flag(non_relativistic_) << "\n";
+  line("C4_SPINOR") << flag(c4_spinor_) << "\n";
+  line("X2C") << flag(x2c_) << "\n";
+  line("HESSIAN_NON_REL") << flag(hessian_non_rel_) << "\n";
+  line("HESSIAN_4C") << flag(hessian_4c_) << "\n";
+  line("HESSIAN_X2C") << flag(hessian_x2c_) << "\n";
+  line("HESSIAN_FUNCTIONAL") << flag(hessian_functional_) << "\n";
+  line("MIXING") << mixing_ << "\n";
+  line("MAX_ITERATIONS") << max_iterations_ << "\n";
+  line("ENERGY_TOLERANCE") << energy_tolerance_ << "\n";
+  line("DENSITY_TOLERANCE") << density_tolerance_ << "\n";
+  line("CHOLESKY") << flag(cholesky_) << "\n";
+  line("CHOLESKY_THRESHOLD") << cholesky_threshold_ << "\n";
+  line("CACHE_INTEGRALS") << flag(cache_integrals_) << "\n";
+  line("CACHE_DIR") << cache_dir_ << "\n";
+  line("FUNCTIONAL") << functional_ << (has_functional_ ? "" : " (default; not set in input)")
+                      << "\n";
+  line("TEMPERATURE") << temperature_ << "\n";
+  line("OCCUPATION_INIT") << occupation_init_ << "\n";
+  line("PNOF_SUBSPACES") << pnof_subspaces_ << "\n";
+  line("PNOF_COUPLING") << pnof_coupling_ << "\n";
+  line("SQP_PNOF_OCC") << flag(sqp_pnof_occ_) << "\n";
+  line("SPEED_OF_LIGHT") << speed_of_light_ << "\n";
+
+  out.flags(saved_flags);
+  out.precision(saved_precision);
 }
 
 }  // namespace rerdmft
