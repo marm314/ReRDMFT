@@ -118,6 +118,15 @@ $(GIT_VERSION_HEADER): force
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
+# Standalone unit test of Utils/NEO (tests/test_neo.cpp): needs only NEO and
+# the LAPACK wrappers, no integrals/basis code. Run: make test_neo LIBCINT=...
+.PHONY: test_neo
+test_neo: $(BUILD_DIR)/test_neo
+	./$(BUILD_DIR)/test_neo
+
+$(BUILD_DIR)/test_neo: tests/test_neo.cpp $(BUILD_DIR)/NEO.o $(BUILD_DIR)/LinearAlgebra.o | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
 clean:
 	rm -rf $(BUILD_DIR) $(BIN) $(GIT_VERSION_HEADER)
 # ($(BUILD_DIR) already holds the .d files alongside their .o's, so the
