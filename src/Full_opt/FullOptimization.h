@@ -70,15 +70,21 @@ struct RdmftModel {
   // shows the rotated integrals still have the pairing symmetry.
   std::function<double(const Matrix<T>&, const Tensor4<T>&, const std::vector<double>&)>
       symmetric_shortcut_energy;
+  // Prints a full occupation vector in the SAME format main.cpp uses right after the
+  // first occupation optimization (JK_only: index/occupation table, two Kramers columns
+  // for X2C; PNOF: one line per geminal, core frozen at 1). Called after the macro loop.
+  std::function<void(const std::vector<double>&, std::ostream&)> print_occupations;
 };
 
 // JK_only functionals (Occ_opt/JK_only.h): SQP over the active occupations
 // with sum(n) = n_electrons (Occ_opt/OccupationEnergy.h + Utils/SQP.h),
 // window [n_inactive_below, n_inactive_below + n_active).
+// `two_columns`: print the occupations as even/odd Kramers pairs side by side (X2C),
+// otherwise one orbital per line (NON_REL).
 template <typename T>
 RdmftModel<T> makeJkOnlyModel(JkFunctional functional, std::size_t f_l, double n_electrons,
                               std::size_t n_total, std::size_t n_inactive_below,
-                              std::size_t n_active);
+                              std::size_t n_active, bool two_columns = false);
 
 // PNOF functionals (Occ_opt/PNOFs.h): `geminals`/`n_core` as built by
 // buildPnofGeminals (indices already converted to actual array indices);

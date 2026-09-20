@@ -2541,7 +2541,8 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
       } else {
         try {
           const auto model = rerdmft::makeJkOnlyModel<T>(functional, f_l, n_electrons, n_total,
-                                                          n_inactive_below, n_active);
+                                                          n_inactive_below, n_active,
+                                                          /*two_columns=*/label == "X2C_HF");
           rerdmft::runFullOptimization<T>(h, eri, embed(sqp_result.x), sqp_result.x, model, full_opt,
                                           /*kramers_restricted=*/label == "X2C_HF",
                                           nuclear_repulsion_energy, out,

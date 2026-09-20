@@ -118,8 +118,39 @@ template RotatedIntegrals<std::complex<double>> rotateIntegralsExact(
 template <typename T>
 RdmftModel<T> makeJkOnlyModel(JkFunctional functional, std::size_t f_l, double n_electrons,
                               std::size_t n_total, std::size_t n_inactive_below,
-                              std::size_t n_active) {
+                              std::size_t n_active, bool two_columns) {
   RdmftModel<T> model;
+  // Same layout as main.cpp's "Optimized occupation numbers" table.
+  model.print_occupations = [=](const std::vector<double>& occ, std::ostream& out) {
+    const auto round5 = [](double x) { return std::round(x * 1e5) / 1e5; };
+    out << "    Optimized occupation numbers (index: n_p, global index into the full "
+           "orbital/spinor space, fixed 5 decimals):\n";
+    out << std::fixed << std::setprecision(5);
+    double displayed_sum = 0.0;
+    if (two_columns) {
+      for (std::size_t i = 0; i + 1 < n_active; i += 2) {
+        const std::size_t g0 = n_inactive_below + i, g1 = g0 + 1;
+        out << "      " << std::setw(6) << g0 << std::setw(12) << occ[g0] << std::setw(10) << g1
+            << std::setw(12) << occ[g1] << "\n";
+        displayed_sum += round5(occ[g0]) + round5(occ[g1]);
+      }
+      if (n_active % 2 == 1) {
+        const std::size_t g = n_inactive_below + n_active - 1;
+        out << "      " << std::setw(6) << g << std::setw(12) << occ[g] << "\n";
+        displayed_sum += round5(occ[g]);
+      }
+    } else {
+      for (std::size_t i = 0; i < n_active; ++i) {
+        const std::size_t g = n_inactive_below + i;
+        out << "      " << std::setw(6) << g << std::setw(12) << occ[g] << "\n";
+        displayed_sum += round5(occ[g]);
+      }
+    }
+    out << std::defaultfloat << std::setprecision(6);
+    out << "    Sum of the occupation numbers shown above, at that same 5-decimal precision "
+           "(expect close to "
+        << n_electrons << "): " << std::setprecision(10) << displayed_sum << std::setprecision(6) << "\n";
+  };
   model.energy = [=](const Matrix<T>& h, const Tensor4<T>& eri, const std::vector<double>& occ) {
     return jkFunctionalEnergy(h, eri, occ, functional, f_l);
   };
@@ -167,6 +198,22 @@ RdmftModel<T> makePnofModel(PnofFunctional functional, std::vector<PnofGeminal> 
                             bool relativistic, bool sqp_occupations, std::size_t n_total) {
   RdmftModel<T> model;
   const std::size_t n_frontier = geminals.size() - n_core;
+  // Same layout as main.cpp's "Optimized geminal occupation numbers" listing.
+  model.print_occupations = [=](const std::vector<double>& occ, std::ostream& out) {
+    out << "    Optimized geminal occupation numbers (n_p, both members of each Kramers/spin "
+           "pair share this value; fixed 5 decimals):\n";
+    out << std::fixed << std::setprecision(5);
+    for (std::size_t a = 0; a < n_core; ++a) {
+      out << "      core        geminal (" << geminals[a].i << "," << geminals[a].ibar
+          << "): n = 1.00000 (frozen)\n";
+    }
+    for (std::size_t a = n_core; a < geminals.size(); ++a) {
+      out << "      subspace " << std::setw(2) << geminals[a].subspace_id << " "
+          << (geminals[a].is_principal ? "principal" : "virtual  ") << " geminal (" << geminals[a].i
+          << "," << geminals[a].ibar << "): n = " << occ[geminals[a].i] << "\n";
+    }
+    out << std::defaultfloat << std::setprecision(6);
+  };
   auto embed = [=](const std::vector<double>& frontier) {
     std::vector<double> full(n_total, 0.0);
     for (std::size_t a = 0; a < n_core; ++a) full[geminals[a].i] = full[geminals[a].ibar] = 1.0;
@@ -625,6 +672,10 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Tensor4<T>& eri,
   log << "    Final total energy: " << std::setprecision(10) << e_elec + nuclear_repulsion_energy << std::setprecision(6)
       << " Hartree (" << std::scientific << std::setprecision(3) << e_elec - e_start << std::defaultfloat
       << std::setprecision(6) << " Hartree relative to the occupation-only optimum)\n";
+  if (model.print_occupations) {
+    log << "  Occupation numbers after the macro-iteration loop:\n";
+    model.print_occupations(occ, log);
+  }
   if (n_occ_unconverged > 0) {
     log << "    Note: the occupation optimizer reported no convergence in " << n_occ_unconverged
         << " of the macro-iterations (its own iteration limit).\n";
@@ -704,9 +755,9 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Tensor4<T>& eri,
 }
 
 template RdmftModel<double> makeJkOnlyModel<double>(JkFunctional, std::size_t, double, std::size_t,
-                                                    std::size_t, std::size_t);
+                                                    std::size_t, std::size_t, bool);
 template RdmftModel<std::complex<double>> makeJkOnlyModel<std::complex<double>>(
-    JkFunctional, std::size_t, double, std::size_t, std::size_t, std::size_t);
+    JkFunctional, std::size_t, double, std::size_t, std::size_t, std::size_t, bool);
 template RdmftModel<double> makePnofModel<double>(PnofFunctional, std::vector<PnofGeminal>,
                                                   std::size_t, int, int, bool, bool, std::size_t);
 template RdmftModel<std::complex<double>> makePnofModel<std::complex<double>>(
