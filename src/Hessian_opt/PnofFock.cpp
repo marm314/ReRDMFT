@@ -1,3 +1,4 @@
+#include "CholeskyEri.h"
 #include "PnofFock.h"
 
 #include <array>
@@ -135,8 +136,8 @@ std::vector<std::size_t> buildPnofPairOf(const std::vector<PnofGeminal>& geminal
   return pair_of;
 }
 
-template <typename T>
-Matrix<T> pnofFockMatrix(PnofFunctional functional, const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri>
+Matrix<T> pnofFockMatrix(PnofFunctional functional, const Matrix<T>& h, const Eri& eri,
                           const std::vector<PnofGeminal>& geminals,
                           const std::vector<double>& occupations, bool relativistic) {
   const std::size_t n = h.rows();
@@ -149,8 +150,14 @@ Matrix<T> pnofFockMatrix(PnofFunctional functional, const Matrix<T>& h, const Te
 template Matrix<double> pnofFockMatrix(PnofFunctional, const Matrix<double>&,
                                         const Tensor4<double>&, const std::vector<PnofGeminal>&,
                                         const std::vector<double>&, bool);
+template Matrix<double> pnofFockMatrix(PnofFunctional, const Matrix<double>&,
+                                        const CholeskyEri<double>&, const std::vector<PnofGeminal>&,
+                                        const std::vector<double>&, bool);
 template Matrix<std::complex<double>> pnofFockMatrix(
     PnofFunctional, const Matrix<std::complex<double>>&, const Tensor4<std::complex<double>>&,
+    const std::vector<PnofGeminal>&, const std::vector<double>&, bool);
+template Matrix<std::complex<double>> pnofFockMatrix(
+    PnofFunctional, const Matrix<std::complex<double>>&, const CholeskyEri<std::complex<double>>&,
     const std::vector<PnofGeminal>&, const std::vector<double>&, bool);
 
 }  // namespace rerdmft

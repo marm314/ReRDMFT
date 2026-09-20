@@ -1,3 +1,4 @@
+#include "CholeskyEri.h"
 #include "JkOnlyFock.h"
 
 #include <complex>
@@ -54,8 +55,8 @@ double conjugateValue(double x) { return x; }
 std::complex<double> conjugateValue(std::complex<double> x) { return std::conj(x); }
 }  // namespace
 
-template <typename T>
-Matrix<T> jkOnlyOrbitalGradient(const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri>
+Matrix<T> jkOnlyOrbitalGradient(const Matrix<T>& h, const Eri& eri,
                                  const std::vector<double>& occupations,
                                  const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x) {
   const std::size_t n = h.rows();
@@ -89,8 +90,14 @@ Matrix<T> jkOnlyOrbitalGradient(const Matrix<T>& h, const Tensor4<T>& eri,
 template Matrix<double> jkOnlyOrbitalGradient(const Matrix<double>&, const Tensor4<double>&,
                                                const std::vector<double>&, const Matrix<double>&,
                                                const Matrix<double>&);
+template Matrix<double> jkOnlyOrbitalGradient(const Matrix<double>&, const CholeskyEri<double>&,
+                                               const std::vector<double>&, const Matrix<double>&,
+                                               const Matrix<double>&);
 template Matrix<std::complex<double>> jkOnlyOrbitalGradient(
     const Matrix<std::complex<double>>&, const Tensor4<std::complex<double>>&,
+    const std::vector<double>&, const Matrix<double>&, const Matrix<double>&);
+template Matrix<std::complex<double>> jkOnlyOrbitalGradient(
+    const Matrix<std::complex<double>>&, const CholeskyEri<std::complex<double>>&,
     const std::vector<double>&, const Matrix<double>&, const Matrix<double>&);
 
 template <typename T>

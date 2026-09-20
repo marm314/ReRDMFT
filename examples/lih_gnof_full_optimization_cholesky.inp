@@ -1,0 +1,21 @@
+# Example ReRDMFT input file: LiH, 6-31G, GNOF (two coupling subspaces), FULL_OPTIMIZATION with
+# CHOLESKY TRUE: the macro-iteration loop runs on Cholesky vectors of the two-electron integrals
+# (Utils/CholeskyEri.h) -- ADAM orbital rotations act on the vectors (O(Nchol n^3)), integral
+# elements are evaluated on demand, no dense n^4 tensor is kept in the loop. Compare
+# lih_gnof_full_optimization.inp (same system, dense integrals): the converged energies agree to
+# the decomposition threshold (CHOLESKY_THRESHOLD, default 1e-10). NON_REL and X2C run in one
+# execution.
+NELEC 4
+BASIS lih-6-31g.gbs
+NON_RELATIVISTIC TRUE
+X2C TRUE
+FUNCTIONAL GNOF
+PNOF_SUBSPACES 2
+PNOF_COUPLING 2
+CHOLESKY TRUE
+FULL_OPTIMIZATION TRUE
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.594900
+END

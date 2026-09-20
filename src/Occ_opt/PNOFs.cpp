@@ -1,3 +1,4 @@
+#include "CholeskyEri.h"
 #include "PNOFs.h"
 
 #include <cmath>
@@ -262,9 +263,9 @@ PnofTwoRdm buildPnofTwoRdm(PnofFunctional functional, const std::vector<PnofGemi
   return result;
 }
 
-template <typename T>
+template <typename T, typename Eri>
 double pnofElectronicEnergy(PnofFunctional /*functional*/, const Matrix<T>& h,
-                             const Tensor4<T>& eri, const std::vector<double>& occupations,
+                             const Eri& eri, const std::vector<double>& occupations,
                              const std::vector<PnofGeminal>& geminals, const PnofTwoRdm& two_rdm,
                              bool relativistic) {
   const std::size_t n = geminals.size();
@@ -454,9 +455,9 @@ double pnofPiInterD12(PnofFunctional functional, double n_i, double n_j) {
 
 }  // namespace
 
-template <typename T>
+template <typename T, typename Eri>
 std::vector<double> pnofOccupationGradient(PnofFunctional functional, const Matrix<T>& h,
-                                            const Tensor4<T>& eri,
+                                            const Eri& eri,
                                             const std::vector<double>& occupations,
                                             const std::vector<PnofGeminal>& geminals,
                                             bool relativistic) {
@@ -554,9 +555,9 @@ std::vector<double> pnofOccupationGradient(PnofFunctional functional, const Matr
   return grad;
 }
 
-template <typename T>
+template <typename T, typename Eri>
 Matrix<double> pnofOccupationHessian(PnofFunctional functional, const Matrix<T>& /*h*/,
-                                      const Tensor4<T>& eri,
+                                      const Eri& eri,
                                       const std::vector<double>& occupations,
                                       const std::vector<PnofGeminal>& geminals,
                                       bool relativistic) {
@@ -620,9 +621,9 @@ Matrix<double> pnofOccupationHessian(PnofFunctional functional, const Matrix<T>&
   return hess;
 }
 
-template <typename T>
+template <typename T, typename Eri>
 Matrix<double> pnofOccupationHessianFD(PnofFunctional functional, const Matrix<T>& h,
-                                        const Tensor4<T>& eri,
+                                        const Eri& eri,
                                         const std::vector<double>& occupations,
                                         const std::vector<PnofGeminal>& geminals,
                                         bool relativistic, double h_step) {
@@ -662,8 +663,15 @@ Matrix<double> pnofOccupationHessianFD(PnofFunctional functional, const Matrix<T
 template double pnofElectronicEnergy(PnofFunctional, const Matrix<double>&, const Tensor4<double>&,
                                       const std::vector<double>&,
                                       const std::vector<PnofGeminal>&, const PnofTwoRdm&, bool);
+template double pnofElectronicEnergy(PnofFunctional, const Matrix<double>&, const CholeskyEri<double>&,
+                                      const std::vector<double>&,
+                                      const std::vector<PnofGeminal>&, const PnofTwoRdm&, bool);
 template double pnofElectronicEnergy(PnofFunctional, const Matrix<std::complex<double>>&,
                                       const Tensor4<std::complex<double>>&,
+                                      const std::vector<double>&,
+                                      const std::vector<PnofGeminal>&, const PnofTwoRdm&, bool);
+template double pnofElectronicEnergy(PnofFunctional, const Matrix<std::complex<double>>&,
+                                      const CholeskyEri<std::complex<double>>&,
                                       const std::vector<double>&,
                                       const std::vector<PnofGeminal>&, const PnofTwoRdm&, bool);
 template double pnofElectronicEnergyDirect(PnofFunctional, const Matrix<double>&,
@@ -678,25 +686,50 @@ template std::vector<double> pnofOccupationGradient(PnofFunctional, const Matrix
                                                      const Tensor4<double>&,
                                                      const std::vector<double>&,
                                                      const std::vector<PnofGeminal>&, bool);
+template std::vector<double> pnofOccupationGradient(PnofFunctional, const Matrix<double>&,
+                                                     const CholeskyEri<double>&,
+                                                     const std::vector<double>&,
+                                                     const std::vector<PnofGeminal>&, bool);
 template std::vector<double> pnofOccupationGradient(PnofFunctional,
                                                      const Matrix<std::complex<double>>&,
                                                      const Tensor4<std::complex<double>>&,
                                                      const std::vector<double>&,
                                                      const std::vector<PnofGeminal>&, bool);
+template std::vector<double> pnofOccupationGradient(PnofFunctional,
+                                                     const Matrix<std::complex<double>>&,
+                                                     const CholeskyEri<std::complex<double>>&,
+                                                     const std::vector<double>&,
+                                                     const std::vector<PnofGeminal>&, bool);
 template Matrix<double> pnofOccupationHessian(PnofFunctional, const Matrix<double>&,
                                                const Tensor4<double>&, const std::vector<double>&,
                                                const std::vector<PnofGeminal>&, bool);
+template Matrix<double> pnofOccupationHessian(PnofFunctional, const Matrix<double>&,
+                                               const CholeskyEri<double>&, const std::vector<double>&,
+                                               const std::vector<PnofGeminal>&, bool);
 template Matrix<double> pnofOccupationHessian(PnofFunctional, const Matrix<std::complex<double>>&,
                                                const Tensor4<std::complex<double>>&,
+                                               const std::vector<double>&,
+                                               const std::vector<PnofGeminal>&, bool);
+template Matrix<double> pnofOccupationHessian(PnofFunctional, const Matrix<std::complex<double>>&,
+                                               const CholeskyEri<std::complex<double>>&,
                                                const std::vector<double>&,
                                                const std::vector<PnofGeminal>&, bool);
 template Matrix<double> pnofOccupationHessianFD(PnofFunctional, const Matrix<double>&,
                                                  const Tensor4<double>&,
                                                  const std::vector<double>&,
                                                  const std::vector<PnofGeminal>&, bool, double);
+template Matrix<double> pnofOccupationHessianFD(PnofFunctional, const Matrix<double>&,
+                                                 const CholeskyEri<double>&,
+                                                 const std::vector<double>&,
+                                                 const std::vector<PnofGeminal>&, bool, double);
 template Matrix<double> pnofOccupationHessianFD(PnofFunctional,
                                                  const Matrix<std::complex<double>>&,
                                                  const Tensor4<std::complex<double>>&,
+                                                 const std::vector<double>&,
+                                                 const std::vector<PnofGeminal>&, bool, double);
+template Matrix<double> pnofOccupationHessianFD(PnofFunctional,
+                                                 const Matrix<std::complex<double>>&,
+                                                 const CholeskyEri<std::complex<double>>&,
                                                  const std::vector<double>&,
                                                  const std::vector<PnofGeminal>&, bool, double);
 

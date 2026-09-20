@@ -66,8 +66,8 @@ namespace rerdmft {
 // occupation-number-derived coupling coefficients are always real.
 // Feed the resulting F into OrbitalGradient.h's orbitalGradient to get
 // g_pq = 2*(F_qp - conj(F_pq)) (see that header for the factor of 2).
-template <typename T>
-Matrix<T> hartreeExchangeFockMatrix(const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri>
+Matrix<T> hartreeExchangeFockMatrix(const Matrix<T>& h, const Eri& eri,
                                      const std::vector<double>& occupations,
                                      const Matrix<double>& two_rdm_h,
                                      const Matrix<double>& two_rdm_x,
@@ -118,8 +118,8 @@ Matrix<T> hartreeExchangeFockMatrix(const Matrix<T>& h, const Tensor4<T>& eri,
 // std::real, valid for real T too) -- the energy is guaranteed real for
 // a Hermitian h/eri and a real, diagonal density, exactly like every
 // other *_result.electronic_energy in this project.
-template <typename T>
-double hartreeExchangeEnergy(const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri>
+double hartreeExchangeEnergy(const Matrix<T>& h, const Eri& eri,
                               const std::vector<double>& occupations,
                               const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x,
                               const std::vector<std::size_t>& pair_of = {},

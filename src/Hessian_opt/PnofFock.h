@@ -129,8 +129,8 @@ std::vector<std::size_t> buildPnofPairOf(const std::vector<PnofGeminal>& geminal
 // result into Hessian_opt/OrbitalGradient.h's orbitalGradient for the
 // orbital-rotation gradient, and Hessian_opt/PnofHessian.h's
 // pnofHessianElement/pnofHessianMatrix for the Hessian.
-template <typename T>
-Matrix<T> pnofFockMatrix(PnofFunctional functional, const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri>
+Matrix<T> pnofFockMatrix(PnofFunctional functional, const Matrix<T>& h, const Eri& eri,
                           const std::vector<PnofGeminal>& geminals,
                           const std::vector<double>& occupations, bool relativistic);
 

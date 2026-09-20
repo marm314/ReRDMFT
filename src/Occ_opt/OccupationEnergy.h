@@ -32,8 +32,8 @@ namespace rerdmft {
 // two_rdm_H/two_rdm_X comments). f_H is plain n_p*n_q for every
 // functional except `kMullerAs` (see JK_only.h's enum comment). An
 // O(n^2) sum.
-template <typename T>
-double jkFunctionalEnergy(const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri>
+double jkFunctionalEnergy(const Matrix<T>& h, const Eri& eri,
                            const std::vector<double>& occupations, JkFunctional functional,
                            std::size_t f_l = 0, double power_alpha = 1.0);
 
@@ -48,8 +48,8 @@ double jkFunctionalEnergy(const Matrix<T>& h, const Tensor4<T>& eri,
 // recovering the simpler `sum_q J_rq*n_q` this formula used to read
 // before `kMullerAs` was added. An O(n^2) computation, returned as one
 // std::vector<double> entry per orbital.
-template <typename T>
-std::vector<double> jkFunctionalGradient(const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri>
+std::vector<double> jkFunctionalGradient(const Matrix<T>& h, const Eri& eri,
                                           const std::vector<double>& occupations,
                                           JkFunctional functional, std::size_t f_l = 0,
                                           double power_alpha = 1.0);
@@ -66,8 +66,8 @@ std::vector<double> jkFunctionalGradient(const Matrix<T>& h, const Tensor4<T>& e
 // Hartree diagonal term was invisible, not merely zero by coincidence).
 // An O(n^2) computation (the diagonal's own inner sum over q is
 // O(n) per row, O(n^2) total over all rows -- never O(n^3)).
-template <typename T>
-Matrix<double> jkFunctionalHessian(const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri>
+Matrix<double> jkFunctionalHessian(const Matrix<T>& h, const Eri& eri,
                                     const std::vector<double>& occupations,
                                     JkFunctional functional, std::size_t f_l = 0,
                                     double power_alpha = 1.0);

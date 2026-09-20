@@ -39,6 +39,11 @@ struct FullOptSettings {
   int max_macro_iterations = 1000;
   double energy_tolerance = 1e-9;     // tolE of the Fortran
   double gradient_tolerance = 1e-5;   // 10**-itolLambda of the Fortran
+  // CHOLESKY TRUE: the loop keeps the two-electron integrals as Cholesky vectors of the Coulomb
+  // metric (Utils/CholeskyEri.h) instead of a dense n^4 tensor: rotations act on the vectors,
+  // elements are evaluated on demand.
+  bool cholesky = false;
+  double cholesky_threshold = 1e-10;
 };
 
 struct RdmftOccupationResult {
@@ -52,23 +57,23 @@ struct RdmftOccupationResult {
 // integrals (h, eri) in the CURRENT orbital basis. Built by makeJkOnlyModel /
 // makePnofModel below (the same energy/gradient/occupation optimizer that
 // the fixed-orbital occupation optimization in main.cpp uses).
-template <typename T>
+template <typename T, typename Eri = Tensor4<T>>
 struct RdmftModel {
   // Electronic energy (no nuclear repulsion) at fixed occupations.
-  std::function<double(const Matrix<T>&, const Tensor4<T>&, const std::vector<double>&)> energy;
+  std::function<double(const Matrix<T>&, const Eri&, const std::vector<double>&)> energy;
   // Orbital-rotation gradient matrix (OrbitalGradient.h's orbitalGradient: g_pq,
   // lower triangle p >= q) at fixed occupations.
-  std::function<Matrix<T>(const Matrix<T>&, const Tensor4<T>&, const std::vector<double>&)> gradient;
+  std::function<Matrix<T>(const Matrix<T>&, const Eri&, const std::vector<double>&)> gradient;
   // Re-optimizes the occupation numbers at fixed integrals. `state` is the
   // model's own warm-start variable (JK_only: active occupations; PNOF
   // L-BFGS: gamma angles; PNOF SQP: frontier occupations), updated in place.
-  std::function<RdmftOccupationResult(const Matrix<T>&, const Tensor4<T>&, std::vector<double>&)>
+  std::function<RdmftOccupationResult(const Matrix<T>&, const Eri&, std::vector<double>&)>
       optimize_occupations;
   // Optional (PNOF): the energy through the Kramers/spin-pair-SYMMETRIC shortcut
   // (Occ_opt/PNOFs.h's pnofElectronicEnergy), valid only while the integrals keep
   // that symmetry. The end-of-run check compares it with `energy`: agreement
   // shows the rotated integrals still have the pairing symmetry.
-  std::function<double(const Matrix<T>&, const Tensor4<T>&, const std::vector<double>&)>
+  std::function<double(const Matrix<T>&, const Eri&, const std::vector<double>&)>
       symmetric_shortcut_energy;
   // Prints a full occupation vector in the SAME format main.cpp uses right after the
   // first occupation optimization (JK_only: index/occupation table, two Kramers columns
@@ -81,8 +86,8 @@ struct RdmftModel {
 // window [n_inactive_below, n_inactive_below + n_active).
 // `two_columns`: print the occupations as even/odd Kramers pairs side by side (X2C),
 // otherwise one orbital per line (NON_REL).
-template <typename T>
-RdmftModel<T> makeJkOnlyModel(JkFunctional functional, std::size_t f_l, double n_electrons,
+template <typename T, typename Eri = Tensor4<T>>
+RdmftModel<T, Eri> makeJkOnlyModel(JkFunctional functional, std::size_t f_l, double n_electrons,
                               std::size_t n_total, std::size_t n_inactive_below,
                               std::size_t n_active, bool two_columns = false);
 
@@ -90,8 +95,8 @@ RdmftModel<T> makeJkOnlyModel(JkFunctional functional, std::size_t f_l, double n
 // buildPnofGeminals (indices already converted to actual array indices);
 // `sqp_occupations` selects the SQP branch (SQP_PNOF_OCC TRUE), otherwise
 // L-BFGS over the unconstrained gamma angles.
-template <typename T>
-RdmftModel<T> makePnofModel(PnofFunctional functional, std::vector<PnofGeminal> geminals,
+template <typename T, typename Eri = Tensor4<T>>
+RdmftModel<T, Eri> makePnofModel(PnofFunctional functional, std::vector<PnofGeminal> geminals,
                             std::size_t n_core, int pnof_subspaces, int pnof_coupling,
                             bool relativistic, bool sqp_occupations, std::size_t n_total);
 
@@ -131,13 +136,38 @@ struct FullOptResult {
 // amplify that roundoff into independent alpha/beta steps of size ~ the learning
 // rate for redundant rotations), so both spins rotate identically and the
 // pair-symmetric energy shortcut of the occupation optimizer stays valid.
-template <typename T>
-FullOptResult runFullOptimization(const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri = Tensor4<T>>
+FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
                                   const std::vector<double>& occupations,
-                                  const std::vector<double>& state, const RdmftModel<T>& model,
+                                  const std::vector<double>& state, const RdmftModel<T, Eri>& model,
                                   const FullOptSettings& settings, bool kramers_restricted,
                                   double nuclear_repulsion_energy, std::ostream& log,
                                   const std::vector<std::size_t>& spin_partner = {});
+
+// Entry points used by main.cpp: same as building the model and calling runFullOptimization, but
+// honouring FullOptSettings::cholesky (the dense MO integrals are decomposed into Cholesky vectors
+// and the loop runs on them). `spin_partner` as in runFullOptimization.
+template <typename T>
+FullOptResult runFullOptimizationJk(const Matrix<T>& h, const Tensor4<T>& eri,
+                                    const std::vector<double>& occupations,
+                                    const std::vector<double>& state, JkFunctional functional,
+                                    std::size_t f_l, double n_electrons, std::size_t n_total,
+                                    std::size_t n_inactive_below, std::size_t n_active,
+                                    bool two_columns, const FullOptSettings& settings,
+                                    bool kramers_restricted, double nuclear_repulsion_energy,
+                                    std::ostream& log,
+                                    const std::vector<std::size_t>& spin_partner = {});
+
+template <typename T>
+FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const Tensor4<T>& eri,
+                                      const std::vector<double>& occupations,
+                                      const std::vector<double>& state, PnofFunctional functional,
+                                      const std::vector<PnofGeminal>& geminals, std::size_t n_core,
+                                      int pnof_subspaces, int pnof_coupling, bool relativistic,
+                                      bool sqp_occupations, std::size_t n_total,
+                                      const FullOptSettings& settings, bool kramers_restricted,
+                                      double nuclear_repulsion_energy, std::ostream& log,
+                                      const std::vector<std::size_t>& spin_partner = {});
 
 }  // namespace rerdmft
 

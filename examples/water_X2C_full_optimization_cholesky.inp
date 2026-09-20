@@ -1,0 +1,15 @@
+# Example ReRDMFT input file: water, X2C spinors, MULLER, FULL_OPTIMIZATION with CHOLESKY TRUE
+# (the macro-iteration loop on Cholesky vectors, Utils/CholeskyEri.h; Kramers-restricted ADAM
+# rotations act on the vectors). Compare water_X2C_full_optimization.inp (dense integrals).
+NELEC 10
+BASIS water-sto-3g.gbs
+X2C TRUE
+FUNCTIONAL MULLER
+CHOLESKY TRUE
+FULL_OPTIMIZATION TRUE
+
+GEOMETRY
+O   0.000000   0.000000   0.000000
+H   0.000000   0.757000   0.586000
+H   0.000000  -0.757000   0.586000
+END

@@ -1382,6 +1382,8 @@ inline rerdmft::FullOptSettings fullOptSettings(const rerdmft::Input& input) {
   settings.max_macro_iterations = input.max_macro_iterations();
   settings.energy_tolerance = input.macro_energy_tolerance();
   settings.gradient_tolerance = input.orbital_gradient_tolerance();
+  settings.cholesky = input.cholesky();
+  settings.cholesky_threshold = input.cholesky_threshold();
   return settings;
 }
 
@@ -2581,14 +2583,13 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
         out << "\n  FULL_OPTIMIZATION is not available for the 4-component (C4_DHF) path.\n";
       } else {
         try {
-          const auto model = rerdmft::makeJkOnlyModel<T>(functional, f_l, n_electrons, n_total,
-                                                          n_inactive_below, n_active,
-                                                          /*two_columns=*/label == "X2C_HF");
-          rerdmft::runFullOptimization<T>(h, eri, embed(sqp_result.x), sqp_result.x, model, full_opt,
-                                          /*kramers_restricted=*/label == "X2C_HF",
-                                          nuclear_repulsion_energy, out,
-                                          label == "NON_REL" ? blockSpinPartner(n_total)
-                                                             : std::vector<std::size_t>{});
+          rerdmft::runFullOptimizationJk<T>(h, eri, embed(sqp_result.x), sqp_result.x, functional, f_l,
+                                            n_electrons, n_total, n_inactive_below, n_active,
+                                            /*two_columns=*/label == "X2C_HF", full_opt,
+                                            /*kramers_restricted=*/label == "X2C_HF",
+                                            nuclear_repulsion_energy, out,
+                                            label == "NON_REL" ? blockSpinPartner(n_total)
+                                                               : std::vector<std::size_t>{});
         } catch (const std::exception& e) {
           out << "\n  FULL_OPTIMIZATION FAILED: " << e.what() << "\n";
         }
@@ -3234,14 +3235,13 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
       out << "\n  FULL_OPTIMIZATION skipped: the occupation optimization did not succeed.\n";
     } else {
       try {
-        const auto model = rerdmft::makePnofModel<T>(functional, geminals, n_core, pnof_subspaces,
-                                                      pnof_coupling, relativistic, sqp_pnof_occ,
-                                                      n_total);
-        rerdmft::runFullOptimization<T>(h, eri, optimized_occ, optimized_state, model, full_opt,
-                                        /*kramers_restricted=*/label == "X2C_HF",
-                                        nuclear_repulsion_energy, out,
-                                        label == "NON_REL" ? blockSpinPartner(n_total)
-                                                           : std::vector<std::size_t>{});
+        rerdmft::runFullOptimizationPnof<T>(h, eri, optimized_occ, optimized_state, functional,
+                                            geminals, n_core, pnof_subspaces, pnof_coupling,
+                                            relativistic, sqp_pnof_occ, n_total, full_opt,
+                                            /*kramers_restricted=*/label == "X2C_HF",
+                                            nuclear_repulsion_energy, out,
+                                            label == "NON_REL" ? blockSpinPartner(n_total)
+                                                               : std::vector<std::size_t>{});
       } catch (const std::exception& e) {
         out << "\n  FULL_OPTIMIZATION FAILED: " << e.what() << "\n";
       }

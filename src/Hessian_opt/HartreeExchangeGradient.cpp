@@ -1,3 +1,4 @@
+#include "CholeskyEri.h"
 #include "HartreeExchangeGradient.h"
 
 #include <complex>
@@ -52,8 +53,8 @@ namespace rerdmft {
 // with two_rdm_h/two_rdm_x/two_rdm_l1/two_rdm_l2 all deliberately
 // UNEQUAL, non-symmetric, and unrelated to any occupation-number
 // formula, to floating-point precision.
-template <typename T>
-Matrix<T> hartreeExchangeFockMatrix(const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri>
+Matrix<T> hartreeExchangeFockMatrix(const Matrix<T>& h, const Eri& eri,
                                      const std::vector<double>& occupations,
                                      const Matrix<double>& two_rdm_h,
                                      const Matrix<double>& two_rdm_x,
@@ -115,8 +116,8 @@ Matrix<T> hartreeExchangeFockMatrix(const Matrix<T>& h, const Tensor4<T>& eri,
   return f;
 }
 
-template <typename T>
-double hartreeExchangeEnergy(const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri>
+double hartreeExchangeEnergy(const Matrix<T>& h, const Eri& eri,
                               const std::vector<double>& occupations,
                               const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x,
                               const std::vector<std::size_t>& pair_of,
@@ -182,8 +183,23 @@ template double hartreeExchangeEnergy(const Matrix<double>& h, const Tensor4<dou
                                        const std::vector<std::size_t>& pair_of,
                                        const Matrix<double>& two_rdm_l1,
                                        const Matrix<double>& two_rdm_l2);
+template double hartreeExchangeEnergy(const Matrix<double>& h, const CholeskyEri<double>& eri,
+                                       const std::vector<double>& occupations,
+                                       const Matrix<double>& two_rdm_h,
+                                       const Matrix<double>& two_rdm_x,
+                                       const std::vector<std::size_t>& pair_of,
+                                       const Matrix<double>& two_rdm_l1,
+                                       const Matrix<double>& two_rdm_l2);
 template double hartreeExchangeEnergy(const Matrix<std::complex<double>>& h,
                                        const Tensor4<std::complex<double>>& eri,
+                                       const std::vector<double>& occupations,
+                                       const Matrix<double>& two_rdm_h,
+                                       const Matrix<double>& two_rdm_x,
+                                       const std::vector<std::size_t>& pair_of,
+                                       const Matrix<double>& two_rdm_l1,
+                                       const Matrix<double>& two_rdm_l2);
+template double hartreeExchangeEnergy(const Matrix<std::complex<double>>& h,
+                                       const CholeskyEri<std::complex<double>>& eri,
                                        const std::vector<double>& occupations,
                                        const Matrix<double>& two_rdm_h,
                                        const Matrix<double>& two_rdm_x,
@@ -199,8 +215,21 @@ template Matrix<double> hartreeExchangeFockMatrix(const Matrix<double>& h,
                                                     const std::vector<std::size_t>& pair_of,
                                                     const Matrix<double>& two_rdm_l1,
                                                     const Matrix<double>& two_rdm_l2);
+template Matrix<double> hartreeExchangeFockMatrix(const Matrix<double>& h,
+                                                    const CholeskyEri<double>& eri,
+                                                    const std::vector<double>& occupations,
+                                                    const Matrix<double>& two_rdm_h,
+                                                    const Matrix<double>& two_rdm_x,
+                                                    const std::vector<std::size_t>& pair_of,
+                                                    const Matrix<double>& two_rdm_l1,
+                                                    const Matrix<double>& two_rdm_l2);
 template Matrix<std::complex<double>> hartreeExchangeFockMatrix(
     const Matrix<std::complex<double>>& h, const Tensor4<std::complex<double>>& eri,
+    const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
+    const Matrix<double>& two_rdm_x, const std::vector<std::size_t>& pair_of,
+    const Matrix<double>& two_rdm_l1, const Matrix<double>& two_rdm_l2);
+template Matrix<std::complex<double>> hartreeExchangeFockMatrix(
+    const Matrix<std::complex<double>>& h, const CholeskyEri<std::complex<double>>& eri,
     const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
     const Matrix<double>& two_rdm_x, const std::vector<std::size_t>& pair_of,
     const Matrix<double>& two_rdm_l1, const Matrix<double>& two_rdm_l2);

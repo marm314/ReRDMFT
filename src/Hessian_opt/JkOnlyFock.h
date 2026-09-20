@@ -54,8 +54,8 @@ Matrix<T> jkOnlyFockMatrix(const Matrix<T>& h, const Tensor4<T>& eri,
 // orbitalGradient(jkOnlyFockMatrix(...)): g_pq = 2*conj(C_pq), only
 // p >= q stored (upper triangle left 0), Re(g_pq) = dE/dkappa_pq for the
 // real step kappa_pq=+t, kappa_qp=-t. O(n^3) for the whole matrix.
-template <typename T>
-Matrix<T> jkOnlyOrbitalGradient(const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri>
+Matrix<T> jkOnlyOrbitalGradient(const Matrix<T>& h, const Eri& eri,
                                  const std::vector<double>& occupations,
                                  const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x);
 

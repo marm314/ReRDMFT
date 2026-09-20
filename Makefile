@@ -149,7 +149,7 @@ $(BUILD_DIR)/test_kramers: tests/test_kramers_restriction.cpp $(BUILD_DIR)/Krame
 test_pnof_gradient: $(BUILD_DIR)/test_pnof_gradient
 	./$(BUILD_DIR)/test_pnof_gradient
 
-$(BUILD_DIR)/test_pnof_gradient: tests/test_pnof_occupation_gradient.cpp $(BUILD_DIR)/PNOFs.o $(BUILD_DIR)/Orb_subspaces.o $(BUILD_DIR)/StringUtils.o | $(BUILD_DIR)
+$(BUILD_DIR)/test_pnof_gradient: tests/test_pnof_occupation_gradient.cpp $(BUILD_DIR)/PNOFs.o $(BUILD_DIR)/Orb_subspaces.o $(BUILD_DIR)/StringUtils.o $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
 # Unit test of Utils/KramersPairing (exact Kramers re-pairing of degenerate clusters).
@@ -158,6 +158,15 @@ test_kramers_pairing: $(BUILD_DIR)/test_kramers_pairing
 	./$(BUILD_DIR)/test_kramers_pairing
 
 $(BUILD_DIR)/test_kramers_pairing: tests/test_kramers_pairing.cpp $(BUILD_DIR)/KramersPairing.o $(BUILD_DIR)/LinearAlgebra.o | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
+# Unit test of Utils/CholeskyEri (Cholesky-vector ERI storage: element access, rotation) and,
+# once the model layer is templated on the tensor type, of its use there.
+.PHONY: test_cholesky_eri
+test_cholesky_eri: $(BUILD_DIR)/test_cholesky_eri
+	./$(BUILD_DIR)/test_cholesky_eri
+
+$(BUILD_DIR)/test_cholesky_eri: tests/test_cholesky_eri.cpp $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o $(BUILD_DIR)/SpinorRotation.o $(BUILD_DIR)/LinearAlgebra.o $(BUILD_DIR)/OccupationEnergy.o $(BUILD_DIR)/JK_only.o $(BUILD_DIR)/JkOnlyFock.o $(BUILD_DIR)/HartreeExchangeGradient.o $(BUILD_DIR)/PnofFock.o $(BUILD_DIR)/PNOFs.o $(BUILD_DIR)/Orb_subspaces.o $(BUILD_DIR)/StringUtils.o | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
 clean:

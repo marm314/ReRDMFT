@@ -160,8 +160,8 @@ PnofTwoRdm buildPnofTwoRdm(PnofFunctional functional, const std::vector<PnofGemi
 //
 // Throws std::runtime_error if `geminals` is empty, or if any J_ij/
 // K_ij/L_ij integral used has a non-negligible imaginary part.
-template <typename T>
-double pnofElectronicEnergy(PnofFunctional functional, const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri>
+double pnofElectronicEnergy(PnofFunctional functional, const Matrix<T>& h, const Eri& eri,
                              const std::vector<double>& occupations,
                              const std::vector<PnofGeminal>& geminals, const PnofTwoRdm& two_rdm,
                              bool relativistic);
@@ -217,9 +217,9 @@ double pnofElectronicEnergyDirect(PnofFunctional functional, const Matrix<T>& h,
 // central finite differences of pnofElectronicEnergy before being
 // trusted (not merely assumed correct by construction, given how easy
 // this specific cross-coupling is to get wrong).
-template <typename T>
+template <typename T, typename Eri>
 std::vector<double> pnofOccupationGradient(PnofFunctional functional, const Matrix<T>& h,
-                                            const Tensor4<T>& eri,
+                                            const Eri& eri,
                                             const std::vector<double>& occupations,
                                             const std::vector<PnofGeminal>& geminals,
                                             bool relativistic);
@@ -231,9 +231,9 @@ std::vector<double> pnofOccupationGradient(PnofFunctional functional, const Matr
 // PNOF5/PNOF7/PNOF7s's own self-contained (n_i,n_j)-only Pi^inter; use
 // pnofOccupationHessianFD below for GNOF instead (an explicit engineering
 // choice, not an oversight).
-template <typename T>
+template <typename T, typename Eri>
 Matrix<double> pnofOccupationHessian(PnofFunctional functional, const Matrix<T>& h,
-                                      const Tensor4<T>& eri,
+                                      const Eri& eri,
                                       const std::vector<double>& occupations,
                                       const std::vector<PnofGeminal>& geminals,
                                       bool relativistic);
@@ -251,9 +251,9 @@ Matrix<double> pnofOccupationHessian(PnofFunctional functional, const Matrix<T>&
 // divergent second derivative AT the true boundary, so a coarser step
 // avoids stepping outside the box while still resolving curvature well
 // away from it).
-template <typename T>
+template <typename T, typename Eri>
 Matrix<double> pnofOccupationHessianFD(PnofFunctional functional, const Matrix<T>& h,
-                                        const Tensor4<T>& eri,
+                                        const Eri& eri,
                                         const std::vector<double>& occupations,
                                         const std::vector<PnofGeminal>& geminals,
                                         bool relativistic, double h_step = 1e-4);
