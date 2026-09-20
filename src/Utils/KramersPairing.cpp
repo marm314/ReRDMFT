@@ -283,6 +283,23 @@ double kramersOneBodyDeviation(const Matrix<C>& h, double* scale) {
   return dev;
 }
 
+double kramersAoOneBodyDeviation(const Matrix<C>& h, double* scale) {
+  if (h.rows() != h.cols() || h.rows() % 2 != 0) {
+    throw std::runtime_error("kramersAoOneBodyDeviation: expected a square matrix of even dimension");
+  }
+  const std::size_t nl = h.rows() / 2;
+  double dev = 0.0, sc = 0.0;
+  for (std::size_t i = 0; i < nl; ++i)
+    for (std::size_t j = 0; j < nl; ++j) {
+      dev = std::max(dev, std::abs(h(nl + i, nl + j) - std::conj(h(i, j))));
+      dev = std::max(dev, std::abs(h(nl + i, j) + std::conj(h(i, nl + j))));
+    }
+  for (std::size_t i = 0; i < h.rows(); ++i)
+    for (std::size_t j = 0; j < h.cols(); ++j) sc = std::max(sc, std::abs(h(i, j)));
+  if (scale) *scale = sc;
+  return dev;
+}
+
 double kramersTwoBodyDeviation(const Tensor4<C>& eri, double* scale) {
   const std::size_t n = eri.dim0();
   const auto sgn = [](std::size_t i) { return (i % 2 == 0) ? 1.0 : -1.0; };

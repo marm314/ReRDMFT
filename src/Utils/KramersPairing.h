@@ -79,6 +79,13 @@ Matrix<std::complex<double>> fixKramersPairingOrthonormal(
 // conj <ab|cd> (two-body physics notation), P i = i^1, s = +1 (even) / -1 (odd). Each returns
 // max |lhs - rhs| and stores max |element| in *scale (if non-null).
 double kramersOneBodyDeviation(const Matrix<std::complex<double>>& h, double* scale = nullptr);
+
+// The same test for a one-body matrix in the two-component AO representation
+// [alpha AO (nL); beta AO (nL)] where Theta|k alpha> = |k beta>, Theta|k beta> = -|k alpha>
+// (e.g. X2C's h_x2c): a time-reversal-even operator obeys
+//   M(beta_i, beta_j) = conj M(alpha_i, alpha_j),  M(beta_i, alpha_j) = -conj M(alpha_i, beta_j).
+// Returns the max deviation over both relations; *scale = max |element|.
+double kramersAoOneBodyDeviation(const Matrix<std::complex<double>>& h, double* scale = nullptr);
 double kramersTwoBodyDeviation(const Tensor4<std::complex<double>>& eri, double* scale = nullptr);
 
 }  // namespace rerdmft

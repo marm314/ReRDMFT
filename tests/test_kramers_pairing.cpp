@@ -215,6 +215,20 @@ int main() {
     hmo(0, 1) = C(0.1, 0.0); hmo(1, 0) = C(0.1, 0.0);
     check(kramersOneBodyDeviation(hmo) > 1e-3, "kramersOneBodyDeviation: a Kramers-mixing element is detected");
   }
+  // AO one-body helper: a time-reversal-even [alpha; beta] matrix (spin-orbit-like) and a violation.
+  {
+    const std::size_t nla = 4;
+    Matrix<C> m(2 * nla, 2 * nla, C{});
+    for (std::size_t i = 0; i < nla; ++i) for (std::size_t j = 0; j < nla; ++j) {
+      const C aa(rng.next(), rng.next()), ab(rng.next(), rng.next());
+      m(i, j) = aa; m(nla + i, nla + j) = std::conj(aa);
+      m(i, nla + j) = ab; m(nla + i, j) = -std::conj(ab);
+    }
+    double sc2 = 0;
+    check(kramersAoOneBodyDeviation(m, &sc2) < 1e-15 && sc2 > 0, "kramersAoOneBodyDeviation: TR-even AO matrix passes");
+    m(nla, nla) += C(0.01, 0.0);
+    check(kramersAoOneBodyDeviation(m) > 5e-3, "kramersAoOneBodyDeviation: a violation is detected");
+  }
   std::cout << "\n" << g_checks - g_failures << " / " << g_checks << " checks passed\n";
   return g_failures == 0 ? 0 : 1;
 }

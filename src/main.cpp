@@ -4727,6 +4727,21 @@ int main(int argc, char** argv) {
                << max_x2c_kramers_splitting << "\n";
     std::cout << "Max |E_X2C - E_DHF(positive-energy branch)| (expect ~0): "
                << max_x2c_eigenvalue_deviation << "\n";
+    {
+      // Time-reversal test of the one-body operator h_x2c itself, in the [Large-alpha,
+      // Large-beta] AO basis (Theta|k alpha> = |k beta>, Theta|k beta> = -|k alpha>):
+      // M(beta_i,beta_j) = conj M(alpha_i,alpha_j), M(beta_i,alpha_j) = -conj M(alpha_i,beta_j).
+      // h_x2c depends only on the (time-reversal-invariant) positive-energy subspace, so this
+      // holds independently of how the individual eigenvector columns are paired.
+      double h_scale = 0.0;
+      const double h_dev = rerdmft::kramersAoOneBodyDeviation(x2c_hamiltonian.h_x2c, &h_scale);
+      const bool h_ok = h_dev <= 1e-8 * std::max(1.0, h_scale);
+      std::cout << "h_x2c time-reversal symmetry (one-body operator, [Large-alpha, Large-beta] AO "
+                   "basis): max |M(bb) - conj M(aa)|, |M(ba) + conj M(ab)| deviation = "
+                << std::scientific << std::setprecision(2) << h_dev << " (max |h_x2c| = " << h_scale
+                << ")" << std::defaultfloat << std::setprecision(6) << "\n  ["
+                << (h_ok ? "PASS" : "FAIL") << "] h_x2c is time-reversal symmetric\n";
+    }
 
     // APPROXIMATE X2C: orthogonalize the SAME raw h_x2c using ONLY the
     // plain large-component Loewdin matrix (x_full's own Large block)
