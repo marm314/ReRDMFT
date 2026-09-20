@@ -11,6 +11,7 @@
 #include "ADAM.h"
 #include "HartreeExchangeGradient.h"
 #include "JkOnlyFock.h"
+#include "KramersPairing.h"
 #include "KramersRestriction.h"
 #include "LBFGS.h"
 #include "OccupationEnergy.h"
@@ -401,36 +402,24 @@ class RotationProblem : public AdamProblem<T> {
   std::vector<long> twin_;
 };
 
-// max |M(P p,P q) - s_p s_q conj M(p,q)| for the Kramers pairing (2k,2k+1).
+// Kramers-structure deviations (Utils/KramersPairing.h) for either scalar type (complex only used).
 template <typename T>
 double timeReversalDeviation(const Matrix<T>& m) {
-  double dev = 0.0;
-  for (std::size_t p = 0; p < m.rows(); ++p) {
-    for (std::size_t q = 0; q < m.cols(); ++q) {
-      const double s = ((p % 2 == 0) ? 1.0 : -1.0) * ((q % 2 == 0) ? 1.0 : -1.0);
-      dev = std::max(dev, std::abs(std::complex<double>(m(p ^ 1, q ^ 1)) -
-                                    s * std::conj(std::complex<double>(m(p, q)))));
-    }
-  }
-  return dev;
+  Matrix<std::complex<double>> c(m.rows(), m.cols());
+  for (std::size_t p = 0; p < m.rows(); ++p)
+    for (std::size_t q = 0; q < m.cols(); ++q) c(p, q) = std::complex<double>(m(p, q));
+  return kramersOneBodyDeviation(c);
 }
 
-// max |eri(Pa,Pb,Pc,Pd) - s_a s_b s_c s_d conj(eri(a,b,c,d))| for the physics-notation
-// tensor <ab|cd> of a time-reversal-even two-body operator, and max |eri|.
 template <typename T>
 std::pair<double, double> twoBodyTimeReversalDeviation(const Tensor4<T>& eri) {
-  const std::size_t n = eri.dim0();
-  const auto s = [](std::size_t i) { return (i % 2 == 0) ? 1.0 : -1.0; };
-  double dev = 0.0, scale = 0.0;
-  for (std::size_t a = 0; a < n; ++a)
-    for (std::size_t b = 0; b < n; ++b)
-      for (std::size_t c = 0; c < n; ++c)
-        for (std::size_t d = 0; d < n; ++d) {
-          const std::complex<double> v(eri(a, b, c, d));
-          scale = std::max(scale, std::abs(v));
-          dev = std::max(dev, std::abs(std::complex<double>(eri(a ^ 1, b ^ 1, c ^ 1, d ^ 1)) -
-                                       s(a) * s(b) * s(c) * s(d) * std::conj(v)));
-        }
+  Tensor4<std::complex<double>> c(eri.dim0(), eri.dim1(), eri.dim2(), eri.dim3());
+  for (std::size_t a = 0; a < eri.dim0(); ++a)
+    for (std::size_t b = 0; b < eri.dim1(); ++b)
+      for (std::size_t x = 0; x < eri.dim2(); ++x)
+        for (std::size_t d = 0; d < eri.dim3(); ++d) c(a, b, x, d) = std::complex<double>(eri(a, b, x, d));
+  double scale = 0.0;
+  const double dev = kramersTwoBodyDeviation(c, &scale);
   return {dev, scale};
 }
 
@@ -449,7 +438,8 @@ Matrix<T> generatorMatrix(std::size_t n, std::size_t p, std::size_t q, double t,
 // Part (a): validation of the pieces the macro loop relies on.
 template <typename T>
 bool runChecks(const Matrix<T>& h, const Tensor4<T>& eri, const std::vector<double>& occ,
-               const RdmftModel<T>& model, bool kramers, std::ostream& log) {
+               const RdmftModel<T>& model, bool kramers, const std::vector<std::size_t>& spin_partner,
+               std::ostream& log) {
   const std::size_t n = h.rows();
   const auto pairs = lowerPairs(n);
   bool ok = true;
@@ -537,6 +527,21 @@ bool runChecks(const Matrix<T>& h, const Tensor4<T>& eri, const std::vector<doub
         verdict(false, "even number of spinors for the Kramers pairing (2k, 2k+1)");
       } else {
         const KramersRestriction kr(n, pairs);
+        // The STARTING integrals must already have the Kramers structure (Theta|2k> = |2k+1>
+        // for every spinor): a Kramers-restricted rotation preserves it but cannot create it.
+        // (Near-degenerate Kramers pairs, e.g. a spin-orbit-split p shell of a stretched
+        // molecule, can leave the SCF eigenvectors slightly mixed across pairs.)
+        {
+          const double h_dev = timeReversalDeviation(h);
+          double h_scale = 0.0;
+          for (std::size_t p = 0; p < n; ++p)
+            for (std::size_t q = 0; q < n; ++q) h_scale = std::max(h_scale, std::abs(std::complex<double>(h(p, q))));
+          const auto [eri_dev, eri_scale] = twoBodyTimeReversalDeviation(eri);
+          log << "    starting integrals: max |h(P p,P q) - s_p s_q conj h(p,q)| = " << h_dev << " (max |h| = " << h_scale
+              << "), max |<Pa Pb|Pc Pd> - s_a s_b s_c s_d conj <ab|cd>| = " << eri_dev << " (max |eri| = " << eri_scale << ")\n";
+          verdict(h_dev <= 1e-8 * std::max(1.0, h_scale), "starting one-electron integrals have the Kramers-pair structure");
+          verdict(eri_dev <= 1e-8 * std::max(1.0, eri_scale), "starting two-electron integrals have the Kramers-pair structure");
+        }
         const double occ_dev = kramersOccupationDeviation(occ);
         log << "    Kramers restriction: " << kr.nOrbits() << " orbit(s) (" << kr.reducedSize()
             << " of " << kr.fullSize() << " real parameters), max |n_a - n_abar| = " << occ_dev << "\n";
@@ -559,6 +564,26 @@ bool runChecks(const Matrix<T>& h, const Tensor4<T>& eri, const std::vector<doub
         log << "    probe Kramers-restricted rotation: time-reversal deviation of exp(-kappa) = " << dev << "\n";
         verdict(dev < 1e-10, "Kramers-restricted rotations preserve the Kramers pairing");
       }
+    }
+  }
+  if constexpr (std::is_same_v<T, double>) {
+    if (!spin_partner.empty()) {
+      double h_dev = 0.0, e_dev = 0.0, h_scale = 0.0, e_scale = 0.0;
+      for (std::size_t p = 0; p < n; ++p)
+        for (std::size_t q = 0; q < n; ++q) {
+          h_scale = std::max(h_scale, std::abs(h(p, q)));
+          h_dev = std::max(h_dev, std::abs(h(spin_partner[p], spin_partner[q]) - h(p, q)));
+        }
+      for (std::size_t a = 0; a < n; ++a)
+        for (std::size_t b = 0; b < n; ++b)
+          for (std::size_t c = 0; c < n; ++c)
+            for (std::size_t d = 0; d < n; ++d) {
+              e_scale = std::max(e_scale, std::abs(eri(a, b, c, d)));
+              e_dev = std::max(e_dev, std::abs(eri(spin_partner[a], spin_partner[b], spin_partner[c], spin_partner[d]) - eri(a, b, c, d)));
+            }
+      log << "    starting integrals, alpha/beta symmetry: max |h(alpha)-h(beta)| = " << h_dev << ", max |eri(alpha..)-eri(beta..)| = " << e_dev << "\n";
+      verdict(h_dev <= 1e-8 * std::max(1.0, h_scale), "starting one-electron integrals are spin-restricted (alpha = beta)");
+      verdict(e_dev <= 1e-8 * std::max(1.0, e_scale), "starting two-electron integrals are spin-restricted (alpha = beta)");
     }
   }
   log << std::defaultfloat << std::setprecision(6);
@@ -589,7 +614,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Tensor4<T>& eri,
   log << "):\n";
 
   log << "  a) Validation of the ADAM / Kramers-restriction machinery on this system:\n";
-  result.checks_passed = runChecks<T>(h, eri, occupations, model, kramers_restricted, log);
+  result.checks_passed = runChecks<T>(h, eri, occupations, model, kramers_restricted, spin_partner, log);
   if (!result.checks_passed) {
     log << "  A validation check FAILED -- the macro-iteration loop is NOT run.\n";
     return result;

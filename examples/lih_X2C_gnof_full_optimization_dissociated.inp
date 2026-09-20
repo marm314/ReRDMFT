@@ -1,0 +1,17 @@
+# Example ReRDMFT input file: LiH, X2C spinors, GNOF (two coupling
+# subspaces), FULL_OPTIMIZATION TRUE (PNOF counterpart of
+# water_X2C_full_optimization.inp). The orbital-rotation energy uses the full
+# two-RDM path, valid for any (also non-symmetric) orbitals.
+NELEC 4
+BASIS lih-6-31g.gbs
+X2C TRUE
+FUNCTIONAL GNOF
+PNOF_SUBSPACES 2
+PNOF_COUPLING 2
+FULL_OPTIMIZATION TRUE
+MACRO_ENERGY_TOLERANCE 1e-10
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   5.000000
+END

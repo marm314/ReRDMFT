@@ -3,6 +3,7 @@
 
 #include <complex>
 
+#include "KramersPairing.h"
 #include "Matrix.h"
 
 namespace rerdmft {
@@ -112,6 +113,29 @@ Matrix<std::complex<double>> fixKramersPhase(const Matrix<std::complex<double>>&
 // pair quantity.
 Matrix<std::complex<double>> fixKramersPhaseLarge(const Matrix<std::complex<double>>& c_matrix,
                                                    const Matrix<double>& s_large);
+
+// Exact Kramers re-pairing of the 4-component (RKB) eigenvectors inside
+// near-degenerate clusters, the C4_DHF counterpart of Utils/KramersPairing.h's
+// fixKramersPairingLarge (same algorithm and motivation: consecutive columns are only
+// guaranteed to be (psi, Theta psi) pairs while every level is well separated; a
+// spin-orbit-split p shell of a stretched molecule breaks that). `eigenvectors` (columns,
+// in H_RKB_ortho's orthonormal basis, ascending `energies`, consecutive pairs) is mapped to
+// the original [Large-alpha, Large-beta, uKB-Small-alpha, uKB-Small-beta] representation
+// only to build Theta there (Theta(AO alpha) = AO beta, Theta(AO beta) = -AO alpha, on the
+// Large and the Small blocks), projected back to the orthonormal coefficient space, and the
+// repair runs there (KramersPairing.h's fixKramersPairingOrthonormal). Returns the repaired
+// eigenvectors (Theta|2k> = |2k+1> exact, same subspaces); call it after
+// fixKramersPhase, before c_dhf = x_full * eigenvectors. Throws std::runtime_error if the
+// mapped basis is not orthonormal (V^dagger S V != 1), on inconsistent dimensions, or on the
+// conditions of fixKramersPairingOrthonormal.
+Matrix<std::complex<double>> fixKramersPairing(const Matrix<std::complex<double>>& eigenvectors,
+                                                const std::vector<double>& energies,
+                                                const Matrix<std::complex<double>>& rkb_coefficients,
+                                                const Matrix<std::complex<double>>& x_full,
+                                                const Matrix<double>& s_large,
+                                                const Matrix<double>& s_small_ukb,
+                                                double cluster_tolerance = 1e-4,
+                                                KramersPairingReport* report = nullptr);
 
 }  // namespace rerdmft
 

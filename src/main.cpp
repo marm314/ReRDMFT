@@ -30,6 +30,7 @@
 #include "IntegralCache.h"
 #include "Integrals.h"
 #include "JK_only.h"
+#include "KramersPairing.h"
 #include "KramersSymmetry.h"
 #include "LBFGS.h"
 #include "LinearAlgebra.h"
@@ -1322,6 +1323,46 @@ inline std::string functionalJointHessianReport(
   out << "    Joint gradient [dE/dt; dE/dy]: norm " << std::sqrt(gnorm) << ", max |component| "
       << gmax << "\n";
   return out.str();
+}
+
+// Kramers-pair structure test of complex-spinor MO integrals (Utils/KramersPairing.h): with the
+// spinors in consecutive pairs (2k, 2k+1), Theta|2k> = |2k+1>, every time-reversal-even
+// operator obeys M(P p,P q) = s_p s_q conj M(p,q) and <Pa Pb|Pc Pd> = s_a s_b s_c s_d
+// conj <ab|cd>. Prints the two PASS/FAIL lines (tolerance 1e-8 * max(1, max |element|)) and
+// returns whether BOTH pass. The exact re-pairing correction is applied only when this FAILs.
+inline bool kramersStructureTest(const std::string& label,
+                                 const rerdmft::Matrix<std::complex<double>>& h_mo,
+                                 const rerdmft::Tensor4<std::complex<double>>& eri_mo) {
+  double h_scale = 0.0, eri_scale = 0.0;
+  const double h_dev = rerdmft::kramersOneBodyDeviation(h_mo, &h_scale);
+  const double eri_dev = rerdmft::kramersTwoBodyDeviation(eri_mo, &eri_scale);
+  const bool h_ok = h_dev <= 1e-8 * std::max(1.0, h_scale);
+  const bool eri_ok = eri_dev <= 1e-8 * std::max(1.0, eri_scale);
+  std::cout << label << " Kramers-pair structure of the MO integrals (Theta|2k> = |2k+1>): "
+            << "max |h(P p,P q) - s_p s_q conj h(p,q)| = " << std::scientific << std::setprecision(2)
+            << h_dev << " (max |h| = " << h_scale
+            << "), max |<Pa Pb|Pc Pd> - s_a s_b s_c s_d conj <ab|cd>| = " << eri_dev
+            << " (max |eri| = " << eri_scale << ")" << std::defaultfloat << std::setprecision(6)
+            << "\n  [" << (h_ok ? "PASS" : "FAIL")
+            << "] one-electron integrals keep the Kramers-pair structure\n  ["
+            << (eri_ok ? "PASS" : "FAIL") << "] two-electron integrals keep the Kramers-pair structure\n";
+  return h_ok && eri_ok;
+}
+
+inline void printKramersPairingReport(const std::string& label,
+                                      const rerdmft::KramersPairingReport& pairing) {
+  std::cout << label << " Kramers pairing correction (exact re-pairing, Utils/KramersPairing.h): "
+            << "max ||Theta psi_even - psi_odd|| " << std::scientific << std::setprecision(2)
+            << pairing.partner_error_before << " -> " << pairing.partner_error_after;
+  if (pairing.n_multi_pair_clusters > 0) {
+    std::cout << "; " << pairing.n_multi_pair_clusters
+              << " near-degenerate cluster(s) of Kramers pairs (energy gaps < 1e-4 Ha, largest: "
+              << pairing.largest_cluster_pairs << " pairs), max column change "
+              << pairing.max_column_change << ", cluster time-reversal-invariance residual "
+              << pairing.max_invariance_residual;
+  }
+  std::cout << "; final exact Theta enforcement moved the columns by "
+            << pairing.max_enforcement_change << std::defaultfloat << std::setprecision(6) << "\n";
 }
 
 // FULL_OPTIMIZATION / MAX_MACRO_ITERATIONS / MACRO_ENERGY_TOLERANCE /
@@ -3819,13 +3860,30 @@ int main(int argc, char** argv) {
       // mirroring EXACTLY what C4_SPINOR does for DHF (see its own
       // comment above), just in the smaller 2*nLarge-dimensional
       // X2C-HF space (no negative-energy branch at all).
-      const auto h_x2c_mo =
-          rerdmft::x2cMoOneElectronTransform(x2c_hamiltonian.h_x2c, x2c_hf_result.c_matrix);
-      const auto eri_x2c_mo =
-          input.cholesky()
-              ? rerdmft::x2cMoTwoElectronTransformPhysicsCholesky(
-                    eri_x2c_spin, x2c_hf_result.c_matrix, input.cholesky_threshold())
-              : rerdmft::x2cMoTwoElectronTransformPhysics(eri_x2c_spin, x2c_hf_result.c_matrix);
+      rerdmft::Matrix<std::complex<double>> h_x2c_mo;
+      rerdmft::Tensor4<std::complex<double>> eri_x2c_mo;
+      const auto transformX2cToMo = [&]() {
+        h_x2c_mo = rerdmft::x2cMoOneElectronTransform(x2c_hamiltonian.h_x2c, x2c_hf_result.c_matrix);
+        eri_x2c_mo =
+            input.cholesky()
+                ? rerdmft::x2cMoTwoElectronTransformPhysicsCholesky(
+                      eri_x2c_spin, x2c_hf_result.c_matrix, input.cholesky_threshold())
+                : rerdmft::x2cMoTwoElectronTransformPhysics(eri_x2c_spin, x2c_hf_result.c_matrix);
+      };
+      transformX2cToMo();
+
+      // Kramers-pair test of the MO integrals; ONLY IF IT FAILS (consecutive eigenvector
+      // columns are not guaranteed to be (psi, Theta psi) pairs when Kramers pairs are
+      // near-degenerate, e.g. a spin-orbit-split p shell of a stretched molecule) rebuild the
+      // pairs exactly (Utils/KramersPairing.h), retransform and test again.
+      if (!kramersStructureTest("X2C-HF", h_x2c_mo, eri_x2c_mo)) {
+        rerdmft::KramersPairingReport pairing;
+        x2c_hf_result.c_matrix = rerdmft::fixKramersPairingLarge(
+            x2c_hf_result.c_matrix, x2c_hf_result.orbital_energies, s_large, 1e-4, &pairing);
+        printKramersPairingReport("X2C-HF", pairing);
+        transformX2cToMo();
+        kramersStructureTest("X2C-HF (after the correction)", h_x2c_mo, eri_x2c_mo);
+      }
       logTiming("X2C-HF MO integral transform complete", t_start, t_checkpoint, timing_records);
 
       const std::size_t x2c_dim = h_x2c_mo.rows();
@@ -4033,7 +4091,6 @@ int main(int argc, char** argv) {
       // eigenvector by a unit-magnitude phase changes none of those.
       dhf_result.fock_ortho_eigenvectors = rerdmft::fixKramersPhase(
           dhf_result.fock_ortho_eigenvectors, rkb_coefficients, x_full, s_large, s_small_ukb);
-      dhf_result.c_dhf = x_full * dhf_result.fock_ortho_eigenvectors;
 
       // Transform h_RKB and the RKB spinor ERIs into the converged DHF
       // spinor ("natural spinor", here) MO basis spanned by c_dhf --
@@ -4044,12 +4101,33 @@ int main(int argc, char** argv) {
       // HartreeExchangeGradient.h's simplified sums (unlike a Fock-
       // matrix-reuse shortcut), so expect this to be slow for large
       // bases (e.g. h2.inp, cc-pVTZ, RKB dim ~120).
-      const auto h_mo = rerdmft::rkbMoOneElectronTransform(h_rkb, dhf_result.c_dhf);
-      const auto eri_mo =
-          input.cholesky()
-              ? rerdmft::rkbMoTwoElectronTransformPhysicsCholesky(
-                    c4_spinor_eri, dhf_result.c_dhf, input.cholesky_threshold())
-              : rerdmft::rkbMoTwoElectronTransformPhysics(c4_spinor_eri, dhf_result.c_dhf);
+      dhf_result.c_dhf = x_full * dhf_result.fock_ortho_eigenvectors;
+      rerdmft::Matrix<std::complex<double>> h_mo;
+      rerdmft::Tensor4<std::complex<double>> eri_mo;
+      const auto transformToMo = [&]() {
+        h_mo = rerdmft::rkbMoOneElectronTransform(h_rkb, dhf_result.c_dhf);
+        eri_mo = input.cholesky()
+                     ? rerdmft::rkbMoTwoElectronTransformPhysicsCholesky(
+                           c4_spinor_eri, dhf_result.c_dhf, input.cholesky_threshold())
+                     : rerdmft::rkbMoTwoElectronTransformPhysics(c4_spinor_eri, dhf_result.c_dhf);
+      };
+      transformToMo();
+
+      // Kramers-pair test of the 4-component MO integrals; ONLY IF IT FAILS rebuild the
+      // Kramers pairs exactly inside near-degenerate clusters (Utils/KramersSymmetry.h's
+      // fixKramersPairing / Utils/KramersPairing.h), retransform and test again. (Consecutive
+      // eigenvector columns are only guaranteed to be (psi, Theta psi) pairs while every level
+      // is well separated, e.g. not for a spin-orbit-split p shell of a stretched molecule.)
+      if (!kramersStructureTest("C4_DHF", h_mo, eri_mo)) {
+        rerdmft::KramersPairingReport pairing;
+        dhf_result.fock_ortho_eigenvectors = rerdmft::fixKramersPairing(
+            dhf_result.fock_ortho_eigenvectors, dhf_result.orbital_energies, rkb_coefficients,
+            x_full, s_large, s_small_ukb, 1e-4, &pairing);
+        printKramersPairingReport("C4_DHF", pairing);
+        dhf_result.c_dhf = x_full * dhf_result.fock_ortho_eigenvectors;
+        transformToMo();
+        kramersStructureTest("C4_DHF (after the correction)", h_mo, eri_mo);
+      }
       logTiming("C4_DHF MO integral transform complete", t_start, t_checkpoint, timing_records);
 
       const std::size_t rkb_dim = h_mo.rows();

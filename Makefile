@@ -152,6 +152,14 @@ test_pnof_gradient: $(BUILD_DIR)/test_pnof_gradient
 $(BUILD_DIR)/test_pnof_gradient: tests/test_pnof_occupation_gradient.cpp $(BUILD_DIR)/PNOFs.o $(BUILD_DIR)/Orb_subspaces.o $(BUILD_DIR)/StringUtils.o | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
+# Unit test of Utils/KramersPairing (exact Kramers re-pairing of degenerate clusters).
+.PHONY: test_kramers_pairing
+test_kramers_pairing: $(BUILD_DIR)/test_kramers_pairing
+	./$(BUILD_DIR)/test_kramers_pairing
+
+$(BUILD_DIR)/test_kramers_pairing: tests/test_kramers_pairing.cpp $(BUILD_DIR)/KramersPairing.o $(BUILD_DIR)/LinearAlgebra.o | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
 clean:
 	rm -rf $(BUILD_DIR) $(BIN) $(GIT_VERSION_HEADER)
 # ($(BUILD_DIR) already holds the .d files alongside their .o's, so the
