@@ -533,15 +533,17 @@ std::vector<double> pnofOccupationGradient(PnofFunctional functional, const Matr
                                    geminals[a].is_principal, &f1_b, &f2_b);
           grad[a] += 2.0 * f1_a * contrib;
           grad[b] += 2.0 * f1_b * contrib;
-          // "Via principal" chain-rule contributions: only meaningful
-          // when the geminal is NOT its own principal (otherwise this
-          // slot IS n_a/n_b itself, already fully covered by f1 above).
-          if (!geminals[a].is_principal) {
-            grad[principal_idx.at(geminals[a].subspace_id)] += 2.0 * f2_a * contrib;
-          }
-          if (!geminals[b].is_principal) {
-            grad[principal_idx.at(geminals[b].subspace_id)] += 2.0 * f2_b * contrib;
-          }
+          // "Via principal" chain-rule contributions, for EVERY geminal
+          // including a principal one: f1 holds n_principal FIXED, but a
+          // principal geminal IS its subspace's n_principal, so its own
+          // d/dn_a needs f2 as well (its slot principal_idx == a). An earlier
+          // version skipped f2 for principal geminals ("already covered by
+          // f1", which is false: f1 is the partial at fixed n_principal),
+          // giving a GNOF gradient wrong by ~2.5e-4 at principal
+          // occupations near 1 (found 2026-09-20: L-BFGS stalled without
+          // converging, see tests/test_pnof_occupation_gradient.cpp).
+          grad[principal_idx.at(geminals[a].subspace_id)] += 2.0 * f2_a * contrib;
+          grad[principal_idx.at(geminals[b].subspace_id)] += 2.0 * f2_b * contrib;
         } else {
           grad[a] += 2.0 * pnofPiInterD1(functional, n_a, n_b) * contrib;
           grad[b] += 2.0 * pnofPiInterD1(functional, n_b, n_a) * contrib;

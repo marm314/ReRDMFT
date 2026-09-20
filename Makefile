@@ -144,6 +144,14 @@ test_kramers: $(BUILD_DIR)/test_kramers
 $(BUILD_DIR)/test_kramers: tests/test_kramers_restriction.cpp $(BUILD_DIR)/KramersRestriction.o $(BUILD_DIR)/ADAM.o $(BUILD_DIR)/NEO.o $(BUILD_DIR)/SpinorRotation.o $(BUILD_DIR)/LinearAlgebra.o | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
+# Unit test of Occ_opt/PNOFs.h's pnofOccupationGradient vs finite differences.
+.PHONY: test_pnof_gradient
+test_pnof_gradient: $(BUILD_DIR)/test_pnof_gradient
+	./$(BUILD_DIR)/test_pnof_gradient
+
+$(BUILD_DIR)/test_pnof_gradient: tests/test_pnof_occupation_gradient.cpp $(BUILD_DIR)/PNOFs.o $(BUILD_DIR)/Orb_subspaces.o $(BUILD_DIR)/StringUtils.o | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
 clean:
 	rm -rf $(BUILD_DIR) $(BIN) $(GIT_VERSION_HEADER)
 # ($(BUILD_DIR) already holds the .d files alongside their .o's, so the
