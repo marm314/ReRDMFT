@@ -244,6 +244,26 @@ void Input::read(const std::string& filename) {
       }
     } else if (keyword == "SQP_PNOF_OCC") {
       sqp_pnof_occ_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "FULL_OPTIMIZATION") {
+      full_optimization_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "MAX_MACRO_ITERATIONS") {
+      max_macro_iterations_ = parseInt(iss, line_number, keyword);
+      if (!(max_macro_iterations_ > 0)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": MAX_MACRO_ITERATIONS must be positive");
+      }
+    } else if (keyword == "MACRO_ENERGY_TOLERANCE") {
+      macro_energy_tolerance_ = parseDouble(iss, line_number, keyword);
+      if (!(macro_energy_tolerance_ > 0.0)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": MACRO_ENERGY_TOLERANCE must be positive");
+      }
+    } else if (keyword == "ORBITAL_GRADIENT_TOLERANCE") {
+      orbital_gradient_tolerance_ = parseDouble(iss, line_number, keyword);
+      if (!(orbital_gradient_tolerance_ > 0.0)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": ORBITAL_GRADIENT_TOLERANCE must be positive");
+      }
     } else if (keyword == "SPEED_OF_LIGHT") {
       speed_of_light_ = parseDouble(iss, line_number, keyword);
       if (!(speed_of_light_ > 0.0)) {
@@ -323,6 +343,10 @@ void Input::print(std::ostream& out) const {
   line("PNOF_SUBSPACES") << pnof_subspaces_ << "\n";
   line("PNOF_COUPLING") << pnof_coupling_ << "\n";
   line("SQP_PNOF_OCC") << flag(sqp_pnof_occ_) << "\n";
+  line("FULL_OPTIMIZATION") << flag(full_optimization_) << "\n";
+  line("MAX_MACRO_ITERATIONS") << max_macro_iterations_ << "\n";
+  line("MACRO_ENERGY_TOLERANCE") << macro_energy_tolerance_ << "\n";
+  line("ORBITAL_GRADIENT_TOLERANCE") << orbital_gradient_tolerance_ << "\n";
   line("SPEED_OF_LIGHT") << speed_of_light_ << "\n";
 
   out.flags(saved_flags);

@@ -1,0 +1,17 @@
+# Example ReRDMFT input file: water, X2C spinors, MULLER JK-only functional,
+# FULL_OPTIMIZATION TRUE: the complex-spinor counterpart of
+# water_NON_REL_full_optimization.inp. The ADAM orbital rotations are
+# restricted to the time-reversal-symmetric (Kramers-restricted) subspace
+# (Utils/KramersRestriction.h); the validation checks additionally verify
+# the Kramers symmetry of the occupations, the gradient and a probe rotation.
+NELEC 10
+BASIS water-sto-3g.gbs
+X2C TRUE
+FUNCTIONAL MULLER
+FULL_OPTIMIZATION TRUE
+
+GEOMETRY
+O   0.000000   0.000000   0.000000
+H   0.000000   0.757000   0.586000
+H   0.000000  -0.757000   0.586000
+END

@@ -101,7 +101,18 @@ PnofFullTwoRdm buildPnofFullTwoRdm(PnofFunctional functional,
             result.two_rdm_x(Q, P) = h_x_value;
           }
 
-          const double l1_signed = matching_parity ? (pi / 2.0) : (-pi / 2.0);
+          // Coefficient of the pair-transfer tuples: +-Pi/4, i.e. HALF the
+          // Gamma element +-Pi/2 of doc Eqs. 98. Every tuple (P,Pbar,Q,Qbar)
+          // is enumerated TWICE by hartreeExchangeEnergy/Fock/Hessian's L1+L2
+          // pattern (once as the L1 slot of (P,Q), once as the L2 slot of
+          // (P,Qbar), because l2 = -l1 and the bar-parity sign flips), while
+          // those functions weight the pair term 1 (not the 1/2 of the H/X
+          // part): the stored coefficient therefore carries the missing 1/2.
+          // With the former +-Pi/2 the pair energy was DOUBLED (found
+          // 2026-09-20 by comparing with pnofElectronicEnergy: 3.9e-2 Ha off
+          // for H2/cc-pVTZ PNOF5, where the exact 2-electron pair-CI energy
+          // equals pnofElectronicEnergy).
+          const double l1_signed = matching_parity ? (pi / 4.0) : (-pi / 4.0);
           result.two_rdm_l1(P, Q) = l1_signed;
           result.two_rdm_l1(Q, P) = l1_signed;
           result.two_rdm_l2(P, Q) = -l1_signed;

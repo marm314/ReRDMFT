@@ -127,6 +127,23 @@ test_neo: $(BUILD_DIR)/test_neo
 $(BUILD_DIR)/test_neo: tests/test_neo.cpp $(BUILD_DIR)/NEO.o $(BUILD_DIR)/LinearAlgebra.o | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
+# Standalone unit test of Utils/ADAM (tests/test_adam.cpp): needs only the
+# project's own rotation exp(-kappa) (SpinorRotation) and LAPACK wrappers.
+.PHONY: test_adam
+test_adam: $(BUILD_DIR)/test_adam
+	./$(BUILD_DIR)/test_adam
+
+$(BUILD_DIR)/test_adam: tests/test_adam.cpp $(BUILD_DIR)/ADAM.o $(BUILD_DIR)/SpinorRotation.o $(BUILD_DIR)/LinearAlgebra.o | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
+# Standalone unit test of Utils/KramersRestriction (tests/test_kramers_restriction.cpp).
+.PHONY: test_kramers
+test_kramers: $(BUILD_DIR)/test_kramers
+	./$(BUILD_DIR)/test_kramers
+
+$(BUILD_DIR)/test_kramers: tests/test_kramers_restriction.cpp $(BUILD_DIR)/KramersRestriction.o $(BUILD_DIR)/ADAM.o $(BUILD_DIR)/NEO.o $(BUILD_DIR)/SpinorRotation.o $(BUILD_DIR)/LinearAlgebra.o | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
 clean:
 	rm -rf $(BUILD_DIR) $(BIN) $(GIT_VERSION_HEADER)
 # ($(BUILD_DIR) already holds the .d files alongside their .o's, so the

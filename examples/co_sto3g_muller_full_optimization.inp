@@ -1,0 +1,22 @@
+# Example ReRDMFT input file: carbon monoxide, STO-3G, MULLER, FULL_OPTIMIZATION (compare
+# co-sto-3g_muller.inp, which uses C4_SPINOR instead: FULL_OPTIMIZATION is not available
+# for the 4-component path).
+# FULL_OPTIMIZATION TRUE: after the occupation-number optimization at the HF orbitals,
+# the ADAM / exact-integral-rotation machinery (and, for X2C, the Kramers-restriction
+# machinery) is validated on this system and, only if every check passes, ADAM orbital
+# rotations (fixed occupations) and occupation re-optimization (fixed orbitals) are
+# macro-iterated to convergence (Full_opt/FullOptimization.h).
+# NON_RELATIVISTIC TRUE and X2C TRUE together: the same molecule is run twice in one
+# execution, first NON_REL (real spin-orbitals, plain ADAM), then X2C (complex spinors,
+# Kramers-restricted ADAM), so the two FULL_OPTIMIZATION paths can be compared.
+NELEC 14
+BASIS co-sto-3g.gbs
+NON_RELATIVISTIC TRUE
+X2C TRUE
+FUNCTIONAL MULLER
+FULL_OPTIMIZATION TRUE
+
+GEOMETRY
+C   0.000000   0.000000   0.000000
+O   0.000000   0.000000   1.128000
+END

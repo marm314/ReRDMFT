@@ -9,9 +9,13 @@ namespace rerdmft {
 // One- and two-electron integrals rotated into a new orbital basis
 // C_new = C_old * U (SpinorRotation.h's own convention for what "U"
 // means), i.e. h_rot = U^dagger h U and eri_rot(p,q,r,s) =
-// sum_{a,b,c,d} conj(U(a,p)) U(b,q) conj(U(c,r)) U(d,s) eri(a,b,c,d)
-// (physics notation, bra legs conjugated -- the same convention every
-// other MO transform in this project uses, e.g. C4_DHF/RkbMoTransform.h).
+// sum_{a,b,c,d} conj(U(a,p)) conj(U(b,q)) U(c,r) U(d,s) eri(a,b,c,d)
+// (physics notation <ab|cd>, the BRA legs -- the first two indices --
+// conjugated, the same convention every other MO transform in this project
+// uses, e.g. C4_DHF/RkbMoTransform.h). (This comment used to show the
+// conjugations on legs a and c; the code below, i.e. the Cholesky
+// transform V' = U^dagger V conj(U), eri' = sum_L V'(ab) conj(V'(cd)),
+// conjugates a and b.)
 template <typename T>
 struct RotatedIntegrals {
   Matrix<T> h;

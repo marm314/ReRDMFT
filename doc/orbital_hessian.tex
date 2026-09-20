@@ -189,9 +189,18 @@ as\\ \texttt{HartreeExchangeGradient.cpp}'s own $F_{pq}$ derivation already
 uses them. For a PNOF functional, $\mathrm{H}_{pq}=\mathrm{X}_{pq}$
 (uniform across every Kramers/spin bar-combination of a geminal pair,
 doc/rel\_pnofs.tex's own \texttt{eq:coulomb-elems}) and $L^{1}_{pq}=
--L^{2}_{pq}=\pm\Pi_{\text{rep}(p),\text{rep}(q)}/2$ (sign $+$ at matching
-bar-parity, $-$ at mismatched) -- see \texttt{PnofFock.h}'s own header
-comment for the full derivation from doc/rel\_pnofs.tex's Eqs.~98c--f.
+-L^{2}_{pq}=\pm\Pi_{\text{rep}(p),\text{rep}(q)}/4$ (sign $+$ at matching
+bar-parity, $-$ at mismatched). The coefficient is $\Pi/4$, not $\Pi/2$,
+because $L^1$ and $L^2$ BOTH contribute at the same tensor entry
+(Eq.~\eqref{eq:pnof-ansatz}): $\Gamma_{p\bar p r\bar r}=L^1_{pr}+L^2_{p\bar r}=
+\pm\Pi/2$, the value of doc/rel\_pnofs.tex's Eqs.~98c--f. (An earlier
+version stored $\pm\Pi/2$ in each, i.e.\ $\Gamma=\pm\Pi$, which doubled the
+pairing energy: it disagreed with \texttt{Occ\_opt/PNOFs.h}'s
+\texttt{pnofElectronicEnergy}, itself equal to the exact two-electron
+pair-CI energy, by $3.9\times10^{-2}$~Hartree for H$_2$/cc-pVTZ PNOF5.
+Corrected 2026-09-20; energy, generalized Fock matrix and Hessian, all
+linear in $L^{1,2}$, are fixed together.) See \texttt{PnofFock.h}'s own
+header comment for the derivation from Eqs.~98c--f.
 
 \subsection*{Hartree/exchange contribution to $G_{pq,rs}$}
 

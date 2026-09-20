@@ -41,8 +41,14 @@ namespace rerdmft {
 //     n_{rep(P)}*n_{rep(Q)} - Delta_{rep(P),rep(Q)}     if rep(P) != rep(Q), MATCHING bar-parity
 //     [above], if `relativistic`, else 0                if rep(P) != rep(Q), MISMATCHED bar-parity
 //   two_rdm_l1_full(P,Q) =
-//     +Pi_{rep(P),rep(Q)}/2   if rep(P) != rep(Q), MATCHING bar-parity
-//     -Pi_{rep(P),rep(Q)}/2   if rep(P) != rep(Q), MISMATCHED bar-parity
+//     +Pi_{rep(P),rep(Q)}/4   if rep(P) != rep(Q), MATCHING bar-parity
+//     -Pi_{rep(P),rep(Q)}/4   if rep(P) != rep(Q), MISMATCHED bar-parity
+//   (HALF the Gamma element +-Pi/2 of Eqs. 98: each pair-transfer tuple is
+//   enumerated twice by the L1+L2 pattern and the pair term carries weight 1 --
+//   see buildPnofFullTwoRdm's .cpp comment. An earlier version stored +-Pi/2,
+//   which doubled the pair energy relative to Occ_opt/PNOFs.h's
+//   pnofElectronicEnergy; corrected 2026-09-20, energies now agree to machine
+//   precision, also for the exact 2-electron pair-CI energy.)
 //     0                                                otherwise
 //   two_rdm_l2_full(P,Q) = -two_rdm_l1_full(P,Q)   [always, at every (P,Q)]
 //

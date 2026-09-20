@@ -1,0 +1,22 @@
+# Example ReRDMFT input file: water, STO-3G, GNOF (PNOF_COUPLING 2), FULL_OPTIMIZATION.
+# FULL_OPTIMIZATION TRUE: after the occupation-number optimization at the HF orbitals,
+# the ADAM / exact-integral-rotation machinery (and, for X2C, the Kramers-restriction
+# machinery) is validated on this system and, only if every check passes, ADAM orbital
+# rotations (fixed occupations) and occupation re-optimization (fixed orbitals) are
+# macro-iterated to convergence (Full_opt/FullOptimization.h).
+# NON_RELATIVISTIC TRUE and X2C TRUE together: the same molecule is run twice in one
+# execution, first NON_REL (real spin-orbitals, plain ADAM), then X2C (complex spinors,
+# Kramers-restricted ADAM), so the two FULL_OPTIMIZATION paths can be compared.
+NELEC 10
+BASIS water-sto-3g.gbs
+NON_RELATIVISTIC TRUE
+X2C TRUE
+FUNCTIONAL GNOF
+PNOF_COUPLING 2
+FULL_OPTIMIZATION TRUE
+
+GEOMETRY
+O   0.000000   0.000000   0.000000
+H   0.000000   0.757000   0.586000
+H   0.000000  -0.757000   0.586000
+END

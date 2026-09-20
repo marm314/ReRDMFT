@@ -308,6 +308,18 @@ class Input {
   // real angle) and has empirically converged at least as reliably.
   bool sqp_pnof_occ() const { return sqp_pnof_occ_; }
 
+  // FULL_OPTIMIZATION: after the occupation-number optimization at the
+  // HF/X2C orbitals, validate the ADAM/Kramers-restriction machinery and
+  // then macro-iterate ADAM orbital rotations and occupation re-
+  // optimization to convergence (Full_opt/FullOptimization.h). NON_REL and
+  // X2C only (not the 4-component path). MAX_MACRO_ITERATIONS,
+  // MACRO_ENERGY_TOLERANCE (the Fortran's tolE) and
+  // ORBITAL_GRADIENT_TOLERANCE (ADAM's 10**-itolLambda) control it.
+  bool full_optimization() const { return full_optimization_; }
+  int max_macro_iterations() const { return max_macro_iterations_; }
+  double macro_energy_tolerance() const { return macro_energy_tolerance_; }
+  double orbital_gradient_tolerance() const { return orbital_gradient_tolerance_; }
+
   // Prints the current value of EVERY input variable (one per line, after
   // the geometry), so a run's output records exactly what was in effect.
   // MAINTENANCE: whenever a new input keyword/member is added to Input,
@@ -343,6 +355,10 @@ class Input {
   int pnof_subspaces_ = 1;
   int pnof_coupling_ = 2;
   bool sqp_pnof_occ_ = false;
+  bool full_optimization_ = false;
+  int max_macro_iterations_ = 1000;
+  double macro_energy_tolerance_ = 1e-9;
+  double orbital_gradient_tolerance_ = 1e-5;
 };
 
 }  // namespace rerdmft
