@@ -186,6 +186,11 @@ void Input::read(const std::string& filename) {
         throw std::runtime_error("line " + std::to_string(line_number) +
                                   ": expected a directory path after CACHE_DIR");
       }
+    } else if (keyword == "RESTART_FILE") {
+      if (!(iss >> restart_file_)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": expected a file name (or NONE) after RESTART_FILE");
+      }
     } else if (keyword == "FUNCTIONAL") {
       std::string token;
       if (!(iss >> token)) {
@@ -336,6 +341,7 @@ void Input::print(std::ostream& out) const {
   line("CHOLESKY_THRESHOLD") << cholesky_threshold_ << "\n";
   line("CACHE_INTEGRALS") << flag(cache_integrals_) << "\n";
   line("CACHE_DIR") << cache_dir_ << "\n";
+  line("RESTART_FILE") << restart_file_ << "\n";
   line("FUNCTIONAL") << functional_ << (has_functional_ ? "" : " (default; not set in input)")
                       << "\n";
   line("TEMPERATURE") << temperature_ << "\n";

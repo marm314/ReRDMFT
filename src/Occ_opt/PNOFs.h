@@ -316,6 +316,15 @@ std::size_t pnofGammasPerSubspace(int pnof_coupling);
 std::vector<double> pnofSubspaceOccupationsFromGammas(int pnof_coupling,
                                                        const std::vector<double>& gammas);
 
+// Inverse of pnofSubspaceOccupationsFromGammas: the pnof_coupling-1 angles (each in [0, pi/2])
+// whose occupations are `occ` (size pnof_coupling, index 0 the principal geminal, sum = 1 to
+// within roundoff; the last virtual is implied by the others). Used to write the GAMMAs of an
+// SQP-optimized (occupation-space) result to the RESTART file. A stick-breaking share whose
+// remaining hole is numerically zero has no defined angle and gets pi/4. Throws
+// std::runtime_error if `occ.size() != pnof_coupling` or `pnof_coupling < 2`.
+std::vector<double> pnofSubspaceGammasFromOccupations(int pnof_coupling,
+                                                       const std::vector<double>& occ);
+
 // DoNOF's own default occupation guess (m_optocc.F90: `GAMMAs=pi/four`,
 // its comment reading "Perturbed occ. numbers (i.e. pi/4) -> occ(i<Fermi
 // level) = 0.75") -- every gamma angle set to pi/4, giving n_principal =

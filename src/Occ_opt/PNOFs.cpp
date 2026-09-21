@@ -1,6 +1,7 @@
 #include "CholeskyEri.h"
 #include "PNOFs.h"
 
+#include <algorithm>
 #include <cmath>
 #include <complex>
 #include <stdexcept>
@@ -758,6 +759,27 @@ std::vector<double> pnofSubspaceOccupationsFromGammas(int pnof_coupling,
   }
   occ[n_coupled] = remaining;
   return occ;
+}
+
+std::vector<double> pnofSubspaceGammasFromOccupations(int pnof_coupling,
+                                                       const std::vector<double>& occ) {
+  const std::size_t n_coupled = pnofGammasPerSubspace(pnof_coupling);
+  if (occ.size() != n_coupled + 1) {
+    throw std::runtime_error(
+        "pnofSubspaceGammasFromOccupations: expected exactly pnof_coupling occupations");
+  }
+  constexpr double kPiOverFour = 0.7853981633974483;
+  const auto clamp01 = [](double x) { return std::min(1.0, std::max(0.0, x)); };
+  std::vector<double> gammas(n_coupled, kPiOverFour);
+  // n_principal = 1/2 + 1/2 cos^2(gamma_0)  ->  cos^2(gamma_0) = 2 n_principal - 1.
+  gammas[0] = std::acos(std::sqrt(clamp01(2.0 * occ[0] - 1.0)));
+  double remaining = 1.0 - occ[0];
+  for (std::size_t k = 0; k + 1 < n_coupled; ++k) {
+    // occ[1+k] = remaining * sin^2(gamma_{k+1}).
+    if (remaining > 1e-14) gammas[k + 1] = std::asin(std::sqrt(clamp01(occ[1 + k] / remaining)));
+    remaining -= occ[1 + k];
+  }
+  return gammas;
 }
 
 std::vector<double> pnofDefaultGuessGammas(int pnof_coupling) {

@@ -169,6 +169,14 @@ test_cholesky_eri: $(BUILD_DIR)/test_cholesky_eri
 $(BUILD_DIR)/test_cholesky_eri: tests/test_cholesky_eri.cpp $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o $(BUILD_DIR)/SpinorRotation.o $(BUILD_DIR)/LinearAlgebra.o $(BUILD_DIR)/OccupationEnergy.o $(BUILD_DIR)/JK_only.o $(BUILD_DIR)/JkOnlyFock.o $(BUILD_DIR)/HartreeExchangeGradient.o $(BUILD_DIR)/PnofFock.o $(BUILD_DIR)/PNOFs.o $(BUILD_DIR)/Orb_subspaces.o $(BUILD_DIR)/StringUtils.o | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
+# Unit test of Utils/Restart (binary RESTART file) and of the PNOF gamma <-> occupation maps.
+.PHONY: test_restart
+test_restart: $(BUILD_DIR)/test_restart
+	./$(BUILD_DIR)/test_restart
+
+$(BUILD_DIR)/test_restart: tests/test_restart.cpp $(BUILD_DIR)/Restart.o $(BUILD_DIR)/PNOFs.o $(BUILD_DIR)/Orb_subspaces.o $(BUILD_DIR)/StringUtils.o $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
 clean:
 	rm -rf $(BUILD_DIR) $(BIN) $(GIT_VERSION_HEADER)
 # ($(BUILD_DIR) already holds the .d files alongside their .o's, so the

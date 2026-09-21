@@ -189,6 +189,10 @@ class Input {
   // Directory (created if missing) that cache_integrals() cache files
   // are written to/read from.
   const std::string& cache_dir() const { return cache_dir_; }
+  // Optional; defaults to "RESTART" when RESTART_FILE is absent. Base name of the binary restart
+  // files (Utils/Restart.h) written at the end of a NON_REL / X2C RDMFT run with a FUNCTIONAL:
+  // "<base>.NON_REL" and "<base>.X2C_HF". The word NONE disables the files.
+  const std::string& restart_file() const { return restart_file_; }
   // Optional; defaults to FALSE when the CHOLESKY keyword is absent --
   // the original direct 4-leg transform is the default everywhere. When
   // TRUE, every two-electron integral basis TRANSFORMATION in this
@@ -348,6 +352,7 @@ class Input {
   bool cholesky_ = false;
   double cholesky_threshold_ = 1e-10;
   std::string cache_dir_ = ".rerdmft_cache";
+  std::string restart_file_ = "RESTART";
   std::string functional_ = "SD";
   bool has_functional_ = false;
   double temperature_ = 1000.0;

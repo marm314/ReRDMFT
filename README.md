@@ -99,13 +99,14 @@ anywhere on a line) are comments.
 | `CHOLESKY_THRESHOLD` | double (> 0) | `1e-10` | Residual-diagonal cutoff for the `CHOLESKY TRUE` decomposition: a pivot below this is treated as numerical noise and decomposition stops. Loosening it (e.g. `1e-6`) finds fewer Cholesky vectors (faster, less accurate); tightening it (e.g. `1e-13`) finds more (slower, closer to an exact reconstruction). Only meaningful when `CHOLESKY` is `TRUE`. |
 | `CACHE_INTEGRALS` | bool | `FALSE` | Cache the two-electron integral tensors to disk and reuse them on a later run with matching geometry+basis (see below). |
 | `CACHE_DIR` | string | `.rerdmft_cache` | Directory (created if missing) used by `CACHE_INTEGRALS`. |
+| `RESTART_FILE` | string | `RESTART` | Base name of the binary restart files written at the end of a `NON_RELATIVISTIC` / `X2C` run with a `FUNCTIONAL`: `<base>.NON_REL` and `<base>.X2C_HF` (see *Restart file* below). `NONE` disables them. The `C4_SPINOR` path writes none. |
 | `FUNCTIONAL` | string | *(none)* | Selects a density matrix functional approximation to evaluate on the converged `NON_REL`/`X2C`/`C4_DHF` orbitals: either a JK-only functional (`Occ_opt/JK_only.h`, Table 1 of Rodriguez-Mayorga et al., *Phys. Chem. Chem. Phys.* 2017) -- one of `SD`, `MBB` (or `MULLER`), `BBC2`, `CA`, `CGA`, `ML`, `MLSIC`, `GU`, `POWER` -- or a Piris natural orbital functional (`Occ_opt/PNOFs.h`) -- one of `PNOF5`, `PNOF7`, `PNOF7S`, `GNOF`. Setting this triggers the whole RDMFT functional evaluation described below; with no `FUNCTIONAL` keyword at all, that step is skipped entirely (it is not gated by `DEBUG`). |
 | `OCCUPATION_INIT` | string | `PROPORTIONAL` | How to generate the initial fractional occupation numbers for a JK-only `FUNCTIONAL` (see below). `PROPORTIONAL`: an aufbau (idempotent) reference redistributed proportionally into an interior box -- temperature-independent. `FERMI_DIRAC`: smeared at `TEMPERATURE` instead. Only meaningful when `FUNCTIONAL` is one of the JK-only names (PNOF functionals build their own initial guess, see below). |
 | `TEMPERATURE` | double (> 0) | `1000` (Kelvin) | Electronic temperature used to smear orbital energies into fractional Fermi-Dirac occupations. Only consumed when `OCCUPATION_INIT FERMI_DIRAC` is selected; ignored (but still validated) otherwise. |
 | `PNOF_SUBSPACES` | int (>= 1) | `1` | Only meaningful when `FUNCTIONAL` is a PNOF name. How many independent coupling subspaces to build outward from HOMO (`Occ_opt/Orb_subspaces.h`): `1` builds just the HOMO subspace, `2` additionally builds a separate HOMO-1 subspace, and so on. Throws if this exceeds the number of occupied Kramers/spin pairs available. |
 | `PNOF_COUPLING` | int (>= 2) | `2` | Only meaningful when `FUNCTIONAL` is a PNOF name. The SIZE of each subspace, in Kramers/spin pairs: 1 occupied pair + (`PNOF_COUPLING` - 1) unoccupied pairs. `2` (the default) is plain HOMO-LUMO perfect pairing; `3` couples each occupied pair with its two closest unoccupied pairs (LUMO and LUMO+1); and so on. Every subspace's unoccupied pairs are a disjoint block (never shared between subspaces); throws if `PNOF_SUBSPACES * (PNOF_COUPLING - 1)` exceeds the number of unoccupied pairs available. |
 | `SQP_PNOF_OCC` | bool | `FALSE` | Only meaningful when `FUNCTIONAL` is a PNOF name. `FALSE` (the default): optimize the occupations via `Utils/LBFGS.h` over the UNCONSTRAINED gamma angles (`standalone_donof`'s own approach). `TRUE`: optimize via `Utils/SQP.h` over the occupations directly instead, subject to explicit box+equality constraints. The two methods solve the same problem and agree to full displayed precision whenever both converge cleanly (see the PNOF section below); only one runs per calculation, never both. |
-| `FULL_OPTIMIZATION` | bool | `FALSE` | After the occupation-number optimization at the HF/X2C orbitals (needs `FUNCTIONAL`), macro-iterate to full convergence, as in DoNOF's driver: ADAM (`Utils/ADAM.h`, DoNOF's parameters: learning rate 0.01, beta1 0.7, beta2 0.9, 10 (+20 per restart) steps per call, learning rate x0.2 after a call that made no progress) over the orbital rotations at fixed occupations, then re-optimization of the occupation numbers at the new orbitals, until `|E - E_old| < MACRO_ENERGY_TOLERANCE` and ADAM asked for no restart. Runs on the MO integrals (rotated with an exact O(n^5) leg transform). **NON_REL** (real spin-orbitals) and **X2C** (complex spinors, with the rotations restricted to the time-reversal-symmetric Kramers-restricted subspace, `Utils/KramersRestriction.h`); not available for `C4_SPINOR` (a message is printed). BEFORE the loop, validation checks are run on the actual data -- exact rotation vs the Cholesky rotation, orbital gradient vs finite differences of the energy, and for X2C occupation equality within Kramers pairs, time-reversal symmetry of the gradient and of a probe Kramers-restricted rotation -- and the loop is only entered if every check passes (for PNOF also that the energy the orbital stage differentiates equals the energy the occupation optimizer minimizes). NON_REL rotations are spin-restricted (alpha and beta rotate identically). After the loop a FINAL TEST verifies the optimized orbitals: for X2C the Kramers pairing (`Theta|2k> = |2k+1>`) of the total rotation, of h and of the two-electron integrals, occupation equality and time-reversal symmetry of the gradient; for NON_REL the alpha/beta symmetry of h and the integrals; for PNOF that the pair-symmetric energy still equals the full two-RDM energy. Works for the JK_only and the PNOF functionals. |
+| `FULL_OPTIMIZATION` | bool | `FALSE` | After the occupation-number optimization at the HF/X2C orbitals (needs `FUNCTIONAL`), macro-iterate to full convergence, as in DoNOF's driver: ADAM (`Utils/ADAM.h`, DoNOF's parameters: learning rate 0.01, beta1 0.7, beta2 0.9, 10 (+20 per restart) steps per call, learning rate x0.2 after a call that made no progress) over the orbital rotations at fixed occupations, then re-optimization of the occupation numbers at the new orbitals, until `|E - E_old| < MACRO_ENERGY_TOLERANCE` and ADAM asked for no restart. Runs on the MO integrals (rotated with an exact O(n^5) leg transform). **NON_REL** (real spin-orbitals) and **X2C** (complex spinors, with the rotations restricted to the time-reversal-symmetric Kramers-restricted subspace, `Utils/KramersRestriction.h`); not available for `C4_SPINOR` (a message is printed). BEFORE the loop, validation checks are run on the actual data -- exact rotation vs the Cholesky rotation, orbital gradient vs finite differences of the energy, and for X2C occupation equality within Kramers pairs, time-reversal symmetry of the gradient and of a probe Kramers-restricted rotation -- and the loop is only entered if every check passes (for PNOF also that the energy the orbital stage differentiates equals the energy the occupation optimizer minimizes, and that the orbital gradient equals the finite difference of that independent occupation-side energy along a symmetry-preserving rotation). NON_REL rotations are spin-restricted (alpha and beta rotate identically). After the loop a FINAL TEST verifies the optimized orbitals: for X2C the Kramers pairing (`Theta|2k> = |2k+1>`) of the total rotation, of h and of the two-electron integrals, occupation equality and time-reversal symmetry of the gradient; for NON_REL the alpha/beta symmetry of h and the integrals; for PNOF that the pair-symmetric energy still equals the full two-RDM energy. Works for the JK_only and the PNOF functionals. |
 | `MAX_MACRO_ITERATIONS` | int | `1000` | Maximum number of macro-iterations (ADAM orbital step + occupation re-optimization) of `FULL_OPTIMIZATION`. |
 | `MACRO_ENERGY_TOLERANCE` | float | `1e-9` | Energy convergence threshold of the macro-iteration loop (`tolE` of the Fortran code). |
 | `ORBITAL_GRADIENT_TOLERANCE` | float | `1e-5` | ADAM's orbital-gradient convergence threshold (max gradient entry; `10**-itolLambda` of the Fortran code). |
@@ -330,6 +331,42 @@ writes files to disk; a cache from a different build of the code is
 detected via an embedded format version and never reused. Files under
 the cache directory are a same-machine binary format, not meant to be
 inspected or shared.
+
+## Restart file
+
+At the end of a `NON_RELATIVISTIC` and/or `X2C` run with a `FUNCTIONAL`,
+the final RDMFT state is written in **binary** to `<RESTART_FILE>.NON_REL`
+and `<RESTART_FILE>.X2C_HF` (default base name `RESTART`, in the working
+directory; `RESTART_FILE NONE` disables it). The format, writer and reader
+are in `Utils/Restart.h`; the program only writes the files for now (the
+reader is used to verify them), reading a restart to start a calculation
+is not implemented yet.
+
+Contents:
+
+- the **occupation numbers** (full vector, one entry per spin-orbital /
+  spinor of the MO basis) -- for the JK-only functionals this is the state;
+- for the **PNOF** functionals also the **gamma angles** (subspace after
+  subspace, `PNOF_COUPLING - 1` angles each, the trigonometric
+  parameterization of `Occ_opt/PNOFs.h`), obtained from the final
+  occupations, so the SQP and the L-BFGS branches write the same thing;
+- the final **molecular-orbital coefficients** `C = C_scf * U_total` in the
+  AO spin-orbital basis: `U_total` is the accumulated `FULL_OPTIMIZATION`
+  rotation (identity without it). `NON_REL`: `blockdiag(C, C)`, real,
+  `2 n_AO x 2 n_MO`, ordered `[alpha, beta]`. `X2C`: the Kramers-fixed
+  spinors, complex, `2 n_Large x 2 n_Large`. Column `j` is MO `j` and has
+  occupation `occupations[j]`;
+- the Large-basis fingerprint (`Utils/IntegralCache.h`), the number of
+  electrons, the PNOF subspace/coupling/core counts, the final total
+  energy and flags telling whether the orbitals come from
+  `FULL_OPTIMIZATION` and whether the optimization converged.
+
+Every file is read back right after it is written and the program prints
+the checks: identity with what was written, `C^dagger S C = 1`,
+`C^dagger h_AO C = U^dagger h_MO U` (which fixes the AO/MO layout and the
+`C_new = C_old U` convention) and, for PNOF, that the gamma angles
+regenerate the occupation numbers. The file layout is documented at the
+top of `Utils/Restart.h`. Unit test: `make test_restart LIBCINT=...`.
 
 ## Contributors
 

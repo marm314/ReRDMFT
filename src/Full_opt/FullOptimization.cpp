@@ -813,6 +813,14 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
   }
   result.iterations = std::min(iter, settings.max_macro_iterations);
   result.occupations = occ;
+  result.occupation_state = occ_state;
+  {
+    const Matrix<T>& u_final = problem.totalRotation();
+    result.total_rotation = Matrix<std::complex<double>>(u_final.rows(), u_final.cols());
+    for (std::size_t i = 0; i < u_final.rows() * u_final.cols(); ++i) {
+      result.total_rotation.data()[i] = std::complex<double>(u_final.data()[i]);
+    }
+  }
   result.electronic_energy = e_elec;
 
   const Matrix<T> g_final = model.gradient(problem.h(), problem.eri(), occ);

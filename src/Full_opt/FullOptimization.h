@@ -117,6 +117,13 @@ struct FullOptResult {
   double electronic_energy = 0.0;   // at the final orbitals/occupations
   double gradient_max = 0.0;        // max |g_pq| (p > q) at the final point
   std::vector<double> occupations;  // final full occupation vector
+  // Final warm-start variable of the occupation optimizer (JK_only: active occupations; PNOF:
+  // frontier occupations for SQP, gamma angles for L-BFGS).
+  std::vector<double> occupation_state;
+  // Accumulated orbital rotation of the macro loop, C_final = C_start * total_rotation (n x n,
+  // stored complex also for real orbitals). EMPTY when the loop did not run (a validation check
+  // failed): the orbitals are then the starting ones.
+  Matrix<std::complex<double>> total_rotation;
 };
 
 // Runs (a) the validation of the ADAM/Kramers-restriction machinery on the
