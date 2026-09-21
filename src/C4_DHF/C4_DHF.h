@@ -68,12 +68,21 @@ struct DiracHartreeFockResult {
 // Stops after `max_iterations` regardless of convergence (converged is
 // false in that case, but the last iteration's results are still
 // returned). total_energy adds the constant nuclear_repulsion_energy.
+//
+// With `diis_size` >= 2 the linear mixing is replaced by Pulay's DIIS (Utils/DIIS.h): the Fock
+// matrix built from P_current is extrapolated with the last `diis_size` (F P S - S P F, F) pairs
+// -- `overlap` is the AO overlap of the same space (S_full) -- and THAT matrix is diagonalized
+// (result.fock_matrix and the orbitals belong to it; the energy is still
+// E = 1/2 Re Tr[P_current (H + F)] with the unextrapolated F); `mixing` is then unused.
+// `diis_size` < 2 keeps the linear mixing.
+// returned). total_energy adds the constant nuclear_repulsion_energy.
 DiracHartreeFockResult runDiracHartreeFockScf(
     const Matrix<std::complex<double>>& h_rkb, const RkbTwoElectronTensor& eri,
     const Matrix<std::complex<double>>& x_full,
     const Matrix<std::complex<double>>& initial_density, int n_electrons,
-    const std::vector<Atom>& geometry, double mixing, int max_iterations = 100,
-    double energy_tolerance = 1e-8, double density_tolerance = 1e-6);
+    const std::vector<Atom>& geometry, double mixing, const Matrix<std::complex<double>>& overlap,
+    int diis_size, int max_iterations = 100, double energy_tolerance = 1e-8,
+    double density_tolerance = 1e-6);
 
 }  // namespace rerdmft
 

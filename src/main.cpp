@@ -1333,22 +1333,28 @@ inline std::string functionalJointHessianReport(
 // operator obeys M(P p,P q) = s_p s_q conj M(p,q) and <Pa Pb|Pc Pd> = s_a s_b s_c s_d
 // conj <ab|cd>. Prints the two PASS/FAIL lines (tolerance 1e-8 * max(1, max |element|)) and
 // returns whether BOTH pass. The exact re-pairing correction is applied only when this FAILs.
+// `repairs_if_failed`: the caller re-pairs the degenerate Kramers pairs (Utils/KramersPairing.h)
+// and tests again when this test does not pass, so a miss is reported as NEEDS RE-PAIRING (an
+// expected step for near-degenerate clusters), not as FAIL; the test after the correction uses
+// the default and reports a genuine FAIL.
 inline bool kramersStructureTest(const std::string& label,
                                  const rerdmft::Matrix<std::complex<double>>& h_mo,
-                                 const rerdmft::Tensor4<std::complex<double>>& eri_mo) {
+                                 const rerdmft::Tensor4<std::complex<double>>& eri_mo,
+                                 bool repairs_if_failed = false) {
   double h_scale = 0.0, eri_scale = 0.0;
   const double h_dev = rerdmft::kramersOneBodyDeviation(h_mo, &h_scale);
   const double eri_dev = rerdmft::kramersTwoBodyDeviation(eri_mo, &eri_scale);
   const bool h_ok = h_dev <= 1e-8 * std::max(1.0, h_scale);
   const bool eri_ok = eri_dev <= 1e-8 * std::max(1.0, eri_scale);
+  const char* miss_label = repairs_if_failed ? "NEEDS RE-PAIRING" : "FAIL";
   std::cout << label << " Kramers-pair structure of the MO integrals (Theta|2k> = |2k+1>): "
             << "max |h(P p,P q) - s_p s_q conj h(p,q)| = " << std::scientific << std::setprecision(2)
             << h_dev << " (max |h| = " << h_scale
             << "), max |<Pa Pb|Pc Pd> - s_a s_b s_c s_d conj <ab|cd>| = " << eri_dev
             << " (max |eri| = " << eri_scale << ")" << std::defaultfloat << std::setprecision(6)
-            << "\n  [" << (h_ok ? "PASS" : "FAIL")
+            << "\n  [" << (h_ok ? "PASS" : miss_label)
             << "] one-electron integrals keep the Kramers-pair structure\n  ["
-            << (eri_ok ? "PASS" : "FAIL") << "] two-electron integrals keep the Kramers-pair structure\n";
+            << (eri_ok ? "PASS" : miss_label) << "] two-electron integrals keep the Kramers-pair structure\n";
   return h_ok && eri_ok;
 }
 
@@ -3805,6 +3811,17 @@ rerdmft::RkbTwoElectronTensor buildOrLoadC4SpinorEri(
                                            input.cholesky(), input.cholesky_threshold());
 }
 
+// How the SCF loops were accelerated, for their headers.
+std::string scfAccelerationLabel(const rerdmft::Input& input) {
+  if (input.diis()) {
+    return "DIIS on the Fock matrix, commutator error F P S - S P F, " + std::to_string(input.diis_size()) +
+           " vectors";
+  }
+  std::ostringstream label;
+  label << "linear density mixing = " << input.mixing();
+  return label.str();
+}
+
 template <typename T>
 rerdmft::Matrix<std::complex<double>> toComplexMatrix(const rerdmft::Matrix<T>& m) {
   rerdmft::Matrix<std::complex<double>> out(m.rows(), m.cols());
@@ -4226,8 +4243,8 @@ int main(int argc, char** argv) {
       logTiming("Two-electron integrals built (NON_REL)", t_start, t_checkpoint, timing_records);
       nonrel_hf_result = rerdmft::runNonRelativisticHartreeFock(
           nonrel_eri, h_core_nonrel, x_large, nonrel_density_initial,
-          input.n_electrons(), input.geometry(), input.mixing(), input.max_iterations(),
-          input.energy_tolerance(), input.density_tolerance());
+          input.n_electrons(), input.geometry(), input.mixing(), s_large, input.scf_diis_size(),
+          input.max_iterations(), input.energy_tolerance(), input.density_tolerance());
       logTiming("Nonrelativistic HF SCF complete", t_start, t_checkpoint, timing_records);
 
       // Transform h and the ERIs into the converged natural (canonical
@@ -4505,8 +4522,9 @@ int main(int argc, char** argv) {
 
       x2c_hf_result = rerdmft::runX2CHartreeFockScf(
           x2c_hamiltonian.h_x2c, eri_x2c_spin, x_large_block, p_initial, input.n_electrons(),
-          input.geometry(), input.mixing(), input.max_iterations(), input.energy_tolerance(),
-          input.density_tolerance());
+          input.geometry(), input.mixing(),
+          rerdmft::extractLargeComponentBlock(s_full, x_large_block.rows()), input.scf_diis_size(),
+          input.max_iterations(), input.energy_tolerance(), input.density_tolerance());
       logTiming("X2C-HF SCF complete", t_start, t_checkpoint, timing_records);
 
       // Canonicalize each converged Kramers pair's relative phase
@@ -4541,7 +4559,7 @@ int main(int argc, char** argv) {
       // columns are not guaranteed to be (psi, Theta psi) pairs when Kramers pairs are
       // near-degenerate, e.g. a spin-orbit-split p shell of a stretched molecule) rebuild the
       // pairs exactly (Utils/KramersPairing.h), retransform and test again.
-      if (!kramersStructureTest("X2C-HF", h_x2c_mo, eri_x2c_mo)) {
+      if (!kramersStructureTest("X2C-HF", h_x2c_mo, eri_x2c_mo, /*repairs_if_failed=*/true)) {
         rerdmft::KramersPairingReport pairing;
         x2c_hf_result.c_matrix = rerdmft::fixKramersPairingLarge(
             x2c_hf_result.c_matrix, x2c_hf_result.orbital_energies, s_large, 1e-4, &pairing);
@@ -4745,8 +4763,8 @@ int main(int argc, char** argv) {
 
       dhf_result = rerdmft::runDiracHartreeFockScf(
           h_rkb, c4_spinor_eri, x_full, density_matrix, input.n_electrons(), input.geometry(),
-          input.mixing(), input.max_iterations(), input.energy_tolerance(),
-          input.density_tolerance());
+          input.mixing(), s_full, input.scf_diis_size(), input.max_iterations(),
+          input.energy_tolerance(), input.density_tolerance());
       logTiming("SCF loop complete", t_start, t_checkpoint, timing_records);
 
       // Canonicalize each converged Kramers pair's relative phase
@@ -4791,7 +4809,7 @@ int main(int argc, char** argv) {
       // fixKramersPairing / Utils/KramersPairing.h), retransform and test again. (Consecutive
       // eigenvector columns are only guaranteed to be (psi, Theta psi) pairs while every level
       // is well separated, e.g. not for a spin-orbit-split p shell of a stretched molecule.)
-      if (!kramersStructureTest("C4_DHF", h_mo, eri_mo)) {
+      if (!kramersStructureTest("C4_DHF", h_mo, eri_mo, /*repairs_if_failed=*/true)) {
         rerdmft::KramersPairingReport pairing;
         dhf_result.fock_ortho_eigenvectors = rerdmft::fixKramersPairing(
             dhf_result.fock_ortho_eigenvectors, dhf_result.orbital_energies, rkb_coefficients,
@@ -5264,9 +5282,8 @@ int main(int argc, char** argv) {
       std::cout << "  Stored values (real-orbital 8-fold-unique): " << nonrel_eri.storedCount()
                  << " (dense would be " << n_large * n_large * n_large * n_large << ")\n";
     }
-    std::cout << "\nNonrelativistic (restricted, closed-shell) Hartree-Fock SCF (NON_REL, linear "
-                 "density mixing = "
-               << input.mixing() << "):\n";
+    std::cout << "\nNonrelativistic (restricted, closed-shell) Hartree-Fock SCF (NON_REL, "
+               << scfAccelerationLabel(input) << "):\n";
     for (const auto& it : nonrel_hf_result.history) {
       std::cout << "  Iteration " << std::setw(3) << it.iteration << "  E = " << std::setw(16)
                  << std::setprecision(10) << it.energy << std::setprecision(6);
@@ -5456,8 +5473,8 @@ int main(int argc, char** argv) {
     std::cout << "\nApproximate X2C-HF SCF (X2C_DHF/X2C_HF.h -- FIXED one-electron h_x2c, no\n"
                  "picture-change correction, ordinary non-relativistic two-electron integrals,\n"
                  "Fock matrix orthogonalized with only the large-component overlap X_Large at\n"
-                 "every iteration; linear density mixing = "
-               << input.mixing() << "):\n";
+                 "every iteration; "
+               << scfAccelerationLabel(input) << "):\n";
     for (const auto& it : x2c_hf_result.history) {
       std::cout << "  Iteration " << std::setw(3) << it.iteration << "  E = " << std::setw(16)
                  << std::setprecision(10) << it.energy << std::setprecision(6);
@@ -5614,8 +5631,7 @@ int main(int argc, char** argv) {
       std::cout << "  Max |F - F^dagger| (Hermiticity check): " << max_herm_err << "\n";
     }
 
-    std::cout << "\n4-component Dirac-Hartree-Fock SCF (linear density mixing = "
-               << input.mixing() << "):\n";
+    std::cout << "\n4-component Dirac-Hartree-Fock SCF (" << scfAccelerationLabel(input) << "):\n";
     for (const auto& it : dhf_result.history) {
       std::cout << "  Iteration " << std::setw(3) << it.iteration << "  E = " << std::setw(16)
                  << std::setprecision(10) << it.energy << std::setprecision(6);

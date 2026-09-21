@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <stdexcept>
 
+#include "DIIS.h"
 #include "ElectronRepulsion.h"
 #include "LinearAlgebra.h"
 #include "NuclearRepulsion.h"
@@ -109,18 +110,23 @@ Matrix<double> nonRelFockMatrix(const Matrix<double>& h_core, const PackedTwoEle
 NonRelHartreeFockResult runNonRelativisticHartreeFock(
     const PackedTwoElectronTensor& eri, const Matrix<double>& h_core,
     const Matrix<double>& x_large, const Matrix<double>& initial_density, int n_electrons,
-    const std::vector<Atom>& geometry, double mixing, int max_iterations,
-    double energy_tolerance, double density_tolerance) {
+    const std::vector<Atom>& geometry, double mixing, const Matrix<double>& overlap, int diis_size,
+    int max_iterations, double energy_tolerance, double density_tolerance) {
   NonRelHartreeFockResult result;
   result.nuclear_repulsion_energy = nuclearRepulsionEnergy(geometry);
 
   Matrix<double> p_current = initial_density;
   double previous_energy = 0.0;
+  const bool use_diis = diis_size >= 2;
+  Diis<double> diis(static_cast<std::size_t>(use_diis ? diis_size : 0));
 
   for (int iteration = 1; iteration <= max_iterations; ++iteration) {
     const Matrix<double> fock = nonRelFockMatrix(h_core, eri, p_current);
+    // DIIS: extrapolate F (the first iteration has a single pair and returns F unchanged).
+    const Matrix<double> fock_scf =
+        use_diis ? diis.extrapolate(scfCommutatorError(fock, p_current, overlap), fock) : fock;
     // X_large is symmetric (S_Large^-1/2), so this is X^dagger F X exactly.
-    const Matrix<double> fock_ortho = x_large * (fock * x_large);
+    const Matrix<double> fock_ortho = x_large * (fock_scf * x_large);
     const SymmetricEigenResult eig = diagonalizeSymmetric(fock_ortho);
     const Matrix<double> c_matrix = x_large * eig.eigenvectors;
     const Matrix<double> p_new = nonRelDensityMatrix(c_matrix, n_electrons);
@@ -135,7 +141,7 @@ NonRelHartreeFockResult runNonRelativisticHartreeFock(
     result.electronic_energy = energy;
     result.orbital_energies = eig.eigenvalues;
     result.density_matrix = p_current;
-    result.fock_matrix = fock;
+    result.fock_matrix = fock_scf;
     result.c_matrix = c_matrix;
 
     NonRelScfIteration record;
@@ -156,6 +162,10 @@ NonRelHartreeFockResult runNonRelativisticHartreeFock(
       break;
     }
 
+    if (use_diis) {
+      p_current = p_new;  // DIIS replaces the linear density mixing
+      continue;
+    }
     // Linear mixing, same convention as runDiracHartreeFockScf: only
     // affects the density fed into the NEXT iteration's Fock build.
     Matrix<double> p_mixed(p_current.rows(), p_current.cols());

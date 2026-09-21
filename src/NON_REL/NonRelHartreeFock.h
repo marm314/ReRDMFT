@@ -86,11 +86,16 @@ Matrix<double> nonRelFockMatrix(const Matrix<double>& h_core, const PackedTwoEle
 // checks convergence (density change OR energy change below its
 // tolerance, skipped on the first iteration). Stops after
 // `max_iterations` regardless of convergence.
+// With `diis_size` >= 2 the linear mixing is replaced by Pulay's DIIS (Utils/DIIS.h): the Fock
+// matrix built from P_current is extrapolated with the last `diis_size` (F P S - S P F, F) pairs
+// -- `overlap` is S_Large -- and THAT matrix is diagonalized (result.fock_matrix and the orbitals
+// belong to it; the energy is still E = 1/2 Tr[P_current (H_core + F)] with the unextrapolated
+// F); `mixing` is then unused. `diis_size` < 2 keeps the linear mixing.
 NonRelHartreeFockResult runNonRelativisticHartreeFock(
     const PackedTwoElectronTensor& eri, const Matrix<double>& h_core,
     const Matrix<double>& x_large, const Matrix<double>& initial_density, int n_electrons,
-    const std::vector<Atom>& geometry, double mixing, int max_iterations,
-    double energy_tolerance, double density_tolerance);
+    const std::vector<Atom>& geometry, double mixing, const Matrix<double>& overlap, int diis_size,
+    int max_iterations, double energy_tolerance, double density_tolerance);
 
 }  // namespace rerdmft
 

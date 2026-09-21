@@ -153,6 +153,14 @@ void Input::read(const std::string& filename) {
         throw std::runtime_error("line " + std::to_string(line_number) +
                                   ": MIXING must be in (0, 1]");
       }
+    } else if (keyword == "DIIS") {
+      diis_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "DIIS_SIZE") {
+      diis_size_ = parseInt(iss, line_number, keyword);
+      if (!(diis_size_ >= 2)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": DIIS_SIZE must be at least 2");
+      }
     } else if (keyword == "MAX_ITERATIONS") {
       max_iterations_ = parseInt(iss, line_number, keyword);
       if (!(max_iterations_ > 0)) {
@@ -334,6 +342,8 @@ void Input::print(std::ostream& out) const {
   line("HESSIAN_X2C") << flag(hessian_x2c_) << "\n";
   line("HESSIAN_FUNCTIONAL") << flag(hessian_functional_) << "\n";
   line("MIXING") << mixing_ << "\n";
+  line("DIIS") << flag(diis_) << "\n";
+  line("DIIS_SIZE") << diis_size_ << "\n";
   line("MAX_ITERATIONS") << max_iterations_ << "\n";
   line("ENERGY_TOLERANCE") << energy_tolerance_ << "\n";
   line("DENSITY_TOLERANCE") << density_tolerance_ << "\n";

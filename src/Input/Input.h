@@ -158,6 +158,17 @@ class Input {
   // the density fed into the next iteration's Fock build is
   // mixing*P_new + (1-mixing)*P_current. Must be in (0, 1].
   double mixing() const { return mixing_; }
+  // Optional; defaults to TRUE when the DIIS keyword is absent. TRUE: the three Hartree-Fock SCF
+  // loops (NON_REL, X2C, C4_SPINOR) use Pulay's DIIS (Utils/DIIS.h) on the Fock matrix -- error
+  // F P S - S P F in the AO basis -- instead of the linear density mixing (MIXING is then
+  // ignored). DIIS FALSE selects the linear density mixing with weight MIXING.
+  bool diis() const { return diis_; }
+  // Optional; defaults to 5 when DIIS_SIZE is absent. Number of (error, Fock) pairs DIIS keeps.
+  // Must be at least 2. Only used with DIIS TRUE.
+  int diis_size() const { return diis_size_; }
+  // The history length handed to the SCF loops: diis_size() with DIIS TRUE, else 0 (linear
+  // mixing, DIIS FALSE).
+  int scf_diis_size() const { return diis_ ? diis_size_ : 0; }
   // Optional; defaults to 100 when MAX_ITERATIONS is absent. Maximum
   // number of C4_DHF SCF cycles (C4_DHF/C4_DHF.h) before giving up
   // (converged is false in that case, but the last cycle's results are
@@ -345,6 +356,8 @@ class Input {
   bool hessian_x2c_ = false;
   bool hessian_functional_ = false;
   double mixing_ = 0.4;
+  bool diis_ = true;
+  int diis_size_ = 5;
   int max_iterations_ = 100;
   double energy_tolerance_ = 1e-8;
   double density_tolerance_ = 1e-6;

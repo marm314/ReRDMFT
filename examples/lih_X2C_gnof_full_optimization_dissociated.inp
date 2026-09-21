@@ -10,6 +10,9 @@ PNOF_SUBSPACES 2
 PNOF_COUPLING 2
 FULL_OPTIMIZATION TRUE
 MACRO_ENERGY_TOLERANCE 1e-10
+# Stretched LiH has near-degenerate SCF solutions: DIIS (the default) converges to a higher one than
+# the damped linear density mixing (total X2C-HF energy -7.7990 vs -7.8241 Ha), so use the mixing.
+DIIS FALSE
 
 GEOMETRY
 Li  0.000000   0.000000   0.000000

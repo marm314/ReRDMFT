@@ -2,6 +2,7 @@
 
 #include <cstddef>
 
+#include "DIIS.h"
 #include "LinearAlgebra.h"
 #include "NuclearRepulsion.h"
 #include "RkbDensityMatrix.h"
@@ -39,17 +40,22 @@ DiracHartreeFockResult runDiracHartreeFockScf(
     const Matrix<std::complex<double>>& h_rkb, const RkbTwoElectronTensor& eri,
     const Matrix<std::complex<double>>& x_full,
     const Matrix<std::complex<double>>& initial_density, int n_electrons,
-    const std::vector<Atom>& geometry, double mixing, int max_iterations,
-    double energy_tolerance, double density_tolerance) {
+    const std::vector<Atom>& geometry, double mixing, const Matrix<std::complex<double>>& overlap,
+    int diis_size, int max_iterations, double energy_tolerance, double density_tolerance) {
   DiracHartreeFockResult result;
   result.nuclear_repulsion_energy = nuclearRepulsionEnergy(geometry);
 
   Matrix<std::complex<double>> p_current = initial_density;
   double previous_energy = 0.0;
+  const bool use_diis = diis_size >= 2;
+  Diis<std::complex<double>> diis(static_cast<std::size_t>(use_diis ? diis_size : 0));
 
   for (int iteration = 1; iteration <= max_iterations; ++iteration) {
     const Matrix<std::complex<double>> fock = rkbFockMatrix(h_rkb, eri, p_current);
-    const Matrix<std::complex<double>> fock_ortho = dagger(x_full) * (fock * x_full);
+    // DIIS: extrapolate F (the first iteration has a single pair and returns F unchanged).
+    const Matrix<std::complex<double>> fock_scf =
+        use_diis ? diis.extrapolate(scfCommutatorError(fock, p_current, overlap), fock) : fock;
+    const Matrix<std::complex<double>> fock_ortho = dagger(x_full) * (fock_scf * x_full);
     const HermitianEigenResult eig = diagonalizeHermitian(fock_ortho);
     const Matrix<std::complex<double>> c_dhf = x_full * eig.eigenvectors;
     const Matrix<std::complex<double>> p_new = rkbDensityMatrix(c_dhf, n_electrons);
@@ -64,7 +70,7 @@ DiracHartreeFockResult runDiracHartreeFockScf(
     result.electronic_energy = energy;
     result.orbital_energies = eig.eigenvalues;
     result.density_matrix = p_current;
-    result.fock_matrix = fock;
+    result.fock_matrix = fock_scf;
     result.c_dhf = c_dhf;
     result.fock_ortho_eigenvectors = eig.eigenvectors;
 
@@ -86,6 +92,10 @@ DiracHartreeFockResult runDiracHartreeFockScf(
       break;
     }
 
+    if (use_diis) {
+      p_current = p_new;  // DIIS replaces the linear density mixing
+      continue;
+    }
     // Linear mixing: only affects the density fed into the NEXT
     // iteration's Fock build, not the energy/results just recorded above.
     Matrix<std::complex<double>> p_mixed(p_current.rows(), p_current.cols());

@@ -78,6 +78,13 @@ struct X2CHartreeFockResult {
 //   6. If not converged, linearly mixes the density fed into the next
 //      iteration: P_current <- mixing*P_new + (1-mixing)*P_current.
 //
+//
+// With `diis_size` >= 2 the linear mixing is replaced by Pulay's DIIS (Utils/DIIS.h): the Fock
+// matrix built from P_current is extrapolated with the last `diis_size` (F P S - S P F, F) pairs
+// -- `overlap` is the AO overlap of the same space (Large-component spin-orbital block of S_full) -- and THAT matrix is diagonalized
+// (result.fock_matrix and the orbitals belong to it; the energy is still
+// E = 1/2 Re Tr[P_current (H + F)] with the unextrapolated F); `mixing` is then unused.
+// `diis_size` < 2 keeps the linear mixing.
 // Stops after `max_iterations` regardless of convergence. total_energy
 // adds the constant nuclear_repulsion_energy.
 X2CHartreeFockResult runX2CHartreeFockScf(const Matrix<std::complex<double>>& h_x2c,
@@ -85,7 +92,8 @@ X2CHartreeFockResult runX2CHartreeFockScf(const Matrix<std::complex<double>>& h_
                                            const Matrix<std::complex<double>>& x_large,
                                            const Matrix<std::complex<double>>& initial_density,
                                            int n_electrons, const std::vector<Atom>& geometry,
-                                           double mixing, int max_iterations = 100,
+                                           double mixing, const Matrix<std::complex<double>>& overlap,
+                                           int diis_size, int max_iterations = 100,
                                            double energy_tolerance = 1e-8,
                                            double density_tolerance = 1e-6);
 
