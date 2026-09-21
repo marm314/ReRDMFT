@@ -27,6 +27,9 @@ PnofFullTwoRdm buildPnofFullTwoRdm(PnofFunctional functional,
                                     const std::vector<PnofGeminal>& geminals,
                                     const std::vector<double>& occupations, std::size_t n_total,
                                     bool relativistic) {
+  // `relativistic` is kept for API compatibility: two_rdm_x is now the same at every bar-parity
+  // combination (see below), so it no longer changes anything here.
+  static_cast<void>(relativistic);
   if (geminals.empty()) {
     throw std::runtime_error("buildPnofFullTwoRdm: no geminals given");
   }
@@ -75,11 +78,10 @@ PnofFullTwoRdm buildPnofFullTwoRdm(PnofFunctional functional,
 
       // H (Coulomb, J-type) is uniform across every bar-combination of
       // (i/ibar, j/jbar) -- doc/rel_pnofs.tex's own `eq:coulomb-elems`
-      // first relation. X (exchange) is the SAME uniform value at
-      // MATCHING bar-parity combinations (P,Q both representatives or
-      // both bar-partners), unconditionally; at MISMATCHED bar-parity,
-      // only when `relativistic` (the genuinely relativistic-only
-      // L_ij-type contribution, doc's own `eq:lflip-elems`). Pi's own
+      // first relation. X (exchange) is the SAME uniform value at every
+      // bar-parity combination (see the assignment below for why also the
+      // mismatched one in the non-relativistic case, where its integral is
+      // spin-forbidden: the Hessian needs an antisymmetric 2-RDM). Pi's own
       // pairing contribution is a SEPARATE, independent 2-RDM entry
       // (Hessian_opt/HartreeExchangeGradient.h's own L1/L2 pattern,
       // `eri(P,Pbar,Q,Qbar)`/`eri(P,Pbar,Qbar,Q)`) -- NOT folded into X
@@ -97,10 +99,16 @@ PnofFullTwoRdm buildPnofFullTwoRdm(PnofFunctional functional,
           result.two_rdm_h(P, Q) = h_x_value;
           result.two_rdm_h(Q, P) = h_x_value;
 
-          if (matching_parity || relativistic) {
-            result.two_rdm_x(P, Q) = h_x_value;
-            result.two_rdm_x(Q, P) = h_x_value;
-          }
+          // X = H at EVERY bar-parity combination, also the mismatched one in the
+          // non-relativistic case. There the exchange integral <PQ|QP> is spin-forbidden
+          // (exactly zero), so the ENERGY and the Fock matrix/gradient do not see the
+          // coefficient -- but the generalized Hessian (Eq. 9 machinery) assumes an
+          // ANTISYMMETRIC 2-RDM, Gamma_{PQ,QP} = -Gamma_{PQ,PQ}, i.e. two_rdm_x == two_rdm_h.
+          // With X = 0 there and H != 0 the NON_REL Hessian was wrong for elements coupling a
+          // pair to its opposite-spin twin (1.8e-5 on -3.8e-2, found 2026-09-21 by an
+          // independent finite difference). `relativistic` no longer gates this entry.
+          result.two_rdm_x(P, Q) = h_x_value;
+          result.two_rdm_x(Q, P) = h_x_value;
 
           // Coefficient of the pair-transfer tuples: +-Pi/4, i.e. HALF the
           // Gamma element +-Pi/2 of doc Eqs. 98. Every tuple (P,Pbar,Q,Qbar)

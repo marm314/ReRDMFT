@@ -31,6 +31,7 @@
 #include "Integrals.h"
 #include "JK_only.h"
 #include "KramersPairing.h"
+#include "KramersRestriction.h"
 #include "KramersSymmetry.h"
 #include "LBFGS.h"
 #include "LinearAlgebra.h"
@@ -1503,6 +1504,103 @@ inline std::string kramersSymmetryReport(
   return out.str();
 }
 
+// PNOF only: curvature of the joint orbital-rotation Hessian along a symmetry-preserving direction
+// against the second finite difference of the INDEPENDENT occupation-side energy
+// (Occ_opt/PNOFs.h's pnofElectronicEnergy, the pair-symmetric shortcut; equal to the exact pair-CI
+// energy for two electrons). The e^kappa checks elsewhere differentiate the full two-RDM energy the
+// Hessian itself is built from, so they cannot see an error common to both. Direction: X2C -> the
+// Kramers-restricted orbit with the largest gradient (Utils/KramersRestriction.h), NON_REL -> the
+// spin-restricted alpha pair (plus its beta twin). `joint` is the symmetric joint Hessian over
+// [t;y] (X2C) or the symmetrized real-step Hessian over t (NON_REL), `gradient` the matching joint
+// gradient. d^2E/ds^2 along exp(-s kappa) = v^T H v at a non-stationary point.
+template <typename T>
+std::string pnofIndependentCurvatureCheck(
+    rerdmft::PnofFunctional functional, const rerdmft::Matrix<T>& h, const rerdmft::Tensor4<T>& eri,
+    const std::vector<rerdmft::PnofGeminal>& geminals, const std::vector<double>& occ,
+    bool relativistic, const std::vector<std::pair<std::size_t, std::size_t>>& pairs,
+    const rerdmft::Matrix<double>& joint, const std::vector<double>& gradient,
+    const std::vector<std::size_t>& spin_partner) {
+  const std::size_t n = h.rows();
+  std::vector<double> dir(gradient.size(), 0.0);
+  bool have = false;
+  if constexpr (!std::is_same_v<T, double>) {
+    if (n % 2 == 0) {
+      const rerdmft::KramersRestriction kr(n, pairs);
+      const auto reduced = kr.contractRepresentative(gradient);
+      std::size_t best = 0;
+      for (std::size_t j = 0; j < reduced.size(); ++j)
+        if (std::abs(reduced[j]) > std::abs(reduced[best])) best = j;
+      std::vector<double> e(kr.reducedSize(), 0.0);
+      e[best] = 1.0;
+      dir = kr.expandRepresentative(e);
+      have = true;
+    }
+  } else if (!spin_partner.empty()) {
+    std::vector<long> index(n * n, -1);
+    for (std::size_t i = 0; i < pairs.size(); ++i) index[pairs[i].first * n + pairs[i].second] = static_cast<long>(i);
+    std::size_t best = pairs.size();
+    double best_mag = 0.0;
+    for (std::size_t i = 0; i < pairs.size(); ++i) {
+      if (spin_partner[pairs[i].first] > spin_partner[pairs[i].second] && std::abs(gradient[i]) > best_mag) {
+        best = i;
+        best_mag = std::abs(gradient[i]);
+      }
+    }
+    if (best < pairs.size()) {
+      dir[best] = 1.0;
+      const long twin = index[spin_partner[pairs[best].first] * n + spin_partner[pairs[best].second]];
+      if (twin >= 0) dir[static_cast<std::size_t>(twin)] = 1.0;
+      have = true;
+    }
+  }
+  std::ostringstream out;
+  if (!have) return out.str();
+  double curvature = 0.0, first = 0.0;
+  for (std::size_t i = 0; i < dir.size(); ++i) {
+    first += gradient[i] * dir[i];
+    for (std::size_t j = 0; j < dir.size(); ++j) curvature += dir[i] * joint(i, j) * dir[j];
+  }
+  const auto energy_at = [&](double s) {
+    rerdmft::Matrix<T> kappa(n, n, T{});
+    for (std::size_t i = 0; i < pairs.size(); ++i) {
+      const auto [p, q] = pairs[i];
+      if constexpr (std::is_same_v<T, double>) {
+        kappa(p, q) = s * dir[i];
+        kappa(q, p) = -s * dir[i];
+      } else {
+        const std::complex<double> z(s * dir[i], s * dir[pairs.size() + i]);
+        kappa(p, q) = z;
+        kappa(q, p) = -std::conj(z);
+      }
+    }
+    const auto u = rerdmft::spinorRotationMatrix(kappa);
+    const auto rot = rerdmft::rotateIntegralsExact(h, eri, u);
+    const auto two_rdm = rerdmft::buildPnofTwoRdm(functional, geminals, occ, relativistic);
+    return rerdmft::pnofElectronicEnergy(functional, rot.h, rot.eri, occ, geminals, two_rdm, relativistic);
+  };
+  // Central differences at step h and h/2, Richardson-extrapolated (removes the O(h^2) term).
+  constexpr double kStep = 1e-3;
+  const double e0 = energy_at(0.0);
+  const double ep = energy_at(kStep), em = energy_at(-kStep);
+  const double ep2 = energy_at(0.5 * kStep), em2 = energy_at(-0.5 * kStep);
+  const double first_h = (ep - em) / (2.0 * kStep), first_h2 = (ep2 - em2) / kStep;
+  const double second_h = (ep + em - 2.0 * e0) / (kStep * kStep);
+  const double second_h2 = (ep2 + em2 - 2.0 * e0) / (0.25 * kStep * kStep);
+  const double fd_first = (4.0 * first_h2 - first_h) / 3.0;
+  const double fd_second = (4.0 * second_h2 - second_h) / 3.0;
+  const bool ok_first = std::abs(first - fd_first) < 1e-7 * std::max(1.0, std::abs(first));
+  const bool ok_second = std::abs(curvature - fd_second) < 1e-6 * std::max(1.0, std::abs(curvature));
+  out << "\n  Independent check of the PNOF orbital gradient and Hessian along a symmetry-preserving\n"
+         "  rotation (finite differences of Occ_opt/PNOFs.h's pnofElectronicEnergy, NOT of the full\n"
+         "  two-RDM energy the gradient/Hessian are built from):\n";
+  out << std::setprecision(8) << "    dE/ds   analytic " << first << "   independent FD " << fd_first << "   |diff| "
+      << std::scientific << std::setprecision(2) << std::abs(first - fd_first) << "\n    d2E/ds2 analytic " << std::setprecision(8)
+      << std::defaultfloat << curvature << "   independent FD " << fd_second << "   |diff| " << std::scientific
+      << std::setprecision(2) << std::abs(curvature - fd_second) << std::defaultfloat << std::setprecision(6) << "\n"
+      << "    [" << (ok_first ? "PASS" : "FAIL") << "] gradient   [" << (ok_second ? "PASS" : "FAIL") << "] Hessian\n";
+  return out.str();
+}
+
 // Validates Hessian_opt/JkOnlyFock.h's jkOnlyOrbitalGradient and
 // Hessian_opt/JkOnlyHessian.h's jkOnlyHessianElement (the rederivation of
 // doc/orbital_hessian_jk_only.pdf) for EVERY JkFunctional, at generic
@@ -1676,6 +1774,330 @@ std::string jkOnlyRotationValidationReport(const rerdmft::Matrix<T>& h,
           functional == JkFunctional::kMbb || functional == JkFunctional::kMullerAs;
       out << formatJointCheck(jointBlocksCheck<T>(h, eri, joint_rot, cb, with_2d));
     }
+  }
+  return out.str();
+}
+
+// NON_REL only: the JK_only Hessian element that couples an orbital pair (p,q) to its
+// opposite-spin TWIN (p+n,q+n) (block spin layout), for every functional, with SPIN-SYMMETRIC
+// fractional occupations (occ[k+n] = occ[k], the physical NON_REL situation). These elements
+// are spin-independent-looking but couple through the Coulomb term only (the exchange
+// integrals across spins are exactly zero), which is where the PNOF Hessian had its X != H
+// bug. Two references, neither of which shares the analytic formula:
+//  * the mixed second derivative of jkOnlyEnergy along exp(-(a K_pq + b K_twin)) (energy only,
+//    4-point, Richardson-extrapolated) against the symmetrized analytic element;
+//  * the derivative of the Fock-based gradient at (p,q) along the twin rotation against the
+//    (unsymmetrized) analytic element.
+// Also the spin-forbidden elements (p,q) x (p+n,q) and (p,q) x (p,q+n), which must be zero.
+template <typename T>
+std::string jkOnlyTwinPairReport(const rerdmft::Matrix<T>& h, const rerdmft::Tensor4<T>& eri,
+                                 double n_electrons) {
+  using rerdmft::JkFunctional;
+  std::ostringstream out;
+  if constexpr (!std::is_same_v<T, double>) {
+    return out.str();
+  } else {
+    const std::size_t n_total = h.rows();
+    if (n_total % 2 != 0 || n_total < 4) return out.str();
+    const std::size_t n = n_total / 2;
+    const auto f_l = static_cast<std::size_t>(std::lround(n_electrons));
+    constexpr double kPowerAlpha = 0.6;
+    constexpr double kStep = 2e-3;
+    std::vector<double> occ(n_total, 0.0);
+    for (std::size_t k = 0; k < n; ++k) {
+      occ[k] = 0.15 + 0.7 * std::fmod(0.6180339887498949 * (k + 1), 1.0);
+      occ[k + n] = occ[k];
+    }
+    const std::vector<std::pair<JkFunctional, std::string>> functionals = {
+        {JkFunctional::kSd, "SD"},         {JkFunctional::kMbb, "MBB (Muller)"},
+        {JkFunctional::kBbc2, "BBC2"},     {JkFunctional::kCa, "CA"},
+        {JkFunctional::kCga, "CGA"},       {JkFunctional::kMl, "ML"},
+        {JkFunctional::kMlsic, "MLSIC"},   {JkFunctional::kGu, "GU"},
+        {JkFunctional::kPower, "POWER(0.6)"}, {JkFunctional::kMullerAs, "MULLER_AS"}};
+
+    // Two alpha-alpha pairs with the largest MBB gradient (never symmetry-zero).
+    const auto hc0 = rerdmft::jkHartreeCoupling(JkFunctional::kMbb, occ, f_l, kPowerAlpha);
+    const auto xc0 = rerdmft::jkExchangeCoupling(JkFunctional::kMbb, occ, f_l, kPowerAlpha);
+    const auto g0 = rerdmft::jkOnlyOrbitalGradient(h, eri, occ, hc0, xc0);
+    std::vector<std::pair<double, std::pair<std::size_t, std::size_t>>> ranked;
+    for (std::size_t p = 1; p < n; ++p)
+      for (std::size_t q = 0; q < p; ++q) ranked.push_back({std::abs(g0(p, q)), {p, q}});
+    std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+    if (ranked.size() < 2) return out.str();
+    const std::size_t n_test = 2;
+
+    const auto rotate = [&](std::size_t a1, std::size_t b1, double s1, std::size_t a2, std::size_t b2,
+                            double s2) {
+      rerdmft::Matrix<T> kappa(n_total, n_total, T{});
+      kappa(a1, b1) += s1;
+      kappa(b1, a1) -= s1;
+      kappa(a2, b2) += s2;
+      kappa(b2, a2) -= s2;
+      return rerdmft::rotateIntegralsExact(h, eri, rerdmft::spinorRotationMatrix(kappa));
+    };
+
+    out << "\n  JK_only Hessian elements coupling a pair to its opposite-spin TWIN (NON_REL, block spin\n"
+           "  layout, spin-symmetric fractional occupations), every functional. Reference 1: mixed second\n"
+           "  derivative of jkOnlyEnergy along exp(-(a K_pq + b K_twin)) (energy only, Richardson, step "
+        << kStep << ");\n  reference 2: derivative of the Fock-based gradient along the twin rotation.\n";
+    for (std::size_t k = 0; k < n_test; ++k) {
+      const auto [p, q] = ranked[k].second;
+      const std::size_t pt = p + n, qt = q + n;
+      // Rotated integrals shared by all functionals.
+      // mixed[j][0..1]: E(+-x,+-x) at x = kStep and kStep/2 -> four signs each.
+      std::vector<rerdmft::RotatedIntegrals<T>> mix;  // order: (h,h),(h,-h),(-h,h),(-h,-h) at h, then h/2
+      for (double x : {kStep, 0.5 * kStep})
+        for (auto [sa, sb] : {std::pair<double, double>{1, 1}, {1, -1}, {-1, 1}, {-1, -1}})
+          mix.push_back(rotate(p, q, sa * x, pt, qt, sb * x));
+      const auto twin_plus = rotate(pt, qt, kStep, pt, qt, 0.0);
+      const auto twin_minus = rotate(pt, qt, -kStep, pt, qt, 0.0);
+      out << "    pair (" << p << "," << q << ") x twin (" << pt << "," << qt << "), |g|=" << std::scientific
+          << std::setprecision(2) << ranked[k].first << std::defaultfloat << std::setprecision(6) << "\n";
+      for (const auto& [functional, name] : functionals) {
+        const auto hc = rerdmft::jkHartreeCoupling(functional, occ, f_l, kPowerAlpha);
+        const auto xc = rerdmft::jkExchangeCoupling(functional, occ, f_l, kPowerAlpha);
+        const double a_pt = rerdmft::jkOnlyHessianElement(h, eri, occ, hc, xc, p, q, pt, qt);
+        const double a_tp = rerdmft::jkOnlyHessianElement(h, eri, occ, hc, xc, pt, qt, p, q);
+        const double sym = 0.5 * (a_pt + a_tp);
+        const auto mixed_at = [&](std::size_t off, double x) {
+          const auto e = [&](std::size_t i) { return rerdmft::jkOnlyEnergy(mix[off + i].h, mix[off + i].eri, occ, hc, xc); };
+          return (e(0) - e(1) - e(2) + e(3)) / (4.0 * x * x);
+        };
+        const double m1 = mixed_at(0, kStep), m2 = mixed_at(4, 0.5 * kStep);
+        const double fd_energy = (4.0 * m2 - m1) / 3.0;
+        const auto gp = rerdmft::orbitalGradient(rerdmft::jkOnlyFockMatrix(twin_plus.h, twin_plus.eri, occ, hc, xc));
+        const auto gm = rerdmft::orbitalGradient(rerdmft::jkOnlyFockMatrix(twin_minus.h, twin_minus.eri, occ, hc, xc));
+        const double fd_grad = std::real(gp(p, q) - gm(p, q)) / (2.0 * kStep);
+        const double forb1 = rerdmft::jkOnlyHessianElement(h, eri, occ, hc, xc, p, q, pt, q);
+        const double forb2 = rerdmft::jkOnlyHessianElement(h, eri, occ, hc, xc, p, q, p, qt);
+        const double d_energy = std::abs(sym - fd_energy), d_grad = std::abs(a_pt - fd_grad);
+        const double scale = std::max(1.0, std::abs(sym));
+        const bool ok = d_energy < 1e-6 * scale && d_grad < 1e-6 * scale && std::abs(forb1) < 1e-10 &&
+                        std::abs(forb2) < 1e-10;
+        out << "      " << std::left << std::setw(13) << name << std::right << std::scientific << std::setprecision(3)
+            << "H=" << a_pt << "  |sym-energyFD|=" << d_energy << "  |H-gradFD|=" << d_grad
+            << "  spin-forbidden max=" << std::max(std::abs(forb1), std::abs(forb2)) << "  ["
+            << (ok ? "PASS" : "FAIL") << "]" << std::defaultfloat << std::setprecision(6) << "\n";
+      }
+    }
+    return out.str();
+  }
+}
+
+// Hartree-Fock LIMIT of the JK_only machinery: MBB (Muller) at the integer occupations n = 1 for
+// the n_electrons lowest occupied spin-orbitals and 0 elsewhere IS Hartree-Fock (Dirac-Fock for
+// the relativistic paths), so its orbital gradient and Hessian must be the HF ones. The reference
+// is NOT built from any JK_only / Hessian_opt code:
+//  * E_HF = sum_{i occ} h_ii + 1/2 sum_{ij occ} (<ij|ij> - <ij|ji>) written from scratch on the
+//    exactly rotated integrals; the gradient and the (joint, symmetrized) Hessian on a set of
+//    test pairs (occupied-virtual, opposite-spin/Kramers twin, spin-forbidden, occupied-occupied,
+//    virtual-virtual) are Richardson-extrapolated finite differences of that energy;
+//  * REAL orbitals only, additionally the textbook closed form over ALL occupied-virtual pairs
+//    (spin-orbital basis), with F = h + sum_j (<pj|qj> - <pj|jq>):
+//      dE/dx_ai = -2 F_ai,   d2E/dx_ai dx_bj = 2 (d_ij F_ab - d_ab F_ij + <aj||ib> + <ab||ij>),
+//    x_ai = the kappa_ai coordinate (kappa_ai = +x, kappa_ia = -x; a virtual, i occupied).
+// The occupied-occupied / virtual-virtual rotations leave E_HF invariant, so their gradient
+// entries must vanish and every Hessian element involving one is at most of the size of the
+// residual occupied-virtual gradient (0 at exactly converged orbitals); those are reported too.
+template <typename T>
+std::string jkOnlyHartreeFockLimitReport(const rerdmft::Matrix<T>& h, const rerdmft::Tensor4<T>& eri,
+                                         std::size_t n_inactive_below, std::size_t n_active,
+                                         double n_electrons) {
+  using rerdmft::JkFunctional;
+  constexpr bool kReal = std::is_same_v<T, double>;
+  const std::size_t n_total = h.rows();
+  const auto n_el = static_cast<std::size_t>(std::lround(n_electrons));
+  std::ostringstream out;
+  if (n_el == 0 || n_el % 2 != 0) return out.str();
+  if (n_total > 64) {
+    out << "\n  JK_only Hartree-Fock-limit check skipped (" << n_total << " spin-orbitals > 64).\n";
+    return out.str();
+  }
+
+  // Occupied / virtual spin-orbitals and the test pairs (p > q).
+  std::vector<std::size_t> occupied, virt;
+  std::vector<std::pair<std::size_t, std::size_t>> pairs;
+  const auto add_pair = [&](std::size_t a, std::size_t b) {
+    if (a == b) return;
+    const std::pair<std::size_t, std::size_t> pr{std::max(a, b), std::min(a, b)};
+    if (std::find(pairs.begin(), pairs.end(), pr) == pairs.end()) pairs.push_back(pr);
+  };
+  if constexpr (kReal) {
+    const std::size_t n = n_total / 2, no = n_el / 2;
+    if (n_total % 2 != 0 || no >= n) return out.str();
+    for (std::size_t k = 0; k < n; ++k) {
+      (k < no ? occupied : virt).push_back(k);
+    }
+    for (std::size_t k = 0; k < n; ++k) {
+      (k < no ? occupied : virt).push_back(k + n);
+    }
+    add_pair(no, no - 1);                                   // LUMO-HOMO (alpha)
+    if (no >= 2 && n - no >= 2) add_pair(no + 1, 0);        // second virtual - lowest occupied
+    if (no >= 2) add_pair(no - 1, 0);                       // occupied-occupied
+    if (n - no >= 2) add_pair(no + 1, no);                  // virtual-virtual
+    add_pair(no + n, no - 1 + n);                           // beta twin of the LUMO-HOMO pair
+    add_pair(no - 1 + n, no);                               // beta HOMO - alpha LUMO (spin-forbidden)
+  } else {
+    const std::size_t base = n_inactive_below, top = n_inactive_below + n_active;
+    if (base + n_el + 1 >= top) return out.str();
+    for (std::size_t k = base; k < top; ++k) (k < base + n_el ? occupied : virt).push_back(k);
+    const std::size_t v0 = base + n_el, o_last = base + n_el - 1;
+    add_pair(v0, o_last);
+    if (n_el >= 2) add_pair(v0 + 1, base);
+    if (n_el >= 2) add_pair(o_last, base);
+    add_pair(v0 + 1, v0);
+    add_pair(v0 + 1, o_last - 1);                           // Kramers partner of the LUMO-HOMO pair
+  }
+  std::vector<double> occ(n_total, 0.0);
+  for (std::size_t i : occupied) occ[i] = 1.0;
+  const auto f_l = n_el;
+  const auto hc = rerdmft::jkHartreeCoupling(JkFunctional::kMbb, occ, f_l, 0.6);
+  const auto xc = rerdmft::jkExchangeCoupling(JkFunctional::kMbb, occ, f_l, 0.6);
+
+  const auto hf_energy = [&](const rerdmft::Matrix<T>& hh, const rerdmft::Tensor4<T>& ee) {
+    double e = 0.0;
+    for (std::size_t i : occupied) e += std::real(hh(i, i));
+    double two = 0.0;
+    for (std::size_t i : occupied)
+      for (std::size_t j : occupied) two += std::real(ee(i, j, i, j)) - std::real(ee(i, j, j, i));
+    return e + 0.5 * two;
+  };
+
+  const std::size_t n_par = kReal ? pairs.size() : 2 * pairs.size();  // [t..., y...]
+  const auto energy_at = [&](const std::vector<double>& x) {
+    rerdmft::Matrix<T> kappa(n_total, n_total, T{});
+    for (std::size_t i = 0; i < pairs.size(); ++i) {
+      const auto [p, q] = pairs[i];
+      if constexpr (kReal) {
+        kappa(p, q) = x[i];
+        kappa(q, p) = -x[i];
+      } else {
+        const std::complex<double> z(x[i], x[pairs.size() + i]);
+        kappa(p, q) = z;
+        kappa(q, p) = -std::conj(z);
+      }
+    }
+    const auto rot = rerdmft::rotateIntegralsExact(h, eri, rerdmft::spinorRotationMatrix(kappa));
+    return hf_energy(rot.h, rot.eri);
+  };
+  const auto point = [&](std::size_t a, double sa, std::size_t b, double sb) {
+    std::vector<double> x(n_par, 0.0);
+    x[a] += sa;
+    x[b] += sb;
+    return energy_at(x);
+  };
+
+  constexpr double kStep = 2e-3;
+  const double e0 = energy_at(std::vector<double>(n_par, 0.0));
+  // Richardson-extrapolated first derivative and (mixed) second derivative.
+  std::vector<double> fd_grad(n_par);
+  rerdmft::Matrix<double> fd_hess(n_par, n_par, 0.0);
+  for (std::size_t a = 0; a < n_par; ++a) {
+    const auto d1 = [&](double x) { return (point(a, x, a, 0.0) - point(a, -x, a, 0.0)) / (2.0 * x); };
+    fd_grad[a] = (4.0 * d1(0.5 * kStep) - d1(kStep)) / 3.0;
+    for (std::size_t b = a; b < n_par; ++b) {
+      const auto d2 = [&](double x) {
+        if (a == b) return (point(a, x, a, x) + point(a, -x, a, -x) - 2.0 * e0) / (4.0 * x * x);
+        return (point(a, x, b, x) - point(a, x, b, -x) - point(a, -x, b, x) + point(a, -x, b, -x)) /
+               (4.0 * x * x);
+      };
+      // (a == b): E(2x)+E(-2x)-2E0 over (2x)^2 is the diagonal second difference at step 2x.
+      fd_hess(a, b) = fd_hess(b, a) = (4.0 * d2(0.5 * kStep) - d2(kStep)) / 3.0;
+    }
+  }
+
+  const auto g_full = rerdmft::jkOnlyOrbitalGradient(h, eri, occ, hc, xc);
+  const std::vector<double> g_joint = rerdmft::jointOrbitalGradient(g_full, pairs);
+  rerdmft::Matrix<double> h_joint(n_par, n_par, 0.0);
+  if constexpr (kReal) {
+    h_joint = symmetrizeReal(rerdmft::jkOnlyHessianMatrix(h, eri, occ, hc, xc, pairs));
+  } else {
+    h_joint = rerdmft::jkOnlyJointHessianMatrix(h, eri, occ, hc, xc, pairs);
+  }
+  double d_grad = 0.0, d_hess = 0.0, max_g = 0.0, max_h = 0.0;
+  for (std::size_t a = 0; a < n_par; ++a) {
+    d_grad = std::max(d_grad, std::abs(g_joint[a] - fd_grad[a]));
+    max_g = std::max(max_g, std::abs(fd_grad[a]));
+    for (std::size_t b = 0; b < n_par; ++b) {
+      d_hess = std::max(d_hess, std::abs(h_joint(a, b) - fd_hess(a, b)));
+      max_h = std::max(max_h, std::abs(fd_hess(a, b)));
+    }
+  }
+  const double e_muller = rerdmft::jkOnlyEnergy(h, eri, occ, hc, xc);
+  out << "\n  JK_only (MBB / Muller) at the Hartree-Fock occupations n = 1 (" << n_el << " lowest occupied spin-orbitals), n = 0\n"
+         "  elsewhere, against a from-scratch Hartree-Fock reference (no JK_only / Hessian_opt code in it):\n"
+      << std::setprecision(12) << "    energy: E_HF(from scratch) = " << e0 << "  MBB = " << e_muller << "  |diff| = "
+      << std::scientific << std::setprecision(2) << std::abs(e0 - e_muller) << std::defaultfloat << std::setprecision(6) << "\n"
+      << "    finite differences of E_HF over " << pairs.size() << " pairs" << (kReal ? "" : " (t and y)") << ":";
+  for (const auto& pr : pairs) out << " (" << pr.first << "," << pr.second << ")";
+  out << std::scientific << std::setprecision(2) << "\n    gradient: |MBB - E_HF FD|max = " << d_grad << " (|g|max = " << max_g
+      << ")   Hessian: |MBB - E_HF FD|max = " << d_hess << " (|H|max = " << max_h << ")\n    ["
+      << ((d_grad < 1e-7 * std::max(1.0, max_g) && d_hess < 1e-6 * std::max(1.0, max_h)) ? "PASS" : "FAIL")
+      << "] gradient and Hessian over the test pairs\n" << std::defaultfloat << std::setprecision(6);
+
+  if constexpr (kReal) {
+    // Textbook closed form over ALL occupied-virtual pairs.
+    const auto fock = [&](std::size_t p, std::size_t q) {
+      double f = h(p, q);
+      for (std::size_t j : occupied) f += eri(p, j, q, j) - eri(p, j, j, q);
+      return f;
+    };
+    const auto anti = [&](std::size_t a, std::size_t b, std::size_t c, std::size_t d) {
+      return eri(a, b, c, d) - eri(a, b, d, c);
+    };
+    struct Ov { std::size_t a, i; };
+    std::vector<Ov> ov;
+    for (std::size_t a : virt)
+      for (std::size_t i : occupied) ov.push_back({a, i});
+    // MBB-side quantities in the x_ai coordinate: pair (p,q), p > q: kappa_pq = +t, so x_ai = t if
+    // a > i and -t if a < i (kappa_ai = -kappa_ia).
+    const auto sign_of = [](const Ov& c) { return c.a > c.i ? 1.0 : -1.0; };
+    double gd = 0.0, gmax = 0.0, hd = 0.0, hmax = 0.0, g_forbidden = 0.0, h_oovv = 0.0;
+    for (const Ov& c : ov) {
+      const std::size_t p = std::max(c.a, c.i), q = std::min(c.a, c.i);
+      const double mbb_x = sign_of(c) * std::real(g_full(p, q));
+      gd = std::max(gd, std::abs(mbb_x - (-2.0 * fock(c.a, c.i))));
+      gmax = std::max(gmax, std::abs(2.0 * fock(c.a, c.i)));
+    }
+    for (const Ov& c1 : ov) {
+      for (const Ov& c2 : ov) {
+        const std::size_t p = std::max(c1.a, c1.i), q = std::min(c1.a, c1.i);
+        const std::size_t r = std::max(c2.a, c2.i), s = std::min(c2.a, c2.i);
+        const double mbb = 0.5 * sign_of(c1) * sign_of(c2) *
+                           (std::real(rerdmft::jkOnlyHessianElement(h, eri, occ, hc, xc, p, q, r, s)) +
+                            std::real(rerdmft::jkOnlyHessianElement(h, eri, occ, hc, xc, r, s, p, q)));
+        const double ref = 2.0 * ((c1.i == c2.i ? fock(c1.a, c2.a) : 0.0) - (c1.a == c2.a ? fock(c1.i, c2.i) : 0.0) +
+                                  anti(c1.a, c2.i, c1.i, c2.a) + anti(c1.a, c2.a, c1.i, c2.i));
+        hd = std::max(hd, std::abs(mbb - ref));
+        hmax = std::max(hmax, std::abs(ref));
+      }
+    }
+    // oo and vv rotations: E_HF is invariant.
+    for (const auto& list : {occupied, virt}) {
+      for (std::size_t x = 0; x < list.size(); ++x)
+        for (std::size_t y = 0; y < x; ++y) {
+          const std::size_t p = std::max(list[x], list[y]), q = std::min(list[x], list[y]);
+          g_forbidden = std::max(g_forbidden, std::abs(std::real(g_full(p, q))));
+          for (const Ov& c : ov) {
+            const std::size_t r = std::max(c.a, c.i), s = std::min(c.a, c.i);
+            h_oovv = std::max(h_oovv, std::abs(0.5 * (std::real(rerdmft::jkOnlyHessianElement(h, eri, occ, hc, xc, p, q, r, s)) +
+                                                     std::real(rerdmft::jkOnlyHessianElement(h, eri, occ, hc, xc, r, s, p, q)))));
+          }
+        }
+    }
+    const double tol_res = 10.0 * gmax + 1e-8;
+    out << std::scientific << std::setprecision(2) << "    textbook closed form over all " << ov.size()
+        << " occupied-virtual pairs (" << ov.size() * ov.size() << " Hessian elements):\n"
+        << "      gradient dE/dx_ai = -2 F_ai: |MBB - textbook|max = " << gd << " (|2F_ai|max = " << gmax << ")\n"
+        << "      Hessian 2(d_ij F_ab - d_ab F_ij + <aj||ib> + <ab||ij>): |MBB - textbook|max = " << hd
+        << " (|H|max = " << hmax << ")\n"
+        << "      occupied-occupied / virtual-virtual (E_HF invariant): |g|max = " << g_forbidden
+        << ", |H(oo|vv, ov)|max = " << h_oovv << "  (bounded by the residual ov gradient " << gmax << ")\n    ["
+        << ((gd < 1e-8 * std::max(1.0, gmax) + 1e-9 && hd < 1e-8 * std::max(1.0, hmax) && g_forbidden < 1e-10 &&
+             h_oovv < tol_res)
+                ? "PASS"
+                : "FAIL")
+        << "] textbook Hartree-Fock gradient and Hessian\n" << std::defaultfloat << std::setprecision(6);
   }
   return out.str();
 }
@@ -2539,6 +2961,8 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
       }
       if (n_active >= 4) {
         out << jkOnlyRotationValidationReport<T>(h, eri, n_inactive_below, n_active, n_electrons);
+        out << jkOnlyTwinPairReport<T>(h, eri, n_electrons);
+        out << jkOnlyHartreeFockLimitReport<T>(h, eri, n_inactive_below, n_active, n_electrons);
       }
     }
 
@@ -3211,6 +3635,14 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
       }
       out << functionalFullHessianReport<T>(label, "PNOF (" + functional_name + ")", hess_full,
                                              max_g, t_start, t_checkpoint, timing_records);
+      if constexpr (std::is_same_v<T, double>) {
+        if (label == "NON_REL") {
+          out << pnofIndependentCurvatureCheck<T>(
+              functional, h, eri, geminals, optimized_occ, relativistic, pair_indices,
+              symmetrizeReal(hess_full), rerdmft::jointOrbitalGradient(g_full, pair_indices),
+              blockSpinPartner(n_total));
+        }
+      }
       if constexpr (!std::is_same_v<T, double>) {
         const auto joint_hess = rerdmft::pnofJointHessianMatrix(
             functional, h, eri, geminals, optimized_occ, relativistic, fock_full, pair_indices);
@@ -3220,6 +3652,10 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
         out << kramersSymmetryReport(g_full, joint_hess,
                                       rerdmft::jointOrbitalGradient(g_full, pair_indices),
                                       pair_indices, optimized_occ);
+        out << pnofIndependentCurvatureCheck<T>(functional, h, eri, geminals, optimized_occ,
+                                                relativistic, pair_indices, joint_hess,
+                                                rerdmft::jointOrbitalGradient(g_full, pair_indices),
+                                                {});
       }
     } catch (const std::exception& e) {
       out << "\n  Full orbital-rotation Hessian FAILED: " << e.what() << "\n";

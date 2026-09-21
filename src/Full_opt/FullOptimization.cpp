@@ -572,6 +572,74 @@ bool runChecks(const Matrix<T>& h, const Eri& eri, const std::vector<double>& oc
     verdict(worst < 1e-6, "orbital gradient matches the energy finite difference");
   }
 
+  // (2b) PNOF only: the orbital gradient against a finite difference of the INDEPENDENT
+  // occupation-side energy (pnofElectronicEnergy, the pair-symmetric shortcut that the occupation
+  // optimizer minimizes and that equals the exact pair-CI energy for two electrons), along a
+  // direction that keeps the Kramers / spin-pair symmetry that shortcut assumes (a rotation of a
+  // single pair would break it). The check (2) above differentiates the full two-RDM energy the
+  // gradient itself is built from, so it cannot see an error common to both.
+  if (model.symmetric_shortcut_energy && g_max >= 1e-7) {
+    std::vector<double> dir(joint_gradient.size(), 0.0);
+    bool have_dir = false;
+    if constexpr (!std::is_same_v<T, double>) {
+      if (kramers && n % 2 == 0) {
+        const KramersRestriction kr(n, pairs);
+        const std::vector<double> reduced_grad = kr.contractRepresentative(joint_gradient);
+        std::size_t best = 0;
+        for (std::size_t j = 0; j < reduced_grad.size(); ++j)
+          if (std::abs(reduced_grad[j]) > std::abs(reduced_grad[best])) best = j;
+        std::vector<double> e(kr.reducedSize(), 0.0);
+        e[best] = 1.0;
+        dir = kr.expandRepresentative(e);
+        have_dir = true;
+      }
+    } else {
+      if (!spin_partner.empty()) {
+        std::vector<long> index(n * n, -1);
+        for (std::size_t i = 0; i < pairs.size(); ++i) index[pairs[i].first * n + pairs[i].second] = static_cast<long>(i);
+        std::size_t best = pairs.size();
+        double best_mag = 0.0;
+        for (std::size_t i = 0; i < pairs.size(); ++i) {
+          const std::size_t pp = spin_partner[pairs[i].first], qq = spin_partner[pairs[i].second];
+          if (pp > qq && std::abs(joint_gradient[i]) > best_mag) { best = i; best_mag = std::abs(joint_gradient[i]); }
+        }
+        if (best < pairs.size()) {
+          const long twin = index[spin_partner[pairs[best].first] * n + spin_partner[pairs[best].second]];
+          dir[best] = 1.0;
+          if (twin >= 0) dir[static_cast<std::size_t>(twin)] = 1.0;
+          have_dir = true;
+        }
+      }
+    }
+    if (have_dir) {
+      double analytic = 0.0;
+      for (std::size_t i = 0; i < dir.size(); ++i) analytic += joint_gradient[i] * dir[i];
+      auto shortcut_at = [&](double scale) {
+        Matrix<T> kappa(n, n, T{});
+        for (std::size_t i = 0; i < pairs.size(); ++i) {
+          const auto [p, q] = pairs[i];
+          if constexpr (std::is_same_v<T, double>) {
+            kappa(p, q) = scale * dir[i];
+            kappa(q, p) = -scale * dir[i];
+          } else {
+            const std::complex<double> z(scale * dir[i], scale * dir[pairs.size() + i]);
+            kappa(p, q) = z;
+            kappa(q, p) = -std::conj(z);
+          }
+        }
+        const Matrix<T> u = spinorRotationMatrix(kappa);
+        return model.symmetric_shortcut_energy(oneElectronRotated(h, u), rotateEri(eri, u), occ);
+      };
+      constexpr double kStep2 = 1e-4;
+      const double fd = (shortcut_at(kStep2) - shortcut_at(-kStep2)) / (2.0 * kStep2);
+      log << "    directional derivative along a symmetry-preserving rotation: analytic gradient " << analytic
+          << " vs finite difference of the independent pair-symmetric energy " << fd << " (|diff| = "
+          << std::abs(analytic - fd) << ")\n";
+      verdict(std::abs(analytic - fd) < 1e-6 * std::max(1.0, std::abs(analytic)),
+              "orbital gradient matches the finite difference of the independent occupation-side energy");
+    }
+  }
+
   // (3) Kramers-restriction machinery (complex spinors only).
   if constexpr (!std::is_same_v<T, double>) {
     if (kramers) {

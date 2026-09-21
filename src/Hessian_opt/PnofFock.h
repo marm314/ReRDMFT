@@ -39,7 +39,9 @@ namespace rerdmft {
 //     0                                                if P == Q
 //     n_{rep(P)}                                       if P != Q, rep(P) == rep(Q)
 //     n_{rep(P)}*n_{rep(Q)} - Delta_{rep(P),rep(Q)}     if rep(P) != rep(Q), MATCHING bar-parity
-//     [above], if `relativistic`, else 0                if rep(P) != rep(Q), MISMATCHED bar-parity
+//     [above] (also when NOT `relativistic`: there the exchange integral is spin-forbidden, so
+//     energy and Fock do not see it, but the Hessian needs two_rdm_x == two_rdm_h, i.e. an
+//     antisymmetric 2-RDM)   if rep(P) != rep(Q), MISMATCHED bar-parity
 //   two_rdm_l1_full(P,Q) =
 //     +Pi_{rep(P),rep(Q)}/4   if rep(P) != rep(Q), MATCHING bar-parity
 //     -Pi_{rep(P),rep(Q)}/4   if rep(P) != rep(Q), MISMATCHED bar-parity
