@@ -115,6 +115,18 @@ struct RdmftModel {
   std::function<std::vector<double>(const Matrix<T>&, const Eri&, const std::vector<double>&,
                                      const std::vector<double>&)>
       hessian_vector;
+  // The SAME computation as `hessian_vector`, but ALWAYS over `Tensor4<T>` regardless of `Eri`
+  // (set alongside `hessian_vector` unconditionally). When `Eri = CholeskyEri<T>`,
+  // `CholeskyEri::operator()` costs O(n_chol) per element instead of O(1), and a single Newton
+  // step's Davidson solve calls `hessian_vector` many times -- NeoOrbitalProblem instead
+  // materializes ONE dense Tensor4 per accepted step (`CholeskyEri::toDense()`, O(n_chol n^4),
+  // paid once) and calls this field for every one of that step's Hessian-vector products, which
+  // are then as cheap as the native-Tensor4 case. When `Eri` already IS `Tensor4<T>` this is the
+  // identical computation as `hessian_vector` (kept as a separate field only for a uniform call
+  // site in NeoOrbitalProblem, not because the two ever differ there).
+  std::function<std::vector<double>(const Matrix<T>&, const Tensor4<T>&, const std::vector<double>&,
+                                     const std::vector<double>&)>
+      hessian_vector_dense;
 };
 
 // JK_only functionals (Occ_opt/JK_only.h): SQP over the active occupations

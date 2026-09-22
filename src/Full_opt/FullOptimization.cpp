@@ -151,6 +151,83 @@ template RotatedIntegrals<std::complex<double>> rotateIntegralsExact(
     const Matrix<std::complex<double>>&, const Tensor4<std::complex<double>>&,
     const Matrix<std::complex<double>>&);
 
+namespace {
+
+// Shared body of RdmftModel::hessian_vector/hessian_vector_dense (JK_only and PNOF, below):
+// factored into a free function template, parameterized on the ERI type SEPARATELY from the
+// model's own `Eri`, so the SAME logic can be instantiated once for the model's native
+// representation (Tensor4 or CholeskyEri) and once more, always, for `Tensor4<T>` -- the second
+// instantiation is what NeoOrbitalProblem's dense-tensor CACHE (see its own comment) calls for a
+// Cholesky-vector model, avoiding CholeskyEri::operator()'s O(Nchol)-per-element cost on every one
+// of the many Hessian-vector products a single Newton step's Davidson solve needs.
+template <typename T, typename EriT>
+std::vector<double> jkOnlyHessianVectorImpl(JkFunctional functional, std::size_t f_l,
+                                            const std::vector<Pair>& pair_indices,
+                                            const Matrix<T>& h, const EriT& eri,
+                                            const std::vector<double>& occ,
+                                            const std::vector<double>& v) {
+  const auto hc = jkHartreeCoupling(functional, occ, f_l);
+  const auto xc = jkExchangeCoupling(functional, occ, f_l);
+  if constexpr (std::is_same_v<T, double>) {
+    const std::size_t n_pairs = pair_indices.size();
+    if (v.size() != n_pairs) throw std::runtime_error("JK_only hessian_vector: v has the wrong size");
+    std::vector<double> w(n_pairs, 0.0);
+    // jkOnlyHessianElement(pq,rs) is the SEQUENTIAL derivative (d/dkappa_pq of pair rs's
+    // gradient), asymmetric off orbital stationarity, exactly like the complex-T joint
+    // functions below -- symmetrize the same way main.cpp's symmetrizeReal(jkOnlyHessianMatrix
+    // (...)) does before using it as a genuine (Newton-usable) Hessian.
+#pragma omp parallel for
+    for (std::size_t i = 0; i < n_pairs; ++i) {
+      const auto& [p, q] = pair_indices[i];
+      double acc = 0.0;
+      for (std::size_t j = 0; j < n_pairs; ++j) {
+        const auto& [r, s] = pair_indices[j];
+        const double e_ij = jkOnlyHessianElement(h, eri, occ, hc, xc, p, q, r, s);
+        const double e_ji = jkOnlyHessianElement(h, eri, occ, hc, xc, r, s, p, q);
+        acc += 0.5 * (e_ij + e_ji) * v[j];
+      }
+      w[i] = acc;
+    }
+    return w;
+  } else {
+    return jkOnlyJointHessianVector(h, eri, occ, hc, xc, pair_indices, v);
+  }
+}
+
+template <typename T, typename EriT>
+std::vector<double> pnofHessianVectorImpl(PnofFunctional functional,
+                                          const std::vector<PnofGeminal>& geminals,
+                                          bool relativistic, const std::vector<Pair>& pair_indices,
+                                          const Matrix<T>& h, const EriT& eri,
+                                          const std::vector<double>& occ,
+                                          const std::vector<double>& v) {
+  const auto fock = pnofFockMatrix(functional, h, eri, geminals, occ, relativistic);
+  if constexpr (std::is_same_v<T, double>) {
+    const std::size_t n_pairs = pair_indices.size();
+    if (v.size() != n_pairs) throw std::runtime_error("PNOF hessian_vector: v has the wrong size");
+    std::vector<double> w(n_pairs, 0.0);
+    // Same symmetrization as the JK_only branch above (see its comment): pnofHessianElement
+    // is the sequential derivative, asymmetric off stationarity.
+#pragma omp parallel for
+    for (std::size_t i = 0; i < n_pairs; ++i) {
+      const auto& [p, q] = pair_indices[i];
+      double acc = 0.0;
+      for (std::size_t j = 0; j < n_pairs; ++j) {
+        const auto& [r, s] = pair_indices[j];
+        const double e_ij = pnofHessianElement(functional, h, eri, geminals, occ, relativistic, fock, p, q, r, s);
+        const double e_ji = pnofHessianElement(functional, h, eri, geminals, occ, relativistic, fock, r, s, p, q);
+        acc += 0.5 * (e_ij + e_ji) * v[j];
+      }
+      w[i] = acc;
+    }
+    return w;
+  } else {
+    return pnofJointHessianVector(functional, h, eri, geminals, occ, relativistic, fock, pair_indices, v);
+  }
+}
+
+}  // namespace
+
 // =====================================================================
 // models
 // =====================================================================
@@ -202,33 +279,14 @@ RdmftModel<T, Eri> makeJkOnlyModel(JkFunctional functional, std::size_t f_l, dou
   {
     const auto pair_indices = hessianPairIndices(n_total);
     model.hessian_vector = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ,
-                               const std::vector<double>& v) -> std::vector<double> {
-      const auto hc = jkHartreeCoupling(functional, occ, f_l);
-      const auto xc = jkExchangeCoupling(functional, occ, f_l);
-      if constexpr (std::is_same_v<T, double>) {
-        const std::size_t n_pairs = pair_indices.size();
-        if (v.size() != n_pairs) throw std::runtime_error("JK_only hessian_vector: v has the wrong size");
-        std::vector<double> w(n_pairs, 0.0);
-        // jkOnlyHessianElement(pq,rs) is the SEQUENTIAL derivative (d/dkappa_pq of pair rs's
-        // gradient), asymmetric off orbital stationarity, exactly like the complex-T joint
-        // functions above -- symmetrize the same way main.cpp's symmetrizeReal(jkOnlyHessianMatrix
-        // (...)) does before using it as a genuine (Newton-usable) Hessian.
-#pragma omp parallel for
-        for (std::size_t i = 0; i < n_pairs; ++i) {
-          const auto& [p, q] = pair_indices[i];
-          double acc = 0.0;
-          for (std::size_t j = 0; j < n_pairs; ++j) {
-            const auto& [r, s] = pair_indices[j];
-            const double e_ij = jkOnlyHessianElement(h, eri, occ, hc, xc, p, q, r, s);
-            const double e_ji = jkOnlyHessianElement(h, eri, occ, hc, xc, r, s, p, q);
-            acc += 0.5 * (e_ij + e_ji) * v[j];
-          }
-          w[i] = acc;
-        }
-        return w;
-      } else {
-        return jkOnlyJointHessianVector(h, eri, occ, hc, xc, pair_indices, v);
-      }
+                               const std::vector<double>& v) {
+      return jkOnlyHessianVectorImpl(functional, f_l, pair_indices, h, eri, occ, v);
+    };
+    // ALWAYS Tensor4-based (even when Eri = CholeskyEri) -- see NeoOrbitalProblem's own comment
+    // on why (its dense-tensor cache for the Cholesky case calls this, not `hessian_vector`).
+    model.hessian_vector_dense = [=](const Matrix<T>& h, const Tensor4<T>& eri,
+                                     const std::vector<double>& occ, const std::vector<double>& v) {
+      return jkOnlyHessianVectorImpl(functional, f_l, pair_indices, h, eri, occ, v);
     };
   }
   model.optimize_occupations = [=](const Matrix<T>& h, const Eri& eri,
@@ -313,30 +371,13 @@ RdmftModel<T, Eri> makePnofModel(PnofFunctional functional, std::vector<PnofGemi
   {
     const auto pair_indices = hessianPairIndices(n_total);
     model.hessian_vector = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ,
-                               const std::vector<double>& v) -> std::vector<double> {
-      const auto fock = pnofFockMatrix(functional, h, eri, geminals, occ, relativistic);
-      if constexpr (std::is_same_v<T, double>) {
-        const std::size_t n_pairs = pair_indices.size();
-        if (v.size() != n_pairs) throw std::runtime_error("PNOF hessian_vector: v has the wrong size");
-        std::vector<double> w(n_pairs, 0.0);
-        // Same symmetrization as the JK_only branch above (see its comment): pnofHessianElement
-        // is the sequential derivative, asymmetric off stationarity.
-#pragma omp parallel for
-        for (std::size_t i = 0; i < n_pairs; ++i) {
-          const auto& [p, q] = pair_indices[i];
-          double acc = 0.0;
-          for (std::size_t j = 0; j < n_pairs; ++j) {
-            const auto& [r, s] = pair_indices[j];
-            const double e_ij = pnofHessianElement(functional, h, eri, geminals, occ, relativistic, fock, p, q, r, s);
-            const double e_ji = pnofHessianElement(functional, h, eri, geminals, occ, relativistic, fock, r, s, p, q);
-            acc += 0.5 * (e_ij + e_ji) * v[j];
-          }
-          w[i] = acc;
-        }
-        return w;
-      } else {
-        return pnofJointHessianVector(functional, h, eri, geminals, occ, relativistic, fock, pair_indices, v);
-      }
+                               const std::vector<double>& v) {
+      return pnofHessianVectorImpl(functional, geminals, relativistic, pair_indices, h, eri, occ, v);
+    };
+    // ALWAYS Tensor4-based -- see JK_only's own comment on this field / NeoOrbitalProblem's cache.
+    model.hessian_vector_dense = [=](const Matrix<T>& h, const Tensor4<T>& eri,
+                                     const std::vector<double>& occ, const std::vector<double>& v) {
+      return pnofHessianVectorImpl(functional, geminals, relativistic, pair_indices, h, eri, occ, v);
     };
   }
   model.symmetric_shortcut_energy = [=](const Matrix<T>& h, const Eri& eri,
@@ -546,10 +587,28 @@ class NeoOrbitalProblem : public NeoProblem<double> {
     return jointOrbitalGradient(model_.gradient(problem_.h(), problem_.eri(), occ_), problem_.pairs());
   }
   std::vector<double> hessianVector(const std::vector<double>& v) override {
-    if (!model_.hessian_vector) {
-      throw std::runtime_error("NeoOrbitalProblem: the model has no hessian_vector");
+    if constexpr (std::is_same_v<Eri, Tensor4<Scalar>>) {
+      if (!model_.hessian_vector) {
+        throw std::runtime_error("NeoOrbitalProblem: the model has no hessian_vector");
+      }
+      return model_.hessian_vector(problem_.h(), problem_.eri(), occ_, v);
+    } else {
+      // CholeskyEri: model_.hessian_vector would call CholeskyEri::operator()'s O(n_chol) element
+      // access O(n_pairs^2) times PER CALL, and a single Newton step's Davidson solve makes many
+      // such calls -- materialize a dense Tensor4 ONCE per accepted step instead (invalidated in
+      // accept() below) and reuse it for every hessianVector() call until the next one. Measured
+      // on lih_gnof_full_optimization_cholesky.inp (X2C): without this, a single macro-iteration
+      // did not finish in 5 minutes; with it, the whole run matches the dense/ADAM result and
+      // takes about as long as the dense NEO case.
+      if (!model_.hessian_vector_dense) {
+        throw std::runtime_error("NeoOrbitalProblem: the model has no hessian_vector_dense");
+      }
+      if (!dense_eri_valid_) {
+        dense_eri_ = problem_.eri().toDense();
+        dense_eri_valid_ = true;
+      }
+      return model_.hessian_vector_dense(problem_.h(), dense_eri_, occ_, v);
     }
-    return model_.hessian_vector(problem_.h(), problem_.eri(), occ_, v);
   }
   double trialEnergy(const std::vector<double>& d) override {
     const auto u = spinorRotationMatrix(buildKappa(d));
@@ -557,7 +616,10 @@ class NeoOrbitalProblem : public NeoProblem<double> {
     const auto eri_trial = rotateEri(problem_.eri(), u);
     return model_.energy(h_trial, eri_trial, occ_);
   }
-  void accept(const std::vector<double>& d) override { problem_.rotate(toStep(d)); }
+  void accept(const std::vector<double>& d) override {
+    problem_.rotate(toStep(d));
+    dense_eri_valid_ = false;  // problem_.eri() just changed -- the cache (if any) is stale.
+  }
 
  private:
   Matrix<Scalar> buildKappa(const std::vector<double>& x) const {
@@ -592,6 +654,9 @@ class NeoOrbitalProblem : public NeoProblem<double> {
   const RdmftModel<Scalar, Eri>& model_;
   RotationProblem<Scalar, Eri>& problem_;
   std::vector<double> occ_;
+  // Only used when Eri != Tensor4<Scalar> -- see hessianVector()'s own comment.
+  Tensor4<Scalar> dense_eri_;
+  bool dense_eri_valid_ = false;
 };
 
 // The (pure-alpha-index, pure-beta-twin-index) pairs of pairs, one entry per orbit, canonically
