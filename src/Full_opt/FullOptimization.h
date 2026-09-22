@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "HartreeExchangeHessian.h"
 #include "IntegralRotation.h"
 #include "JK_only.h"
 #include "Matrix.h"
@@ -34,6 +35,9 @@ namespace rerdmft {
 // with the EXACT O(n^5) leg transform (`rotateIntegralsExact`) -- no
 // AO-basis re-transformation is ever needed.
 
+// Which method drives the orbital-rotation step of the macro loop (ORBITAL_OPTIMIZER keyword).
+enum class OrbitalOptimizer { kAdam, kNeo };
+
 struct FullOptSettings {
   bool enabled = false;
   int max_macro_iterations = 1000;
@@ -44,6 +48,25 @@ struct FullOptSettings {
   // elements are evaluated on demand.
   bool cholesky = false;
   double cholesky_threshold = 1e-10;
+  // ADAM (default) or NEO (Utils/NEO.h, second-order trust-region Newton, matrix-free
+  // Hessian-vector products -- Hessian_opt/JkOnlyHessian.h's/HartreeExchangeHessian.h's
+  // ...JointHessianVector or a plain symmetrized per-element sum for real orbitals, see
+  // RdmftModel::hessian_vector). Falls back to ADAM with a printed note when the model has no
+  // hessian_vector (a Cholesky-vector model: CHOLESKY TRUE has no cheap per-element Hessian).
+  // NEO always targets the GROUND STATE (target_order = 0, a minimum) here -- no saddle-point
+  // search. Every macro-iteration's Newton descent is run to ITS OWN full convergence
+  // (ORBITAL_GRADIENT_TOLERANCE), up to `neo_max_iterations` Newton steps -- NOT an ADAM-style
+  // small-then-growing budget: that was tried and measured to only ever hurt, never help. Cutting
+  // a Newton descent short mid-iteration hands the next occupation re-optimization a
+  // not-actually-stationary orbital point, and on some PNOF/GNOF systems (found by comparing
+  // against ADAM, e.g. lih_pnof7's X2C branch: 2e-5 Ha off, truncated, vs machine precision, not
+  // truncated) that locks the whole macro loop into a WORSE final answer with no way back --
+  // ADAM's own many small, cheap steps never have this failure mode, since a partial ADAM step is
+  // still along the true (not budget-cut) direction. A single generous `neo_max_iterations` avoids
+  // it: NEO is a quadratically convergent Newton method, so genuinely needing more than a few tens
+  // of steps per macro-iteration would itself be a sign of trouble.
+  OrbitalOptimizer orbital_optimizer = OrbitalOptimizer::kAdam;
+  int neo_max_iterations = 100;
 };
 
 struct RdmftOccupationResult {
@@ -79,6 +102,19 @@ struct RdmftModel {
   // first occupation optimization (JK_only: index/occupation table, two Kramers columns
   // for X2C; PNOF: one line per geminal, core frozen at 1). Called after the macro loop.
   std::function<void(const std::vector<double>&, std::ostream&)> print_occupations;
+  // Orbital-rotation Hessian-VECTOR product w = H v at fixed occupations, over the SAME pair list
+  // `hessianPairIndices(h.rows())` jointOrbitalGradient/the joint Hessian builders use --
+  // ROW-based (Hessian_opt/JkOnlyHessian.h's/HartreeExchangeHessian.h's ...JointHessianVector, or
+  // a plain per-element sum for real orbitals): v/w never cost more than O(n_pairs) memory, the
+  // O(n_pairs^2 x n) element cost is paid on every call (no dense matrix is ever cached) -- this
+  // is what Utils/NEO.h's NeoProblem::hessianVector needs. T = double: v/w size = n_pairs (real,
+  // t only). T = complex<double>: v/w size = 2*n_pairs (joint [t;y], complex spinors). Works for
+  // `Eri = Tensor4<T>` AND `Eri = CholeskyEri<T>` (the underlying element/joint-vector functions
+  // only ever touch `eri` through `operator()` and `dim0..dim3()`, which CholeskyEri provides
+  // too) -- CHOLESKY TRUE no longer disables NEO.
+  std::function<std::vector<double>(const Matrix<T>&, const Eri&, const std::vector<double>&,
+                                     const std::vector<double>&)>
+      hessian_vector;
 };
 
 // JK_only functionals (Occ_opt/JK_only.h): SQP over the active occupations

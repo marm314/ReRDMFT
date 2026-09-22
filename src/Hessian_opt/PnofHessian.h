@@ -48,8 +48,8 @@ namespace rerdmft {
 // there is no benefit to hoisting them out for a single-element call;
 // see `pnofHessianMatrix` below for the version that hoists them out
 // once for a full matrix build instead.
-template <typename T>
-T pnofHessianElement(PnofFunctional functional, const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri>
+T pnofHessianElement(PnofFunctional functional, const Matrix<T>& h, const Eri& eri,
                       const std::vector<PnofGeminal>& geminals,
                       const std::vector<double>& occupations, bool relativistic,
                       const Matrix<T>& fock, std::size_t p, std::size_t q, std::size_t r,
@@ -92,14 +92,14 @@ Matrix<T> pnofHessianMatrix(PnofFunctional functional, const Matrix<T>& h, const
 // (T = std::complex<double>). Thin wrappers over HartreeExchangeHessian.h,
 // exactly like pnofHessianElement (see the convention note above for
 // what they measure off stationarity).
-template <typename T>
-T pnofHessianElementImag(PnofFunctional functional, const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri>
+T pnofHessianElementImag(PnofFunctional functional, const Matrix<T>& h, const Eri& eri,
                           const std::vector<PnofGeminal>& geminals,
                           const std::vector<double>& occupations, bool relativistic,
                           const Matrix<T>& fock, std::size_t p, std::size_t q, std::size_t r,
                           std::size_t s);
-template <typename T>
-T pnofHessianElementMixed(PnofFunctional functional, const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri>
+T pnofHessianElementMixed(PnofFunctional functional, const Matrix<T>& h, const Eri& eri,
                            const std::vector<PnofGeminal>& geminals,
                            const std::vector<double>& occupations, bool relativistic,
                            const Matrix<T>& fock, std::size_t p, std::size_t q, std::size_t r,
@@ -112,6 +112,20 @@ T pnofHessianElementMixed(PnofFunctional functional, const Matrix<T>& h, const T
 // hartreeExchangeSymmetricJointHessianMatrix for the exact definition
 // (each block symmetrized from the same bare G_pq,rs, L1/L2 included).
 // `fock` = pnofFockMatrix(...)'s own output. Complex spinors only.
+// Hessian-VECTOR product of pnofJointHessianMatrix's own matrix, without ever forming it (see
+// HartreeExchangeHessian.h's hartreeExchangeJointHessianVector, which this thin wrapper reuses
+// exactly as pnofJointHessianMatrix reuses hartreeExchangeSymmetricJointHessianMatrix). `fock` =
+// pnofFockMatrix(...)'s own output. `v`/the returned vector have size 2*pair_indices.size().
+// Complex spinors only.
+template <typename Eri>
+std::vector<double> pnofJointHessianVector(
+    PnofFunctional functional, const Matrix<std::complex<double>>& h,
+    const Eri& eri, const std::vector<PnofGeminal>& geminals,
+    const std::vector<double>& occupations, bool relativistic,
+    const Matrix<std::complex<double>>& fock,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices,
+    const std::vector<double>& v);
+
 Matrix<double> pnofJointHessianMatrix(
     PnofFunctional functional, const Matrix<std::complex<double>>& h,
     const Tensor4<std::complex<double>>& eri, const std::vector<PnofGeminal>& geminals,

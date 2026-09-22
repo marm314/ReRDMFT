@@ -1393,6 +1393,8 @@ inline rerdmft::FullOptSettings fullOptSettings(const rerdmft::Input& input) {
   settings.gradient_tolerance = input.orbital_gradient_tolerance();
   settings.cholesky = input.cholesky();
   settings.cholesky_threshold = input.cholesky_threshold();
+  settings.orbital_optimizer = input.orbital_optimizer() == "NEO" ? rerdmft::OrbitalOptimizer::kNeo
+                                                                  : rerdmft::OrbitalOptimizer::kAdam;
   return settings;
 }
 

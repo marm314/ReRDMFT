@@ -1,0 +1,19 @@
+# Example ReRDMFT input file: water, X2C spinors, MULLER JK-only functional, FULL_OPTIMIZATION
+# TRUE with ORBITAL_OPTIMIZER NEO -- the NEO counterpart of water_X2C_full_optimization.inp, same
+# system, same functional. NEO's Newton steps are restricted to the time-reversal-symmetric
+# (Kramers-restricted) subspace (Utils/KramersRestriction.h's KramersNeoProblem), exactly as
+# ADAM's own steps are; the validation checks are unchanged (Kramers symmetry of the occupations,
+# the gradient and a probe rotation). See water_muller_as_neo_full_optimization.inp for what
+# ORBITAL_OPTIMIZER NEO changes in general.
+NELEC 10
+BASIS water-sto-3g.gbs
+X2C TRUE
+FUNCTIONAL MULLER
+FULL_OPTIMIZATION TRUE
+ORBITAL_OPTIMIZER NEO
+
+GEOMETRY
+O   0.000000   0.000000   0.000000
+H   0.000000   0.757000   0.586000
+H   0.000000  -0.757000   0.586000
+END

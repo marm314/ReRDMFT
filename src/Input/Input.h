@@ -334,6 +334,13 @@ class Input {
   int max_macro_iterations() const { return max_macro_iterations_; }
   double macro_energy_tolerance() const { return macro_energy_tolerance_; }
   double orbital_gradient_tolerance() const { return orbital_gradient_tolerance_; }
+  // Optional; defaults to "ADAM" when ORBITAL_OPTIMIZER is absent. Which method drives the
+  // orbital-rotation step of the FULL_OPTIMIZATION macro loop: "ADAM" (DoNOF's first-order
+  // optimizer) or "NEO" (Utils/NEO.h's matrix-free, second-order trust-region Newton method,
+  // Full_opt/FullOptimization.h's own FullOptSettings::OrbitalOptimizer). NEO needs the dense
+  // two-electron integrals and falls back to ADAM (with a printed note) when CHOLESKY TRUE has
+  // decomposed them into vectors instead.
+  const std::string& orbital_optimizer() const { return orbital_optimizer_; }
 
   // Prints the current value of EVERY input variable (one per line, after
   // the geometry), so a run's output records exactly what was in effect.
@@ -377,6 +384,7 @@ class Input {
   int max_macro_iterations_ = 1000;
   double macro_energy_tolerance_ = 1e-9;
   double orbital_gradient_tolerance_ = 1e-5;
+  std::string orbital_optimizer_ = "ADAM";
 };
 
 }  // namespace rerdmft

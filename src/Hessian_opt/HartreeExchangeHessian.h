@@ -99,8 +99,8 @@ namespace rerdmft {
 // <double>) orbital basis -- explicit instantiations for both are
 // provided in the .cpp. `two_rdm_h`/`two_rdm_x`/`two_rdm_l1`/
 // `two_rdm_l2` are always real (Matrix<double>) regardless of T.
-template <typename T>
-T hartreeExchangeHessianElement(const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri>
+T hartreeExchangeHessianElement(const Matrix<T>& h, const Eri& eri,
                                  const std::vector<double>& occupations,
                                  const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x,
                                  const Matrix<T>& fock, std::size_t p, std::size_t q,
@@ -114,8 +114,8 @@ T hartreeExchangeHessianElement(const Matrix<T>& h, const Tensor4<T>& eri,
 // pair-term contribution to the BARE G_pq,rs that both this function and
 // the Mixed one below combine (see rawL1L2HessianTerm in the .cpp).
 // Required whenever the 2-RDM has nonzero L1/L2 entries.
-template <typename T>
-T hartreeExchangeHessianElementImag(const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri>
+T hartreeExchangeHessianElementImag(const Matrix<T>& h, const Eri& eri,
                                      const std::vector<double>& occupations,
                                      const Matrix<double>& two_rdm_h,
                                      const Matrix<double>& two_rdm_x, const Matrix<T>& fock,
@@ -165,8 +165,8 @@ T hartreeExchangeHessianElementImag(const Matrix<T>& h, const Tensor4<T>& eri,
 // to), Hess^{yt}_pq,rs = Hess^{ty}_rs,pq -- i.e. just call this same
 // function with the two pairs swapped. Confirmed numerically, not just
 // asserted, at both test points above.
-template <typename T>
-T hartreeExchangeHessianElementMixed(const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri>
+T hartreeExchangeHessianElementMixed(const Matrix<T>& h, const Eri& eri,
                                       const std::vector<double>& occupations,
                                       const Matrix<double>& two_rdm_h,
                                       const Matrix<double>& two_rdm_x, const Matrix<T>& fock,
@@ -209,6 +209,31 @@ Matrix<double> hartreeExchangeSymmetricJointHessianMatrix(
 // (pair[I].first, pair[I].second), first > second. Used to give
 // `hartreeExchangeHessianMatrix`'s rows/columns a definite meaning.
 std::vector<std::pair<std::size_t, std::size_t>> hessianPairIndices(std::size_t n);
+
+// Hessian-VECTOR product w = H v of hartreeExchangeSymmetricJointHessianMatrix's own matrix H,
+// over the joint real parameters [t_0..t_{n_pairs-1}; y_0..y_{n_pairs-1}], WITHOUT ever forming
+// that matrix: for every unordered pair (I,J) (I<=J) it computes the same four block values
+// (tt, yy, ty(I,J), ty(J,I)) the matrix builder does and immediately accumulates their
+// contribution into `w`, discarding them. Same O(n_pairs^2) element evaluations (O(n) each, so
+// O(n^5) total, exactly hartreeExchangeSymmetricJointHessianMatrix's own cost) but O(n_pairs)
+// memory instead of O(n_pairs^2) -- the callback NEO.h's NeoProblem::hessianVector needs without
+// ever materializing the (potentially huge) dense Hessian. `v`/the returned vector have size
+// 2*pair_indices.size(); optional `pair_of`/`two_rdm_l1`/`two_rdm_l2` as
+// hartreeExchangeSymmetricJointHessianMatrix's own. Complex orbitals only (T = std::complex
+// <double>; the joint [t;y] parametrization only exists for those -- NON_REL orbitals have no y
+// direction at all, so a plain vector of hartreeExchangeHessianElement/pnofHessianElement
+// evaluations already IS memory-light: see FullOptimization.cpp's realHessianVector).
+template <typename Eri>
+std::vector<double> hartreeExchangeJointHessianVector(
+    const Matrix<std::complex<double>>& h, const Eri& eri,
+    const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
+    const Matrix<double>& two_rdm_x, const Matrix<std::complex<double>>& fock,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices,
+    const std::vector<double>& v, const std::vector<std::size_t>& pair_of = {},
+    const Matrix<double>& two_rdm_l1 = Matrix<double>(),
+    const Matrix<double>& two_rdm_l2 = Matrix<double>());
+
+
 
 // Builds the FULL, dense orbital-rotation Hessian, indexed by the
 // INDEPENDENT rotation pairs `pair_indices` (typically

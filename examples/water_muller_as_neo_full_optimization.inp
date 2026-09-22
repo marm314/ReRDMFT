@@ -1,0 +1,27 @@
+# Example ReRDMFT input file: water, STO-3G, MULLER_AS (the antisymmetric Muller functional),
+# FULL_OPTIMIZATION TRUE with ORBITAL_OPTIMIZER NEO (Utils/NEO.h) instead of the default ADAM --
+# the NEO counterpart of water_muller_as_full_optimization.inp, same system, same functional.
+# ORBITAL_OPTIMIZER NEO: the orbital-rotation step of each macro-iteration is a second-order,
+# matrix-free, trust-region Newton step (targeting the ground state only, no saddle-point search)
+# instead of ADAM's many small first-order steps; the Hessian-vector product never forms the
+# dense orbital-rotation Hessian (Full_opt/FullOptimization.h's RdmftModel::hessian_vector).
+# NEO needs the dense two-electron integrals (falls back to ADAM, with a printed note, under
+# CHOLESKY TRUE) and, for X2C, its Newton steps are additionally restricted to the
+# time-reversal-symmetric (Kramers) subspace exactly like ADAM's own restriction.
+# Typically converges in far fewer macro-iterations than ADAM (a handful, not tens), but is NOT
+# guaranteed to land on the SAME stationary point for every PNOF/GNOF system -- compare against
+# the ADAM run (water_muller_as_full_optimization.inp) as a routine cross-check; JK_only
+# functionals like MULLER_AS have not shown this sensitivity in testing.
+NELEC 10
+BASIS water-sto-3g.gbs
+NON_RELATIVISTIC TRUE
+X2C TRUE
+FUNCTIONAL MULLER_AS
+FULL_OPTIMIZATION TRUE
+ORBITAL_OPTIMIZER NEO
+
+GEOMETRY
+O   0.000000   0.000000   0.000000
+H   0.000000   0.757000   0.586000
+H   0.000000  -0.757000   0.586000
+END

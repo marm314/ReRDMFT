@@ -2,12 +2,13 @@
 
 #include <complex>
 
+#include "CholeskyEri.h"
 #include "HartreeExchangeHessian.h"
 
 namespace rerdmft {
 
-template <typename T>
-T pnofHessianElement(PnofFunctional functional, const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri>
+T pnofHessianElement(PnofFunctional functional, const Matrix<T>& h, const Eri& eri,
                       const std::vector<PnofGeminal>& geminals,
                       const std::vector<double>& occupations, bool relativistic,
                       const Matrix<T>& fock, std::size_t p, std::size_t q, std::size_t r,
@@ -30,8 +31,8 @@ Matrix<T> pnofHessianMatrix(PnofFunctional functional, const Matrix<T>& h, const
                                        pair_indices, pair_of, full.two_rdm_l1, full.two_rdm_l2);
 }
 
-template <typename T>
-T pnofHessianElementImag(PnofFunctional functional, const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri>
+T pnofHessianElementImag(PnofFunctional functional, const Matrix<T>& h, const Eri& eri,
                           const std::vector<PnofGeminal>& geminals,
                           const std::vector<double>& occupations, bool relativistic,
                           const Matrix<T>& fock, std::size_t p, std::size_t q, std::size_t r,
@@ -43,8 +44,8 @@ T pnofHessianElementImag(PnofFunctional functional, const Matrix<T>& h, const Te
                                             full.two_rdm_l2);
 }
 
-template <typename T>
-T pnofHessianElementMixed(PnofFunctional functional, const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri>
+T pnofHessianElementMixed(PnofFunctional functional, const Matrix<T>& h, const Eri& eri,
                            const std::vector<PnofGeminal>& geminals,
                            const std::vector<double>& occupations, bool relativistic,
                            const Matrix<T>& fock, std::size_t p, std::size_t q, std::size_t r,
@@ -77,6 +78,14 @@ template std::complex<double> pnofHessianElementMixed(
     PnofFunctional, const Matrix<std::complex<double>>&, const Tensor4<std::complex<double>>&,
     const std::vector<PnofGeminal>&, const std::vector<double>&, bool,
     const Matrix<std::complex<double>>&, std::size_t, std::size_t, std::size_t, std::size_t);
+template std::complex<double> pnofHessianElementImag(
+    PnofFunctional, const Matrix<std::complex<double>>&, const CholeskyEri<std::complex<double>>&,
+    const std::vector<PnofGeminal>&, const std::vector<double>&, bool,
+    const Matrix<std::complex<double>>&, std::size_t, std::size_t, std::size_t, std::size_t);
+template std::complex<double> pnofHessianElementMixed(
+    PnofFunctional, const Matrix<std::complex<double>>&, const CholeskyEri<std::complex<double>>&,
+    const std::vector<PnofGeminal>&, const std::vector<double>&, bool,
+    const Matrix<std::complex<double>>&, std::size_t, std::size_t, std::size_t, std::size_t);
 
 template double pnofHessianElement(PnofFunctional, const Matrix<double>&, const Tensor4<double>&,
                                     const std::vector<PnofGeminal>&, const std::vector<double>&,
@@ -84,6 +93,14 @@ template double pnofHessianElement(PnofFunctional, const Matrix<double>&, const 
                                     std::size_t, std::size_t);
 template std::complex<double> pnofHessianElement(
     PnofFunctional, const Matrix<std::complex<double>>&, const Tensor4<std::complex<double>>&,
+    const std::vector<PnofGeminal>&, const std::vector<double>&, bool,
+    const Matrix<std::complex<double>>&, std::size_t, std::size_t, std::size_t, std::size_t);
+template double pnofHessianElement(PnofFunctional, const Matrix<double>&, const CholeskyEri<double>&,
+                                    const std::vector<PnofGeminal>&, const std::vector<double>&,
+                                    bool, const Matrix<double>&, std::size_t, std::size_t,
+                                    std::size_t, std::size_t);
+template std::complex<double> pnofHessianElement(
+    PnofFunctional, const Matrix<std::complex<double>>&, const CholeskyEri<std::complex<double>>&,
     const std::vector<PnofGeminal>&, const std::vector<double>&, bool,
     const Matrix<std::complex<double>>&, std::size_t, std::size_t, std::size_t, std::size_t);
 
@@ -95,5 +112,35 @@ template Matrix<std::complex<double>> pnofHessianMatrix(
     PnofFunctional, const Matrix<std::complex<double>>&, const Tensor4<std::complex<double>>&,
     const std::vector<PnofGeminal>&, const std::vector<double>&, bool,
     const Matrix<std::complex<double>>&, const std::vector<std::pair<std::size_t, std::size_t>>&);
+
+template <typename Eri>
+std::vector<double> pnofJointHessianVector(
+    PnofFunctional functional, const Matrix<std::complex<double>>& h,
+    const Eri& eri, const std::vector<PnofGeminal>& geminals,
+    const std::vector<double>& occupations, bool relativistic,
+    const Matrix<std::complex<double>>& fock,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices,
+    const std::vector<double>& v) {
+  const auto full = buildPnofFullTwoRdm(functional, geminals, occupations, h.rows(), relativistic);
+  const auto pair_of = buildPnofPairOf(geminals, h.rows());
+  return hartreeExchangeJointHessianVector(h, eri, occupations, full.two_rdm_h, full.two_rdm_x,
+                                           fock, pair_indices, v, pair_of, full.two_rdm_l1,
+                                           full.two_rdm_l2);
+}
+
+template std::vector<double> pnofJointHessianVector(
+    PnofFunctional functional, const Matrix<std::complex<double>>& h,
+    const Tensor4<std::complex<double>>& eri, const std::vector<PnofGeminal>& geminals,
+    const std::vector<double>& occupations, bool relativistic,
+    const Matrix<std::complex<double>>& fock,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices,
+    const std::vector<double>& v);
+template std::vector<double> pnofJointHessianVector(
+    PnofFunctional functional, const Matrix<std::complex<double>>& h,
+    const CholeskyEri<std::complex<double>>& eri, const std::vector<PnofGeminal>& geminals,
+    const std::vector<double>& occupations, bool relativistic,
+    const Matrix<std::complex<double>>& fock,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices,
+    const std::vector<double>& v);
 
 }  // namespace rerdmft

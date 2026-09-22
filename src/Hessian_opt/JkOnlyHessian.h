@@ -59,8 +59,8 @@ namespace rerdmft {
 // Deliberately a SEPARATE, self-contained implementation from
 // HartreeExchangeHessian.h/PnofHessian.h (PNOF's correct Hessian is
 // untouched).
-template <typename T>
-T jkOnlyHessianElement(const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri>
+T jkOnlyHessianElement(const Matrix<T>& h, const Eri& eri,
                         const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
                         const Matrix<double>& two_rdm_x, std::size_t p, std::size_t q,
                         std::size_t r, std::size_t s);
@@ -92,13 +92,13 @@ Matrix<T> jkOnlyHessianMatrix(const Matrix<T>& h, const Tensor4<T>& eri,
 // (sequential derivative, exactly what a finite difference of the
 // gradient at a rotated point measures). Values are real for physical
 // input (the returned complex has roundoff imaginary part).
-template <typename T>
-T jkOnlyHessianElementImag(const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri>
+T jkOnlyHessianElementImag(const Matrix<T>& h, const Eri& eri,
                             const std::vector<double>& occupations,
                             const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x,
                             std::size_t p, std::size_t q, std::size_t r, std::size_t s);
-template <typename T>
-T jkOnlyHessianElementMixed(const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri>
+T jkOnlyHessianElementMixed(const Matrix<T>& h, const Eri& eri,
                              const std::vector<double>& occupations,
                              const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x,
                              std::size_t p, std::size_t q, std::size_t r, std::size_t s);
@@ -117,6 +117,18 @@ T jkOnlyHessianElementMixed(const Matrix<T>& h, const Tensor4<T>& eri,
 //   SS_yt(pq;rs) = i(G_pq,rs-G_pq,sr+G_qp,rs-G_qp,sr).
 // Real symmetric 2*n_pairs matrix (real parts). Complex orbitals only.
 // O(n^5).
+// Hessian-VECTOR product of jkOnlyJointHessianMatrix's own matrix, without ever forming it --
+// same idea and cost accounting as HartreeExchangeHessian.h's hartreeExchangeJointHessianVector
+// (O(n_pairs) memory instead of O(n_pairs^2), same O(n^5) total element cost). `v`/the returned
+// vector have size 2*pair_indices.size(). Complex spinors only.
+template <typename Eri>
+std::vector<double> jkOnlyJointHessianVector(
+    const Matrix<std::complex<double>>& h, const Eri& eri,
+    const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
+    const Matrix<double>& two_rdm_x,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices,
+    const std::vector<double>& v);
+
 Matrix<double> jkOnlyJointHessianMatrix(
     const Matrix<std::complex<double>>& h, const Tensor4<std::complex<double>>& eri,
     const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,

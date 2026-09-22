@@ -277,6 +277,17 @@ void Input::read(const std::string& filename) {
         throw std::runtime_error("line " + std::to_string(line_number) +
                                   ": ORBITAL_GRADIENT_TOLERANCE must be positive");
       }
+    } else if (keyword == "ORBITAL_OPTIMIZER") {
+      std::string token;
+      if (!(iss >> token)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": expected ADAM or NEO after ORBITAL_OPTIMIZER");
+      }
+      orbital_optimizer_ = toUpper(token);
+      if (orbital_optimizer_ != "ADAM" && orbital_optimizer_ != "NEO") {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": ORBITAL_OPTIMIZER must be ADAM or NEO");
+      }
     } else if (keyword == "SPEED_OF_LIGHT") {
       speed_of_light_ = parseDouble(iss, line_number, keyword);
       if (!(speed_of_light_ > 0.0)) {
@@ -363,6 +374,7 @@ void Input::print(std::ostream& out) const {
   line("MAX_MACRO_ITERATIONS") << max_macro_iterations_ << "\n";
   line("MACRO_ENERGY_TOLERANCE") << macro_energy_tolerance_ << "\n";
   line("ORBITAL_GRADIENT_TOLERANCE") << orbital_gradient_tolerance_ << "\n";
+  line("ORBITAL_OPTIMIZER") << orbital_optimizer_ << "\n";
   line("SPEED_OF_LIGHT") << speed_of_light_ << "\n";
 
   out.flags(saved_flags);

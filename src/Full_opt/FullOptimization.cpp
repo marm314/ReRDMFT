@@ -12,12 +12,14 @@
 #include "CholeskyEri.h"
 #include "HartreeExchangeGradient.h"
 #include "JkOnlyFock.h"
+#include "JkOnlyHessian.h"
 #include "KramersPairing.h"
 #include "KramersRestriction.h"
 #include "LBFGS.h"
 #include "OccupationEnergy.h"
 #include "OrbitalGradient.h"
 #include "PnofFock.h"
+#include "PnofHessian.h"
 #include "SQP.h"
 #include "SpinorRotation.h"
 
@@ -197,6 +199,38 @@ RdmftModel<T, Eri> makeJkOnlyModel(JkFunctional functional, std::size_t f_l, dou
     const auto xc = jkExchangeCoupling(functional, occ, f_l);
     return jkOnlyOrbitalGradient(h, eri, occ, hc, xc);
   };
+  {
+    const auto pair_indices = hessianPairIndices(n_total);
+    model.hessian_vector = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ,
+                               const std::vector<double>& v) -> std::vector<double> {
+      const auto hc = jkHartreeCoupling(functional, occ, f_l);
+      const auto xc = jkExchangeCoupling(functional, occ, f_l);
+      if constexpr (std::is_same_v<T, double>) {
+        const std::size_t n_pairs = pair_indices.size();
+        if (v.size() != n_pairs) throw std::runtime_error("JK_only hessian_vector: v has the wrong size");
+        std::vector<double> w(n_pairs, 0.0);
+        // jkOnlyHessianElement(pq,rs) is the SEQUENTIAL derivative (d/dkappa_pq of pair rs's
+        // gradient), asymmetric off orbital stationarity, exactly like the complex-T joint
+        // functions above -- symmetrize the same way main.cpp's symmetrizeReal(jkOnlyHessianMatrix
+        // (...)) does before using it as a genuine (Newton-usable) Hessian.
+#pragma omp parallel for
+        for (std::size_t i = 0; i < n_pairs; ++i) {
+          const auto& [p, q] = pair_indices[i];
+          double acc = 0.0;
+          for (std::size_t j = 0; j < n_pairs; ++j) {
+            const auto& [r, s] = pair_indices[j];
+            const double e_ij = jkOnlyHessianElement(h, eri, occ, hc, xc, p, q, r, s);
+            const double e_ji = jkOnlyHessianElement(h, eri, occ, hc, xc, r, s, p, q);
+            acc += 0.5 * (e_ij + e_ji) * v[j];
+          }
+          w[i] = acc;
+        }
+        return w;
+      } else {
+        return jkOnlyJointHessianVector(h, eri, occ, hc, xc, pair_indices, v);
+      }
+    };
+  }
   model.optimize_occupations = [=](const Matrix<T>& h, const Eri& eri,
                                    std::vector<double>& state) {
     auto embed = [&](const std::vector<double>& active) {
@@ -276,6 +310,35 @@ RdmftModel<T, Eri> makePnofModel(PnofFunctional functional, std::vector<PnofGemi
   model.gradient = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ) {
     return orbitalGradient(pnofFockMatrix(functional, h, eri, geminals, occ, relativistic));
   };
+  {
+    const auto pair_indices = hessianPairIndices(n_total);
+    model.hessian_vector = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ,
+                               const std::vector<double>& v) -> std::vector<double> {
+      const auto fock = pnofFockMatrix(functional, h, eri, geminals, occ, relativistic);
+      if constexpr (std::is_same_v<T, double>) {
+        const std::size_t n_pairs = pair_indices.size();
+        if (v.size() != n_pairs) throw std::runtime_error("PNOF hessian_vector: v has the wrong size");
+        std::vector<double> w(n_pairs, 0.0);
+        // Same symmetrization as the JK_only branch above (see its comment): pnofHessianElement
+        // is the sequential derivative, asymmetric off stationarity.
+#pragma omp parallel for
+        for (std::size_t i = 0; i < n_pairs; ++i) {
+          const auto& [p, q] = pair_indices[i];
+          double acc = 0.0;
+          for (std::size_t j = 0; j < n_pairs; ++j) {
+            const auto& [r, s] = pair_indices[j];
+            const double e_ij = pnofHessianElement(functional, h, eri, geminals, occ, relativistic, fock, p, q, r, s);
+            const double e_ji = pnofHessianElement(functional, h, eri, geminals, occ, relativistic, fock, r, s, p, q);
+            acc += 0.5 * (e_ij + e_ji) * v[j];
+          }
+          w[i] = acc;
+        }
+        return w;
+      } else {
+        return pnofJointHessianVector(functional, h, eri, geminals, occ, relativistic, fock, pair_indices, v);
+      }
+    };
+  }
   model.symmetric_shortcut_energy = [=](const Matrix<T>& h, const Eri& eri,
                                         const std::vector<double>& occ) {
     const auto two_rdm = buildPnofTwoRdm(functional, geminals, occ, relativistic);
@@ -436,6 +499,164 @@ class RotationProblem : public AdamProblem<T> {
   Eri eri_b_;
   Matrix<T> u_t_, u_b_;
   std::vector<long> twin_;
+};
+
+// =====================================================================
+// NEO problem over the orbital rotations
+// =====================================================================
+
+// Trial integrals and the cumulative rotation, in the JOINT real parametrization NEO.h expects
+// (Utils/NEO.h: T = double, real orbitals directly for NON_REL; the real [t;y] joint vector,
+// Hessian_opt/OrbitalGradient.h's own convention, for X2C's complex spinors -- see NEO.h's own
+// note that this IS its intended use of T = double). Works for `Eri = Tensor4<Scalar>` AND
+// `Eri = CholeskyEri<Scalar>` (RdmftModel::hessian_vector is set for both -- see
+// FullOptimization.h). `Scalar` is the integrals' own scalar type (double for NON_REL,
+// complex<double> for X2C); `dimension()` is pairs_.size() (NON_REL) or 2*pairs_.size() (X2C).
+//
+// NOTE (NON_REL, spin_partner): unlike RotationProblem, this does NOT average the alpha/beta twin
+// gradient entries the way ADAM does. It relies instead on the underlying physics: a spin-
+// restricted (Sz-conserving) starting point has IDENTICAL gradient/Hessian-action on a pure-alpha
+// pair and its pure-beta twin, and exactly zero on a spin-mixing pair, so a trajectory that starts
+// there stays there analytically. The end-of-run final test (spin symmetry of h/eri) still checks
+// this rather than assuming it -- unlike ADAM's per-parameter normalization, NEO's Newton step has
+// no mechanism that would spontaneously BREAK an exact tie, but a degenerate Davidson eigenvector
+// choice in principle could; a genuine spin-restricted NEO problem (a "SpinRestriction" analogous
+// to Utils/KramersRestriction.h) would remove even that risk and is a natural follow-up if the
+// final test ever shows drift.
+// A THIN wrapper, not a second state holder: it reads/rotates the SAME RotationProblem the ADAM
+// branch would use (h()/eri()/pairs() for reading, rotate() -- via the identical adamKappaMatrix
+// per-pair convention adamPairIndices/hessianPairIndices already share -- for the one-shot commit
+// accept() needs), so `problem.totalRotation()`/`h()`/`eri()` stay the SINGLE source of truth the
+// rest of runFullOptimization (occupation re-optimization, the final tests) already reads,
+// whichever optimizer actually advanced them. Only trialEnergy() needs its own (non-mutating)
+// rotation -- built with the SAME oneElectronRotated/rotateEri pair RotationProblem::rotate()
+// itself uses (Tensor4: exact O(n^5); CholeskyEri: rotates the vectors), rather than the
+// Tensor4-only rotateIntegralsExact -- since NEO must be able to try a step without committing it.
+template <typename Scalar, typename Eri>
+class NeoOrbitalProblem : public NeoProblem<double> {
+ public:
+  NeoOrbitalProblem(const RdmftModel<Scalar, Eri>& model, RotationProblem<Scalar, Eri>& problem)
+      : model_(model), problem_(problem) {}
+  void setOccupations(const std::vector<double>& occ) { occ_ = occ; }
+  std::size_t dimension() const override {
+    return std::is_same_v<Scalar, double> ? problem_.pairs().size() : 2 * problem_.pairs().size();
+  }
+  double energy() override { return model_.energy(problem_.h(), problem_.eri(), occ_); }
+  std::vector<double> gradient() override {
+    return jointOrbitalGradient(model_.gradient(problem_.h(), problem_.eri(), occ_), problem_.pairs());
+  }
+  std::vector<double> hessianVector(const std::vector<double>& v) override {
+    if (!model_.hessian_vector) {
+      throw std::runtime_error("NeoOrbitalProblem: the model has no hessian_vector");
+    }
+    return model_.hessian_vector(problem_.h(), problem_.eri(), occ_, v);
+  }
+  double trialEnergy(const std::vector<double>& d) override {
+    const auto u = spinorRotationMatrix(buildKappa(d));
+    const auto h_trial = oneElectronRotated(problem_.h(), u);
+    const auto eri_trial = rotateEri(problem_.eri(), u);
+    return model_.energy(h_trial, eri_trial, occ_);
+  }
+  void accept(const std::vector<double>& d) override { problem_.rotate(toStep(d)); }
+
+ private:
+  Matrix<Scalar> buildKappa(const std::vector<double>& x) const {
+    const auto& pairs = problem_.pairs();
+    Matrix<Scalar> kappa(problem_.h().rows(), problem_.h().rows(), Scalar{});
+    for (std::size_t i = 0; i < pairs.size(); ++i) {
+      const auto& [p, q] = pairs[i];
+      if constexpr (std::is_same_v<Scalar, double>) {
+        kappa(p, q) = x[i];
+        kappa(q, p) = -x[i];
+      } else {
+        const Scalar z(x[i], x[pairs.size() + i]);
+        kappa(p, q) = z;
+        kappa(q, p) = -std::conj(z);
+      }
+    }
+    return kappa;
+  }
+  std::vector<Scalar> toStep(const std::vector<double>& d) const {
+    const auto& pairs = problem_.pairs();
+    std::vector<Scalar> step(pairs.size());
+    for (std::size_t i = 0; i < pairs.size(); ++i) {
+      if constexpr (std::is_same_v<Scalar, double>) {
+        step[i] = d[i];
+      } else {
+        step[i] = Scalar(d[i], d[pairs.size() + i]);
+      }
+    }
+    return step;
+  }
+
+  const RdmftModel<Scalar, Eri>& model_;
+  RotationProblem<Scalar, Eri>& problem_;
+  std::vector<double> occ_;
+};
+
+// The (pure-alpha-index, pure-beta-twin-index) pairs of pairs, one entry per orbit, canonically
+// ordered (alpha < beta): SAME twin relation as RotationProblem's own `twin_` (spin_partner maps
+// each half rigidly onto the other, preserving p>q order within a pure pair), just returned as a
+// list instead of consumed inline. A spin-mixing pair (one index alpha, one beta) has no orbit --
+// left out entirely, matching that its gradient/Hessian-action is exactly zero by Sz symmetry.
+std::vector<std::pair<std::size_t, std::size_t>> spinOrbits(
+    const std::vector<Pair>& pairs, const std::vector<std::size_t>& spin_partner) {
+  const std::size_t n = spin_partner.size();
+  std::vector<long> index(n * n, -1);
+  for (std::size_t i = 0; i < pairs.size(); ++i) index[pairs[i].first * n + pairs[i].second] = static_cast<long>(i);
+  std::vector<std::pair<std::size_t, std::size_t>> orbits;
+  for (std::size_t i = 0; i < pairs.size(); ++i) {
+    const std::size_t pp = spin_partner[pairs[i].first], qq = spin_partner[pairs[i].second];
+    if (pp > qq) {
+      const long twin = index[pp * n + qq];
+      if (twin >= 0 && i < static_cast<std::size_t>(twin)) orbits.emplace_back(i, static_cast<std::size_t>(twin));
+    }
+  }
+  return orbits;
+}
+
+// NEO in the spin-restricted (Sz-conserving) sector for NON_REL, the T=double analogue of
+// Utils/KramersRestriction.h's KramersNeoProblem: an ISOMETRIC embedding Q (Q^T Q = 1) tying each
+// pure-alpha pair to its pure-beta twin with EQUAL weight 1/sqrt(2) (no signs -- unlike Kramers
+// orbits, real orbitals have no y and the two twins are related by nothing more than a spin swap),
+// so every accepted step is exactly alpha/beta-symmetric by construction, closing the gap ADAM's
+// own per-parameter gradient AVERAGING only approximates (see NeoOrbitalProblem's own header
+// comment: without this wrapper the end-of-run spin-symmetry test can fail by ~1e-6, confirmed on
+// water_muller_as_full_optimization.inp with ORBITAL_OPTIMIZER NEO).
+class SpinRestrictedNeoProblem : public NeoProblem<double> {
+ public:
+  SpinRestrictedNeoProblem(NeoProblem<double>& full, std::vector<std::pair<std::size_t, std::size_t>> orbits)
+      : full_(full), orbits_(std::move(orbits)) {}
+  std::size_t dimension() const override { return orbits_.size(); }
+  double energy() override { return full_.energy(); }
+  std::vector<double> gradient() override { return contract(full_.gradient()); }
+  std::vector<double> hessianVector(const std::vector<double>& v) override {
+    return contract(full_.hessianVector(expand(v)));
+  }
+  double trialEnergy(const std::vector<double>& d) override { return full_.trialEnergy(expand(d)); }
+  void accept(const std::vector<double>& d) override { full_.accept(expand(d)); }
+
+ private:
+  std::vector<double> expand(const std::vector<double>& reduced) const {
+    std::vector<double> full(full_.dimension(), 0.0);
+    constexpr double kInvSqrt2 = 0.70710678118654752440;
+    for (std::size_t k = 0; k < orbits_.size(); ++k) {
+      full[orbits_[k].first] = kInvSqrt2 * reduced[k];
+      full[orbits_[k].second] = kInvSqrt2 * reduced[k];
+    }
+    return full;
+  }
+  std::vector<double> contract(const std::vector<double>& full) const {
+    std::vector<double> reduced(orbits_.size());
+    constexpr double kInvSqrt2 = 0.70710678118654752440;
+    for (std::size_t k = 0; k < orbits_.size(); ++k) {
+      reduced[k] = kInvSqrt2 * (full[orbits_[k].first] + full[orbits_[k].second]);
+    }
+    return reduced;
+  }
+
+  NeoProblem<double>& full_;
+  std::vector<std::pair<std::size_t, std::size_t>> orbits_;
 };
 
 // Kramers-structure deviations (Utils/KramersPairing.h) for either scalar type (complex only used).
@@ -726,9 +947,11 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
                                   const std::vector<std::size_t>& spin_partner) {
   FullOptResult result;
   result.occupations = occupations;
-  log << "\n  FULL orbital + occupation optimization (ADAM orbital rotations at fixed occupations, then\n"
+  log << "\n  FULL orbital + occupation optimization ("
+      << (settings.orbital_optimizer == OrbitalOptimizer::kNeo ? "NEO" : "ADAM")
+      << " orbital rotations at fixed occupations, then\n"
          "  occupation re-optimization at the new orbitals, macro-iterated to convergence; energy tolerance "
-      << settings.energy_tolerance << ", ADAM gradient tolerance " << settings.gradient_tolerance << ", at most "
+      << settings.energy_tolerance << ", orbital-gradient tolerance " << settings.gradient_tolerance << ", at most "
       << settings.max_macro_iterations << " macro-iterations";
   if (kramers_restricted) log << "; orbital rotations Kramers-restricted (Utils/KramersRestriction.h)";
   if (!spin_partner.empty()) log << "; spin-restricted orbital rotations (alpha and beta rotate identically)";
@@ -759,6 +982,30 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
   if constexpr (!std::is_same_v<T, double>) {
     if (kramers_restricted) kr = std::make_unique<KramersRestriction>(h.rows(), problem.pairs());
   }
+  // NON_REL's NEO analogue of `kr`: ties every pure-alpha pair to its pure-beta twin (see
+  // SpinRestrictedNeoProblem's own comment on why this is needed, unlike ADAM's averaging).
+  std::vector<std::pair<std::size_t, std::size_t>> spin_orbits;
+  if constexpr (std::is_same_v<T, double>) {
+    if (!spin_partner.empty()) spin_orbits = spinOrbits(problem.pairs(), spin_partner);
+  }
+
+  // NEO branch: needs the model's hessian_vector (set for both Tensor4 and CholeskyEri models --
+  // see RdmftModel's own note) AND ORBITAL_OPTIMIZER NEO; falls back to ADAM (with a printed
+  // note) if hessian_vector is somehow unset (defensive -- every model built by makeJkOnlyModel/
+  // makePnofModel sets it).
+  bool use_neo = false;
+  std::unique_ptr<NeoOrbitalProblem<T, Eri>> neo_problem;
+  if (settings.orbital_optimizer == OrbitalOptimizer::kNeo && model.hessian_vector) {
+    neo_problem = std::make_unique<NeoOrbitalProblem<T, Eri>>(model, problem);
+    use_neo = true;
+  }
+  if (settings.orbital_optimizer == OrbitalOptimizer::kNeo && !use_neo) {
+    log << "    ORBITAL_OPTIMIZER NEO requested but the model has no Hessian-vector callback: using ADAM.\n";
+  }
+  NeoOptions neo_options;
+  neo_options.step.target_order = 0;  // ground state (a minimum) only -- no saddle-point search here.
+  neo_options.gradient_tolerance = settings.gradient_tolerance;
+  neo_options.max_iterations = settings.neo_max_iterations;  // fixed budget -- see its own comment.
 
   std::vector<double> occ = occupations;
   std::vector<double> occ_state = state;
@@ -767,22 +1014,56 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
   const double e_start = e_elec;
   log << "    starting point (occupation-optimized HF orbitals): total energy " << std::setprecision(10)
       << e_elec + nuclear_repulsion_energy << std::setprecision(6) << " Hartree\n";
-  log << "    iter      total energy (Ha)          dE        max|grad|  ADAM steps  learning rate\n";
+  log << (use_neo ? "    iter      total energy (Ha)          dE        max|grad|  NEO steps    trust radius\n"
+                  : "    iter      total energy (Ha)          dE        max|grad|  ADAM steps  learning rate\n");
 
   int iter = 0;
   int n_occ_unconverged = 0;
   for (iter = 1; iter <= settings.max_macro_iterations; ++iter) {
     problem.setOccupations(occ);
-    AdamResult ar;
-    if constexpr (!std::is_same_v<T, double>) {
-      if (kr) {
-        KramersAdamProblem reduced(problem, *kr);
-        ar = adam.run(reduced);
+    double max_gradient = 0.0;
+    int orbital_iterations = 0;
+    bool gradient_converged = false, orbital_restart_requested = false;
+    double log_extra = 0.0;  // ADAM's learning rate, or NEO's final trust radius.
+    if (use_neo) {
+      neo_problem->setOccupations(occ);
+      NeoResult nr;
+      if constexpr (!std::is_same_v<T, double>) {
+        if (kr) {
+          KramersNeoProblem reduced(*neo_problem, *kr);
+          nr = neoOptimize(reduced, neo_options);
+        } else {
+          nr = neoOptimize(*neo_problem, neo_options);
+        }
+      } else {
+        if (!spin_orbits.empty()) {
+          SpinRestrictedNeoProblem reduced(*neo_problem, spin_orbits);
+          nr = neoOptimize(reduced, neo_options);
+        } else {
+          nr = neoOptimize(*neo_problem, neo_options);
+        }
+      }
+      max_gradient = nr.gradient_max;
+      orbital_iterations = nr.iterations;
+      gradient_converged = nr.converged;
+      log_extra = nr.history.empty() ? 0.0 : nr.history.back().radius;
+    } else {
+      AdamResult ar;
+      if constexpr (!std::is_same_v<T, double>) {
+        if (kr) {
+          KramersAdamProblem reduced(problem, *kr);
+          ar = adam.run(reduced);
+        } else {
+          ar = adam.run(problem);
+        }
       } else {
         ar = adam.run(problem);
       }
-    } else {
-      ar = adam.run(problem);
+      max_gradient = ar.max_gradient;
+      orbital_iterations = ar.iterations;
+      gradient_converged = ar.gradient_converged;
+      orbital_restart_requested = ar.restart_requested;
+      log_extra = ar.learning_rate;
     }
 
     RdmftOccupationResult occ_result;
@@ -794,18 +1075,18 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
     }
     if (!occ_result.converged) ++n_occ_unconverged;
     occ = occ_result.occupations;
-    // Same energy definition as the ADAM stage (see makePnofModel: the
+    // Same energy definition as the orbital stage (see makePnofModel: the
     // optimizer's own value can differ for a non-symmetric eri).
     e_elec = model.energy(problem.h(), problem.eri(), occ);
     const double d_e = e_elec - e_old;
     log << "    " << std::setw(4) << iter << "  " << std::fixed << std::setprecision(10) << std::setw(20)
         << e_elec + nuclear_repulsion_energy << "  " << std::scientific << std::setprecision(2) << std::setw(10)
-        << d_e << "  " << std::setw(10) << ar.max_gradient << "  " << std::defaultfloat << std::setw(6)
-        << ar.iterations << "      " << std::scientific << std::setprecision(2) << ar.learning_rate
-        << (ar.restart_requested ? "  restart" : "") << (ar.gradient_converged ? "  gradient-converged" : "")
+        << d_e << "  " << std::setw(10) << max_gradient << "  " << std::defaultfloat << std::setw(6)
+        << orbital_iterations << "      " << std::scientific << std::setprecision(2) << log_extra
+        << (orbital_restart_requested ? "  restart" : "") << (gradient_converged ? "  gradient-converged" : "")
         << (occ_result.converged ? "" : "  occupations-not-converged")
         << std::defaultfloat << std::setprecision(6) << "\n";
-    if (std::abs(d_e) < settings.energy_tolerance && !adam.restartRequested()) {
+    if (std::abs(d_e) < settings.energy_tolerance && !(use_neo ? false : adam.restartRequested())) {
       result.converged = true;
       break;
     }
@@ -827,6 +1108,48 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
   double g_max = 0.0;
   for (const auto& [p, q] : problem.pairs()) g_max = std::max(g_max, std::abs(std::complex<double>(g_final(p, q))));
   result.gradient_max = g_max;
+
+  // NEO only (ADAM has no Hessian to check): is the point the macro loop stopped at actually a
+  // MINIMUM of the orbital-rotation energy, within the same symmetry-restricted subspace NEO
+  // searched (Kramers for X2C, spin-restricted for NON_REL, unrestricted otherwise)? A stationary
+  // point with zero gradient can still be a saddle; this verifies target_order = 0 was genuinely
+  // reached, using the SAME matrix-free machinery as neoOptimize's own verify_index, just run once
+  // more here since re-running it every macro-iteration would be wasteful.
+  if (use_neo) {
+    neo_problem->setOccupations(occ);
+    NeoEigenOptions eig_options;
+    constexpr std::size_t kRoots = 3;
+    NeoEigenResult<double> eig;
+    if constexpr (!std::is_same_v<T, double>) {
+      if (kr) {
+        KramersNeoProblem reduced(*neo_problem, *kr);
+        eig = neoLowestHessianEigenpairs<double>(
+            reduced.dimension(), [&](const std::vector<double>& v) { return reduced.hessianVector(v); },
+            std::min(kRoots, reduced.dimension()), {}, eig_options);
+      } else {
+        eig = neoLowestHessianEigenpairs<double>(
+            neo_problem->dimension(), [&](const std::vector<double>& v) { return neo_problem->hessianVector(v); },
+            std::min(kRoots, neo_problem->dimension()), {}, eig_options);
+      }
+    } else if (!spin_orbits.empty()) {
+      SpinRestrictedNeoProblem reduced(*neo_problem, spin_orbits);
+      eig = neoLowestHessianEigenpairs<double>(
+          reduced.dimension(), [&](const std::vector<double>& v) { return reduced.hessianVector(v); },
+          std::min(kRoots, reduced.dimension()), {}, eig_options);
+    } else {
+      eig = neoLowestHessianEigenpairs<double>(
+          neo_problem->dimension(), [&](const std::vector<double>& v) { return neo_problem->hessianVector(v); },
+          std::min(kRoots, neo_problem->dimension()), {}, eig_options);
+    }
+    const int n_negative = static_cast<int>(
+        std::count_if(eig.eigenvalues.begin(), eig.eigenvalues.end(), [](double e) { return e < -1e-6; }));
+    log << "    Hessian check (lowest " << eig.eigenvalues.size() << " eigenvalue(s) of the "
+        << (kr ? "Kramers-restricted" : (!spin_orbits.empty() ? "spin-restricted" : "unrestricted"))
+        << " orbital-rotation Hessian at this point):";
+    for (double e : eig.eigenvalues) log << " " << std::scientific << std::setprecision(3) << e;
+    log << std::defaultfloat << std::setprecision(6) << (eig.converged ? "" : "  (Davidson NOT converged)") << "\n";
+    log << "    [" << (n_negative == 0 ? "PASS" : "FAIL") << "] the point is a genuine minimum (0 negative eigenvalues)\n";
+  }
 
   log << "  " << (result.converged ? "CONVERGED" : "NOT converged") << " after " << result.iterations
       << " macro-iteration(s).\n";
