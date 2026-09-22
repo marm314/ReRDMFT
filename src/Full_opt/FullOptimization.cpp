@@ -1082,139 +1082,176 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
   log << (use_neo ? "    iter      total energy (Ha)          dE        max|grad|  NEO steps    trust radius\n"
                   : "    iter      total energy (Ha)          dE        max|grad|  ADAM steps  learning rate\n");
 
-  int iter = 0;
-  int n_occ_unconverged = 0;
-  for (iter = 1; iter <= settings.max_macro_iterations; ++iter) {
-    problem.setOccupations(occ);
-    double max_gradient = 0.0;
-    int orbital_iterations = 0;
-    bool gradient_converged = false, orbital_restart_requested = false;
-    double log_extra = 0.0;  // ADAM's learning rate, or NEO's final trust radius.
-    if (use_neo) {
-      neo_problem->setOccupations(occ);
-      NeoResult nr;
-      if constexpr (!std::is_same_v<T, double>) {
-        if (kr) {
-          KramersNeoProblem reduced(*neo_problem, *kr);
-          nr = neoOptimize(reduced, neo_options);
-        } else {
-          nr = neoOptimize(*neo_problem, neo_options);
-        }
-      } else {
-        if (!spin_orbits.empty()) {
-          SpinRestrictedNeoProblem reduced(*neo_problem, spin_orbits);
-          nr = neoOptimize(reduced, neo_options);
-        } else {
-          nr = neoOptimize(*neo_problem, neo_options);
-        }
-      }
-      max_gradient = nr.gradient_max;
-      orbital_iterations = nr.iterations;
-      gradient_converged = nr.converged;
-      log_extra = nr.history.empty() ? 0.0 : nr.history.back().radius;
-    } else {
-      AdamResult ar;
-      if constexpr (!std::is_same_v<T, double>) {
-        if (kr) {
-          KramersAdamProblem reduced(problem, *kr);
-          ar = adam.run(reduced);
-        } else {
-          ar = adam.run(problem);
-        }
-      } else {
-        ar = adam.run(problem);
-      }
-      max_gradient = ar.max_gradient;
-      orbital_iterations = ar.iterations;
-      gradient_converged = ar.gradient_converged;
-      orbital_restart_requested = ar.restart_requested;
-      log_extra = ar.learning_rate;
-    }
-
-    RdmftOccupationResult occ_result;
-    try {
-      occ_result = model.optimize_occupations(problem.h(), problem.eri(), occ_state);
-    } catch (const std::exception& e) {
-      log << "    occupation re-optimization FAILED (" << e.what() << ") -- stopping.\n";
-      break;
-    }
-    if (!occ_result.converged) ++n_occ_unconverged;
-    occ = occ_result.occupations;
-    // Same energy definition as the orbital stage (see makePnofModel: the
-    // optimizer's own value can differ for a non-symmetric eri).
-    e_elec = model.energy(problem.h(), problem.eri(), occ);
-    const double d_e = e_elec - e_old;
-    log << "    " << std::setw(4) << iter << "  " << std::fixed << std::setprecision(10) << std::setw(20)
-        << e_elec + nuclear_repulsion_energy << "  " << std::scientific << std::setprecision(2) << std::setw(10)
-        << d_e << "  " << std::setw(10) << max_gradient << "  " << std::defaultfloat << std::setw(6)
-        << orbital_iterations << "      " << std::scientific << std::setprecision(2) << log_extra
-        << (orbital_restart_requested ? "  restart" : "") << (gradient_converged ? "  gradient-converged" : "")
-        << (occ_result.converged ? "" : "  occupations-not-converged")
-        << std::defaultfloat << std::setprecision(6) << "\n";
-    if (std::abs(d_e) < settings.energy_tolerance && !(use_neo ? false : adam.restartRequested())) {
-      result.converged = true;
-      break;
-    }
-    e_old = e_elec;
-  }
-  result.iterations = std::min(iter, settings.max_macro_iterations);
-  result.occupations = occ;
-  result.occupation_state = occ_state;
-  {
-    const Matrix<T>& u_final = problem.totalRotation();
-    result.total_rotation = Matrix<std::complex<double>>(u_final.rows(), u_final.cols());
-    for (std::size_t i = 0; i < u_final.rows() * u_final.cols(); ++i) {
-      result.total_rotation.data()[i] = std::complex<double>(u_final.data()[i]);
-    }
-  }
-  result.electronic_energy = e_elec;
-
-  const Matrix<T> g_final = model.gradient(problem.h(), problem.eri(), occ);
-  double g_max = 0.0;
-  for (const auto& [p, q] : problem.pairs()) g_max = std::max(g_max, std::abs(std::complex<double>(g_final(p, q))));
-  result.gradient_max = g_max;
-
-  // NEO only (ADAM has no Hessian to check): is the point the macro loop stopped at actually a
-  // MINIMUM of the orbital-rotation energy, within the same symmetry-restricted subspace NEO
-  // searched (Kramers for X2C, spin-restricted for NON_REL, unrestricted otherwise)? A stationary
-  // point with zero gradient can still be a saddle; this verifies target_order = 0 was genuinely
-  // reached, using the SAME matrix-free machinery as neoOptimize's own verify_index, just run once
-  // more here since re-running it every macro-iteration would be wasteful.
-  if (use_neo) {
-    neo_problem->setOccupations(occ);
-    NeoEigenOptions eig_options;
-    constexpr std::size_t kRoots = 3;
-    NeoEigenResult<double> eig;
+  // NEO only, when target_order = 0 (ground state) was requested: is the point the macro loop
+  // stopped at actually a MINIMUM of the orbital-rotation energy, within the same symmetry-
+  // restricted subspace NEO searched (Kramers for X2C, spin-restricted for NON_REL, unrestricted
+  // otherwise)? A stationary point with zero gradient can still be a saddle -- NEO's own stopping
+  // rule is gradient-only, and a shallow negative-curvature direction can become numerically
+  // decoupled (doc/NEO.tex Sec. 3.2: |z0| < decoupled_z0*||g||) before it has been descended, so
+  // NEO can report "converged" at a genuine saddle (confirmed on lih_pnof5/7/7s NON_REL). When
+  // that happens here, escape along the offending eigenvector -- whichever sign lowers the trial
+  // energy -- and re-enter the macro loop from the perturbed point, up to a small retry cap.
+  auto withReduced = [&](auto&& fn) {
     if constexpr (!std::is_same_v<T, double>) {
       if (kr) {
         KramersNeoProblem reduced(*neo_problem, *kr);
-        eig = neoLowestHessianEigenpairs<double>(
-            reduced.dimension(), [&](const std::vector<double>& v) { return reduced.hessianVector(v); },
-            std::min(kRoots, reduced.dimension()), {}, eig_options);
-      } else {
-        eig = neoLowestHessianEigenpairs<double>(
-            neo_problem->dimension(), [&](const std::vector<double>& v) { return neo_problem->hessianVector(v); },
-            std::min(kRoots, neo_problem->dimension()), {}, eig_options);
+        fn(static_cast<NeoProblem<double>&>(reduced));
+        return;
       }
-    } else if (!spin_orbits.empty()) {
-      SpinRestrictedNeoProblem reduced(*neo_problem, spin_orbits);
-      eig = neoLowestHessianEigenpairs<double>(
-          reduced.dimension(), [&](const std::vector<double>& v) { return reduced.hessianVector(v); },
-          std::min(kRoots, reduced.dimension()), {}, eig_options);
     } else {
-      eig = neoLowestHessianEigenpairs<double>(
-          neo_problem->dimension(), [&](const std::vector<double>& v) { return neo_problem->hessianVector(v); },
-          std::min(kRoots, neo_problem->dimension()), {}, eig_options);
+      if (!spin_orbits.empty()) {
+        SpinRestrictedNeoProblem reduced(*neo_problem, spin_orbits);
+        fn(static_cast<NeoProblem<double>&>(reduced));
+        return;
+      }
     }
-    const int n_negative = static_cast<int>(
-        std::count_if(eig.eigenvalues.begin(), eig.eigenvalues.end(), [](double e) { return e < -1e-6; }));
-    log << "    Hessian check (lowest " << eig.eigenvalues.size() << " eigenvalue(s) of the "
-        << (kr ? "Kramers-restricted" : (!spin_orbits.empty() ? "spin-restricted" : "unrestricted"))
-        << " orbital-rotation Hessian at this point):";
-    for (double e : eig.eigenvalues) log << " " << std::scientific << std::setprecision(3) << e;
-    log << std::defaultfloat << std::setprecision(6) << (eig.converged ? "" : "  (Davidson NOT converged)") << "\n";
-    log << "    [" << (n_negative == 0 ? "PASS" : "FAIL") << "] the point is a genuine minimum (0 negative eigenvalues)\n";
+    fn(static_cast<NeoProblem<double>&>(*neo_problem));
+  };
+  constexpr int kMaxSaddleEscapeAttempts = 3;
+
+  int iter = 0;
+  int n_occ_unconverged = 0;
+  int total_macro_iterations = 0;
+  Matrix<T> g_final(h.rows(), h.rows(), T{});
+  double g_max = 0.0;
+  for (int escape_attempt = 0;; ++escape_attempt) {
+    result.converged = false;
+    for (iter = 1; iter <= settings.max_macro_iterations; ++iter) {
+      problem.setOccupations(occ);
+      double max_gradient = 0.0;
+      int orbital_iterations = 0;
+      bool gradient_converged = false, orbital_restart_requested = false;
+      double log_extra = 0.0;  // ADAM's learning rate, or NEO's final trust radius.
+      if (use_neo) {
+        neo_problem->setOccupations(occ);
+        NeoResult nr;
+        if constexpr (!std::is_same_v<T, double>) {
+          if (kr) {
+            KramersNeoProblem reduced(*neo_problem, *kr);
+            nr = neoOptimize(reduced, neo_options);
+          } else {
+            nr = neoOptimize(*neo_problem, neo_options);
+          }
+        } else {
+          if (!spin_orbits.empty()) {
+            SpinRestrictedNeoProblem reduced(*neo_problem, spin_orbits);
+            nr = neoOptimize(reduced, neo_options);
+          } else {
+            nr = neoOptimize(*neo_problem, neo_options);
+          }
+        }
+        max_gradient = nr.gradient_max;
+        orbital_iterations = nr.iterations;
+        gradient_converged = nr.converged;
+        log_extra = nr.history.empty() ? 0.0 : nr.history.back().radius;
+      } else {
+        AdamResult ar;
+        if constexpr (!std::is_same_v<T, double>) {
+          if (kr) {
+            KramersAdamProblem reduced(problem, *kr);
+            ar = adam.run(reduced);
+          } else {
+            ar = adam.run(problem);
+          }
+        } else {
+          ar = adam.run(problem);
+        }
+        max_gradient = ar.max_gradient;
+        orbital_iterations = ar.iterations;
+        gradient_converged = ar.gradient_converged;
+        orbital_restart_requested = ar.restart_requested;
+        log_extra = ar.learning_rate;
+      }
+
+      RdmftOccupationResult occ_result;
+      try {
+        occ_result = model.optimize_occupations(problem.h(), problem.eri(), occ_state);
+      } catch (const std::exception& e) {
+        log << "    occupation re-optimization FAILED (" << e.what() << ") -- stopping.\n";
+        break;
+      }
+      if (!occ_result.converged) ++n_occ_unconverged;
+      occ = occ_result.occupations;
+      // Same energy definition as the orbital stage (see makePnofModel: the
+      // optimizer's own value can differ for a non-symmetric eri).
+      e_elec = model.energy(problem.h(), problem.eri(), occ);
+      const double d_e = e_elec - e_old;
+      log << "    " << std::setw(4) << iter << "  " << std::fixed << std::setprecision(10) << std::setw(20)
+          << e_elec + nuclear_repulsion_energy << "  " << std::scientific << std::setprecision(2) << std::setw(10)
+          << d_e << "  " << std::setw(10) << max_gradient << "  " << std::defaultfloat << std::setw(6)
+          << orbital_iterations << "      " << std::scientific << std::setprecision(2) << log_extra
+          << (orbital_restart_requested ? "  restart" : "") << (gradient_converged ? "  gradient-converged" : "")
+          << (occ_result.converged ? "" : "  occupations-not-converged")
+          << std::defaultfloat << std::setprecision(6) << "\n";
+      if (std::abs(d_e) < settings.energy_tolerance && !(use_neo ? false : adam.restartRequested())) {
+        result.converged = true;
+        break;
+      }
+      e_old = e_elec;
+    }
+    total_macro_iterations += std::min(iter, settings.max_macro_iterations);
+    result.occupations = occ;
+    result.occupation_state = occ_state;
+    {
+      const Matrix<T>& u_final = problem.totalRotation();
+      result.total_rotation = Matrix<std::complex<double>>(u_final.rows(), u_final.cols());
+      for (std::size_t i = 0; i < u_final.rows() * u_final.cols(); ++i) {
+        result.total_rotation.data()[i] = std::complex<double>(u_final.data()[i]);
+      }
+    }
+    result.electronic_energy = e_elec;
+
+    g_final = model.gradient(problem.h(), problem.eri(), occ);
+    g_max = 0.0;
+    for (const auto& [p, q] : problem.pairs()) g_max = std::max(g_max, std::abs(std::complex<double>(g_final(p, q))));
+    result.gradient_max = g_max;
+
+    if (!use_neo) break;  // ADAM has no Hessian to check and nothing to escape.
+
+    neo_problem->setOccupations(occ);
+    NeoEigenOptions eig_options;
+    constexpr std::size_t kRoots = 3;
+    bool escaping = false;
+    withReduced([&](NeoProblem<double>& reduced) {
+      const std::size_t n_roots = std::min<std::size_t>(kRoots, reduced.dimension());
+      const NeoEigenResult<double> eig = neoLowestHessianEigenpairs<double>(
+          reduced.dimension(), [&](const std::vector<double>& v) { return reduced.hessianVector(v); }, n_roots, {},
+          eig_options);
+      const int n_negative = static_cast<int>(
+          std::count_if(eig.eigenvalues.begin(), eig.eigenvalues.end(), [](double e) { return e < -1e-6; }));
+      log << "    Hessian check (lowest " << eig.eigenvalues.size() << " eigenvalue(s) of the "
+          << (kr ? "Kramers-restricted" : (!spin_orbits.empty() ? "spin-restricted" : "unrestricted"))
+          << " orbital-rotation Hessian at this point):";
+      for (double e : eig.eigenvalues) log << " " << std::scientific << std::setprecision(3) << e;
+      log << std::defaultfloat << std::setprecision(6) << (eig.converged ? "" : "  (Davidson NOT converged)") << "\n";
+      if (n_negative > 0 && !eig.eigenvectors.empty() && escape_attempt < kMaxSaddleEscapeAttempts) {
+        const auto& v = eig.eigenvectors.front();  // most negative eigenvalue: eigenvalues is ascending
+        constexpr double kEscapeStep = 0.3;
+        std::vector<double> step_plus(v.size()), step_minus(v.size());
+        for (std::size_t i = 0; i < v.size(); ++i) {
+          step_plus[i] = kEscapeStep * v[i];
+          step_minus[i] = -kEscapeStep * v[i];
+        }
+        const double e0 = reduced.energy();
+        const double e_plus = reduced.trialEnergy(step_plus);
+        const double e_minus = reduced.trialEnergy(step_minus);
+        log << "    Escaping the saddle (eigenvalue " << std::scientific << std::setprecision(3)
+            << eig.eigenvalues.front() << std::defaultfloat << std::setprecision(6)
+            << "): perturbing along its eigenvector, sign chosen by trial energy (" << std::setprecision(10)
+            << e_plus << " vs " << e_minus << ", from " << e0 << std::setprecision(6) << "), attempt "
+            << (escape_attempt + 1) << "/" << kMaxSaddleEscapeAttempts << "; re-optimizing.\n";
+        reduced.accept(e_plus <= e_minus ? step_plus : step_minus);
+        escaping = true;
+      } else {
+        log << "    [" << (n_negative == 0 ? "PASS" : "FAIL")
+            << "] the point is a genuine minimum (0 negative eigenvalues)\n";
+      }
+    });
+    if (!escaping) break;
+    e_elec = model.energy(problem.h(), problem.eri(), occ);
+    e_old = e_elec;
   }
+  result.iterations = total_macro_iterations;
 
   log << "  " << (result.converged ? "CONVERGED" : "NOT converged") << " after " << result.iterations
       << " macro-iteration(s).\n";
