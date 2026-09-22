@@ -1,0 +1,29 @@
+# Example ReRDMFT input file: LiH, 6-31G, PNOF5 (two coupling subspaces), FULL_OPTIMIZATION TRUE
+# with ORBITAL_OPTIMIZER NEO -- demonstrates the automatic saddle-point escape in
+# Full_opt/FullOptimization.cpp's post-loop Hessian check.
+#
+# On the NON_REL branch below, NEO's gradient-only stopping rule reports "converged" at a point
+# that is actually a shallow SADDLE of the orbital-rotation Hessian (one eigenvalue around -2e-5,
+# a curvature direction whose coupling to the gradient became numerically negligible before it was
+# fully descended -- see doc/NEO.tex Sec. 3.2). The post-loop check (run because target_order = 0,
+# a minimum, was requested) detects this and perturbs the point along that eigenvector -- whichever
+# sign lowers the trial energy -- then re-enters the macro loop; watch for the "Escaping the
+# saddle..." lines and the two attempts before "[PASS] the point is a genuine minimum". The final
+# energy then matches ORBITAL_OPTIMIZER ADAM (lih_pnof5_full_optimization.inp) to ~1e-9 Hartree,
+# instead of sitting ~2e-5 Hartree above it as it would without the escape. The X2C branch below
+# does not hit a saddle on this system (the check passes immediately, no escape needed) and is
+# included only for the usual ADAM/NEO cross-check.
+NELEC 4
+BASIS lih-6-31g.gbs
+NON_RELATIVISTIC TRUE
+X2C TRUE
+FUNCTIONAL PNOF5
+PNOF_SUBSPACES 2
+PNOF_COUPLING 2
+FULL_OPTIMIZATION TRUE
+ORBITAL_OPTIMIZER NEO
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.594900
+END
