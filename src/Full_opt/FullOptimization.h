@@ -138,21 +138,26 @@ struct RdmftModel {
 // exclusion below THAT -- `n_electrons` here is already NELEC minus those 2*JK_FROZEN_PAIRS frozen
 // electrons (the caller's job: main.cpp's buildFunctionalReport computes and validates both).
 // `two_columns`: print the occupations as even/odd Kramers pairs side by side (X2C),
-// otherwise one orbital per line (NON_REL).
+// otherwise one orbital per line (NON_REL). `n_negative` (C4_DHF only): MUST equal whatever
+// n_negative runFullOptimization/RotationProblem is given -- it only affects which pair list the
+// Hessian-vector callbacks capture (via lowerPairs(n_total, n_negative), the SAME pairs()
+// RotationProblem/NeoOrbitalProblem then rotate over), not the occupation window itself.
 template <typename T, typename Eri = Tensor4<T>>
 RdmftModel<T, Eri> makeJkOnlyModel(JkFunctional functional, std::size_t f_l, double n_electrons,
                               std::size_t n_total, std::size_t n_frozen,
                               std::size_t n_inactive_below,
-                              std::size_t n_active, bool two_columns = false);
+                              std::size_t n_active, bool two_columns = false,
+                              std::size_t n_negative = 0);
 
 // PNOF functionals (Occ_opt/PNOFs.h): `geminals`/`n_core` as built by
 // buildPnofGeminals (indices already converted to actual array indices);
 // `sqp_occupations` selects the SQP branch (SQP_PNOF_OCC TRUE), otherwise
-// L-BFGS over the unconstrained gamma angles.
+// L-BFGS over the unconstrained gamma angles. `n_negative`: see makeJkOnlyModel's own comment.
 template <typename T, typename Eri = Tensor4<T>>
 RdmftModel<T, Eri> makePnofModel(PnofFunctional functional, std::vector<PnofGeminal> geminals,
                             std::size_t n_core, int pnof_subspaces, int pnof_coupling,
-                            bool relativistic, bool sqp_occupations, std::size_t n_total);
+                            bool relativistic, bool sqp_occupations, std::size_t n_total,
+                            std::size_t n_negative = 0);
 
 // Exact rotation of the MO integrals into the basis C_new = C_old * U:
 // h' = U^dagger h U, eri'(pqrs) = sum conj(U_ap) conj(U_bq) U_cr U_ds
@@ -197,17 +202,30 @@ struct FullOptResult {
 // amplify that roundoff into independent alpha/beta steps of size ~ the learning
 // rate for redundant rotations), so both spins rotate identically and the
 // pair-symmetric energy shortcut of the occupation optimizer stays valid.
+// `n_negative` (complex T only, C4_DHF): size of the negative-energy (Dirac sea) branch,
+// occupying indices [0, n_negative) -- when > 0, every orbital-rotation PAIR touching one of
+// those indices is excluded from the parameter space entirely (never just left at zero
+// gradient: dropped from pairs() itself), so the optimizer only ever rotates among the
+// positive-energy spinors. This keeps the no-pair approximation exact throughout (the
+// negative-energy columns of the accumulated rotation stay bit-for-bit unchanged -- see
+// project notes) and turns what would otherwise be Talman (1986)/Saue (ChemPhysChem 2011)'s
+// min-max saddle-point characterization of relativistic SCF into an ordinary MINIMIZATION
+// (target_order = 0 is then correct for NEO), at the cost of never exploring the -- physically
+// spurious, no-pair-violating -- negative-curvature directions that saddle has.
 template <typename T, typename Eri = Tensor4<T>>
 FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
                                   const std::vector<double>& occupations,
                                   const std::vector<double>& state, const RdmftModel<T, Eri>& model,
                                   const FullOptSettings& settings, bool kramers_restricted,
                                   double nuclear_repulsion_energy, std::ostream& log,
-                                  const std::vector<std::size_t>& spin_partner = {});
+                                  const std::vector<std::size_t>& spin_partner = {},
+                                  std::size_t n_negative = 0);
 
 // Entry points used by main.cpp: same as building the model and calling runFullOptimization, but
 // honouring FullOptSettings::cholesky (the dense MO integrals are decomposed into Cholesky vectors
-// and the loop runs on them). `spin_partner` as in runFullOptimization.
+// and the loop runs on them). `spin_partner`/`n_negative` as in runFullOptimization -- `n_negative`
+// is what lets C4_DHF pass its own negative-energy branch size once FULL_OPTIMIZATION is wired for
+// it, with NON_REL/X2C's default 0 leaving them unaffected.
 template <typename T>
 FullOptResult runFullOptimizationJk(const Matrix<T>& h, const Tensor4<T>& eri,
                                     const std::vector<double>& occupations,
@@ -218,7 +236,8 @@ FullOptResult runFullOptimizationJk(const Matrix<T>& h, const Tensor4<T>& eri,
                                     bool two_columns, const FullOptSettings& settings,
                                     bool kramers_restricted, double nuclear_repulsion_energy,
                                     std::ostream& log,
-                                    const std::vector<std::size_t>& spin_partner = {});
+                                    const std::vector<std::size_t>& spin_partner = {},
+                                    std::size_t n_negative = 0);
 
 template <typename T>
 FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const Tensor4<T>& eri,
@@ -229,7 +248,8 @@ FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const Tensor4<T>& eri,
                                       bool sqp_occupations, std::size_t n_total,
                                       const FullOptSettings& settings, bool kramers_restricted,
                                       double nuclear_repulsion_energy, std::ostream& log,
-                                      const std::vector<std::size_t>& spin_partner = {});
+                                      const std::vector<std::size_t>& spin_partner = {},
+                                      std::size_t n_negative = 0);
 
 }  // namespace rerdmft
 

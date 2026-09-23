@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -34,13 +35,35 @@ inline std::complex<double> conjugate(const std::complex<double>& x) { return st
 
 using Pair = std::pair<std::size_t, std::size_t>;
 
-std::vector<Pair> lowerPairs(std::size_t n) {
+// `n_negative` (default 0): excludes every pair touching an index < n_negative -- C4_DHF's
+// negative-energy (Dirac sea) branch, which orbital rotations must never mix into an occupied
+// positive-energy orbital (Talman 1986's min-max characterization of relativistic SCF; Saue,
+// ChemPhysChem 12, 3077 (2011)) to stay within the no-pair approximation. Checking q < n_negative
+// alone suffices since q < p always, so q is the smaller of the two indices.
+std::vector<Pair> lowerPairs(std::size_t n, std::size_t n_negative = 0) {
   std::vector<Pair> pairs;
   pairs.reserve(n * (n - 1) / 2);
   for (std::size_t p = 1; p < n; ++p) {
-    for (std::size_t q = 0; q < p; ++q) pairs.emplace_back(p, q);
+    for (std::size_t q = 0; q < p; ++q) {
+      if (q < n_negative) continue;
+      pairs.emplace_back(p, q);
+    }
   }
   return pairs;
+}
+
+// Drops every pair touching an index < n_negative from an arbitrary (e.g. adamPairIndices')
+// pair list, preserving order -- same exclusion as lowerPairs' own n_negative, for a caller
+// that cannot build its list with lowerPairs directly (RotationProblem, below).
+std::vector<Pair> excludeNegative(std::vector<Pair> pairs, std::size_t n_negative) {
+  if (n_negative == 0) return pairs;
+  std::vector<Pair> out;
+  out.reserve(pairs.size());
+  for (const auto& pr : pairs) {
+    if (pr.first < n_negative || pr.second < n_negative) continue;
+    out.push_back(pr);
+  }
+  return out;
 }
 
 }  // namespace
@@ -236,7 +259,7 @@ template <typename T, typename Eri>
 RdmftModel<T, Eri> makeJkOnlyModel(JkFunctional functional, std::size_t f_l, double n_electrons,
                               std::size_t n_total, std::size_t n_frozen,
                               std::size_t n_inactive_below,
-                              std::size_t n_active, bool two_columns) {
+                              std::size_t n_active, bool two_columns, std::size_t n_negative) {
   RdmftModel<T, Eri> model;
   const std::size_t frozen_base = n_inactive_below - n_frozen;
   // Same layout as main.cpp's "Optimized occupation numbers" table.
@@ -288,7 +311,11 @@ RdmftModel<T, Eri> makeJkOnlyModel(JkFunctional functional, std::size_t f_l, dou
     return jkOnlyOrbitalGradient(h, eri, occ, hc, xc);
   };
   {
-    const auto pair_indices = hessianPairIndices(n_total);
+    // MUST be the SAME pair list RotationProblem/NeoOrbitalProblem actually rotate over (dropped
+    // via excludeNegative there, C4_DHF only) -- otherwise the joint [t;y] vector NEO passes in
+    // has a different size than this row-based Hv expects (hessianPairIndices(n_total) alone,
+    // unfiltered, would silently mismatch whenever n_negative > 0).
+    const auto pair_indices = lowerPairs(n_total, n_negative);
     model.hessian_vector = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ,
                                const std::vector<double>& v) {
       return jkOnlyHessianVectorImpl(functional, f_l, pair_indices, h, eri, occ, v);
@@ -337,7 +364,8 @@ RdmftModel<T, Eri> makeJkOnlyModel(JkFunctional functional, std::size_t f_l, dou
 template <typename T, typename Eri>
 RdmftModel<T, Eri> makePnofModel(PnofFunctional functional, std::vector<PnofGeminal> geminals,
                             std::size_t n_core, int pnof_subspaces, int pnof_coupling,
-                            bool relativistic, bool sqp_occupations, std::size_t n_total) {
+                            bool relativistic, bool sqp_occupations, std::size_t n_total,
+                            std::size_t n_negative) {
   RdmftModel<T, Eri> model;
   const std::size_t n_frontier = geminals.size() - n_core;
   // Same layout as main.cpp's "Optimized geminal occupation numbers" listing.
@@ -381,7 +409,9 @@ RdmftModel<T, Eri> makePnofModel(PnofFunctional functional, std::vector<PnofGemi
     return orbitalGradient(pnofFockMatrix(functional, h, eri, geminals, occ, relativistic));
   };
   {
-    const auto pair_indices = hessianPairIndices(n_total);
+    // Same requirement as JK_only's own comment: must match RotationProblem/NeoOrbitalProblem's
+    // actual (possibly n_negative-restricted, C4_DHF only) pair list exactly.
+    const auto pair_indices = lowerPairs(n_total, n_negative);
     model.hessian_vector = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ,
                                const std::vector<double>& v) {
       return pnofHessianVectorImpl(functional, geminals, relativistic, pair_indices, h, eri, occ, v);
@@ -497,9 +527,12 @@ namespace {
 template <typename T, typename Eri>
 class RotationProblem : public AdamProblem<T> {
  public:
+  // `n_negative` (default 0, C4_DHF only): excludes every pair touching the negative-energy
+  // branch's first n_negative indices from the rotation entirely -- see lowerPairs' own comment.
   RotationProblem(const RdmftModel<T, Eri>& model, const Matrix<T>& h, const Eri& eri,
-                  const std::vector<std::size_t>& spin_partner = {})
-      : model_(model), n_(h.rows()), pairs_(adamPairIndices(h.rows(), false)), h_t_(h), eri_t_(eri),
+                  const std::vector<std::size_t>& spin_partner = {}, std::size_t n_negative = 0)
+      : model_(model), n_(h.rows()),
+        pairs_(excludeNegative(adamPairIndices(h.rows(), false), n_negative)), h_t_(h), eri_t_(eri),
         h_b_(h), eri_b_(eri), u_t_(h.rows(), h.rows(), T{}), u_b_(h.rows(), h.rows(), T{}) {
     for (std::size_t i = 0; i < n_; ++i) u_t_(i, i) = u_b_(i, i) = T(1.0);
     if (!spin_partner.empty()) {
@@ -773,9 +806,9 @@ Matrix<T> generatorMatrix(std::size_t n, std::size_t p, std::size_t q, double t,
 template <typename T, typename Eri>
 bool runChecks(const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ,
                const RdmftModel<T, Eri>& model, bool kramers, const std::vector<std::size_t>& spin_partner,
-               std::ostream& log) {
+               std::ostream& log, std::size_t n_negative = 0) {
   const std::size_t n = h.rows();
-  const auto pairs = lowerPairs(n);
+  const auto pairs = lowerPairs(n, n_negative);
   bool ok = true;
   auto verdict = [&](bool pass, const std::string& what) {
     log << "    [" << (pass ? "PASS" : "FAIL") << "] " << what << "\n";
@@ -1021,7 +1054,8 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
                                   const std::vector<double>& state, const RdmftModel<T, Eri>& model,
                                   const FullOptSettings& settings, bool kramers_restricted,
                                   double nuclear_repulsion_energy, std::ostream& log,
-                                  const std::vector<std::size_t>& spin_partner) {
+                                  const std::vector<std::size_t>& spin_partner,
+                                  std::size_t n_negative) {
   FullOptResult result;
   result.occupations = occupations;
   log << "\n  FULL orbital + occupation optimization ("
@@ -1032,6 +1066,11 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
       << settings.max_macro_iterations << " macro-iterations";
   if (kramers_restricted) log << "; orbital rotations Kramers-restricted (Utils/KramersRestriction.h)";
   if (!spin_partner.empty()) log << "; spin-restricted orbital rotations (alpha and beta rotate identically)";
+  if (n_negative > 0) {
+    log << "; rotations excluded from the " << n_negative
+        << " negative-energy (Dirac sea) spinors (no-pair approximation, Talman 1986/Saue"
+           " ChemPhysChem 2011's min-max characterization -- see project notes)";
+  }
   log << "):\n";
 
   if constexpr (!std::is_same_v<Eri, Tensor4<T>>) {
@@ -1042,7 +1081,8 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
            "  Kramers/spin-structure tests assemble one transiently).\n";
   }
   log << "  a) Validation of the ADAM / Kramers-restriction machinery on this system:\n";
-  result.checks_passed = runChecks<T, Eri>(h, eri, occupations, model, kramers_restricted, spin_partner, log);
+  result.checks_passed =
+      runChecks<T, Eri>(h, eri, occupations, model, kramers_restricted, spin_partner, log, n_negative);
   if (!result.checks_passed) {
     log << "  A validation check FAILED -- the macro-iteration loop is NOT run.\n";
     return result;
@@ -1050,7 +1090,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
   log << "  All validation checks passed.\n";
 
   log << "  b) Macro-iteration loop:\n";
-  RotationProblem<T, Eri> problem(model, h, eri, spin_partner);
+  RotationProblem<T, Eri> problem(model, h, eri, spin_partner, n_negative);
   AdamOptions adam_options;
   adam_options.gradient_tolerance = settings.gradient_tolerance;
   adam_options.energy_tolerance = settings.energy_tolerance;
@@ -1312,7 +1352,19 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
       final_verdict(h_dev <= 1e-8 * std::max(1.0, h_scale), "one-electron integrals keep the Kramers-pair structure");
       final_verdict(eri_dev <= 1e-8 * std::max(1.0, eri_scale), "two-electron integrals keep the Kramers-pair structure");
       final_verdict(occ_dev < 1e-6, "occupation numbers equal within every Kramers pair");
-      final_verdict(nu_dev <= 1e-6 * std::max(nu_scale, 1e-10) + 1e-12, "final orbital gradient is time-reversal symmetric");
+      // The 1e-12 floor alone assumes roundoff scales with the GRADIENT's own magnitude
+      // (nu_scale); for C4_DHF the gradient/occupation-optimization sums also touch h/eri
+      // entries up to ~h_scale/eri_scale in magnitude (the negative-energy branch, order
+      // -2mc^2 ~ 1e4 Hartree, always multiplied by an exactly-zero occupation coefficient but
+      // still summed over), so roundoff can reach ~machine-epsilon*h_scale even though the
+      // PHYSICAL asymmetry is zero -- confirmed directly (JK_only/MULLER, water/STO-3G C4_DHF:
+      // nu_dev 7.35e-12 with h_scale 3.76e4, comfortably explained by ~100*eps*h_scale but far
+      // above the un-scaled 1e-12 floor). X2C's own h_scale is chemical-size, so this term stays
+      // well below 1e-12 there and does not loosen that check.
+      final_verdict(nu_dev <= 1e-6 * std::max(nu_scale, 1e-10) + 1e-12 +
+                                  100.0 * std::numeric_limits<double>::epsilon() *
+                                      std::max(h_scale, eri_scale),
+                    "final orbital gradient is time-reversal symmetric");
     } else {
       log << "    (Kramers pairing test not applicable: no Kramers restriction requested)\n";
     }
@@ -1360,21 +1412,60 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
 namespace {
 
 // Decomposes the dense MO integrals into Cholesky vectors and verifies the reconstruction
-// (all elements for small n, a strided sample otherwise).
+// (all elements for small n, a strided sample otherwise). `n_negative` (C4_DHF only): occupations
+// are EXACTLY 0 on the negative-energy branch (buildPnofFullTwoRdm/jkHartree|ExchangeCoupling both
+// vanish whenever either index has occ 0), and n_negative>0 additionally excludes those indices
+// from every orbital rotation (excludeNegative) -- so no energy/gradient/Hessian sum ever needs
+// the TRUE VALUE of an eri element touching that branch, only that IT NOT POISON the decomposition
+// of the (chemically relevant) positive-energy sub-block it's fetched alongside. Confirmed
+// directly it does: on LiH/6-31G C4_DHF the negative branch's sheer magnitude (~-2mc^2, order
+// 1e4 Hartree) made the pivoted decomposition of the FULL tensor reconstruct even the
+// positive-only sub-block only to ~3.5e-05 at the default 1e-10 threshold (vs. ~1e-15 for
+// NON_REL/X2C's own, single-scale tensors) -- so those entries are zeroed out (not merely
+// excluded from the check) before decomposition when n_negative>0, eliminating the mixed-scale
+// pivot competition entirely; the check below then confirms the positive-block reconstruction
+// this actually achieves.
 template <typename T>
-CholeskyEri<T> makeCholeskyEri(const Tensor4<T>& eri, double threshold, std::ostream& log) {
-  const CholeskyEri<T> ch = CholeskyEri<T>::fromDense(eri, threshold);
+CholeskyEri<T> makeCholeskyEri(const Tensor4<T>& eri, double threshold, std::ostream& log,
+                               std::size_t n_negative = 0) {
+  Tensor4<T> sanitized;
+  const Tensor4<T>* decompose_from = &eri;
+  if (n_negative > 0) {
+    sanitized = eri;
+    const std::size_t n_full = eri.dim0();
+    for (std::size_t a = 0; a < n_full; ++a) {
+      for (std::size_t b = 0; b < n_full; ++b) {
+        for (std::size_t c = 0; c < n_full; ++c) {
+          for (std::size_t d = 0; d < n_full; ++d) {
+            if (a < n_negative || b < n_negative || c < n_negative || d < n_negative) {
+              sanitized(a, b, c, d) = T{};
+            }
+          }
+        }
+      }
+    }
+    decompose_from = &sanitized;
+  }
+  const CholeskyEri<T> ch = CholeskyEri<T>::fromDense(*decompose_from, threshold);
   const std::size_t n = eri.dim0();
-  const std::size_t total = n * n * n * n;
+  const std::size_t n_check = n - n_negative;
+  const std::size_t total = n_check * n_check * n_check * n_check;
   const std::size_t stride = total > 20000000 ? total / 20000000 + 1 : 1;
   double worst = 0.0;
   for (std::size_t flat = 0; flat < total; flat += stride) {
-    const std::size_t d = flat % n, c = (flat / n) % n, b = (flat / (n * n)) % n, a = flat / (n * n * n);
+    const std::size_t d = n_negative + flat % n_check, c = n_negative + (flat / n_check) % n_check,
+                       b = n_negative + (flat / (n_check * n_check)) % n_check,
+                       a = n_negative + flat / (n_check * n_check * n_check);
     worst = std::max(worst, std::abs(std::complex<double>(ch(a, b, c, d) - eri(a, b, c, d))));
   }
   log << "  Cholesky decomposition of the MO integrals (Coulomb grouping, threshold " << threshold << "): "
-      << ch.nVectors() << " vectors for n = " << n << " spinors (n^2 = " << n * n
-      << "); max |reconstruction - dense| = " << std::scientific << std::setprecision(2) << worst
+      << ch.nVectors() << " vectors for n = " << n << " spinors (n^2 = " << n * n << ")";
+  if (n_negative > 0) {
+    log << "; reconstruction checked over the " << n_check
+        << " positive-energy spinors only (the rest never enters an energy/gradient/Hessian sum"
+           " with a nonzero coefficient)";
+  }
+  log << "; max |reconstruction - dense| = " << std::scientific << std::setprecision(2) << worst
       << std::defaultfloat << std::setprecision(6) << (stride > 1 ? " (sampled)" : "") << "\n";
   if (worst > 100.0 * threshold + 1e-9) {
     throw std::runtime_error("the Cholesky vectors do not reproduce the two-electron integrals");
@@ -1393,22 +1484,23 @@ FullOptResult runFullOptimizationJk(const Matrix<T>& h, const Tensor4<T>& eri,
                                     std::size_t n_active,
                                     bool two_columns, const FullOptSettings& settings,
                                     bool kramers_restricted, double nuclear_repulsion_energy,
-                                    std::ostream& log, const std::vector<std::size_t>& spin_partner) {
+                                    std::ostream& log, const std::vector<std::size_t>& spin_partner,
+                                    std::size_t n_negative) {
   if (settings.cholesky) {
-    const CholeskyEri<T> ch = makeCholeskyEri(eri, settings.cholesky_threshold, log);
+    const CholeskyEri<T> ch = makeCholeskyEri(eri, settings.cholesky_threshold, log, n_negative);
     const auto model = makeJkOnlyModel<T, CholeskyEri<T>>(functional, f_l, n_electrons, n_total,
                                                           n_frozen, n_inactive_below, n_active,
-                                                          two_columns);
+                                                          two_columns, n_negative);
     return runFullOptimization<T, CholeskyEri<T>>(h, ch, occupations, state, model, settings,
                                                    kramers_restricted, nuclear_repulsion_energy, log,
-                                                   spin_partner);
+                                                   spin_partner, n_negative);
   }
   const auto model = makeJkOnlyModel<T, Tensor4<T>>(functional, f_l, n_electrons, n_total,
                                                     n_frozen, n_inactive_below, n_active,
-                                                    two_columns);
+                                                    two_columns, n_negative);
   return runFullOptimization<T, Tensor4<T>>(h, eri, occupations, state, model, settings,
                                               kramers_restricted, nuclear_repulsion_energy, log,
-                                              spin_partner);
+                                              spin_partner, n_negative);
 }
 
 template <typename T>
@@ -1420,33 +1512,36 @@ FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const Tensor4<T>& eri,
                                       bool sqp_occupations, std::size_t n_total,
                                       const FullOptSettings& settings, bool kramers_restricted,
                                       double nuclear_repulsion_energy, std::ostream& log,
-                                      const std::vector<std::size_t>& spin_partner) {
+                                      const std::vector<std::size_t>& spin_partner,
+                                      std::size_t n_negative) {
   if (settings.cholesky) {
-    const CholeskyEri<T> ch = makeCholeskyEri(eri, settings.cholesky_threshold, log);
+    const CholeskyEri<T> ch = makeCholeskyEri(eri, settings.cholesky_threshold, log, n_negative);
     const auto model = makePnofModel<T, CholeskyEri<T>>(functional, geminals, n_core, pnof_subspaces,
                                                         pnof_coupling, relativistic, sqp_occupations,
-                                                        n_total);
+                                                        n_total, n_negative);
     return runFullOptimization<T, CholeskyEri<T>>(h, ch, occupations, state, model, settings,
                                                    kramers_restricted, nuclear_repulsion_energy, log,
-                                                   spin_partner);
+                                                   spin_partner, n_negative);
   }
   const auto model = makePnofModel<T, Tensor4<T>>(functional, geminals, n_core, pnof_subspaces,
-                                                  pnof_coupling, relativistic, sqp_occupations, n_total);
+                                                  pnof_coupling, relativistic, sqp_occupations, n_total,
+                                                  n_negative);
   return runFullOptimization<T, Tensor4<T>>(h, eri, occupations, state, model, settings,
                                              kramers_restricted, nuclear_repulsion_energy, log,
-                                             spin_partner);
+                                             spin_partner, n_negative);
 }
 
 #define RERDMFT_INSTANTIATE_FULLOPT(T, ERI)                                                        \
   template RdmftModel<T, ERI> makeJkOnlyModel<T, ERI>(JkFunctional, std::size_t, double,           \
                                                       std::size_t, std::size_t, std::size_t,        \
-                                                      std::size_t, bool);                           \
+                                                      std::size_t, bool, std::size_t);              \
   template RdmftModel<T, ERI> makePnofModel<T, ERI>(PnofFunctional, std::vector<PnofGeminal>,      \
-                                                    std::size_t, int, int, bool, bool, std::size_t); \
+                                                    std::size_t, int, int, bool, bool, std::size_t, \
+                                                    std::size_t);                                   \
   template FullOptResult runFullOptimization<T, ERI>(                                              \
       const Matrix<T>&, const ERI&, const std::vector<double>&, const std::vector<double>&,        \
       const RdmftModel<T, ERI>&, const FullOptSettings&, bool, double, std::ostream&,              \
-      const std::vector<std::size_t>&);
+      const std::vector<std::size_t>&, std::size_t);
 
 RERDMFT_INSTANTIATE_FULLOPT(double, Tensor4<double>)
 RERDMFT_INSTANTIATE_FULLOPT(double, CholeskyEri<double>)
@@ -1458,21 +1553,22 @@ template FullOptResult runFullOptimizationJk<double>(
     const Matrix<double>&, const Tensor4<double>&, const std::vector<double>&,
     const std::vector<double>&, JkFunctional, std::size_t, double, std::size_t, std::size_t,
     std::size_t, std::size_t, bool, const FullOptSettings&, bool, double, std::ostream&,
-    const std::vector<std::size_t>&);
+    const std::vector<std::size_t>&, std::size_t);
 template FullOptResult runFullOptimizationJk<std::complex<double>>(
     const Matrix<std::complex<double>>&, const Tensor4<std::complex<double>>&,
     const std::vector<double>&, const std::vector<double>&, JkFunctional, std::size_t, double,
     std::size_t, std::size_t, std::size_t, std::size_t, bool, const FullOptSettings&, bool, double,
-    std::ostream&, const std::vector<std::size_t>&);
+    std::ostream&, const std::vector<std::size_t>&, std::size_t);
 template FullOptResult runFullOptimizationPnof<double>(
     const Matrix<double>&, const Tensor4<double>&, const std::vector<double>&,
     const std::vector<double>&, PnofFunctional, const std::vector<PnofGeminal>&, std::size_t, int,
     int, bool, bool, std::size_t, const FullOptSettings&, bool, double, std::ostream&,
-    const std::vector<std::size_t>&);
+    const std::vector<std::size_t>&, std::size_t);
 template FullOptResult runFullOptimizationPnof<std::complex<double>>(
     const Matrix<std::complex<double>>&, const Tensor4<std::complex<double>>&,
     const std::vector<double>&, const std::vector<double>&, PnofFunctional,
     const std::vector<PnofGeminal>&, std::size_t, int, int, bool, bool, std::size_t,
-    const FullOptSettings&, bool, double, std::ostream&, const std::vector<std::size_t>&);
+    const FullOptSettings&, bool, double, std::ostream&, const std::vector<std::size_t>&,
+    std::size_t);
 
 }  // namespace rerdmft

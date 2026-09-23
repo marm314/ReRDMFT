@@ -110,11 +110,12 @@ anywhere on a line) are comments.
 | `PNOF_SUBSPACES` | int (>= 1) | `1` | Only with a PNOF `FUNCTIONAL`. Number of independent coupling subspaces built outward from HOMO (`Occ_opt/Orb_subspaces.h`); throws if it exceeds the occupied pairs available. |
 | `PNOF_COUPLING` | int (>= 2) | `2` | Only with a PNOF `FUNCTIONAL`. Size of each subspace in pairs: 1 occupied + (`PNOF_COUPLING`-1) unoccupied. `2` is plain HOMO-LUMO pairing. |
 | `SQP_PNOF_OCC` | bool | `FALSE` | Only with a PNOF `FUNCTIONAL`. `FALSE`: optimize via `Utils/LBFGS.h` over unconstrained gamma angles (DoNOF's own approach). `TRUE`: optimize via `Utils/SQP.h` over occupations directly, with explicit box+equality constraints. Both agree to full precision when both converge. |
-| `FULL_OPTIMIZATION` | bool | `FALSE` | After occupation optimization (needs `FUNCTIONAL`), macro-iterate to convergence: an orbital-rotation step (`ORBITAL_OPTIMIZER`) at fixed occupations, then occupation re-optimization at the new orbitals, until `|E-E_old| < MACRO_ENERGY_TOLERANCE`. Works for `NON_REL` (real spin-orbitals) and `X2C` (complex, Kramers-restricted rotations); not available for `C4_SPINOR`. Validation checks gate the loop, and a final test verifies the optimized orbitals keep the expected symmetry (Kramers pairing for X2C, spin symmetry for NON_REL, pair-symmetric energy for PNOF). |
+| `FULL_OPTIMIZATION` | bool | `FALSE` | After occupation optimization (needs `FUNCTIONAL`), macro-iterate to convergence: an orbital-rotation step (`ORBITAL_OPTIMIZER`) at fixed occupations, then occupation re-optimization at the new orbitals, until `|E-E_old| < MACRO_ENERGY_TOLERANCE`. Works for `NON_REL` (real spin-orbitals), `X2C` (complex, Kramers-restricted rotations), and `C4_SPINOR` (complex, Kramers-restricted rotations *restricted to the positive-energy spinors only* -- see below). Validation checks gate the loop, and a final test verifies the optimized orbitals keep the expected symmetry (Kramers pairing for X2C/C4_SPINOR, spin symmetry for NON_REL, pair-symmetric energy for PNOF). |
 | `MAX_MACRO_ITERATIONS` | int | `1000` | Maximum number of macro-iterations of `FULL_OPTIMIZATION`. |
 | `MACRO_ENERGY_TOLERANCE` | float | `1e-9` | Energy convergence threshold of the macro-iteration loop. |
 | `ORBITAL_GRADIENT_TOLERANCE` | float | `1e-5` | ADAM's/NEO's orbital-gradient convergence threshold (max gradient entry). |
-| `ORBITAL_OPTIMIZER` | string | `ADAM` | Which method drives `FULL_OPTIMIZATION`'s orbital-rotation step. `ADAM`: DoNOF's own first-order optimizer (`Utils/ADAM.h`). `NEO`: `Utils/NEO.h`'s matrix-free, second-order Newton method targeting the ground state, using a row-based Hessian-vector product (no dense Hessian formed); also works with `CHOLESKY TRUE`. Converges in far fewer macro-iterations than ADAM and usually matches its energy to 1e-6-1e-9. On some PNOF/GNOF NON_REL systems NEO can land on a different stationary point; a post-loop Hessian check detects this and automatically escapes a detected saddle (perturb along the negative-curvature eigenvector, retry up to 3 times), but a residual gap to a genuine alternate minimum is reported rather than silently fixed -- compare against `ADAM` as a routine cross-check. Templates: `examples/*_neo_full_optimization.inp`. |
+| `ORBITAL_OPTIMIZER` | string | `ADAM` | Which method drives `FULL_OPTIMIZATION`'s orbital-rotation step. `ADAM`: DoNOF's own first-order optimizer (`Utils/ADAM.h`). `NEO`: `Utils/NEO.h`'s matrix-free, second-order Newton method targeting the ground state, using a row-based Hessian-vector product (no dense Hessian formed); also works with `CHOLESKY TRUE` and `C4_SPINOR`. Converges in far fewer macro-iterations than ADAM and usually matches its energy to 1e-6-1e-9. On some PNOF/GNOF NON_REL systems NEO can land on a different stationary point; a post-loop Hessian check detects this and automatically escapes a detected saddle (perturb along the negative-curvature eigenvector, retry up to 3 times), but a residual gap to a genuine alternate minimum is reported rather than silently fixed -- compare against `ADAM` as a routine cross-check. Templates: `examples/*_neo_full_optimization.inp`. |
+| `FULL_OPTIMIZATION_4C_NEG` | bool | `FALSE` | Only meaningful for `C4_SPINOR` + `FULL_OPTIMIZATION`. Requests orbital rotations that also mix occupied positive-energy spinors into the negative-energy branch (the genuine min-max saddle relativistic SCF is characterized by, as opposed to the positive-energy-only restriction always used today -- see below). **Not yet implemented**: setting it `TRUE` does not change what runs; it only prints a warning after the (still positive-energy-only) optimization completes, saying so. |
 | `X2C` | bool | `FALSE` | Print the one-electron X2C decoupling report and run the approximate X2C-HF SCF (see below), between the `NON_RELATIVISTIC` and `C4_SPINOR` reports. Independent of `C4_SPINOR` (the RKB Hamiltonian it needs is always built). With `DEBUG`, adds extra cross-checks. |
 
 ## X2C decoupling and X2C-HF
@@ -315,6 +316,46 @@ worked `C4_SPINOR`/`NON_RELATIVISTIC` examples, or
 `examples/water_X2C_gnof.inp` for the `X2C` case (`FUNCTIONAL GNOF`,
 `PNOF_COUPLING 2` throughout) -- direct PNOF counterparts of the MULLER
 examples above.
+
+## FULL_OPTIMIZATION for C4_SPINOR: positive-energy-only orbital rotations
+
+Relativistic SCF is not a plain minimization over the full 4-component spinor space: it is a
+min-max problem (Talman, *Phys. Rev. Lett.* 57, 1091 (1986); Saue, *"Relativistic Hamiltonians
+for chemistry: A primer,"* ChemPhysChem 12, 3077 (2011)) -- a minimum over rotations *among*
+positive-energy spinors, but a maximum over rotations that mix an occupied positive-energy
+spinor into the negative-energy (Dirac sea) branch, since admitting that character would let the
+energy decrease without bound (variational collapse). `FULL_OPTIMIZATION`'s orbital-rotation step
+therefore never explores that direction for `C4_SPINOR`: every pair touching a negative-energy
+index is dropped from the parameter space entirely (not merely left at zero gradient), for both
+`ORBITAL_OPTIMIZER ADAM` and `NEO`. Since `κ` (the rotation generator) then has an exact
+block-diagonal structure (zero coupling to the negative branch), `exp(κ)` is exactly block-diagonal
+too: the negative-energy spinors stay bit-for-bit unchanged throughout the whole macro loop, and
+orthonormality with the (untouched) negative branch is preserved exactly. This turns C4_SPINOR's
+own orbital optimization into an ordinary minimization, same as `NON_REL`/`X2C` -- `NEO`'s default
+`target_order = 0` is then the physically correct target, confirmed by its own post-loop Hessian
+check (`[PASS] the point is a genuine minimum`). The positive-energy branch is itself
+Kramers-paired the same way X2C's spinors are, so it is Kramers-restricted here too.
+
+`CHOLESKY TRUE` needs one more step: C4_SPINOR's MO integrals span an enormous dynamic range (the
+negative branch's diagonal is order -2mc^2, ~1e4 Hartree, next to chemically-scaled positive-energy
+integrals), and decomposing both together lets the negative branch's sheer magnitude dominate the
+pivoted decomposition's pivot selection, degrading the reconstruction accuracy of the (chemically
+relevant) positive-energy block itself (confirmed directly: ~3.5e-05 instead of the ~1e-15 CHOLESKY
+already achieves for NON_REL/X2C). Since no energy/gradient/Hessian sum ever needs the TRUE value
+of a negative-branch integral (its occupation is always exactly 0), that block is zeroed out
+before decomposition instead, eliminating the mixed-scale competition entirely and recovering the
+same ~1e-12-1e-15 accuracy as the other two paths, at roughly half as many Cholesky vectors as
+decomposing the untouched tensor needs.
+
+See `examples/lih_gnof_c4_full_optimization.inp` (`ADAM`, dense integrals, all three SCF paths in
+one run), `examples/lih_gnof_c4_neo_full_optimization.inp` (`NEO`), and
+`examples/lih_gnof_c4_full_optimization_cholesky.inp` (`CHOLESKY TRUE`) -- all three converge to
+the same C4_DHF energy to ~1e-9 Hartree.
+
+The genuine min-max version -- letting rotations explore the negative-energy branch too, rather
+than excluding it from the search entirely -- is not implemented yet; setting
+`FULL_OPTIMIZATION_4C_NEG TRUE` prints a warning saying so rather than silently running the
+positive-energy-only version with no comment.
 
 ## Two-electron integral disk cache
 

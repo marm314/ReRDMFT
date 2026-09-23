@@ -352,10 +352,11 @@ class Input {
   bool sqp_pnof_occ() const { return sqp_pnof_occ_; }
 
   // FULL_OPTIMIZATION: after the occupation-number optimization at the
-  // HF/X2C orbitals, validate the ADAM/Kramers-restriction machinery and
-  // then macro-iterate ADAM orbital rotations and occupation re-
-  // optimization to convergence (Full_opt/FullOptimization.h). NON_REL and
-  // X2C only (not the 4-component path). MAX_MACRO_ITERATIONS,
+  // HF/X2C/C4_DHF orbitals, validate the ADAM/Kramers-restriction machinery
+  // and then macro-iterate ADAM orbital rotations and occupation re-
+  // optimization to convergence (Full_opt/FullOptimization.h). NON_REL, X2C,
+  // and C4_SPINOR (rotations restricted to the positive-energy spinors only
+  // -- see full_optimization_4c_neg() below). MAX_MACRO_ITERATIONS,
   // MACRO_ENERGY_TOLERANCE (the Fortran's tolE) and
   // ORBITAL_GRADIENT_TOLERANCE (ADAM's 10**-itolLambda) control it.
   bool full_optimization() const { return full_optimization_; }
@@ -369,6 +370,17 @@ class Input {
   // two-electron integrals and falls back to ADAM (with a printed note) when CHOLESKY TRUE has
   // decomposed them into vectors instead.
   const std::string& orbital_optimizer() const { return orbital_optimizer_; }
+  // Optional; defaults to FALSE. Only meaningful for C4_SPINOR + FULL_OPTIMIZATION: requests
+  // orbital rotations that also mix occupied positive-energy spinors into the negative-energy
+  // (Dirac sea) branch -- the genuine min-max saddle-point problem relativistic SCF is
+  // characterized by (Talman 1986; Saue, ChemPhysChem 12, 3077 (2011)), as opposed to the
+  // positive-energy-only restriction FULL_OPTIMIZATION always uses today (see README.md's own
+  // "FULL_OPTIMIZATION for C4_SPINOR" section). NOT YET IMPLEMENTED: setting this TRUE does not
+  // change what actually runs (still the positive-energy-only restriction) -- it only makes
+  // main.cpp print a warning after that restricted optimization completes, so a user who
+  // explicitly asked for the full negative-energy-inclusive treatment is told it isn't
+  // available yet rather than silently getting the restricted one with no comment at all.
+  bool full_optimization_4c_neg() const { return full_optimization_4c_neg_; }
 
   // Prints the current value of EVERY input variable (one per line, after
   // the geometry), so a run's output records exactly what was in effect.
@@ -415,6 +427,7 @@ class Input {
   double macro_energy_tolerance_ = 1e-9;
   double orbital_gradient_tolerance_ = 1e-5;
   std::string orbital_optimizer_ = "ADAM";
+  bool full_optimization_4c_neg_ = false;
 };
 
 }  // namespace rerdmft

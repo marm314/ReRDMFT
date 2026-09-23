@@ -2122,6 +2122,7 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
                                    const std::string& occupation_init_name,
                                    double nuclear_repulsion_energy, bool debug, int verbose,
                                    bool full_hessian, const rerdmft::FullOptSettings& full_opt,
+                                   bool full_optimization_4c_neg,
                                    std::chrono::steady_clock::time_point t_start,
                                    std::chrono::steady_clock::time_point& t_checkpoint,
                                    std::vector<TimingRecord>& timing_records,
@@ -3063,24 +3064,36 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
       }
     }
 
-    // FULL_OPTIMIZATION: validate ADAM/Kramers restriction, then macro-iterate
-    // ADAM orbital rotations + occupation re-optimization (NON_REL, X2C).
+    // FULL_OPTIMIZATION: validate ADAM/Kramers restriction, then macro-iterate ADAM/NEO orbital
+    // rotations + occupation re-optimization. For C4_DHF, `frozen_base` (the ORIGINAL, unshifted
+    // n_inactive_below -- the negative-energy branch's own size, 0 for NON_REL/X2C) is passed as
+    // n_negative: every orbital-rotation pair touching that branch is excluded from the
+    // parameter space entirely (never explored, not merely left at zero gradient), keeping the
+    // no-pair approximation exact and turning the min-max saddle relativistic SCF is
+    // characterized by (Talman 1986; Saue, ChemPhysChem 12, 3077 (2011)) into an ordinary
+    // minimization over the positive-energy spinors alone -- see runFullOptimization's own
+    // comment. Kramers-restricted like X2C, since the positive-energy branch is itself
+    // Kramers-paired the same way.
     rerdmft::FullOptResult full_result;
     if (full_opt.enabled) {
-      if (label == "C4_DHF") {
-        out << "\n  FULL_OPTIMIZATION is not available for the 4-component (C4_DHF) path.\n";
-      } else {
-        try {
-          full_result = rerdmft::runFullOptimizationJk<T>(h, eri, embed(sqp_result.x), sqp_result.x, functional, f_l,
-                                            n_electrons_active, n_total, n_frozen, n_inactive_below, n_active,
-                                            /*two_columns=*/label == "X2C_HF", full_opt,
-                                            /*kramers_restricted=*/label == "X2C_HF",
-                                            nuclear_repulsion_energy, out,
-                                            label == "NON_REL" ? blockSpinPartner(n_total)
-                                                               : std::vector<std::size_t>{});
-        } catch (const std::exception& e) {
-          out << "\n  FULL_OPTIMIZATION FAILED: " << e.what() << "\n";
-        }
+      try {
+        full_result = rerdmft::runFullOptimizationJk<T>(h, eri, embed(sqp_result.x), sqp_result.x, functional, f_l,
+                                          n_electrons_active, n_total, n_frozen, n_inactive_below, n_active,
+                                          /*two_columns=*/label == "X2C_HF" || label == "C4_DHF", full_opt,
+                                          /*kramers_restricted=*/label == "X2C_HF" || label == "C4_DHF",
+                                          nuclear_repulsion_energy, out,
+                                          label == "NON_REL" ? blockSpinPartner(n_total)
+                                                             : std::vector<std::size_t>{},
+                                          /*n_negative=*/frozen_base);
+      } catch (const std::exception& e) {
+        out << "\n  FULL_OPTIMIZATION FAILED: " << e.what() << "\n";
+      }
+      if (label == "C4_DHF" && full_optimization_4c_neg) {
+        out << "\n  Warning: FULL_OPTIMIZATION_4C_NEG TRUE requested orbital rotations involving\n"
+               "  the negative-energy states, but 4-component full optimization involving\n"
+               "  negative energy states is not available -- the run above used the\n"
+               "  positive-energy-only restriction instead (see README.md's own"
+               " \"FULL_OPTIMIZATION\n  for C4_SPINOR\" section).\n";
       }
     }
 
@@ -3230,6 +3243,7 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
                                        int pnof_coupling, bool relativistic, bool sqp_pnof_occ,
                                        bool debug, int verbose, bool full_hessian,
                                        const rerdmft::FullOptSettings& full_opt,
+                                       bool full_optimization_4c_neg,
                                        std::chrono::steady_clock::time_point t_start,
                                        std::chrono::steady_clock::time_point& t_checkpoint,
                                        std::vector<TimingRecord>& timing_records,
@@ -3750,25 +3764,34 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
     }
   }
 
-  // FULL_OPTIMIZATION: validate ADAM/Kramers restriction, then macro-iterate
-  // ADAM orbital rotations + occupation re-optimization (NON_REL, X2C).
+  // FULL_OPTIMIZATION: validate ADAM/Kramers restriction, then macro-iterate ADAM/NEO orbital
+  // rotations + occupation re-optimization. For C4_DHF, n_inactive_below (the negative-energy
+  // branch's own size, 0 for NON_REL/X2C) is passed as n_negative: every orbital-rotation pair
+  // touching that branch is excluded from the parameter space entirely, keeping the no-pair
+  // approximation exact -- see runFullOptimization's/main.cpp's JK_only call site's own comment.
   rerdmft::FullOptResult full_result;
   if (full_opt.enabled) {
-    if (label == "C4_DHF") {
-      out << "\n  FULL_OPTIMIZATION is not available for the 4-component (C4_DHF) path.\n";
-    } else if (!occupations_optimized) {
+    if (!occupations_optimized) {
       out << "\n  FULL_OPTIMIZATION skipped: the occupation optimization did not succeed.\n";
     } else {
       try {
         full_result = rerdmft::runFullOptimizationPnof<T>(h, eri, optimized_occ, optimized_state, functional,
                                             geminals, n_core, pnof_subspaces, pnof_coupling,
                                             relativistic, sqp_pnof_occ, n_total, full_opt,
-                                            /*kramers_restricted=*/label == "X2C_HF",
+                                            /*kramers_restricted=*/label == "X2C_HF" || label == "C4_DHF",
                                             nuclear_repulsion_energy, out,
                                             label == "NON_REL" ? blockSpinPartner(n_total)
-                                                               : std::vector<std::size_t>{});
+                                                               : std::vector<std::size_t>{},
+                                            /*n_negative=*/n_inactive_below);
       } catch (const std::exception& e) {
         out << "\n  FULL_OPTIMIZATION FAILED: " << e.what() << "\n";
+      }
+      if (label == "C4_DHF" && full_optimization_4c_neg) {
+        out << "\n  Warning: FULL_OPTIMIZATION_4C_NEG TRUE requested orbital rotations involving\n"
+               "  the negative-energy states, but 4-component full optimization involving\n"
+               "  negative energy states is not available -- the run above used the\n"
+               "  positive-energy-only restriction instead (see README.md's own"
+               " \"FULL_OPTIMIZATION\n  for C4_SPINOR\" section).\n";
       }
     }
   }
@@ -4495,7 +4518,8 @@ int main(int argc, char** argv) {
               "NON_REL", h_spin, eri_spin, 2 * n_spatial, 0, input.n_electrons(),
               input.functional(), nonrel_hf_result.nuclear_repulsion_energy,
               input.pnof_subspaces(), input.pnof_coupling(), /*relativistic=*/false,
-              input.sqp_pnof_occ(), input.debug(), input.verbose(), input.hessian_functional(), fullOptSettings(input), t_start, t_checkpoint, timing_records,
+              input.sqp_pnof_occ(), input.debug(), input.verbose(), input.hessian_functional(), fullOptSettings(input),
+              input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records,
               &nonrel_restart);
         } else {
           nonrel_functional_report = buildFunctionalReport(
@@ -4503,7 +4527,8 @@ int main(int argc, char** argv) {
               input.jk_frozen_pairs(), input.jk_active_pairs(),
               input.temperature(), input.functional(), input.occupation_init(),
               nonrel_hf_result.nuclear_repulsion_energy, input.debug(), input.verbose(),
-              input.hessian_functional(), fullOptSettings(input), t_start, t_checkpoint, timing_records,
+              input.hessian_functional(), fullOptSettings(input), input.full_optimization_4c_neg(),
+              t_start, t_checkpoint, timing_records,
               &nonrel_restart);
         }
         // RESTART file: spin-orbital coefficients [alpha; beta] x [alpha MOs, beta MOs] in the
@@ -4787,7 +4812,8 @@ int main(int argc, char** argv) {
               "X2C_HF", h_x2c_mo, eri_x2c_mo, h_x2c_mo.rows(), 0, input.n_electrons(),
               input.functional(), x2c_hf_result.nuclear_repulsion_energy, input.pnof_subspaces(),
               input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
-              input.verbose(), input.hessian_functional(), fullOptSettings(input), t_start, t_checkpoint, timing_records,
+              input.verbose(), input.hessian_functional(), fullOptSettings(input),
+              input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records,
               &x2c_restart);
         } else {
           x2c_functional_report = buildFunctionalReport(
@@ -4795,7 +4821,8 @@ int main(int argc, char** argv) {
               input.n_electrons(), input.jk_frozen_pairs(), input.jk_active_pairs(),
               input.temperature(), input.functional(),
               input.occupation_init(), x2c_hf_result.nuclear_repulsion_energy, input.debug(),
-              input.verbose(), input.hessian_functional(), fullOptSettings(input), t_start, t_checkpoint,
+              input.verbose(), input.hessian_functional(), fullOptSettings(input),
+              input.full_optimization_4c_neg(), t_start, t_checkpoint,
               timing_records, &x2c_restart);
         }
         // RESTART file: the (Kramers-fixed) X2C-HF spinor coefficients times the FULL_OPTIMIZATION
@@ -5068,14 +5095,16 @@ int main(int argc, char** argv) {
               "C4_DHF", h_mo, eri_mo, h_mo.rows() - n_negative, n_negative, input.n_electrons(),
               input.functional(), dhf_result.nuclear_repulsion_energy, input.pnof_subspaces(),
               input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
-              input.verbose(), input.hessian_functional(), fullOptSettings(input), t_start, t_checkpoint, timing_records);
+              input.verbose(), input.hessian_functional(), fullOptSettings(input),
+              input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records);
         } else {
           dhf_functional_report = buildFunctionalReport(
               "C4_DHF", h_mo, eri_mo, dhf_orbital_energies_positive, n_negative,
               input.n_electrons(), input.jk_frozen_pairs(), input.jk_active_pairs(),
               input.temperature(), input.functional(),
               input.occupation_init(), dhf_result.nuclear_repulsion_energy, input.debug(),
-              input.verbose(), input.hessian_functional(), fullOptSettings(input), t_start, t_checkpoint,
+              input.verbose(), input.hessian_functional(), fullOptSettings(input),
+              input.full_optimization_4c_neg(), t_start, t_checkpoint,
               timing_records);
         }
       }

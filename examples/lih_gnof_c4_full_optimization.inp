@@ -1,0 +1,28 @@
+# Example ReRDMFT input file: LiH, 6-31G, GNOF (two coupling subspaces), FULL_OPTIMIZATION TRUE,
+# now including C4_SPINOR (4-component DHF) alongside NON_REL and X2C in one run.
+#
+# For C4_DHF, orbital rotations are restricted to the positive-energy spinors only: rotating an
+# occupied positive-energy orbital into the negative-energy (Dirac sea) branch is exactly the
+# min-max saddle-point direction relativistic SCF is characterized by (Talman, Phys. Rev. Lett.
+# 57, 1091 (1986); Saue, ChemPhysChem 12, 3077 (2011)) -- allowing it would let the energy
+# decrease without bound (variational collapse). Excluding those pairs from the parameter space
+# entirely (not merely leaving them at zero gradient) keeps the no-pair approximation exact and
+# turns C4_DHF's own orbital optimization into an ordinary MINIMIZATION, same as NON_REL/X2C
+# (watch for "rotations excluded from the N negative-energy (Dirac sea) spinors" in the log, and
+# the final "[PASS] the point is a genuine minimum" from NEO's own post-loop Hessian check on
+# lih_gnof_c4_neo_full_optimization.inp). C4_DHF's positive-energy branch is itself Kramers-paired
+# the same way X2C's spinors are, so it is Kramers-restricted here too.
+NELEC 4
+BASIS lih-6-31g.gbs
+NON_RELATIVISTIC TRUE
+X2C TRUE
+C4_SPINOR TRUE
+FUNCTIONAL GNOF
+PNOF_SUBSPACES 2
+PNOF_COUPLING 2
+FULL_OPTIMIZATION TRUE
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.594900
+END

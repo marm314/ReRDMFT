@@ -1,0 +1,30 @@
+# Example ReRDMFT input file: LiH, 6-31G, GNOF, FULL_OPTIMIZATION TRUE with CHOLESKY TRUE,
+# including C4_SPINOR -- the Cholesky-vector counterpart of lih_gnof_c4_full_optimization.inp.
+#
+# C4_DHF's MO integrals span an enormous dynamic range (the negative-energy branch's diagonal is
+# order -2mc^2, ~1e4 Hartree, next to the chemically-scaled positive-energy block): decomposing
+# the two blocks together directly would let the negative branch's sheer magnitude dominate the
+# pivoted decomposition's pivot selection and starve the (chemically relevant) positive-energy
+# block's own reconstruction accuracy (confirmed directly: ~3.5e-05 instead of the ~1e-15 CHOLESKY
+# already achieves for NON_REL/X2C). Since occupations are EXACTLY 0 on the negative branch, no
+# energy/gradient/Hessian sum ever needs its TRUE integral values anyway -- runFullOptimizationJk/
+# Pnof therefore zero that block out before decomposition (not merely excluding it from the
+# accuracy check), eliminating the mixed-scale competition entirely and recovering the same
+# ~1e-12-1e-15 reconstruction accuracy as the other two paths, at roughly half as many vectors as
+# decomposing the untouched full tensor would need. Compare the converged energy against
+# lih_gnof_c4_full_optimization.inp's own dense-integral result (they agree to ~1e-9 Hartree).
+NELEC 4
+BASIS lih-6-31g.gbs
+NON_RELATIVISTIC TRUE
+X2C TRUE
+C4_SPINOR TRUE
+FUNCTIONAL GNOF
+PNOF_SUBSPACES 2
+PNOF_COUPLING 2
+FULL_OPTIMIZATION TRUE
+CHOLESKY TRUE
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.594900
+END

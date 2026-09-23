@@ -1,0 +1,25 @@
+# Example ReRDMFT input file: LiH, 6-31G, GNOF, FULL_OPTIMIZATION TRUE with ORBITAL_OPTIMIZER
+# NEO -- the NEO counterpart of lih_gnof_c4_full_optimization.inp, same system, same functional,
+# including C4_SPINOR. See that file's own header comment for why C4_DHF's orbital rotations are
+# restricted to the positive-energy spinors only (turning what would otherwise be a min-max
+# saddle-point search into an ordinary minimization). Because of that restriction, NEO's default
+# target_order = 0 is the physically correct target here too: watch for the post-loop
+# "[PASS] the point is a genuine minimum (0 negative eigenvalues)" on the C4_DHF section, exactly
+# like the X2C section right above it. Compare its converged energy against
+# lih_gnof_c4_full_optimization.inp's own ADAM result as a routine cross-check (they agree to
+# ~1e-9 Hartree here).
+NELEC 4
+BASIS lih-6-31g.gbs
+NON_RELATIVISTIC TRUE
+X2C TRUE
+C4_SPINOR TRUE
+FUNCTIONAL GNOF
+PNOF_SUBSPACES 2
+PNOF_COUPLING 2
+FULL_OPTIMIZATION TRUE
+ORBITAL_OPTIMIZER NEO
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.594900
+END
