@@ -4,6 +4,7 @@
 #include <cmath>
 #include <functional>
 #include <stdexcept>
+#include <string>
 
 #include "LinearAlgebra.h"
 
@@ -298,6 +299,67 @@ double kramersAoOneBodyDeviation(const Matrix<C>& h, double* scale) {
     for (std::size_t j = 0; j < h.cols(); ++j) sc = std::max(sc, std::abs(h(i, j)));
   if (scale) *scale = sc;
   return dev;
+}
+
+namespace {
+
+// RKB AO layout [La; Lb; Sa; Sb], each block nl long: partner = alpha<->beta within the pair of
+// blocks (block index xor 1), sign +1 for an alpha block, -1 for a beta block.
+inline std::size_t rkbPartner(std::size_t a, std::size_t nl) { return ((a / nl) ^ 1) * nl + a % nl; }
+inline double rkbSign(std::size_t a, std::size_t nl) { return ((a / nl) % 2 == 0) ? 1.0 : -1.0; }
+
+std::size_t rkbBlockLength(const Matrix<C>& m, const char* who) {
+  if (m.rows() != m.cols() || m.rows() == 0 || m.rows() % 4 != 0) {
+    throw std::runtime_error(std::string(who) + ": expected a square matrix whose dimension is a multiple of 4");
+  }
+  return m.rows() / 4;
+}
+
+}  // namespace
+
+Matrix<C> kramersSymmetrizeAo(const Matrix<C>& m, double* removed) {
+  if (m.rows() != m.cols() || m.rows() == 0 || m.rows() % 2 != 0) {
+    throw std::runtime_error("kramersSymmetrizeAo: expected a square matrix of even dimension");
+  }
+  const std::size_t nl = m.rows() / 2;
+  Matrix<C> out(m.rows(), m.cols(), C{});
+  double max_removed = 0.0;
+  for (std::size_t a = 0; a < m.rows(); ++a)
+    for (std::size_t b = 0; b < m.cols(); ++b) {
+      const std::size_t pa = a < nl ? a + nl : a - nl, pb = b < nl ? b + nl : b - nl;
+      const double s = ((a < nl) ? 1.0 : -1.0) * ((b < nl) ? 1.0 : -1.0);
+      out(a, b) = 0.5 * (m(a, b) + s * std::conj(m(pa, pb)));
+      max_removed = std::max(max_removed, std::abs(m(a, b) - out(a, b)));
+    }
+  if (removed) *removed = max_removed;
+  return out;
+}
+
+double kramersRkbAoDeviation(const Matrix<C>& m, double* scale) {
+  const std::size_t nl = rkbBlockLength(m, "kramersRkbAoDeviation");
+  double dev = 0.0, sc = 0.0;
+  for (std::size_t a = 0; a < m.rows(); ++a)
+    for (std::size_t b = 0; b < m.cols(); ++b) {
+      sc = std::max(sc, std::abs(m(a, b)));
+      const double s = rkbSign(a, nl) * rkbSign(b, nl);
+      dev = std::max(dev, std::abs(m(rkbPartner(a, nl), rkbPartner(b, nl)) - s * std::conj(m(a, b))));
+    }
+  if (scale) *scale = sc;
+  return dev;
+}
+
+Matrix<C> kramersSymmetrizeRkbAo(const Matrix<C>& m, double* removed) {
+  const std::size_t nl = rkbBlockLength(m, "kramersSymmetrizeRkbAo");
+  Matrix<C> out(m.rows(), m.cols(), C{});
+  double max_removed = 0.0;
+  for (std::size_t a = 0; a < m.rows(); ++a)
+    for (std::size_t b = 0; b < m.cols(); ++b) {
+      const double s = rkbSign(a, nl) * rkbSign(b, nl);
+      out(a, b) = 0.5 * (m(a, b) + s * std::conj(m(rkbPartner(a, nl), rkbPartner(b, nl))));
+      max_removed = std::max(max_removed, std::abs(m(a, b) - out(a, b)));
+    }
+  if (removed) *removed = max_removed;
+  return out;
 }
 
 double kramersTwoBodyDeviation(const Tensor4<C>& eri, double* scale) {

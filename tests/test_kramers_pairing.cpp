@@ -228,6 +228,81 @@ int main() {
     check(kramersAoOneBodyDeviation(m, &sc2) < 1e-15 && sc2 > 0, "kramersAoOneBodyDeviation: TR-even AO matrix passes");
     m(nla, nla) += C(0.01, 0.0);
     check(kramersAoOneBodyDeviation(m) > 5e-3, "kramersAoOneBodyDeviation: a violation is detected");
+    // Two-block symmetrizer (X2C SCF): no-op on an even matrix; on a general Hermitian matrix the result
+    // is even, Hermitian and idempotent, and removes something.
+    Matrix<C> ev(2 * nla, 2 * nla, C{});
+    for (std::size_t i = 0; i < nla; ++i) for (std::size_t j = 0; j < nla; ++j) {
+      const C aa(rng.next(), rng.next()), ab(rng.next(), rng.next());
+      ev(i, j) = aa; ev(nla + i, nla + j) = std::conj(aa);
+      ev(i, nla + j) = ab; ev(nla + i, j) = -std::conj(ab);
+    }
+    double rm_even = -1;
+    const Matrix<C> ev2 = kramersSymmetrizeAo(ev, &rm_even);
+    double chg = 0;
+    for (std::size_t a = 0; a < 2 * nla; ++a) for (std::size_t b = 0; b < 2 * nla; ++b) chg = std::max(chg, std::abs(ev2(a, b) - ev(a, b)));
+    check(rm_even < 1e-15 && chg < 1e-15, "kramersSymmetrizeAo: exact no-op on a TR-even matrix");
+    Matrix<C> gen(2 * nla, 2 * nla, C{});
+    for (std::size_t a = 0; a < 2 * nla; ++a) for (std::size_t b = 0; b <= a; ++b) {
+      const C v(rng.next(), a == b ? 0.0 : rng.next());
+      gen(a, b) = v; gen(b, a) = std::conj(v);
+    }
+    double rm_gen = 0;
+    const Matrix<C> pj = kramersSymmetrizeAo(gen, &rm_gen);
+    const Matrix<C> pj2 = kramersSymmetrizeAo(pj);
+    double herm2 = 0, idem2 = 0;
+    for (std::size_t a = 0; a < 2 * nla; ++a) for (std::size_t b = 0; b < 2 * nla; ++b) {
+      herm2 = std::max(herm2, std::abs(pj(a, b) - std::conj(pj(b, a))));
+      idem2 = std::max(idem2, std::abs(pj2(a, b) - pj(a, b)));
+    }
+    check(kramersAoOneBodyDeviation(pj) < 1e-15 && herm2 < 1e-15 && idem2 < 1e-15,
+          "kramersSymmetrizeAo: result is TR-even, Hermitian and idempotent");
+    check(kramersAoOneBodyDeviation(gen) > 1e-2 && rm_gen > 1e-2, "kramersSymmetrizeAo: a general matrix violates TR and the projection removes it");
+    bool threw2 = false;
+    try { kramersSymmetrizeAo(Matrix<C>(3, 3, C{})); } catch (const std::runtime_error&) { threw2 = true; }
+    check(threw2, "kramersSymmetrizeAo: odd dimension throws");
+  }
+  // RKB AO helpers: [La; Lb; Sa; Sb] layout (4 nl), Theta|k alpha> = |k beta>, Theta|k beta> = -|k alpha> in both blocks.
+  {
+    const std::size_t nl = 3, n = 4 * nl;
+    // Time-reversal-EVEN matrix: for every pair of blocks (X, Y in {L, S}) M(Xa,Ya) = aa, M(Xb,Yb) = conj aa,
+    // M(Xa,Yb) = ab, M(Xb,Ya) = -conj ab -- Large-Large, Small-Small and Large-Small sectors alike.
+    Matrix<C> even(n, n, C{});
+    for (std::size_t x = 0; x < 2; ++x) for (std::size_t y = 0; y < 2; ++y)
+      for (std::size_t i = 0; i < nl; ++i) for (std::size_t j = 0; j < nl; ++j) {
+        const C aa(rng.next(), rng.next()), ab(rng.next(), rng.next());
+        even((2 * x) * nl + i, (2 * y) * nl + j) = aa;
+        even((2 * x + 1) * nl + i, (2 * y + 1) * nl + j) = std::conj(aa);
+        even((2 * x) * nl + i, (2 * y + 1) * nl + j) = ab;
+        even((2 * x + 1) * nl + i, (2 * y) * nl + j) = -std::conj(ab);
+      }
+    double sc3 = 0, removed_even = -1;
+    check(kramersRkbAoDeviation(even, &sc3) < 1e-15 && sc3 > 0, "kramersRkbAoDeviation: TR-even RKB AO matrix passes");
+    const Matrix<C> same = kramersSymmetrizeRkbAo(even, &removed_even);
+    double max_change = 0;
+    for (std::size_t a = 0; a < n; ++a) for (std::size_t b = 0; b < n; ++b) max_change = std::max(max_change, std::abs(same(a, b) - even(a, b)));
+    check(removed_even < 1e-15 && max_change < 1e-15, "kramersSymmetrizeRkbAo: exact no-op on a TR-even matrix");
+    // A general Hermitian matrix: the projection is TR-even, Hermitian, idempotent, and removes something.
+    Matrix<C> gen(n, n, C{});
+    for (std::size_t a = 0; a < n; ++a) for (std::size_t b = 0; b <= a; ++b) {
+      const C v(rng.next(), a == b ? 0.0 : rng.next());
+      gen(a, b) = v; gen(b, a) = std::conj(v);
+    }
+    double removed_gen = 0;
+    const Matrix<C> proj = kramersSymmetrizeRkbAo(gen, &removed_gen);
+    double herm = 0, idem = 0;
+    const Matrix<C> proj2 = kramersSymmetrizeRkbAo(proj);
+    for (std::size_t a = 0; a < n; ++a) for (std::size_t b = 0; b < n; ++b) {
+      herm = std::max(herm, std::abs(proj(a, b) - std::conj(proj(b, a))));
+      idem = std::max(idem, std::abs(proj2(a, b) - proj(a, b)));
+    }
+    check(kramersRkbAoDeviation(proj) < 1e-15, "kramersSymmetrizeRkbAo: result is time-reversal even");
+    check(herm < 1e-15 && idem < 1e-15, "kramersSymmetrizeRkbAo: keeps Hermiticity and is idempotent");
+    check(kramersRkbAoDeviation(gen) > 1e-2 && removed_gen > 1e-2, "kramersSymmetrizeRkbAo: a general matrix violates TR and the projection removes it");
+    even(nl, nl) += C(0.01, 0.0);
+    check(kramersRkbAoDeviation(even) > 5e-3, "kramersRkbAoDeviation: a violation is detected");
+    bool threw = false;
+    try { kramersRkbAoDeviation(Matrix<C>(6, 6, C{})); } catch (const std::runtime_error&) { threw = true; }
+    check(threw, "kramersRkbAoDeviation: dimension not a multiple of 4 throws");
   }
   std::cout << "\n" << g_checks - g_failures << " / " << g_checks << " checks passed\n";
   return g_failures == 0 ? 0 : 1;

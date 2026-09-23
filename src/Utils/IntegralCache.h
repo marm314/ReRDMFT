@@ -29,8 +29,8 @@ constexpr std::uint32_t kIntegralCacheFormatVersion = 1;
 // Notably, this (and hence every cache key below) does NOT depend on
 // the speed of light: rkbCoefficients, and therefore every two-electron
 // integral built from it, is purely a function of the Large/Small AO
-// bases (RkbTransformation.h) -- so, e.g., water-c1000.inp,
-// water-c100000.inp, and water-c10000000.inp (same geometry and basis,
+// bases (RkbTransformation.h) -- so, e.g., water-c1000.inp
+// and water-c100000.inp (same geometry and basis,
 // different SPEED_OF_LIGHT) share one cache entry.
 std::uint64_t basisFingerprint(const std::vector<BasisFunction>& basis);
 

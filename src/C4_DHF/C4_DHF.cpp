@@ -3,6 +3,7 @@
 #include <cstddef>
 
 #include "DIIS.h"
+#include "KramersPairing.h"
 #include "LinearAlgebra.h"
 #include "NuclearRepulsion.h"
 #include "RkbDensityMatrix.h"
@@ -41,11 +42,31 @@ DiracHartreeFockResult runDiracHartreeFockScf(
     const Matrix<std::complex<double>>& x_full,
     const Matrix<std::complex<double>>& initial_density, int n_electrons,
     const std::vector<Atom>& geometry, double mixing, const Matrix<std::complex<double>>& overlap,
-    int diis_size, int max_iterations, double energy_tolerance, double density_tolerance) {
+    int diis_size, int max_iterations, double energy_tolerance, double density_tolerance,
+    bool kramers_restricted) {
   DiracHartreeFockResult result;
   result.nuclear_repulsion_energy = nuclearRepulsionEnergy(geometry);
 
-  Matrix<std::complex<double>> p_current = initial_density;
+  // Kramers-restricted SCF: project every density onto its time-reversal-even part
+  // (Utils/KramersPairing.h's kramersSymmetrizeRkbAo). The closed-shell orbital-optimization
+  // machinery downstream assumes Kramers-paired spinors, but nothing in the plain SCF iteration
+  // enforces that: at a geometry where the restricted solution is unstable (stretched LiH) any
+  // tiny time-reversal asymmetry -- e.g. from Cholesky-decomposed integrals -- grows into a
+  // lower-energy Kramers-BROKEN solution whose levels are not doublets (found on LiH at 5
+  // Angstrom with CHOLESKY TRUE: E = -7.930 instead of the restricted -7.823 Ha, partner levels
+  // split by 1.6e-2 Ha). On an already symmetric density this is a no-op.
+  // An odd electron count fills half of a Kramers pair: that density is not time-reversal even by
+  // construction, and projecting it would silently turn the open shell into an averaged ensemble.
+  const bool restrict_active = kramers_restricted && n_electrons % 2 == 0;
+  const auto restrictDensity = [&](const Matrix<std::complex<double>>& p) -> Matrix<std::complex<double>> {
+    if (!restrict_active) return p;
+    double removed = 0.0;
+    Matrix<std::complex<double>> even = kramersSymmetrizeRkbAo(p, &removed);
+    result.max_density_asymmetry = std::max(result.max_density_asymmetry, removed);
+    return even;
+  };
+
+  Matrix<std::complex<double>> p_current = restrictDensity(initial_density);
   double previous_energy = 0.0;
   const bool use_diis = diis_size >= 2;
   Diis<std::complex<double>> diis(static_cast<std::size_t>(use_diis ? diis_size : 0));
@@ -58,7 +79,7 @@ DiracHartreeFockResult runDiracHartreeFockScf(
     const Matrix<std::complex<double>> fock_ortho = dagger(x_full) * (fock_scf * x_full);
     const HermitianEigenResult eig = diagonalizeHermitian(fock_ortho);
     const Matrix<std::complex<double>> c_dhf = x_full * eig.eigenvectors;
-    const Matrix<std::complex<double>> p_new = rkbDensityMatrix(c_dhf, n_electrons);
+    const Matrix<std::complex<double>> p_new = restrictDensity(rkbDensityMatrix(c_dhf, n_electrons));
 
     // Self-consistent-pair energy: evaluated with the SAME density that
     // built this Fock matrix, not the (not yet computed) mixed one.

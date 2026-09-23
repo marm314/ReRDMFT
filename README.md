@@ -83,7 +83,7 @@ anywhere on a line) are comments.
 | `BASIS` | string | *required* | Gaussian basis set file name. |
 | `GEOMETRY` ... `END` | block | *required* | Molecular geometry as `<symbol> <x> <y> <z>` lines, one atom per line, coordinates in Angstrom (converted to Bohr internally). |
 | `NON_RELATIVISTIC` | bool | `FALSE` | Run the standard nonrelativistic Hartree-Fock SCF (`NON_REL`). |
-| `C4_SPINOR` | bool | `FALSE` | Run the 4-component Dirac-Hartree-Fock SCF (`C4_DHF`), building the RKB two-electron Coulomb tensor. Opt-in since both time and memory cost scale steeply with basis size. |
+| `C4_SPINOR` | bool | `FALSE` | Run the 4-component Dirac-Hartree-Fock SCF (`C4_DHF`), building the RKB two-electron Coulomb tensor. Opt-in since both time and memory cost scale steeply with basis size. Both this SCF and the `X2C` one are Kramers-restricted for an even `NELEC`: every iteration's density is projected onto its time-reversal-even part (spin-orbit mixing of the spinors is kept; only the magnetization is removed), so they cannot drift into a lower-energy Kramers-broken solution at unstable geometries (e.g. stretched LiH with `CHOLESKY TRUE`). The output reports the largest element removed (~0 when the iteration stayed symmetric by itself). |
 | `DEBUG` | bool | `FALSE` | Print detailed basis/matrix diagnostics, plus internal cross-checks (efficient-vs-general gradient/Hessian formulas, finite-difference gradient/Hessian tests) for whichever of `NON_RELATIVISTIC`/`C4_SPINOR` is on. |
 | `VERBOSE` | int (>= 0) | `0` | Only with `DEBUG TRUE`. `0` skips the extra dense-2-RDM cross-check; `>0` runs it; `>1` (`C4_SPINOR` only) also checks the mixed real/imaginary Hessian block against a finite difference. |
 | `HESSIAN_NON_REL` | bool | `FALSE` | Build and diagonalize the full orbital-rotation Hessian of the converged `NON_REL` solution, reporting whether it is a genuine minimum. O(n^5)/O(n^6), opt-in. |
@@ -366,7 +366,7 @@ positive-energy-only version with no comment.
 The (expensive, O(N^4)) two-electron integral tensors depend only on the
 molecular geometry and basis set -- NOT on `SPEED_OF_LIGHT` -- so runs
 that share a geometry+basis but scan over the speed of light (e.g. a
-`water-c1000.inp` / `water-c100000.inp` / `water-c10000000.inp` series)
+`water-c1000.inp` / `water-c100000.inp` series)
 would otherwise recompute bit-identical integrals every time. Setting
 
 ```

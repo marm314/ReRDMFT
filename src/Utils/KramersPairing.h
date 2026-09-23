@@ -86,6 +86,31 @@ double kramersOneBodyDeviation(const Matrix<std::complex<double>>& h, double* sc
 //   M(beta_i, beta_j) = conj M(alpha_i, alpha_j),  M(beta_i, alpha_j) = -conj M(alpha_i, beta_j).
 // Returns the max deviation over both relations; *scale = max |element|.
 double kramersAoOneBodyDeviation(const Matrix<std::complex<double>>& h, double* scale = nullptr);
+
+// Time-reversal-even part of a matrix in the two-component AO representation [alpha AO (nL);
+// beta AO (nL)] (the projection matching kramersAoOneBodyDeviation's relations):
+//   even(a,b) = (M(a,b) + s_a s_b conj M(P a, P b)) / 2,  P = alpha <-> beta, s = +1 (alpha) / -1 (beta).
+// An exact no-op on an already even matrix; keeps Hermiticity; *removed = max |M - even|. Throws on
+// an odd dimension. Used to keep the X2C-HF SCF Kramers-restricted.
+Matrix<std::complex<double>> kramersSymmetrizeAo(const Matrix<std::complex<double>>& m,
+                                                  double* removed = nullptr);
+
+// The same test and projection for a matrix in the 4-component RKB spinor AO representation
+// [Large-alpha (nL); Large-beta (nL); Small-alpha (nL); Small-beta (nL)] (dimension 4 nL, one
+// RKB small function sigma.p|Large_p> per large spin-orbital p). sigma.p is time-reversal even,
+// so Theta maps the small block exactly like the large one: Theta|k alpha> = |k beta>,
+// Theta|k beta> = -|k alpha> in BOTH blocks. With partner P(a) (alpha <-> beta of the same AO,
+// same block) and sign s(a) = +1 (alpha) / -1 (beta), a time-reversal-EVEN matrix obeys
+//   M(P a, P b) = s(a) s(b) conj M(a, b)
+// (Large-Large, Small-Small and Large-Small sectors alike). kramersRkbAoDeviation returns
+// max |M(P a, P b) - s(a) s(b) conj M(a, b)| (and max |element| in *scale);
+// kramersSymmetrizeRkbAo returns the time-reversal-even part (M + Theta M Theta^-1)/2 -- an
+// exact no-op on an already even matrix, keeps Hermiticity, and (S being even) the trace with
+// the overlap -- and stores max |M - even part| in *removed. Both throw on a dimension that is
+// not a multiple of 4.
+double kramersRkbAoDeviation(const Matrix<std::complex<double>>& m, double* scale = nullptr);
+Matrix<std::complex<double>> kramersSymmetrizeRkbAo(const Matrix<std::complex<double>>& m,
+                                                     double* removed = nullptr);
 double kramersTwoBodyDeviation(const Tensor4<std::complex<double>>& eri, double* scale = nullptr);
 
 }  // namespace rerdmft

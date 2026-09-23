@@ -4,6 +4,7 @@
 #include <cstddef>
 
 #include "DIIS.h"
+#include "KramersPairing.h"
 #include "LinearAlgebra.h"
 #include "NuclearRepulsion.h"
 #include "X2C_DensityMatrix.h"
@@ -44,11 +45,27 @@ X2CHartreeFockResult runX2CHartreeFockScf(const Matrix<std::complex<double>>& h_
                                            int n_electrons, const std::vector<Atom>& geometry,
                                            double mixing, const Matrix<std::complex<double>>& overlap,
                                            int diis_size, int max_iterations,
-                                           double energy_tolerance, double density_tolerance) {
+                                           double energy_tolerance, double density_tolerance,
+                                           bool kramers_restricted) {
   X2CHartreeFockResult result;
   result.nuclear_repulsion_energy = nuclearRepulsionEnergy(geometry);
 
-  Matrix<std::complex<double>> p_current = initial_density;
+  // Kramers-restricted SCF, exactly as in C4_DHF.cpp's runDiracHartreeFockScf: project every
+  // density onto its time-reversal-even part ([alpha; beta] layout, kramersSymmetrizeAo) so the
+  // iteration cannot drift into a Kramers-broken solution at a geometry where the restricted one
+  // is unstable (seen for the 4-component SCF on stretched LiH). A no-op on an already even density.
+  // An odd electron count fills half of a Kramers pair: that density is not time-reversal even by
+  // construction, and projecting it would silently turn the open shell into an averaged ensemble.
+  const bool restrict_active = kramers_restricted && n_electrons % 2 == 0;
+  const auto restrictDensity = [&](const Matrix<std::complex<double>>& p) -> Matrix<std::complex<double>> {
+    if (!restrict_active) return p;
+    double removed = 0.0;
+    Matrix<std::complex<double>> even = kramersSymmetrizeAo(p, &removed);
+    result.max_density_asymmetry = std::max(result.max_density_asymmetry, removed);
+    return even;
+  };
+
+  Matrix<std::complex<double>> p_current = restrictDensity(initial_density);
   double previous_energy = 0.0;
   const bool use_diis = diis_size >= 2;
   Diis<std::complex<double>> diis(static_cast<std::size_t>(use_diis ? diis_size : 0));
@@ -61,7 +78,7 @@ X2CHartreeFockResult runX2CHartreeFockScf(const Matrix<std::complex<double>>& h_
     const Matrix<std::complex<double>> fock_ortho = dagger(x_large) * (fock_scf * x_large);
     const HermitianEigenResult eig = diagonalizeHermitian(fock_ortho);
     const Matrix<std::complex<double>> c_matrix = x_large * eig.eigenvectors;
-    const Matrix<std::complex<double>> p_new = x2cDensityMatrix(c_matrix, n_electrons);
+    const Matrix<std::complex<double>> p_new = restrictDensity(x2cDensityMatrix(c_matrix, n_electrons));
 
     // Self-consistent-pair energy: evaluated with the SAME density that
     // built this Fock matrix, not the (not yet computed) mixed one.

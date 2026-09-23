@@ -39,6 +39,10 @@ struct DiracHartreeFockResult {
   // Kramers pairs, not just degenerate-looking eigenvalues.
   Matrix<std::complex<double>> fock_ortho_eigenvectors;
   std::vector<ScfIteration> history;  // one entry per iteration, in order
+  // Kramers-restricted SCF only: the largest matrix element removed from any iteration's density
+  // by the time-reversal symmetrization (0 = the SCF stayed time-reversal symmetric on its own;
+  // a LARGE value means the unrestricted iteration was drifting toward a Kramers-broken solution).
+  double max_density_asymmetry = 0.0;
 };
 
 // Runs the 4-component Dirac-Hartree-Fock (DHF) self-consistent field
@@ -82,7 +86,7 @@ DiracHartreeFockResult runDiracHartreeFockScf(
     const Matrix<std::complex<double>>& initial_density, int n_electrons,
     const std::vector<Atom>& geometry, double mixing, const Matrix<std::complex<double>>& overlap,
     int diis_size, int max_iterations = 100, double energy_tolerance = 1e-8,
-    double density_tolerance = 1e-6);
+    double density_tolerance = 1e-6, bool kramers_restricted = true);
 
 }  // namespace rerdmft
 

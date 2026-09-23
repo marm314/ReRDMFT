@@ -1,0 +1,22 @@
+# Example ReRDMFT input file: stretched LiH (5 Angstrom), 6-31G, GNOF, FULL_OPTIMIZATION TRUE with
+# ORBITAL_OPTIMIZER NEO -- the NEO counterpart of lih_c4_gnof_full_optimization_dissociated.inp
+# (X2C and C4_SPINOR in one run, C4_SPINOR rotations restricted to the positive-energy spinors).
+# This near-degenerate geometry is a hard case for a second-order method: NEO needs many
+# Hessian-vector products per macro-iteration, so expect it to be slower than ADAM here even
+# though it converges to the same energy (see lih_X2C_gnof_full_optimization_dissociated.inp).
+NELEC 4
+BASIS lih-6-31g.gbs
+X2C TRUE
+C4_SPINOR TRUE
+FUNCTIONAL GNOF
+PNOF_SUBSPACES 2
+PNOF_COUPLING 2
+FULL_OPTIMIZATION TRUE
+ORBITAL_OPTIMIZER NEO
+MACRO_ENERGY_TOLERANCE 1e-10
+DIIS FALSE
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   5.000000
+END

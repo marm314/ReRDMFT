@@ -4912,6 +4912,20 @@ int main(int argc, char** argv) {
 
       fock_matrix = rerdmft::rkbFockMatrix(h_rkb, c4_spinor_eri, density_matrix);
 
+      {
+        // The Kramers-restricted SCF below projects the density onto its time-reversal-even part
+        // in the RKB spinor AO basis [Large-alpha; Large-beta; Small-alpha; Small-beta]
+        // (Utils/KramersPairing.h's kramersSymmetrizeRkbAo). h_RKB is time-reversal even, so it
+        // must pass the same test -- this validates that layout on the actual data.
+        double h_scale = 0.0;
+        const double h_dev = rerdmft::kramersRkbAoDeviation(h_rkb, &h_scale);
+        std::cout << "h_RKB time-reversal symmetry (one-body operator, [Large-alpha, Large-beta, "
+                     "Small-alpha, Small-beta] RKB AO basis): max |M(P a,P b) - s_a s_b conj M(a,b)| = "
+                  << std::scientific << std::setprecision(2) << h_dev << " (max |h_RKB| = " << h_scale
+                  << ")" << std::defaultfloat << std::setprecision(6) << "\n  ["
+                  << (h_dev <= 1e-8 * std::max(1.0, h_scale) ? "PASS" : "FAIL")
+                  << "] h_RKB is time-reversal symmetric\n";
+      }
       dhf_result = rerdmft::runDiracHartreeFockScf(
           h_rkb, c4_spinor_eri, x_full, density_matrix, input.n_electrons(), input.geometry(),
           input.mixing(), s_full, input.scf_diis_size(), input.max_iterations(),
@@ -5646,6 +5660,11 @@ int main(int argc, char** argv) {
     }
     std::cout << "  " << (x2c_hf_result.converged ? "Converged" : "Did NOT converge") << " after "
                << x2c_hf_result.iterations << " iteration(s)\n";
+    std::cout << "  Kramers-restricted SCF: every density projected onto its time-reversal-even part; "
+                 "largest element removed = "
+              << std::scientific << std::setprecision(2) << x2c_hf_result.max_density_asymmetry
+              << std::defaultfloat << std::setprecision(6)
+              << " (~0: the iteration stayed time-reversal symmetric on its own)\n";
     std::cout << std::setprecision(10);
     printEnergyLine("Electronic energy", x2c_hf_result.electronic_energy);
     printEnergyLine("Nuclear repulsion energy", x2c_hf_result.nuclear_repulsion_energy);
@@ -5805,6 +5824,11 @@ int main(int argc, char** argv) {
     }
     std::cout << "  " << (dhf_result.converged ? "Converged" : "Did NOT converge") << " after "
                << dhf_result.iterations << " iteration(s)\n";
+    std::cout << "  Kramers-restricted SCF: every density projected onto its time-reversal-even part; "
+                 "largest element removed = "
+              << std::scientific << std::setprecision(2) << dhf_result.max_density_asymmetry
+              << std::defaultfloat << std::setprecision(6)
+              << " (~0: the iteration stayed time-reversal symmetric on its own)\n";
     std::cout << std::setprecision(10);
     printEnergyLine("Electronic energy", dhf_result.electronic_energy);
     printEnergyLine("Nuclear repulsion energy", dhf_result.nuclear_repulsion_energy);
