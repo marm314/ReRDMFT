@@ -2164,11 +2164,41 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
         ", which must be strictly between 0 and 2*JK_ACTIVE_PAIRS = " +
         std::to_string(n_active_window));
   }
-  const std::vector<double> orbital_energies_window(
-      orbital_energies_active.begin() + static_cast<std::ptrdiff_t>(n_frozen),
-      orbital_energies_active.begin() + static_cast<std::ptrdiff_t>(n_frozen + n_active_window));
   const std::size_t frozen_base = n_inactive_below;
-  n_inactive_below = frozen_base + n_frozen;  // shift: the active window's own base from here on.
+  n_inactive_below = frozen_base + n_frozen;  // shift: the active window's own base from here on
+                                               // (COUNTS only from here -- see frozen_indices/
+                                               // active_indices below for actual array positions).
+  // Actual full-array indices of the frozen/active windows -- a plain CONTIGUOUS range (valid for
+  // X2C_HF/C4_DHF: energy-sorted with adjacent Kramers pairs) is WRONG for NON_REL, whose
+  // spin-orbitals are in BLOCK layout [alpha_0..alpha_{n-1}, beta_0..beta_{n-1}]
+  // (ClosedShellSpinOrbitals.h): alpha_k and beta_k are degenerate but n_spatial=n_total/2 apart
+  // in the array, so "the first N array positions" would mix different spatial orbitals' alpha
+  // members instead of keeping each spatial orbital's own alpha+beta pair together (found via a
+  // hard SQP infeasibility once occupations were tied exactly per pair -- see [[project-jk-only]]
+  // -- previously silent since independent per-orbital SQP variables never needed the partition
+  // itself to be pair-consistent). For NON_REL, gather by INTERLEAVED spatial rank instead (rank r
+  // -> alpha at r, beta at r+n_spatial), exactly PNOF's own toActualIndex convention
+  // (buildPnofFunctionalReport) -- so LOCAL indices (2k, 2k+1) are an adjacent pair for ALL THREE
+  // labels uniformly from here on.
+  std::vector<std::size_t> frozen_indices(n_frozen), active_indices(n_active_window);
+  if (label == "NON_REL") {
+    const std::size_t n_spatial = n_available / 2;
+    for (std::size_t i = 0; i < n_frozen; ++i) {
+      const std::size_t rank = i / 2;
+      frozen_indices[i] = (i % 2 == 0) ? rank : rank + n_spatial;
+    }
+    for (std::size_t i = 0; i < n_active_window; ++i) {
+      const std::size_t rank = n_frozen / 2 + i / 2;
+      active_indices[i] = (i % 2 == 0) ? rank : rank + n_spatial;
+    }
+  } else {
+    for (std::size_t i = 0; i < n_frozen; ++i) frozen_indices[i] = frozen_base + i;
+    for (std::size_t i = 0; i < n_active_window; ++i) active_indices[i] = frozen_base + n_frozen + i;
+  }
+  std::vector<double> orbital_energies_window(n_active_window);
+  for (std::size_t i = 0; i < n_active_window; ++i) {
+    orbital_energies_window[i] = orbital_energies_active[active_indices[i] - frozen_base];
+  }
 
   const auto occupation_init_method = rerdmft::parseOccupationInitMethod(occupation_init_name);
   const auto occupations_active = rerdmft::generateInitialOccupations(
@@ -2179,9 +2209,9 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
             t_start, t_checkpoint, timing_records);
 
   std::vector<double> occupations(n_total, 0.0);
-  for (std::size_t i = 0; i < n_frozen; ++i) occupations[frozen_base + i] = 1.0;
+  for (std::size_t i = 0; i < n_frozen; ++i) occupations[frozen_indices[i]] = 1.0;
   for (std::size_t i = 0; i < occupations_active.size(); ++i) {
-    occupations[n_inactive_below + i] = occupations_active[i];
+    occupations[active_indices[i]] = occupations_active[i];
   }
 
   const auto functional = rerdmft::parseJkFunctional(functional_name);
@@ -2244,36 +2274,75 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
   // a literal infinity, hence keeping the feasible region an interior
   // box throughout (see Occ_opt/OccupationInit.h).
   const std::size_t n_active = occupations_active.size();
-  const rerdmft::Matrix<double> a_eq(1, n_active, 1.0);
+  // Kramers/spin pairs within the active window: JK_only ties each pair's occupation to a SINGLE
+  // SQP variable (rather than one variable per orbital), so partners come out EXACTLY equal by
+  // construction -- like PNOF's own geminals already are -- instead of merely converging close
+  // (independent per-orbital SQP variables previously left ~1e-12-1e-15 residual drift, worse for
+  // C4_DHF's larger integral magnitude -- see [[project-jk-only]]). Pair entries are LOCAL indices
+  // into the active window ([0, n_active)); adjacent (2k, 2k+1) uniformly for every label now that
+  // active_indices[] above already resolves each label's own actual-array layout (contiguous
+  // Kramers pairs for X2C_HF/C4_DHF, interleaved spatial rank for NON_REL).
+  std::vector<std::pair<std::size_t, std::size_t>> pairs;
+  pairs.reserve(n_active / 2);
+  for (std::size_t i = 0; i + 1 < n_active; i += 2) pairs.emplace_back(i, i + 1);
+  const std::size_t n_pairs = pairs.size();
+  const rerdmft::Matrix<double> a_eq(1, n_pairs, 2.0);  // 2 electrons per pair (both members tied)
   const std::vector<double> b_eq = {n_electrons_active};
-  const std::vector<double> lb(n_active, kOccupationEpsilon);
-  const std::vector<double> ub(n_active, 1.0 - kOccupationEpsilon);
+  const std::vector<double> lb(n_pairs, kOccupationEpsilon);
+  const std::vector<double> ub(n_pairs, 1.0 - kOccupationEpsilon);
 
-  auto embed = [&](const std::vector<double>& active) {
+  auto embed = [&](const std::vector<double>& reduced) {
     std::vector<double> full(n_total, 0.0);
-    for (std::size_t i = 0; i < n_frozen; ++i) full[frozen_base + i] = 1.0;
-    for (std::size_t i = 0; i < n_active; ++i) full[n_inactive_below + i] = active[i];
+    for (std::size_t i = 0; i < n_frozen; ++i) full[frozen_indices[i]] = 1.0;
+    for (std::size_t i = 0; i < n_pairs; ++i) {
+      full[active_indices[pairs[i].first]] = reduced[i];
+      full[active_indices[pairs[i].second]] = reduced[i];
+    }
     return full;
+  };
+  // Expands a reduced (per-pair) vector into one entry per ACTIVE orbital (both pair members
+  // equal, LOCAL indexing) -- the shape every printing/debug/RESTART use below already expects.
+  auto expandActive = [&](const std::vector<double>& reduced) {
+    std::vector<double> active(n_active, 0.0);
+    for (std::size_t i = 0; i < n_pairs; ++i) {
+      active[pairs[i].first] = reduced[i];
+      active[pairs[i].second] = reduced[i];
+    }
+    return active;
   };
   const rerdmft::SqpValueFn value_fn = [&](const std::vector<double>& x) {
     return rerdmft::jkFunctionalEnergy(h, eri, embed(x), functional, f_l);
   };
   const rerdmft::SqpGradientFn gradient_fn = [&](const std::vector<double>& x) {
     const auto full_grad = rerdmft::jkFunctionalGradient(h, eri, embed(x), functional, f_l);
-    return std::vector<double>(
-        full_grad.begin() + static_cast<std::ptrdiff_t>(n_inactive_below),
-        full_grad.begin() + static_cast<std::ptrdiff_t>(n_inactive_below + n_active));
+    std::vector<double> reduced_grad(n_pairs);
+    for (std::size_t i = 0; i < n_pairs; ++i) {
+      // Chain rule: both n_p and n_q are driven by the SAME reduced variable x_i (dn_p/dx_i =
+      // dn_q/dx_i = 1), so dE/dx_i = dE/dn_p + dE/dn_q.
+      reduced_grad[i] = full_grad[active_indices[pairs[i].first]] +
+                        full_grad[active_indices[pairs[i].second]];
+    }
+    return reduced_grad;
   };
   const rerdmft::SqpHessianFn hessian_fn = [&](const std::vector<double>& x) {
     const auto full_hess = rerdmft::jkFunctionalHessian(h, eri, embed(x), functional, f_l);
-    rerdmft::Matrix<double> active_hess(n_active, n_active);
-    for (std::size_t r = 0; r < n_active; ++r) {
-      for (std::size_t s = 0; s < n_active; ++s) {
-        active_hess(r, s) = full_hess(n_inactive_below + r, n_inactive_below + s);
+    rerdmft::Matrix<double> reduced_hess(n_pairs, n_pairs);
+    for (std::size_t r = 0; r < n_pairs; ++r) {
+      const std::size_t pr = active_indices[pairs[r].first], qr = active_indices[pairs[r].second];
+      for (std::size_t s = 0; s < n_pairs; ++s) {
+        const std::size_t ps = active_indices[pairs[s].first], qs = active_indices[pairs[s].second];
+        // d^2E/dx_r dx_s = sum over all 4 (n_p/n_q of pair r) x (n_p/n_q of pair s) combinations.
+        reduced_hess(r, s) = full_hess(pr, ps) + full_hess(pr, qs) + full_hess(qr, ps) + full_hess(qr, qs);
       }
     }
-    return active_hess;
+    return reduced_hess;
   };
+  // Reduced starting point: average the two (already near-equal, from a Kramers/spin-degenerate
+  // OCCUPATION_INIT) partner occupations per pair.
+  std::vector<double> reduced_state0(n_pairs);
+  for (std::size_t i = 0; i < n_pairs; ++i) {
+    reduced_state0[i] = 0.5 * (occupations_active[pairs[i].first] + occupations_active[pairs[i].second]);
+  }
 
   // Finite-difference validation of jkFunctionalGradient/
   // jkFunctionalHessian (Occ_opt/OccupationEnergy.h) against
@@ -2286,26 +2355,26 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
   // (jkHartreeFunctionD1/D11/D12) into this file for the first time --
   // every functional before it had D1_H=n_j/D11_H=0/D12_H=1 baked in
   // literally, never exercising jkHartreeFunction* at all. Cheap
-  // (O(n_active) per index), always run under DEBUG TRUE.
-  if (debug && n_active >= 2) {
+  // (O(n_pairs) per index), always run under DEBUG TRUE.
+  if (debug && n_pairs >= 2) {
     const std::size_t r_idx = 0;
     const std::size_t s_idx = 1;
     constexpr double kOccFdStep = 1e-5;
     auto perturbed = [&](std::size_t idx, double delta) {
-      std::vector<double> x = occupations_active;
+      std::vector<double> x = reduced_state0;
       x[idx] += delta;
       return x;
     };
     const double e_plus = value_fn(perturbed(r_idx, kOccFdStep));
     const double e_minus = value_fn(perturbed(r_idx, -kOccFdStep));
     const double fd_grad_r = (e_plus - e_minus) / (2.0 * kOccFdStep);
-    const auto analytic_grad = gradient_fn(occupations_active);
+    const auto analytic_grad = gradient_fn(reduced_state0);
     const auto grad_plus = gradient_fn(perturbed(s_idx, kOccFdStep));
     const auto grad_minus = gradient_fn(perturbed(s_idx, -kOccFdStep));
     const double fd_hess_rs = (grad_plus[r_idx] - grad_minus[r_idx]) / (2.0 * kOccFdStep);
-    const auto analytic_hess = hessian_fn(occupations_active);
+    const auto analytic_hess = hessian_fn(reduced_state0);
     out << "\n  Occ_opt/OccupationEnergy.h finite-difference check (functional " << functional_name
-        << ", indices " << r_idx << "," << s_idx << " of the active subspace):\n";
+        << ", pair-tied indices " << r_idx << "," << s_idx << " of the active subspace):\n";
     out << "    dE/dn_r:        analytic=" << std::setprecision(10) << analytic_grad[r_idx]
         << "  finite-diff=" << fd_grad_r
         << "  |diff|=" << std::abs(analytic_grad[r_idx] - fd_grad_r) << std::setprecision(6)
@@ -2317,15 +2386,18 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
   }
 
   out << "\n  SQP occupation-number optimization (Utils/SQP.h, FIXED orbitals/integrals,\n"
-      << "  sum(n) = " << n_electrons << " constraint, " << kOccupationEpsilon << " <= n_p <= "
-      << (1.0 - kOccupationEpsilon) << "):\n";
+      << "  " << n_pairs << " Kramers/spin pair(s), each tied to a SINGLE variable (both partners\n"
+      << "  always get EXACTLY the same occupation), sum(n) = " << n_electrons_active
+      << " constraint, " << kOccupationEpsilon << " <= n_p <= " << (1.0 - kOccupationEpsilon)
+      << "):\n";
   try {
     const auto sqp_result =
-        rerdmft::solveSqp(value_fn, gradient_fn, hessian_fn, a_eq, b_eq, lb, ub, occupations_active);
+        rerdmft::solveSqp(value_fn, gradient_fn, hessian_fn, a_eq, b_eq, lb, ub, reduced_state0);
     logTiming(label + " SQP occupation-number optimization complete (" + functional_name + ")",
               t_start, t_checkpoint, timing_records);
+    const auto optimized_active = expandActive(sqp_result.x);
     double optimized_occupation_sum = 0.0;
-    for (const double n : sqp_result.x) optimized_occupation_sum += n;
+    for (const double n : optimized_active) optimized_occupation_sum += n;
     const double optimized_total_energy = sqp_result.objective_value + nuclear_repulsion_energy;
     out << "    " << (sqp_result.converged ? "Converged" : "Did NOT converge") << " after "
         << sqp_result.iterations << " iteration(s)\n";
@@ -2352,37 +2424,33 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
     // JK_FROZEN_PAIRS: the frozen block, pinned at exactly 1 (never an SQP variable) -- PNOF's
     // own "core geminal ... (frozen)" style.
     for (std::size_t i = 0; i + 1 < n_frozen; i += 2) {
-      const std::size_t g0 = frozen_base + i, g1 = g0 + 1;
+      const std::size_t g0 = frozen_indices[i], g1 = frozen_indices[i + 1];
       out << "      " << std::setw(6) << g0 << std::setw(12) << 1.0 << std::setw(10) << g1
           << std::setw(12) << 1.0 << "  (frozen)\n";
       displayed_occupation_sum += 2.0;
     }
     if (label == "C4_DHF" || label == "X2C_HF") {
-      // Two columns, even/odd side by side -- SAME adjacent-index
-      // Kramers-pair convention already used elsewhere in this file
-      // (e.g. "Converged one-body (Fock_ortho) state energies"): lets
-      // the printed numbers themselves be visually checked to confirm
-      // Kramers partners get the SAME occupation (a pure function of
-      // orbital energy, and Kramers partners are degenerate in energy
-      // -- see [[project-jk-only]]'s own confirmation of this).
+      // Two columns, even/odd side by side -- SAME adjacent-LOCAL-index Kramers-pair convention
+      // as the `pairs` list above, so the two printed numbers are now GUARANTEED identical (tied
+      // to the same SQP variable), not merely observed to be close.
       for (std::size_t i = 0; i + 1 < n_active; i += 2) {
-        const std::size_t g0 = n_inactive_below + i;
-        const std::size_t g1 = n_inactive_below + i + 1;
-        out << "      " << std::setw(6) << g0 << std::setw(12) << sqp_result.x[i]
-            << std::setw(10) << g1 << std::setw(12) << sqp_result.x[i + 1] << "\n";
-        displayed_occupation_sum += round5(sqp_result.x[i]) + round5(sqp_result.x[i + 1]);
+        const std::size_t g0 = active_indices[i];
+        const std::size_t g1 = active_indices[i + 1];
+        out << "      " << std::setw(6) << g0 << std::setw(12) << optimized_active[i]
+            << std::setw(10) << g1 << std::setw(12) << optimized_active[i + 1] << "\n";
+        displayed_occupation_sum += round5(optimized_active[i]) + round5(optimized_active[i + 1]);
       }
       if (n_active % 2 == 1) {
-        const std::size_t g = n_inactive_below + n_active - 1;
-        out << "      " << std::setw(6) << g << std::setw(12) << sqp_result.x[n_active - 1]
+        const std::size_t g = active_indices[n_active - 1];
+        out << "      " << std::setw(6) << g << std::setw(12) << optimized_active[n_active - 1]
             << "\n";
-        displayed_occupation_sum += round5(sqp_result.x[n_active - 1]);
+        displayed_occupation_sum += round5(optimized_active[n_active - 1]);
       }
     } else {
       for (std::size_t i = 0; i < n_active; ++i) {
-        out << "      " << std::setw(6) << (n_inactive_below + i) << std::setw(12)
-            << sqp_result.x[i] << "\n";
-        displayed_occupation_sum += round5(sqp_result.x[i]);
+        out << "      " << std::setw(6) << active_indices[i] << std::setw(12)
+            << optimized_active[i] << "\n";
+        displayed_occupation_sum += round5(optimized_active[i]);
       }
     }
     out << std::defaultfloat << std::setprecision(6);

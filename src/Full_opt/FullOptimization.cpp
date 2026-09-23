@@ -262,6 +262,27 @@ RdmftModel<T, Eri> makeJkOnlyModel(JkFunctional functional, std::size_t f_l, dou
                               std::size_t n_active, bool two_columns, std::size_t n_negative) {
   RdmftModel<T, Eri> model;
   const std::size_t frozen_base = n_inactive_below - n_frozen;
+  // Actual full-array indices of the frozen/active windows -- MUST use the exact same algorithm
+  // as main.cpp's buildFunctionalReport (its own frozen_indices/active_indices, same comment
+  // there for the full story): a plain contiguous range is wrong for NON_REL's BLOCK-layout
+  // spin-orbitals (alpha_k and beta_k are n_total/2 apart in the array, not adjacent), so NON_REL
+  // gathers by INTERLEAVED spatial rank instead (rank r -> alpha at r, beta at r+n_spatial),
+  // making LOCAL indices (2k, 2k+1) an adjacent pair uniformly for every T from here on.
+  std::vector<std::size_t> frozen_indices(n_frozen), active_indices(n_active);
+  if constexpr (std::is_same_v<T, double>) {
+    const std::size_t n_spatial = n_total / 2;
+    for (std::size_t i = 0; i < n_frozen; ++i) {
+      const std::size_t rank = i / 2;
+      frozen_indices[i] = (i % 2 == 0) ? rank : rank + n_spatial;
+    }
+    for (std::size_t i = 0; i < n_active; ++i) {
+      const std::size_t rank = n_frozen / 2 + i / 2;
+      active_indices[i] = (i % 2 == 0) ? rank : rank + n_spatial;
+    }
+  } else {
+    for (std::size_t i = 0; i < n_frozen; ++i) frozen_indices[i] = frozen_base + i;
+    for (std::size_t i = 0; i < n_active; ++i) active_indices[i] = n_inactive_below + i;
+  }
   // Same layout as main.cpp's "Optimized occupation numbers" table.
   model.print_occupations = [=](const std::vector<double>& occ, std::ostream& out) {
     const auto round5 = [](double x) { return std::round(x * 1e5) / 1e5; };
@@ -272,26 +293,26 @@ RdmftModel<T, Eri> makeJkOnlyModel(JkFunctional functional, std::size_t f_l, dou
     // JK_FROZEN_PAIRS: the frozen block, pinned at exactly 1 (never an SQP variable) --
     // PNOF's own "core geminal ... (frozen)" style.
     for (std::size_t i = 0; i + 1 < n_frozen; i += 2) {
-      const std::size_t g0 = frozen_base + i, g1 = g0 + 1;
+      const std::size_t g0 = frozen_indices[i], g1 = frozen_indices[i + 1];
       out << "      " << std::setw(6) << g0 << std::setw(12) << occ[g0] << std::setw(10) << g1
           << std::setw(12) << occ[g1] << "  (frozen)\n";
       displayed_sum += round5(occ[g0]) + round5(occ[g1]);
     }
     if (two_columns) {
       for (std::size_t i = 0; i + 1 < n_active; i += 2) {
-        const std::size_t g0 = n_inactive_below + i, g1 = g0 + 1;
+        const std::size_t g0 = active_indices[i], g1 = active_indices[i + 1];
         out << "      " << std::setw(6) << g0 << std::setw(12) << occ[g0] << std::setw(10) << g1
             << std::setw(12) << occ[g1] << "\n";
         displayed_sum += round5(occ[g0]) + round5(occ[g1]);
       }
       if (n_active % 2 == 1) {
-        const std::size_t g = n_inactive_below + n_active - 1;
+        const std::size_t g = active_indices[n_active - 1];
         out << "      " << std::setw(6) << g << std::setw(12) << occ[g] << "\n";
         displayed_sum += round5(occ[g]);
       }
     } else {
       for (std::size_t i = 0; i < n_active; ++i) {
-        const std::size_t g = n_inactive_below + i;
+        const std::size_t g = active_indices[i];
         out << "      " << std::setw(6) << g << std::setw(12) << occ[g] << "\n";
         displayed_sum += round5(occ[g]);
       }
@@ -327,12 +348,24 @@ RdmftModel<T, Eri> makeJkOnlyModel(JkFunctional functional, std::size_t f_l, dou
       return jkOnlyHessianVectorImpl(functional, f_l, pair_indices, h, eri, occ, v);
     };
   }
+  // Kramers/spin pairs within the active window -- SAME convention and SAME reasoning as
+  // main.cpp's buildFunctionalReport (its own `state` is exactly this function's reduced
+  // per-pair vector, carried across the FULL_OPTIMIZATION macro loop's own occupation
+  // re-optimizations, so the two MUST agree): adjacent LOCAL indices (2k, 2k+1), which
+  // active_indices[] above already resolves to each T's own actual-array layout.
+  std::vector<std::pair<std::size_t, std::size_t>> pairs;
+  pairs.reserve(n_active / 2);
+  for (std::size_t i = 0; i + 1 < n_active; i += 2) pairs.emplace_back(i, i + 1);
+  const std::size_t n_pairs = pairs.size();
   model.optimize_occupations = [=](const Matrix<T>& h, const Eri& eri,
                                    std::vector<double>& state) {
-    auto embed = [&](const std::vector<double>& active) {
+    auto embed = [&](const std::vector<double>& reduced) {
       std::vector<double> full(n_total, 0.0);
-      for (std::size_t i = 0; i < n_frozen; ++i) full[frozen_base + i] = 1.0;
-      for (std::size_t i = 0; i < n_active; ++i) full[n_inactive_below + i] = active[i];
+      for (std::size_t i = 0; i < n_frozen; ++i) full[frozen_indices[i]] = 1.0;
+      for (std::size_t i = 0; i < n_pairs; ++i) {
+        full[active_indices[pairs[i].first]] = reduced[i];
+        full[active_indices[pairs[i].second]] = reduced[i];
+      }
       return full;
     };
     const SqpValueFn value_fn = [&](const std::vector<double>& x) {
@@ -340,20 +373,28 @@ RdmftModel<T, Eri> makeJkOnlyModel(JkFunctional functional, std::size_t f_l, dou
     };
     const SqpGradientFn gradient_fn = [&](const std::vector<double>& x) {
       const auto g = jkFunctionalGradient(h, eri, embed(x), functional, f_l);
-      return std::vector<double>(g.begin() + static_cast<std::ptrdiff_t>(n_inactive_below),
-                                  g.begin() + static_cast<std::ptrdiff_t>(n_inactive_below + n_active));
+      std::vector<double> reduced_grad(n_pairs);
+      for (std::size_t i = 0; i < n_pairs; ++i) {
+        reduced_grad[i] = g[active_indices[pairs[i].first]] + g[active_indices[pairs[i].second]];
+      }
+      return reduced_grad;
     };
     const SqpHessianFn hessian_fn = [&](const std::vector<double>& x) {
       const auto full = jkFunctionalHessian(h, eri, embed(x), functional, f_l);
-      Matrix<double> active(n_active, n_active);
-      for (std::size_t r = 0; r < n_active; ++r)
-        for (std::size_t s = 0; s < n_active; ++s) active(r, s) = full(n_inactive_below + r, n_inactive_below + s);
-      return active;
+      Matrix<double> reduced_hess(n_pairs, n_pairs);
+      for (std::size_t r = 0; r < n_pairs; ++r) {
+        const std::size_t pr = active_indices[pairs[r].first], qr = active_indices[pairs[r].second];
+        for (std::size_t s = 0; s < n_pairs; ++s) {
+          const std::size_t ps = active_indices[pairs[s].first], qs = active_indices[pairs[s].second];
+          reduced_hess(r, s) = full(pr, ps) + full(pr, qs) + full(qr, ps) + full(qr, qs);
+        }
+      }
+      return reduced_hess;
     };
-    const Matrix<double> a_eq(1, n_active, 1.0);
+    const Matrix<double> a_eq(1, n_pairs, 2.0);  // 2 electrons per pair (both members tied)
     const std::vector<double> b_eq = {n_electrons};
-    const std::vector<double> lb(n_active, kOccupationEpsilon);
-    const std::vector<double> ub(n_active, 1.0 - kOccupationEpsilon);
+    const std::vector<double> lb(n_pairs, kOccupationEpsilon);
+    const std::vector<double> ub(n_pairs, 1.0 - kOccupationEpsilon);
     const auto res = solveSqp(value_fn, gradient_fn, hessian_fn, a_eq, b_eq, lb, ub, state);
     state = res.x;
     return RdmftOccupationResult{embed(res.x), res.objective_value, res.converged, res.iterations};

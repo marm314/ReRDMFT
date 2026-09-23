@@ -223,8 +223,12 @@ orbital reoptimization):
    `hartreeExchangeEnergy`).
 3. Optimize the occupation numbers further via a sequential quadratic
    programming solver (`Occ_opt/SQP.h`), minimizing that same energy
-   subject to `sum(n_p) = NELEC` and `0 < n_p < 1`, and report the
-   optimized occupations, their sum, and the optimized energy.
+   subject to `sum(n_p) = NELEC` and `0 < n_p < 1`. The SQP solves in a
+   REDUCED space with one variable per Kramers (or, for `NON_RELATIVISTIC`,
+   spin) pair, both partners tied to it -- so partners always get EXACTLY
+   the same occupation by construction, not merely a close numerical
+   coincidence -- and reports the optimized occupations, their sum, and
+   the optimized energy.
 
 For `C4_SPINOR`, the negative-energy (Dirac sea) branch is excluded
 from both steps entirely (pinned at exactly zero occupation, never an
@@ -234,9 +238,9 @@ X2C's own decoupling already eliminated that branch entirely. Results
 are printed after the corresponding SCF's own energy, gradient, and
 (if requested) Hessian diagnostics -- optimized occupation numbers are
 listed at fixed 5-decimal precision, in two columns for `C4_SPINOR` and
-`X2C` (adjacent Kramers pairs side by side, which should read as
-identical values -- confirmed to hold through the SQP optimization too)
-and one column otherwise.
+`X2C` (adjacent Kramers pairs side by side, printed identical by
+construction) and one column otherwise (`NON_RELATIVISTIC`'s own spin
+pairs, not printed side by side, but tied via the same SQP mechanism).
 
 See `examples/water_muller.inp` and `examples/co-sto-3g_muller.inp` for
 worked `C4_SPINOR`/`NON_RELATIVISTIC` examples, or
