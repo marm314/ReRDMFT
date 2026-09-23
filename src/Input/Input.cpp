@@ -243,6 +243,18 @@ void Input::read(const std::string& filename) {
                                   "' (expected one of PROPORTIONAL, FERMI_DIRAC)");
       }
       occupation_init_ = upper;
+    } else if (keyword == "JK_FROZEN_PAIRS") {
+      jk_frozen_pairs_ = parseInt(iss, line_number, keyword);
+      if (jk_frozen_pairs_ < 0) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": JK_FROZEN_PAIRS must be at least 0");
+      }
+    } else if (keyword == "JK_ACTIVE_PAIRS") {
+      jk_active_pairs_ = parseInt(iss, line_number, keyword);
+      if (jk_active_pairs_ < 1) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": JK_ACTIVE_PAIRS must be at least 1");
+      }
     } else if (keyword == "PNOF_SUBSPACES") {
       pnof_subspaces_ = parseInt(iss, line_number, keyword);
       if (pnof_subspaces_ < 1) {
@@ -367,6 +379,10 @@ void Input::print(std::ostream& out) const {
                       << "\n";
   line("TEMPERATURE") << temperature_ << "\n";
   line("OCCUPATION_INIT") << occupation_init_ << "\n";
+  line("JK_FROZEN_PAIRS") << jk_frozen_pairs_ << "\n";
+  line("JK_ACTIVE_PAIRS") << jk_active_pairs_
+                           << (jk_active_pairs_ < 0 ? " (default; all remaining orbitals)" : "")
+                           << "\n";
   line("PNOF_SUBSPACES") << pnof_subspaces_ << "\n";
   line("PNOF_COUPLING") << pnof_coupling_ << "\n";
   line("SQP_PNOF_OCC") << flag(sqp_pnof_occ_) << "\n";

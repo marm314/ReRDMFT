@@ -234,9 +234,11 @@ std::vector<double> pnofHessianVectorImpl(PnofFunctional functional,
 
 template <typename T, typename Eri>
 RdmftModel<T, Eri> makeJkOnlyModel(JkFunctional functional, std::size_t f_l, double n_electrons,
-                              std::size_t n_total, std::size_t n_inactive_below,
+                              std::size_t n_total, std::size_t n_frozen,
+                              std::size_t n_inactive_below,
                               std::size_t n_active, bool two_columns) {
   RdmftModel<T, Eri> model;
+  const std::size_t frozen_base = n_inactive_below - n_frozen;
   // Same layout as main.cpp's "Optimized occupation numbers" table.
   model.print_occupations = [=](const std::vector<double>& occ, std::ostream& out) {
     const auto round5 = [](double x) { return std::round(x * 1e5) / 1e5; };
@@ -244,6 +246,14 @@ RdmftModel<T, Eri> makeJkOnlyModel(JkFunctional functional, std::size_t f_l, dou
            "orbital/spinor space, fixed 5 decimals):\n";
     out << std::fixed << std::setprecision(5);
     double displayed_sum = 0.0;
+    // JK_FROZEN_PAIRS: the frozen block, pinned at exactly 1 (never an SQP variable) --
+    // PNOF's own "core geminal ... (frozen)" style.
+    for (std::size_t i = 0; i + 1 < n_frozen; i += 2) {
+      const std::size_t g0 = frozen_base + i, g1 = g0 + 1;
+      out << "      " << std::setw(6) << g0 << std::setw(12) << occ[g0] << std::setw(10) << g1
+          << std::setw(12) << occ[g1] << "  (frozen)\n";
+      displayed_sum += round5(occ[g0]) + round5(occ[g1]);
+    }
     if (two_columns) {
       for (std::size_t i = 0; i + 1 < n_active; i += 2) {
         const std::size_t g0 = n_inactive_below + i, g1 = g0 + 1;
@@ -266,7 +276,8 @@ RdmftModel<T, Eri> makeJkOnlyModel(JkFunctional functional, std::size_t f_l, dou
     out << std::defaultfloat << std::setprecision(6);
     out << "    Sum of the occupation numbers shown above, at that same 5-decimal precision "
            "(expect close to "
-        << n_electrons << "): " << std::setprecision(10) << displayed_sum << std::setprecision(6) << "\n";
+        << (n_electrons + static_cast<double>(n_frozen)) << "): " << std::setprecision(10)
+        << displayed_sum << std::setprecision(6) << "\n";
   };
   model.energy = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ) {
     return jkFunctionalEnergy(h, eri, occ, functional, f_l);
@@ -293,6 +304,7 @@ RdmftModel<T, Eri> makeJkOnlyModel(JkFunctional functional, std::size_t f_l, dou
                                    std::vector<double>& state) {
     auto embed = [&](const std::vector<double>& active) {
       std::vector<double> full(n_total, 0.0);
+      for (std::size_t i = 0; i < n_frozen; ++i) full[frozen_base + i] = 1.0;
       for (std::size_t i = 0; i < n_active; ++i) full[n_inactive_below + i] = active[i];
       return full;
     };
@@ -1377,20 +1389,23 @@ FullOptResult runFullOptimizationJk(const Matrix<T>& h, const Tensor4<T>& eri,
                                     const std::vector<double>& occupations,
                                     const std::vector<double>& state, JkFunctional functional,
                                     std::size_t f_l, double n_electrons, std::size_t n_total,
-                                    std::size_t n_inactive_below, std::size_t n_active,
+                                    std::size_t n_frozen, std::size_t n_inactive_below,
+                                    std::size_t n_active,
                                     bool two_columns, const FullOptSettings& settings,
                                     bool kramers_restricted, double nuclear_repulsion_energy,
                                     std::ostream& log, const std::vector<std::size_t>& spin_partner) {
   if (settings.cholesky) {
     const CholeskyEri<T> ch = makeCholeskyEri(eri, settings.cholesky_threshold, log);
     const auto model = makeJkOnlyModel<T, CholeskyEri<T>>(functional, f_l, n_electrons, n_total,
-                                                          n_inactive_below, n_active, two_columns);
+                                                          n_frozen, n_inactive_below, n_active,
+                                                          two_columns);
     return runFullOptimization<T, CholeskyEri<T>>(h, ch, occupations, state, model, settings,
                                                    kramers_restricted, nuclear_repulsion_energy, log,
                                                    spin_partner);
   }
   const auto model = makeJkOnlyModel<T, Tensor4<T>>(functional, f_l, n_electrons, n_total,
-                                                    n_inactive_below, n_active, two_columns);
+                                                    n_frozen, n_inactive_below, n_active,
+                                                    two_columns);
   return runFullOptimization<T, Tensor4<T>>(h, eri, occupations, state, model, settings,
                                               kramers_restricted, nuclear_repulsion_energy, log,
                                               spin_partner);
@@ -1424,7 +1439,8 @@ FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const Tensor4<T>& eri,
 
 #define RERDMFT_INSTANTIATE_FULLOPT(T, ERI)                                                        \
   template RdmftModel<T, ERI> makeJkOnlyModel<T, ERI>(JkFunctional, std::size_t, double,           \
-                                                      std::size_t, std::size_t, std::size_t, bool); \
+                                                      std::size_t, std::size_t, std::size_t,        \
+                                                      std::size_t, bool);                           \
   template RdmftModel<T, ERI> makePnofModel<T, ERI>(PnofFunctional, std::vector<PnofGeminal>,      \
                                                     std::size_t, int, int, bool, bool, std::size_t); \
   template FullOptResult runFullOptimization<T, ERI>(                                              \
@@ -1441,12 +1457,12 @@ RERDMFT_INSTANTIATE_FULLOPT(std::complex<double>, CholeskyEri<std::complex<doubl
 template FullOptResult runFullOptimizationJk<double>(
     const Matrix<double>&, const Tensor4<double>&, const std::vector<double>&,
     const std::vector<double>&, JkFunctional, std::size_t, double, std::size_t, std::size_t,
-    std::size_t, bool, const FullOptSettings&, bool, double, std::ostream&,
+    std::size_t, std::size_t, bool, const FullOptSettings&, bool, double, std::ostream&,
     const std::vector<std::size_t>&);
 template FullOptResult runFullOptimizationJk<std::complex<double>>(
     const Matrix<std::complex<double>>&, const Tensor4<std::complex<double>>&,
     const std::vector<double>&, const std::vector<double>&, JkFunctional, std::size_t, double,
-    std::size_t, std::size_t, std::size_t, bool, const FullOptSettings&, bool, double,
+    std::size_t, std::size_t, std::size_t, std::size_t, bool, const FullOptSettings&, bool, double,
     std::ostream&, const std::vector<std::size_t>&);
 template FullOptResult runFullOptimizationPnof<double>(
     const Matrix<double>&, const Tensor4<double>&, const std::vector<double>&,

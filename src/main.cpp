@@ -2117,6 +2117,7 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
                                    const rerdmft::Tensor4<T>& eri,
                                    const std::vector<double>& orbital_energies_active,
                                    std::size_t n_inactive_below, double n_electrons,
+                                   int jk_frozen_pairs, int jk_active_pairs,
                                    double temperature_kelvin, const std::string& functional_name,
                                    const std::string& occupation_init_name,
                                    double nuclear_repulsion_energy, bool debug, int verbose,
@@ -2127,15 +2128,57 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
                                    rerdmft::RestartCapture* restart = nullptr) {
   const std::size_t n_total = h.rows();
   constexpr double kOccupationEpsilon = 1e-6;
+
+  // JK_FROZEN_PAIRS/JK_ACTIVE_PAIRS (only meaningful for a JK-only FUNCTIONAL): partition the
+  // n_available = orbital_energies_active.size() orbitals this SCF path makes available for
+  // JK-only occupation (already excluding, for C4_DHF, the negative-energy branch pinned below
+  // n_inactive_below itself) by ENERGY into, lowest first, a FROZEN block (n_frozen =
+  // 2*jk_frozen_pairs spin-orbitals/spinors, pinned at EXACTLY n=1, never an occupation-
+  // optimization variable), the ACTIVE window (n_active_window = 2*jk_active_pairs, or all the
+  // rest when JK_ACTIVE_PAIRS is absent -- the SQP's own fractional-occupation window, sum(n) =
+  // NELEC - 2*JK_FROZEN_PAIRS), and everything above that DEEP VIRTUAL (pinned at EXACTLY n=0,
+  // excluded), mirroring PNOF's own core/active/deep-virtual split. Both keywords default to
+  // "off" (0 frozen pairs / all remaining orbitals active), reproducing today's behavior exactly.
+  const std::size_t n_available = orbital_energies_active.size();
+  const std::size_t n_frozen = 2 * static_cast<std::size_t>(std::max(0, jk_frozen_pairs));
+  if (n_frozen > n_available) {
+    throw std::runtime_error(label + ": JK_FROZEN_PAIRS requests " + std::to_string(n_frozen) +
+                              " frozen spin-orbitals/spinors but only " +
+                              std::to_string(n_available) + " are available");
+  }
+  const std::size_t n_active_window = jk_active_pairs >= 0
+                                           ? 2 * static_cast<std::size_t>(jk_active_pairs)
+                                           : n_available - n_frozen;
+  if (n_frozen + n_active_window > n_available) {
+    throw std::runtime_error(
+        label + ": JK_FROZEN_PAIRS + JK_ACTIVE_PAIRS requests " +
+        std::to_string(n_frozen + n_active_window) + " spin-orbitals/spinors but only " +
+        std::to_string(n_available) + " are available");
+  }
+  const double n_electrons_active = n_electrons - static_cast<double>(n_frozen);
+  if (!(n_electrons_active > 0.0 && n_electrons_active < static_cast<double>(n_active_window))) {
+    throw std::runtime_error(
+        label + ": JK_FROZEN_PAIRS/JK_ACTIVE_PAIRS leave NELEC - 2*JK_FROZEN_PAIRS = " +
+        std::to_string(n_electrons_active) +
+        ", which must be strictly between 0 and 2*JK_ACTIVE_PAIRS = " +
+        std::to_string(n_active_window));
+  }
+  const std::vector<double> orbital_energies_window(
+      orbital_energies_active.begin() + static_cast<std::ptrdiff_t>(n_frozen),
+      orbital_energies_active.begin() + static_cast<std::ptrdiff_t>(n_frozen + n_active_window));
+  const std::size_t frozen_base = n_inactive_below;
+  n_inactive_below = frozen_base + n_frozen;  // shift: the active window's own base from here on.
+
   const auto occupation_init_method = rerdmft::parseOccupationInitMethod(occupation_init_name);
   const auto occupations_active = rerdmft::generateInitialOccupations(
-      occupation_init_method, orbital_energies_active, n_electrons, temperature_kelvin,
+      occupation_init_method, orbital_energies_window, n_electrons_active, temperature_kelvin,
       kOccupationEpsilon);
   logTiming(label + " initial occupations generated (OCCUPATION_INIT " + occupation_init_name +
                 ", FUNCTIONAL " + functional_name + ")",
             t_start, t_checkpoint, timing_records);
 
   std::vector<double> occupations(n_total, 0.0);
+  for (std::size_t i = 0; i < n_frozen; ++i) occupations[frozen_base + i] = 1.0;
   for (std::size_t i = 0; i < occupations_active.size(); ++i) {
     occupations[n_inactive_below + i] = occupations_active[i];
   }
@@ -2201,12 +2244,13 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
   // box throughout (see Occ_opt/OccupationInit.h).
   const std::size_t n_active = occupations_active.size();
   const rerdmft::Matrix<double> a_eq(1, n_active, 1.0);
-  const std::vector<double> b_eq = {n_electrons};
+  const std::vector<double> b_eq = {n_electrons_active};
   const std::vector<double> lb(n_active, kOccupationEpsilon);
   const std::vector<double> ub(n_active, 1.0 - kOccupationEpsilon);
 
   auto embed = [&](const std::vector<double>& active) {
     std::vector<double> full(n_total, 0.0);
+    for (std::size_t i = 0; i < n_frozen; ++i) full[frozen_base + i] = 1.0;
     for (std::size_t i = 0; i < n_active; ++i) full[n_inactive_below + i] = active[i];
     return full;
   };
@@ -2284,7 +2328,7 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
     const double optimized_total_energy = sqp_result.objective_value + nuclear_repulsion_energy;
     out << "    " << (sqp_result.converged ? "Converged" : "Did NOT converge") << " after "
         << sqp_result.iterations << " iteration(s)\n";
-    out << "    Optimized sum of occupations (expect " << n_electrons
+    out << "    Optimized sum of occupations (expect " << n_electrons_active
         << "): " << std::setprecision(10) << optimized_occupation_sum << std::setprecision(6)
         << "\n";
     out << "    Optimized electronic energy: " << std::setprecision(10)
@@ -2304,6 +2348,14 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
            "orbital/spinor space, fixed 5 decimals):\n";
     out << std::fixed << std::setprecision(5);
     double displayed_occupation_sum = 0.0;
+    // JK_FROZEN_PAIRS: the frozen block, pinned at exactly 1 (never an SQP variable) -- PNOF's
+    // own "core geminal ... (frozen)" style.
+    for (std::size_t i = 0; i + 1 < n_frozen; i += 2) {
+      const std::size_t g0 = frozen_base + i, g1 = g0 + 1;
+      out << "      " << std::setw(6) << g0 << std::setw(12) << 1.0 << std::setw(10) << g1
+          << std::setw(12) << 1.0 << "  (frozen)\n";
+      displayed_occupation_sum += 2.0;
+    }
     if (label == "C4_DHF" || label == "X2C_HF") {
       // Two columns, even/odd side by side -- SAME adjacent-index
       // Kramers-pair convention already used elsewhere in this file
@@ -3020,7 +3072,7 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
       } else {
         try {
           full_result = rerdmft::runFullOptimizationJk<T>(h, eri, embed(sqp_result.x), sqp_result.x, functional, f_l,
-                                            n_electrons, n_total, n_inactive_below, n_active,
+                                            n_electrons_active, n_total, n_frozen, n_inactive_below, n_active,
                                             /*two_columns=*/label == "X2C_HF", full_opt,
                                             /*kramers_restricted=*/label == "X2C_HF",
                                             nuclear_repulsion_energy, out,
@@ -4448,6 +4500,7 @@ int main(int argc, char** argv) {
         } else {
           nonrel_functional_report = buildFunctionalReport(
               "NON_REL", h_spin, eri_spin, nonrel_orbital_energies_spin, 0, input.n_electrons(),
+              input.jk_frozen_pairs(), input.jk_active_pairs(),
               input.temperature(), input.functional(), input.occupation_init(),
               nonrel_hf_result.nuclear_repulsion_energy, input.debug(), input.verbose(),
               input.hessian_functional(), fullOptSettings(input), t_start, t_checkpoint, timing_records,
@@ -4739,7 +4792,8 @@ int main(int argc, char** argv) {
         } else {
           x2c_functional_report = buildFunctionalReport(
               "X2C_HF", h_x2c_mo, eri_x2c_mo, x2c_hf_result.orbital_energies, 0,
-              input.n_electrons(), input.temperature(), input.functional(),
+              input.n_electrons(), input.jk_frozen_pairs(), input.jk_active_pairs(),
+              input.temperature(), input.functional(),
               input.occupation_init(), x2c_hf_result.nuclear_repulsion_energy, input.debug(),
               input.verbose(), input.hessian_functional(), fullOptSettings(input), t_start, t_checkpoint,
               timing_records, &x2c_restart);
@@ -5018,7 +5072,8 @@ int main(int argc, char** argv) {
         } else {
           dhf_functional_report = buildFunctionalReport(
               "C4_DHF", h_mo, eri_mo, dhf_orbital_energies_positive, n_negative,
-              input.n_electrons(), input.temperature(), input.functional(),
+              input.n_electrons(), input.jk_frozen_pairs(), input.jk_active_pairs(),
+              input.temperature(), input.functional(),
               input.occupation_init(), dhf_result.nuclear_repulsion_energy, input.debug(),
               input.verbose(), input.hessian_functional(), fullOptSettings(input), t_start, t_checkpoint,
               timing_records);

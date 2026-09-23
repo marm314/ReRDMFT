@@ -274,6 +274,34 @@ class Input {
   // functional() is (Input.h stays independent of Occ_opt). Only
   // meaningful when has_functional() is true.
   const std::string& occupation_init() const { return occupation_init_; }
+  // Optional; defaults to 0 when JK_FROZEN_PAIRS is absent. Only meaningful for a JK-only
+  // FUNCTIONAL (Occ_opt/JK_only.h) -- a PNOF name uses pnof_subspaces()/pnof_coupling() instead,
+  // this is ignored (but still validated) for those. Freezes the 2*JK_FROZEN_PAIRS LOWEST-energy
+  // spin-orbitals/spinors (aufbau order, the same convention as PNOF's own core/subspace
+  // partitioning) at EXACTLY occupation 1 -- a genuine constant, never an occupation-optimization
+  // variable, not merely an initial guess -- leaving the rest of the SCF's orbitals (positive-
+  // energy branch only, for C4_SPINOR: the negative-energy branch stays excluded exactly as
+  // today, counted separately from this window) split between jk_active_pairs() below (the
+  // fractional-occupation window) and, above that, a deep-virtual block pinned at exactly 0. The
+  // default 0 reproduces today's behavior exactly (every orbital competes for occupation). See
+  // jk_active_pairs() for the companion keyword and the validation the two are checked together
+  // with (main.cpp, where the basis size needed to validate them is known).
+  int jk_frozen_pairs() const { return jk_frozen_pairs_; }
+  // Optional; defaults to -1 (sentinel: "all remaining orbitals", today's behavior) when
+  // JK_ACTIVE_PAIRS is absent. Only meaningful for a JK-only FUNCTIONAL, together with
+  // jk_frozen_pairs() above: the NEXT 2*JK_ACTIVE_PAIRS spin-orbitals/spinors by energy (right
+  // above the 2*JK_FROZEN_PAIRS frozen ones) are the fractional-occupation SQP window, with
+  // sum(n) = NELEC - 2*JK_FROZEN_PAIRS; every orbital above that window is deep virtual, pinned
+  // at exactly 0 (excluded from the SQP entirely), mirroring PNOF's own deep-core/deep-virtual
+  // split. Counted in PAIRS (spin-orbital/spinor's own degenerate partner, exactly
+  // pnof_subspaces()'s own convention) rather than individual electrons/orbitals so that no
+  // separate "must be even" validation is ever needed -- 2*JK_FROZEN_PAIRS and 2*JK_ACTIVE_PAIRS
+  // are even by construction. Must be at least 1 when explicitly given (an active window of zero
+  // pairs, i.e. no fractional occupation at all, is not a meaningful JK-only calculation);
+  // basis-size feasibility (2*(JK_FROZEN_PAIRS+JK_ACTIVE_PAIRS) <= the available orbitals, and
+  // 0 < NELEC - 2*JK_FROZEN_PAIRS < 2*JK_ACTIVE_PAIRS for an interior-feasible SQP box) is
+  // checked in main.cpp, once the basis size is known.
+  int jk_active_pairs() const { return jk_active_pairs_; }
   // Optional; defaults to 1 when PNOF_SUBSPACES is absent. How many
   // independent PNOF-style (Piris) coupling subspaces to build
   // (Occ_opt/Orb_subspaces.h), one per occupied orbital PAIR outward
@@ -377,6 +405,8 @@ class Input {
   bool has_functional_ = false;
   double temperature_ = 1000.0;
   std::string occupation_init_ = "PROPORTIONAL";
+  int jk_frozen_pairs_ = 0;
+  int jk_active_pairs_ = -1;
   int pnof_subspaces_ = 1;
   int pnof_coupling_ = 2;
   bool sqp_pnof_occ_ = false;

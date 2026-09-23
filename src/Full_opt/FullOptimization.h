@@ -131,12 +131,18 @@ struct RdmftModel {
 
 // JK_only functionals (Occ_opt/JK_only.h): SQP over the active occupations
 // with sum(n) = n_electrons (Occ_opt/OccupationEnergy.h + Utils/SQP.h),
-// window [n_inactive_below, n_inactive_below + n_active).
+// window [n_inactive_below, n_inactive_below + n_active). `n_frozen` (JK_FROZEN_PAIRS*2):
+// the n_frozen spin-orbitals/spinors immediately BELOW n_inactive_below (i.e. indices
+// [n_inactive_below - n_frozen, n_inactive_below)) are pinned at EXACTLY occupation 1 (a genuine
+// constant, never an SQP variable) rather than the caller's own negative-energy-branch/deep-virtual
+// exclusion below THAT -- `n_electrons` here is already NELEC minus those 2*JK_FROZEN_PAIRS frozen
+// electrons (the caller's job: main.cpp's buildFunctionalReport computes and validates both).
 // `two_columns`: print the occupations as even/odd Kramers pairs side by side (X2C),
 // otherwise one orbital per line (NON_REL).
 template <typename T, typename Eri = Tensor4<T>>
 RdmftModel<T, Eri> makeJkOnlyModel(JkFunctional functional, std::size_t f_l, double n_electrons,
-                              std::size_t n_total, std::size_t n_inactive_below,
+                              std::size_t n_total, std::size_t n_frozen,
+                              std::size_t n_inactive_below,
                               std::size_t n_active, bool two_columns = false);
 
 // PNOF functionals (Occ_opt/PNOFs.h): `geminals`/`n_core` as built by
@@ -207,7 +213,8 @@ FullOptResult runFullOptimizationJk(const Matrix<T>& h, const Tensor4<T>& eri,
                                     const std::vector<double>& occupations,
                                     const std::vector<double>& state, JkFunctional functional,
                                     std::size_t f_l, double n_electrons, std::size_t n_total,
-                                    std::size_t n_inactive_below, std::size_t n_active,
+                                    std::size_t n_frozen, std::size_t n_inactive_below,
+                                    std::size_t n_active,
                                     bool two_columns, const FullOptSettings& settings,
                                     bool kramers_restricted, double nuclear_repulsion_energy,
                                     std::ostream& log,

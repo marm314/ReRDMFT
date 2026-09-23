@@ -1,0 +1,24 @@
+# Example ReRDMFT input file: water, STO-3G, MULLER (JK-only) functional, with JK_FROZEN_PAIRS
+# and JK_ACTIVE_PAIRS -- restricts the fractional-occupation SQP to a small active window instead
+# of letting every spin-orbital compete for occupation (compare water_muller.inp, same system with
+# neither keyword set).
+#
+# NON_REL has 14 spin-orbitals (7 spatial AOs x 2 spins), 10 electrons. JK_FROZEN_PAIRS 1 freezes
+# the 2 LOWEST-energy spin-orbitals (the O 1s core, essentially) at EXACTLY occupation 1 -- never
+# an SQP variable. JK_ACTIVE_PAIRS 5 makes the NEXT 10 spin-orbitals by energy the fractional-
+# occupation window (sum(n) = NELEC - 2*JK_FROZEN_PAIRS = 8, strictly inside (0, 10) as the SQP's
+# box needs); the remaining 14 - 2 - 10 = 2 spin-orbitals (the highest-energy virtuals) are pinned
+# at EXACTLY 0 (deep virtual, excluded from the SQP entirely) -- mirroring PNOF's own
+# core/active/deep-virtual split (see PNOF_SUBSPACES/PNOF_COUPLING).
+NELEC 10
+BASIS water-sto-3g.gbs
+NON_RELATIVISTIC TRUE
+FUNCTIONAL MULLER
+JK_FROZEN_PAIRS 1
+JK_ACTIVE_PAIRS 5
+
+GEOMETRY
+O   0.000000   0.000000   0.000000
+H   0.000000   0.757000   0.586000
+H   0.000000  -0.757000   0.586000
+END
