@@ -1,0 +1,23 @@
+# Example ReRDMFT input file: stretched LiH (5 Angstrom), 6-31G, GNOF, FULL_OPTIMIZATION TRUE with
+# CHOLESKY TRUE -- the Cholesky counterpart of lih_c4_gnof_full_optimization_dissociated.inp (X2C and
+# C4_SPINOR in one run, C4_SPINOR rotations restricted to the positive-energy spinors). It doubles as a
+# regression test: with Cholesky-decomposed integrals the 4-component SCF used to drift into a
+# Kramers-broken solution here (E = -7.930 Ha); the Kramers-restricted SCF keeps it time-reversal
+# symmetric, and the energies match the dense example (X2C -7.932412191, C4 -7.931505041 Ha).
+# Use DIIS FALSE (linear mixing) as in the dense example.
+NELEC 4
+BASIS lih-6-31g.gbs
+X2C TRUE
+C4_SPINOR TRUE
+FUNCTIONAL GNOF
+PNOF_SUBSPACES 2
+PNOF_COUPLING 2
+FULL_OPTIMIZATION TRUE
+MACRO_ENERGY_TOLERANCE 1e-10
+DIIS FALSE
+CHOLESKY TRUE
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   5.000000
+END
