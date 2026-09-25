@@ -5,6 +5,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <iostream>
+#include <limits>
+#include <numeric>
+#include <string>
 #include <stdexcept>
 #include <vector>
 
@@ -222,7 +226,7 @@ void subtractConjTransGemm(const std::complex<double>* lmat, std::size_t nchol, 
 
 template <typename T>
 std::vector<Matrix<T>> choleskyDecomposeEri(const Tensor4<T>& eri, double threshold,
-                                             std::size_t max_vectors) {
+                                             std::size_t max_vectors, std::size_t max_batch) {
   const std::size_t n = eri.dim0();
   if (eri.dim1() != n || eri.dim2() != n || eri.dim3() != n) {
     throw std::runtime_error("choleskyDecomposeEri: eri is not square in all four dimensions");
@@ -281,7 +285,7 @@ std::vector<Matrix<T>> choleskyDecomposeEri(const Tensor4<T>& eri, double thresh
   // speedup -- both remain exact to `threshold` regardless, since pivot
   // ORDER only affects Nchol (efficiency), never the accuracy of the
   // resulting factorization.
-  constexpr std::size_t kMaxQualified = 64;
+  const std::size_t kMaxQualified = std::max<std::size_t>(1, max_batch);
   constexpr double kSpanFactor = 1e-2;
 
   std::vector<T> lmat;  // (nchol_so_far x n2), rows = vectors found so far
@@ -366,6 +370,11 @@ std::vector<Matrix<T>> choleskyDecomposeEri(const Tensor4<T>& eri, double thresh
     std::vector<bool> built(batch_size, false);
     const std::size_t batch_start = nchol_so_far;
     std::size_t built_count = 0;
+    // Largest CURRENT residual diagonal over all (A,B) (not just this batch's candidates); refreshed
+    // after every vector below. A pivot much smaller than it must NOT be taken (see the stop test
+    // in the loop): dividing by sqrt of a small pivot amplifies the roundoff in the tensor's rows
+    // by 1/sqrt(pivot), which the batch's frozen candidate list would otherwise allow.
+    double current_max = dmax;
 
     while (built_count < batch_size && nchol_so_far < max_iterations) {
       std::size_t jstar = batch_size;
@@ -379,6 +388,13 @@ std::vector<Matrix<T>> choleskyDecomposeEri(const Tensor4<T>& eri, double thresh
             "is not Hermitian positive semi-definite");
       }
       if (qdiag[jstar] < threshold) break;
+      // Batch qualification is decided at the batch START from the then-largest diagonal; the
+      // diagonal keeps shrinking as the batch's vectors are built, so re-test against the CURRENT
+      // largest one and end the batch (the outer loop re-qualifies from scratch) once the best
+      // remaining candidate is no longer within kSpanFactor of it. Without this the batch drifts
+      // to greedy-violating small pivots and loses accuracy at tight thresholds (CO/cc-pVDZ X2C:
+      // threshold 1e-10 gave a reconstruction error of 8e-8, and 1e-14 an error of ~6).
+      if (built_count > 0 && qdiag[jstar] < kSpanFactor * current_max) break;
 
       std::copy(mtilde.data() + jstar * n2, mtilde.data() + jstar * n2 + n2, row.data());
       if (built_count > 0) {
@@ -396,9 +412,11 @@ std::vector<Matrix<T>> choleskyDecomposeEri(const Tensor4<T>& eri, double thresh
       // the defining sum's conj(V_k(C,D)) factor needs this extra
       // conjugate on top of dividing by sqrt(pivot).
       const double inv_sqrt_pivot = 1.0 / std::sqrt(qdiag[jstar]);
+      current_max = -std::numeric_limits<double>::infinity();
       for (std::size_t p = 0; p < n2; ++p) {
         row[p] = conjugate(row[p]) * T(inv_sqrt_pivot);
         diag[p] -= realPart(row[p] * conjugate(row[p]));
+        current_max = std::max(current_max, diag[p]);
       }
       lmat.insert(lmat.end(), row.begin(), row.end());
       built[jstar] = true;
@@ -418,6 +436,75 @@ std::vector<Matrix<T>> choleskyDecomposeEri(const Tensor4<T>& eri, double thresh
     Matrix<T> v(n, n);
     std::copy(lmat.data() + k * n2, lmat.data() + (k + 1) * n2, v.data());
     vectors.push_back(std::move(v));
+  }
+  return vectors;
+}
+
+namespace {
+// max |sum_L V_L(A,B) conj(V_L(C,D)) - eri(A,B,C,D)| over a strided sample of at most `max_samples`
+// elements (all of them for a small tensor). The stride is made coprime to n^2 so it cannot alias
+// with the index structure. Rows W(AB, :) of the (n^2 x nchol) vector table make each sample one
+// contiguous dot product.
+template <typename T>
+double sampledReconstructionError(const Tensor4<T>& eri, const std::vector<Matrix<T>>& vectors,
+                                  std::size_t max_samples) {
+  const std::size_t n = eri.dim0();
+  const std::size_t n2 = n * n;
+  const std::size_t nchol = vectors.size();
+  std::vector<T> w(n2 * nchol);
+  for (std::size_t l = 0; l < nchol; ++l) {
+    const T* v = vectors[l].data();
+    for (std::size_t ab = 0; ab < n2; ++ab) w[ab * nchol + l] = v[ab];
+  }
+  const std::size_t total = n2 * n2;
+  std::size_t stride = total > max_samples ? total / max_samples + 1 : 1;
+  while (stride > 1 && std::gcd(stride, n2) != 1) ++stride;
+  const std::size_t n_samples = (total + stride - 1) / stride;
+  double worst = 0.0;
+#pragma omp parallel for reduction(max : worst) schedule(static)
+  for (std::size_t k = 0; k < n_samples; ++k) {
+    const std::size_t flat = k * stride;
+    const T* left = &w[(flat / n2) * nchol];
+    const T* right = &w[(flat % n2) * nchol];
+    T sum{};
+    for (std::size_t l = 0; l < nchol; ++l) sum += left[l] * conjugate(right[l]);
+    worst = std::max(worst, std::abs(std::complex<double>(sum - eri.data()[flat])));
+  }
+  return worst;
+}
+}  // namespace
+
+template <typename T>
+std::vector<Matrix<T>> choleskyDecomposeEriChecked(const Tensor4<T>& eri, double threshold,
+                                                    CholeskyCheckReport* report) {
+  const double tolerance = 100.0 * threshold + 1e-9;
+  constexpr std::size_t kSamples = 4000000;
+  std::vector<Matrix<T>> vectors;
+  double worst = 0.0;
+  std::size_t used = 0;
+  bool retried = false;
+  for (const std::size_t batch : {std::size_t{64}, std::size_t{8}, std::size_t{1}}) {
+    vectors = choleskyDecomposeEri(eri, threshold, 0, batch);
+    worst = sampledReconstructionError(eri, vectors, kSamples);
+    used = batch;
+    if (worst <= tolerance) break;
+    retried = true;
+    std::cerr << "warning: Cholesky decomposition (batch " << batch << ", threshold " << threshold
+              << ") reconstructs the integrals only to " << worst << " (tolerance " << tolerance << ")"
+              << (batch > 1 ? "; retrying with a smaller batch\n" : "\n");
+  }
+  if (report != nullptr) {
+    report->batch_used = used;
+    report->n_vectors = vectors.size();
+    report->max_error = worst;
+    report->tolerance = tolerance;
+    report->retried = retried;
+  }
+  if (worst > tolerance) {
+    throw std::runtime_error(
+        "choleskyDecomposeEriChecked: the Cholesky vectors do not reproduce the two-electron integrals "
+        "(max error " + std::to_string(worst) + " > tolerance " + std::to_string(tolerance) +
+        ") even with a one-pivot-at-a-time decomposition");
   }
   return vectors;
 }
@@ -444,7 +531,7 @@ Tensor4<T> choleskyReconstructEri(const std::vector<Matrix<T>>& vectors) {
 
 template <typename T>
 Tensor4<T> choleskyTransformEri(const Tensor4<T>& eri, const Matrix<T>& c, double threshold) {
-  const auto vectors = choleskyDecomposeEri(eri, threshold);
+  const auto vectors = choleskyDecomposeEriChecked(eri, threshold);
   const auto transformed = choleskyTransformVectors(vectors, c);
   return choleskyReconstructEri(transformed);
 }
@@ -468,16 +555,20 @@ std::vector<Matrix<std::complex<double>>> promoteVectorsToComplex(
 Tensor4<std::complex<double>> choleskyTransformEriMixed(const Tensor4<double>& eri,
                                                          const Matrix<std::complex<double>>& c,
                                                          double threshold) {
-  const auto real_vectors = choleskyDecomposeEri(eri, threshold);
+  const auto real_vectors = choleskyDecomposeEriChecked(eri, threshold);
   const auto complex_vectors = promoteVectorsToComplex(real_vectors);
   const auto transformed = choleskyTransformVectors(complex_vectors, c);
   return choleskyReconstructEri(transformed);
 }
 
+template std::vector<Matrix<double>> choleskyDecomposeEriChecked(const Tensor4<double>&, double,
+                                                                   CholeskyCheckReport*);
+template std::vector<Matrix<std::complex<double>>> choleskyDecomposeEriChecked(
+    const Tensor4<std::complex<double>>&, double, CholeskyCheckReport*);
 template std::vector<Matrix<double>> choleskyDecomposeEri(const Tensor4<double>&, double,
-                                                            std::size_t);
+                                                            std::size_t, std::size_t);
 template std::vector<Matrix<std::complex<double>>> choleskyDecomposeEri(
-    const Tensor4<std::complex<double>>&, double, std::size_t);
+    const Tensor4<std::complex<double>>&, double, std::size_t, std::size_t);
 template std::vector<Matrix<double>> choleskyTransformVectors(const std::vector<Matrix<double>>&,
                                                                 const Matrix<double>&);
 template std::vector<Matrix<std::complex<double>>> choleskyTransformVectors(

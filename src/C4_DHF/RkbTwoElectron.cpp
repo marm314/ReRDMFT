@@ -329,7 +329,7 @@ RkbTwoElectronTensor rkbTwoElectronIntegrals(const std::vector<BasisFunction>& l
     // (no swapElectronPairs shortcut needed: computing all four y1,y2
     // combinations this way is already O(Nchol*n_large^4), cheaper than
     // even one direct quarter-transform of the untouched ss_ss tensor).
-    const auto vectors = choleskyDecomposeEri(ss_ss, cholesky_threshold);
+    const auto vectors = choleskyDecomposeEriChecked(ss_ss, cholesky_threshold);
     std::vector<Matrix<std::complex<double>>> w[2];
     for (std::size_t y = 0; y < 2; ++y) {
       w[y].reserve(vectors.size());

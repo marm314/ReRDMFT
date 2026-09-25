@@ -115,9 +115,37 @@ namespace rerdmft {
 // than a small numerical-noise allowance is ever encountered (a
 // genuine sign of a non-Hermitian-PSD input, e.g. a bug elsewhere, NOT
 // swallowed silently).
+//
+// `max_batch`: the largest number of pivots qualified together in one batch (default 64; 1 is the
+// classic one-pivot-at-a-time greedy algorithm, slowest but the most robust). Batch pivots are kept
+// within a factor 1e-2 of the CURRENT largest residual diagonal, but a tensor with roundoff-level
+// non-PSD noise (~1e-13) can still lose accuracy at tight thresholds with large batches; callers
+// that verify the reconstruction (FullOptimization.cpp's makeCholeskyEri) retry with a smaller one.
 template <typename T>
 std::vector<Matrix<T>> choleskyDecomposeEri(const Tensor4<T>& eri, double threshold = 1e-10,
-                                             std::size_t max_vectors = 0);
+                                             std::size_t max_vectors = 0, std::size_t max_batch = 64);
+
+// What choleskyDecomposeEriChecked did (all fields optional to read).
+struct CholeskyCheckReport {
+  std::size_t batch_used = 0;        // the max_batch of the accepted decomposition (64, 8 or 1)
+  std::size_t n_vectors = 0;
+  double max_error = 0.0;            // max |reconstruction - eri| over the sampled elements
+  double tolerance = 0.0;            // 100*threshold + 1e-9
+  bool retried = false;              // true if the default (fastest) batch missed the tolerance
+};
+
+// choleskyDecomposeEri WITH a reconstruction check and a fallback: decomposes with the default
+// batch (64), verifies eri(A,B,C,D) = sum_L V_L(A,B) conj(V_L(C,D)) on a strided sample of at most
+// ~4e6 elements against the tolerance 100*threshold + 1e-9, and if it is missed redoes the
+// decomposition with a smaller batch (8, then 1 = classic greedy, the most robust). Throws
+// std::runtime_error if even that misses -- inaccurate integrals are never returned silently.
+// Every Cholesky step of the program that does not check the result itself goes through this
+// (see the batched-pivot instability note on choleskyDecomposeEri's max_batch). A retry is reported
+// on std::cerr. Never truncates by count (no max_vectors): the check assumes a threshold-limited
+// decomposition.
+template <typename T>
+std::vector<Matrix<T>> choleskyDecomposeEriChecked(const Tensor4<T>& eri, double threshold = 1e-10,
+                                                    CholeskyCheckReport* report = nullptr);
 
 // Transforms every Cholesky vector from its old (n_old x n_old) basis
 // into a new one:

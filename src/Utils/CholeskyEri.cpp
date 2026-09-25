@@ -14,7 +14,7 @@ inline std::complex<double> conjugate(const std::complex<double>& x) { return st
 }  // namespace
 
 template <typename T>
-CholeskyEri<T> CholeskyEri<T>::fromDense(const Tensor4<T>& eri, double threshold) {
+CholeskyEri<T> CholeskyEri<T>::fromDense(const Tensor4<T>& eri, double threshold, std::size_t max_batch) {
   const std::size_t n = eri.dim0();
   if (eri.dim1() != n || eri.dim2() != n || eri.dim3() != n) {
     throw std::runtime_error("CholeskyEri::fromDense: eri must have four equal dimensions");
@@ -25,7 +25,7 @@ CholeskyEri<T> CholeskyEri<T>::fromDense(const Tensor4<T>& eri, double threshold
     for (std::size_t b = 0; b < n; ++b)
       for (std::size_t c = 0; c < n; ++c)
         for (std::size_t d = 0; d < n; ++d) coulomb(c, a, b, d) = eri(a, b, c, d);
-  return fromVectors(choleskyDecomposeEri(coulomb, threshold));
+  return fromVectors(choleskyDecomposeEri(coulomb, threshold, 0, max_batch));
 }
 
 template <typename T>

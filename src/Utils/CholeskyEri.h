@@ -40,7 +40,8 @@ class CholeskyEri {
 
   // Decomposes a dense tensor (which must have the Hermitian symmetry <ab|cd> = conj <dc|ba> and
   // be PSD in the Coulomb grouping, as any physical two-electron tensor is).
-  static CholeskyEri fromDense(const Tensor4<T>& eri, double threshold = 1e-10);
+  // `max_batch`: see choleskyDecomposeEri (smaller = slower but more robust).
+  static CholeskyEri fromDense(const Tensor4<T>& eri, double threshold = 1e-10, std::size_t max_batch = 64);
   // From vectors V_L(x,y) (each n x n) already in the convention above.
   static CholeskyEri fromVectors(const std::vector<Matrix<T>>& vectors);
 

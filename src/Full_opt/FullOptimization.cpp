@@ -964,7 +964,7 @@ Matrix<T> generatorMatrix(std::size_t n, std::size_t p, std::size_t q, double t,
 template <typename T, typename Eri>
 bool runChecks(const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ,
                const RdmftModel<T, Eri>& model, bool kramers, const std::vector<std::size_t>& spin_partner,
-               std::ostream& log, std::size_t n_negative = 0) {
+               std::ostream& log, std::size_t n_negative = 0, bool check_hessian_diagonal = false) {
   const std::size_t n = h.rows();
   const auto pairs = lowerPairs(n, n_negative);
   bool ok = true;
@@ -1061,12 +1061,12 @@ bool runChecks(const Matrix<T>& h, const Eri& eri, const std::vector<double>& oc
     verdict(worst < 1e-6, "orbital gradient matches the energy finite difference");
   }
 
-  // (2a) NEO's Hessian-diagonal preconditioner against finite differences of the (local) gradient at
+  // (2a) (NEO only -- ADAM never uses the diagonal) NEO's Hessian-diagonal preconditioner against finite differences of the (local) gradient at
   // the same pairs: H_II = d g_I / d t_I (and, for complex spinors, H_(y_I) = d g_(y_I) / d y_I) via
   // a central difference of the gradient at the rotated integrals -- the definition NeoProblem's
   // hessianVector documents -- and against the Hessian-vector product's own I-th entry for the unit
   // vector e_I (must agree to roundoff: the diagonal is the diagonal of that very operator).
-  if (model.hessian_diagonal_dense && model.hessian_vector_dense) {
+  if (check_hessian_diagonal && model.hessian_diagonal_dense && model.hessian_vector_dense) {
     // Dense-tensor variants (identical computation; a Cholesky model's own would pay O(n_chol) per
     // element access). The Hessian-vector comparison costs one product per tested direction, so it
     // is skipped for very large rotation spaces.
@@ -1290,7 +1290,8 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
   }
   log << "  a) Validation of the ADAM / Kramers-restriction machinery on this system:\n";
   result.checks_passed =
-      runChecks<T, Eri>(h, eri, occupations, model, kramers_restricted, spin_partner, log, n_negative);
+      runChecks<T, Eri>(h, eri, occupations, model, kramers_restricted, spin_partner, log, n_negative,
+                        /*check_hessian_diagonal=*/settings.orbital_optimizer == OrbitalOptimizer::kNeo);
   if (!result.checks_passed) {
     log << "  A validation check FAILED -- the macro-iteration loop is NOT run.\n";
     return result;
@@ -1659,17 +1660,30 @@ CholeskyEri<T> makeCholeskyEri(const Tensor4<T>& eri, double threshold, std::ost
     }
     decompose_from = &sanitized;
   }
-  const CholeskyEri<T> ch = CholeskyEri<T>::fromDense(*decompose_from, threshold);
   const std::size_t n = eri.dim0();
   const std::size_t n_check = n - n_negative;
   const std::size_t total = n_check * n_check * n_check * n_check;
   const std::size_t stride = total > 20000000 ? total / 20000000 + 1 : 1;
+  // Batched pivoting (the default, fastest) can lose accuracy on a tensor with roundoff-level non-PSD
+  // noise at tight thresholds (CO/cc-pVDZ X2C at 1e-10: reconstruction error 8e-8 before the
+  // in-batch pivot guard was added): verify the reconstruction and, if it misses the tolerance,
+  // redo the decomposition with a smaller batch (64 -> 8 -> 1, the last being classic greedy).
+  const double tolerance = 100.0 * threshold + 1e-9;
+  CholeskyEri<T> ch;
   double worst = 0.0;
-  for (std::size_t flat = 0; flat < total; flat += stride) {
-    const std::size_t d = n_negative + flat % n_check, c = n_negative + (flat / n_check) % n_check,
-                       b = n_negative + (flat / (n_check * n_check)) % n_check,
-                       a = n_negative + flat / (n_check * n_check * n_check);
-    worst = std::max(worst, std::abs(std::complex<double>(ch(a, b, c, d) - eri(a, b, c, d))));
+  for (const std::size_t batch : {std::size_t{64}, std::size_t{8}, std::size_t{1}}) {
+    ch = CholeskyEri<T>::fromDense(*decompose_from, threshold, batch);
+    worst = 0.0;
+    for (std::size_t flat = 0; flat < total; flat += stride) {
+      const std::size_t d = n_negative + flat % n_check, c = n_negative + (flat / n_check) % n_check,
+                         b = n_negative + (flat / (n_check * n_check)) % n_check,
+                         a = n_negative + flat / (n_check * n_check * n_check);
+      worst = std::max(worst, std::abs(std::complex<double>(ch(a, b, c, d) - eri(a, b, c, d))));
+    }
+    if (worst <= tolerance) break;
+    log << "  Cholesky decomposition (batch " << batch << ") reconstructs the integrals only to " << std::scientific
+        << std::setprecision(2) << worst << " (tolerance " << tolerance << ")" << std::defaultfloat
+        << std::setprecision(6) << (batch > 1 ? ": retrying with a smaller batch\n" : "\n");
   }
   log << "  Cholesky decomposition of the MO integrals (Coulomb grouping, threshold " << threshold << "): "
       << ch.nVectors() << " vectors for n = " << n << " spinors (n^2 = " << n * n << ")";
@@ -1680,7 +1694,7 @@ CholeskyEri<T> makeCholeskyEri(const Tensor4<T>& eri, double threshold, std::ost
   }
   log << "; max |reconstruction - dense| = " << std::scientific << std::setprecision(2) << worst
       << std::defaultfloat << std::setprecision(6) << (stride > 1 ? " (sampled)" : "") << "\n";
-  if (worst > 100.0 * threshold + 1e-9) {
+  if (worst > tolerance) {
     throw std::runtime_error("the Cholesky vectors do not reproduce the two-electron integrals");
   }
   return ch;

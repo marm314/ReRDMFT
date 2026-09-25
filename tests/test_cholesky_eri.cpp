@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "CholeskyEri.h"
+#include "Cholesky_Decomposition.h"
 #include "HartreeExchangeGradient.h"
 #include "JK_only.h"
 #include "JkOnlyFock.h"
@@ -159,7 +160,49 @@ void testModelLayer(const std::string& label) {
   }
 }
 
+// choleskyDecomposeEriChecked: the bra-ket grouping eri(A,B,C,D) = sum_L V_L(A,B) conj(V_L(C,D)) it
+// verifies. A well-conditioned low-rank tensor passes on the first (fastest) batch without a retry;
+// a noisy rank-deficient one (tiny non-PSD roundoff, like the CO/cc-pVDZ X2C MO integrals) must come
+// out within the tolerance whichever batch it finally needed; a genuinely non-PSD tensor throws.
+template <typename T>
+void testChecked(const std::string& label) {
+  Rng rng;
+  const std::size_t n = 6, rank = 9;
+  std::vector<Matrix<T>> vec(rank, Matrix<T>(n, n, T{}));
+  for (auto& v : vec) for (std::size_t i = 0; i < n; ++i) for (std::size_t j = 0; j < n; ++j) v(i, j) = 0.3 * randomScalar<T>(rng);
+  Tensor4<T> t(n, n, n, n, T{});
+  for (std::size_t a = 0; a < n; ++a) for (std::size_t b = 0; b < n; ++b) for (std::size_t c = 0; c < n; ++c) for (std::size_t d = 0; d < n; ++d) {
+    T x{}; for (const auto& v : vec) x += v(a, b) * conjOf(v(c, d)); t(a, b, c, d) = x;
+  }
+  CholeskyCheckReport rep;
+  const auto vs = choleskyDecomposeEriChecked(t, 1e-10, &rep);
+  check(!vs.empty() && vs.size() <= rank + 1, label + ": checked decomposition finds the true low rank");
+  check(rep.max_error <= rep.tolerance && !rep.retried && rep.batch_used == 64, label + ": well-conditioned tensor passes on the default batch, error " + std::to_string(rep.max_error));
+  // Roundoff-level Hermitian noise on top of the rank-deficient tensor (1e-13, well below any threshold).
+  Tensor4<T> noisy = t;
+  Rng nrng; nrng.s = 7ULL;
+  for (std::size_t a = 0; a < n; ++a) for (std::size_t b = 0; b < n; ++b) for (std::size_t c = 0; c < n; ++c) for (std::size_t d = 0; d < n; ++d) {
+    if (a * n + b > c * n + d) continue;
+    const T e = 1e-13 * randomScalar<T>(nrng);
+    noisy(a, b, c, d) += e; if (a * n + b != c * n + d) noisy(c, d, a, b) += conjOf(e);
+  }
+  for (const double thr : {1e-8, 1e-10, 1e-12}) {
+    CholeskyCheckReport r2;
+    bool threw = false;
+    try { choleskyDecomposeEriChecked(noisy, thr, &r2); } catch (const std::exception&) { threw = true; }
+    check(!threw, label + ": noisy rank-deficient tensor decomposes within tolerance at threshold " + std::to_string(thr));
+  }
+  // Not PSD: a large negative diagonal must be rejected (throws), not returned as garbage.
+  Tensor4<T> bad = t;
+  for (std::size_t a = 0; a < n; ++a) for (std::size_t b = 0; b < n; ++b) bad(a, b, a, b) = -1.0;
+  bool threw = false;
+  try { choleskyDecomposeEriChecked(bad, 1e-10); } catch (const std::exception&) { threw = true; }
+  check(threw, label + ": a non-PSD tensor is rejected");
+}
+
 int main() {
+  try { testChecked<double>("checked (real)"); } catch (const std::exception& e) { std::cout << "checked real threw: " << e.what() << "\n"; ++g_failures; ++g_checks; }
+  try { testChecked<C>("checked (complex)"); } catch (const std::exception& e) { std::cout << "checked complex threw: " << e.what() << "\n"; ++g_failures; ++g_checks; }
   try { testType<double>("real"); } catch (const std::exception& e) { std::cout << "real threw: " << e.what() << "\n"; ++g_failures; ++g_checks; }
   try { testType<C>("complex"); } catch (const std::exception& e) { std::cout << "complex threw: " << e.what() << "\n"; ++g_failures; ++g_checks; }
   try { testModelLayer<double>("model layer (real)"); } catch (const std::exception& e) { std::cout << "model layer real threw: " << e.what() << "\n"; ++g_failures; ++g_checks; }
