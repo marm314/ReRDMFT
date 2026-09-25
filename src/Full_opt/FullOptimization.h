@@ -127,6 +127,14 @@ struct RdmftModel {
   std::function<std::vector<double>(const Matrix<T>&, const Tensor4<T>&, const std::vector<double>&,
                                      const std::vector<double>&)>
       hessian_vector_dense;
+  // The DIAGONAL of the Hessian `hessian_vector` applies (size n_pairs for real T, 2*n_pairs -- joint
+  // [t;y] -- for complex T), O(n_pairs) element evaluations. NEO's Davidson preconditioner
+  // (NeoProblem::hessianDiagonal); `hessian_diagonal_dense` is the always-Tensor4 twin used with
+  // NeoOrbitalProblem's dense-tensor cache, exactly like `hessian_vector_dense`.
+  std::function<std::vector<double>(const Matrix<T>&, const Eri&, const std::vector<double>&)>
+      hessian_diagonal;
+  std::function<std::vector<double>(const Matrix<T>&, const Tensor4<T>&, const std::vector<double>&)>
+      hessian_diagonal_dense;
 };
 
 // JK_only functionals (Occ_opt/JK_only.h): SQP over the active occupations

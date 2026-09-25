@@ -12,6 +12,7 @@
 #include "ADAM.h"
 #include "CholeskyEri.h"
 #include "HartreeExchangeGradient.h"
+#include "HartreeExchangeHessian.h"
 #include "JkOnlyFock.h"
 #include "JkOnlyHessian.h"
 #include "KramersPairing.h"
@@ -183,6 +184,30 @@ namespace {
 // instantiation is what NeoOrbitalProblem's dense-tensor CACHE (see its own comment) calls for a
 // Cholesky-vector model, avoiding CholeskyEri::operator()'s O(Nchol)-per-element cost on every one
 // of the many Hessian-vector products a single Newton step's Davidson solve needs.
+// Diagonal of the matrix jkOnlyHessianVectorImpl applies (NEO's Davidson preconditioner): real T
+// -> jkOnlyHessianElement(p,q,p,q) (symmetrization 0.5(e_ij+e_ji) is the element itself at I = J);
+// complex T -> the joint [t;y] diagonal, size 2*n_pairs.
+template <typename T, typename EriT>
+std::vector<double> jkOnlyHessianDiagonalImpl(JkFunctional functional, std::size_t f_l,
+                                              const std::vector<Pair>& pair_indices,
+                                              const Matrix<T>& h, const EriT& eri,
+                                              const std::vector<double>& occ) {
+  const auto hc = jkHartreeCoupling(functional, occ, f_l);
+  const auto xc = jkExchangeCoupling(functional, occ, f_l);
+  if constexpr (std::is_same_v<T, double>) {
+    const std::size_t n_pairs = pair_indices.size();
+    std::vector<double> d(n_pairs, 0.0);
+#pragma omp parallel for
+    for (std::size_t i = 0; i < n_pairs; ++i) {
+      const auto& [p, q] = pair_indices[i];
+      d[i] = jkOnlyHessianElement(h, eri, occ, hc, xc, p, q, p, q);
+    }
+    return d;
+  } else {
+    return jkOnlyJointHessianDiagonal(h, eri, occ, hc, xc, pair_indices);
+  }
+}
+
 template <typename T, typename EriT>
 std::vector<double> jkOnlyHessianVectorImpl(JkFunctional functional, std::size_t f_l,
                                             const std::vector<Pair>& pair_indices,
@@ -217,9 +242,37 @@ std::vector<double> jkOnlyHessianVectorImpl(JkFunctional functional, std::size_t
   }
 }
 
+// Diagonal of the matrix pnofHessianVectorImpl applies -- see jkOnlyHessianDiagonalImpl. `full`/
+// `pair_of` are the caller's cached 2-RDM matrices (same cache the Hessian-vector product uses).
+template <typename T, typename EriT>
+std::vector<double> pnofHessianDiagonalImpl(PnofFunctional functional,
+                                            const std::vector<PnofGeminal>& geminals,
+                                            const PnofFullTwoRdm& full,
+                                            const std::vector<std::size_t>& pair_of, bool relativistic,
+                                            const std::vector<Pair>& pair_indices, const Matrix<T>& h,
+                                            const EriT& eri, const std::vector<double>& occ) {
+  const auto fock = pnofFockMatrix(functional, h, eri, geminals, occ, relativistic);
+  if constexpr (std::is_same_v<T, double>) {
+    const std::size_t n_pairs = pair_indices.size();
+    std::vector<double> d(n_pairs, 0.0);
+#pragma omp parallel for
+    for (std::size_t i = 0; i < n_pairs; ++i) {
+      const auto& [p, q] = pair_indices[i];
+      d[i] = hartreeExchangeHessianElement(h, eri, occ, full.two_rdm_h, full.two_rdm_x, fock, p, q, p, q,
+                                           pair_of, full.two_rdm_l1, full.two_rdm_l2);
+    }
+    return d;
+  } else {
+    return hartreeExchangeJointHessianDiagonal(h, eri, occ, full.two_rdm_h, full.two_rdm_x, fock, pair_indices,
+                                               pair_of, full.two_rdm_l1, full.two_rdm_l2);
+  }
+}
+
 template <typename T, typename EriT>
 std::vector<double> pnofHessianVectorImpl(PnofFunctional functional,
                                           const std::vector<PnofGeminal>& geminals,
+                                          const PnofFullTwoRdm& full,
+                                          const std::vector<std::size_t>& pair_of,
                                           bool relativistic, const std::vector<Pair>& pair_indices,
                                           const Matrix<T>& h, const EriT& eri,
                                           const std::vector<double>& occ,
@@ -237,8 +290,13 @@ std::vector<double> pnofHessianVectorImpl(PnofFunctional functional,
       double acc = 0.0;
       for (std::size_t j = 0; j < n_pairs; ++j) {
         const auto& [r, s] = pair_indices[j];
-        const double e_ij = pnofHessianElement(functional, h, eri, geminals, occ, relativistic, fock, p, q, r, s);
-        const double e_ji = pnofHessianElement(functional, h, eri, geminals, occ, relativistic, fock, r, s, p, q);
+        // `full`/`pair_of` are built ONCE per occupation vector (the caller's cache) -- rebuilding
+        // them inside pnofHessianElement for each of the 2*n_pairs^2 elements cost about half of
+        // every Hessian-vector product.
+        const double e_ij = hartreeExchangeHessianElement(h, eri, occ, full.two_rdm_h, full.two_rdm_x, fock,
+                                                          p, q, r, s, pair_of, full.two_rdm_l1, full.two_rdm_l2);
+        const double e_ji = hartreeExchangeHessianElement(h, eri, occ, full.two_rdm_h, full.two_rdm_x, fock,
+                                                          r, s, p, q, pair_of, full.two_rdm_l1, full.two_rdm_l2);
         acc += 0.5 * (e_ij + e_ji) * v[j];
       }
       w[i] = acc;
@@ -347,6 +405,12 @@ RdmftModel<T, Eri> makeJkOnlyModel(JkFunctional functional, std::size_t f_l, dou
                                      const std::vector<double>& occ, const std::vector<double>& v) {
       return jkOnlyHessianVectorImpl(functional, f_l, pair_indices, h, eri, occ, v);
     };
+    model.hessian_diagonal = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ) {
+      return jkOnlyHessianDiagonalImpl(functional, f_l, pair_indices, h, eri, occ);
+    };
+    model.hessian_diagonal_dense = [=](const Matrix<T>& h, const Tensor4<T>& eri, const std::vector<double>& occ) {
+      return jkOnlyHessianDiagonalImpl(functional, f_l, pair_indices, h, eri, occ);
+    };
   }
   // Kramers/spin pairs within the active window -- SAME convention and SAME reasoning as
   // main.cpp's buildFunctionalReport (its own `state` is exactly this function's reduced
@@ -453,14 +517,41 @@ RdmftModel<T, Eri> makePnofModel(PnofFunctional functional, std::vector<PnofGemi
     // Same requirement as JK_only's own comment: must match RotationProblem/NeoOrbitalProblem's
     // actual (possibly n_negative-restricted, C4_DHF only) pair list exactly.
     const auto pair_indices = lowerPairs(n_total, n_negative);
+    // The 2-RDM matrices (two_rdm_h/x/l1/l2) depend only on the occupations, which are FIXED during
+    // an orbital-optimization step: build them once per occupation vector and reuse them for every
+    // Hessian-vector product (each Davidson iteration of every Newton step) instead of per element.
+    struct TwoRdmCache {
+      std::vector<double> occ;
+      PnofFullTwoRdm full;
+      bool valid = false;
+    };
+    const auto cache = std::make_shared<TwoRdmCache>();
+    const auto cachedTwoRdm = [=](const std::vector<double>& occ) -> const PnofFullTwoRdm& {
+      if (!cache->valid || cache->occ != occ) {
+        cache->full = buildPnofFullTwoRdm(functional, geminals, occ, n_total, relativistic);
+        cache->occ = occ;
+        cache->valid = true;
+      }
+      return cache->full;
+    };
     model.hessian_vector = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ,
                                const std::vector<double>& v) {
-      return pnofHessianVectorImpl(functional, geminals, relativistic, pair_indices, h, eri, occ, v);
+      return pnofHessianVectorImpl(functional, geminals, cachedTwoRdm(occ), pair_of, relativistic, pair_indices,
+                                   h, eri, occ, v);
     };
     // ALWAYS Tensor4-based -- see JK_only's own comment on this field / NeoOrbitalProblem's cache.
     model.hessian_vector_dense = [=](const Matrix<T>& h, const Tensor4<T>& eri,
                                      const std::vector<double>& occ, const std::vector<double>& v) {
-      return pnofHessianVectorImpl(functional, geminals, relativistic, pair_indices, h, eri, occ, v);
+      return pnofHessianVectorImpl(functional, geminals, cachedTwoRdm(occ), pair_of, relativistic, pair_indices,
+                                   h, eri, occ, v);
+    };
+    model.hessian_diagonal = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ) {
+      return pnofHessianDiagonalImpl(functional, geminals, cachedTwoRdm(occ), pair_of, relativistic, pair_indices,
+                                     h, eri, occ);
+    };
+    model.hessian_diagonal_dense = [=](const Matrix<T>& h, const Tensor4<T>& eri, const std::vector<double>& occ) {
+      return pnofHessianDiagonalImpl(functional, geminals, cachedTwoRdm(occ), pair_of, relativistic, pair_indices,
+                                     h, eri, occ);
     };
   }
   model.symmetric_shortcut_energy = [=](const Matrix<T>& h, const Eri& eri,
@@ -696,6 +787,22 @@ class NeoOrbitalProblem : public NeoProblem<double> {
       return model_.hessian_vector_dense(problem_.h(), dense_eri_, occ_, v);
     }
   }
+  // Diagonal of the Hessian the Hessian-vector product applies: NEO's Davidson preconditioner
+  // (without it the unpreconditioned solve needs 150+ Hessian products per step on CO/cc-pVDZ).
+  // O(n_pairs) elements, so cheap next to ONE hessianVector() call. Empty if the model has none.
+  std::vector<double> hessianDiagonal() override {
+    if constexpr (std::is_same_v<Eri, Tensor4<Scalar>>) {
+      if (!model_.hessian_diagonal) return {};
+      return model_.hessian_diagonal(problem_.h(), problem_.eri(), occ_);
+    } else {
+      if (!model_.hessian_diagonal_dense) return {};
+      if (!dense_eri_valid_) {
+        dense_eri_ = problem_.eri().toDense();
+        dense_eri_valid_ = true;
+      }
+      return model_.hessian_diagonal_dense(problem_.h(), dense_eri_, occ_);
+    }
+  }
   double trialEnergy(const std::vector<double>& d) override {
     const auto u = spinorRotationMatrix(buildKappa(d));
     const auto h_trial = oneElectronRotated(problem_.h(), u);
@@ -783,6 +890,16 @@ class SpinRestrictedNeoProblem : public NeoProblem<double> {
   std::vector<double> gradient() override { return contract(full_.gradient()); }
   std::vector<double> hessianVector(const std::vector<double>& v) override {
     return contract(full_.hessianVector(expand(v)));
+  }
+  // Preconditioner only: the reduced diagonal is (H_aa + H_bb)/2 + H_ab; the alpha-beta cross term
+  // H_ab is dropped (same approximation as KramersRestriction::contractDiagonal), which affects
+  // only the convergence rate of the Davidson solve, never its result.
+  std::vector<double> hessianDiagonal() override {
+    const std::vector<double> d = full_.hessianDiagonal();
+    if (d.empty()) return {};
+    std::vector<double> reduced(orbits_.size());
+    for (std::size_t k = 0; k < orbits_.size(); ++k) reduced[k] = 0.5 * (d[orbits_[k].first] + d[orbits_[k].second]);
+    return reduced;
   }
   double trialEnergy(const std::vector<double>& d) override { return full_.trialEnergy(expand(d)); }
   void accept(const std::vector<double>& d) override { full_.accept(expand(d)); }
@@ -942,6 +1059,56 @@ bool runChecks(const Matrix<T>& h, const Eri& eri, const std::vector<double>& oc
         << ") vs central finite difference of the energy at the " << n_test
         << " largest-gradient pairs: max |diff| = " << worst << "\n";
     verdict(worst < 1e-6, "orbital gradient matches the energy finite difference");
+  }
+
+  // (2a) NEO's Hessian-diagonal preconditioner against finite differences of the (local) gradient at
+  // the same pairs: H_II = d g_I / d t_I (and, for complex spinors, H_(y_I) = d g_(y_I) / d y_I) via
+  // a central difference of the gradient at the rotated integrals -- the definition NeoProblem's
+  // hessianVector documents -- and against the Hessian-vector product's own I-th entry for the unit
+  // vector e_I (must agree to roundoff: the diagonal is the diagonal of that very operator).
+  if (model.hessian_diagonal_dense && model.hessian_vector_dense) {
+    // Dense-tensor variants (identical computation; a Cholesky model's own would pay O(n_chol) per
+    // element access). The Hessian-vector comparison costs one product per tested direction, so it
+    // is skipped for very large rotation spaces.
+    const auto& eri_dense = denseOf(eri);
+    const bool compare_hv = pairs.size() <= 4000;
+    const std::vector<double> diag = model.hessian_diagonal_dense(h, eri_dense, occ);
+    constexpr double kStepD = 1e-4;
+    double worst_fd = 0.0, worst_hv = 0.0, scale = 0.0;
+    const std::size_t n_pairs_all = pairs.size();
+    for (std::size_t k = 0; k < n_test; ++k) {
+      const std::size_t idx = order[k];
+      const auto [p, q] = pairs[idx];
+      auto gradient_at = [&](double t, double y) {
+        const Matrix<T> u = spinorRotationMatrix(generatorMatrix<T>(n, p, q, t, y));
+        return jointOrbitalGradient(model.gradient(oneElectronRotated(h, u), rotateEri(eri, u), occ), pairs);
+      };
+      const auto gt_plus = gradient_at(kStepD, 0.0), gt_minus = gradient_at(-kStepD, 0.0);
+      const double fd_t = (gt_plus[idx] - gt_minus[idx]) / (2.0 * kStepD);
+      std::vector<double> e(diag.size(), 0.0);
+      e[idx] = 1.0;
+      worst_fd = std::max(worst_fd, std::abs(diag[idx] - fd_t));
+      if (compare_hv) worst_hv = std::max(worst_hv, std::abs(diag[idx] - model.hessian_vector_dense(h, eri_dense, occ, e)[idx]));
+      scale = std::max(scale, std::abs(diag[idx]));
+      if constexpr (!std::is_same_v<T, double>) {
+        const auto gy_plus = gradient_at(0.0, kStepD), gy_minus = gradient_at(0.0, -kStepD);
+        const double fd_y = (gy_plus[n_pairs_all + idx] - gy_minus[n_pairs_all + idx]) / (2.0 * kStepD);
+        std::vector<double> ey(diag.size(), 0.0);
+        ey[n_pairs_all + idx] = 1.0;
+        worst_fd = std::max(worst_fd, std::abs(diag[n_pairs_all + idx] - fd_y));
+        if (compare_hv) {
+          worst_hv = std::max(worst_hv, std::abs(diag[n_pairs_all + idx] -
+                                                 model.hessian_vector_dense(h, eri_dense, occ, ey)[n_pairs_all + idx]));
+        }
+        scale = std::max(scale, std::abs(diag[n_pairs_all + idx]));
+      }
+    }
+    log << "    Hessian diagonal (NEO preconditioner) at the " << n_test << " largest-gradient pairs: max |diag - central"
+        << " finite difference of the gradient| = " << worst_fd;
+    if (compare_hv) log << ", max |diag - (H e_I)_I| = " << worst_hv;
+    log << " (largest |diag| tested " << scale << ")\n";
+    verdict(worst_hv < 1e-8 * std::max(1.0, scale) && worst_fd < 1e-5 * std::max(1.0, scale),
+            "Hessian diagonal matches the Hessian-vector product and the gradient finite difference");
   }
 
   // (2b) PNOF only: the orbital gradient against a finite difference of the INDEPENDENT
@@ -1161,6 +1328,11 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
     log << "    ORBITAL_OPTIMIZER NEO requested but the model has no Hessian-vector callback: using ADAM.\n";
   }
   NeoOptions neo_options;
+  // Inexact Newton: the Davidson solve for each step only needs a residual of ~0.1*|g| (the
+  // library default 1e-6 is an absolute cap, which over-solves every step while |g| >> 1e-5 -- on
+  // CO/cc-pVDZ (GNOF, NON_REL) the residual stagnated near 2e-5 for hundreds of Hessian products).
+  // Tolerance = min(residual_tolerance, 0.1*|g|), so it still tightens as the gradient falls.
+  neo_options.step.residual_tolerance = 1e-3;
   neo_options.step.target_order = 0;  // ground state (a minimum) only -- no saddle-point search here.
   neo_options.gradient_tolerance = settings.gradient_tolerance;
   neo_options.max_iterations = settings.neo_max_iterations;  // fixed budget -- see its own comment.

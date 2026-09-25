@@ -289,4 +289,40 @@ template std::vector<double> jkOnlyJointHessianVector(
     const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices,
     const std::vector<double>& v);
 
+template <typename Eri>
+std::vector<double> jkOnlyJointHessianDiagonal(
+    const Matrix<std::complex<double>>& h, const Eri& eri,
+    const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
+    const Matrix<double>& two_rdm_x,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices) {
+  using C = std::complex<double>;
+  checkJkOnlyArgs(h, eri, occupations, two_rdm_h, two_rdm_x, "jkOnlyJointHessianDiagonal");
+  const std::size_t n = h.rows();
+  const std::size_t n_pairs = pair_indices.size();
+  std::vector<double> d(2 * n_pairs, 0.0);
+#pragma omp parallel for schedule(dynamic)
+  for (std::size_t big_i = 0; big_i < n_pairs; ++big_i) {
+    const auto& [p, q] = pair_indices[big_i];
+    auto g = [&](std::size_t a, std::size_t b, std::size_t c, std::size_t e) {
+      return rawJkOnlyG(h, eri, occupations, two_rdm_h, two_rdm_x, n, a, b, c, e);
+    };
+    const C g_pq_pq = g(p, q, p, q), g_pq_qp = g(p, q, q, p);
+    const C g_qp_pq = g(q, p, p, q), g_qp_qp = g(q, p, q, p);
+    d[big_i] = (g_pq_pq - g_pq_qp - g_qp_pq + g_qp_qp).real();
+    d[n_pairs + big_i] = -(g_pq_pq + g_pq_qp + g_qp_pq + g_qp_qp).real();
+  }
+  return d;
+}
+
+template std::vector<double> jkOnlyJointHessianDiagonal(
+    const Matrix<std::complex<double>>& h, const Tensor4<std::complex<double>>& eri,
+    const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
+    const Matrix<double>& two_rdm_x,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);
+template std::vector<double> jkOnlyJointHessianDiagonal(
+    const Matrix<std::complex<double>>& h, const CholeskyEri<std::complex<double>>& eri,
+    const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
+    const Matrix<double>& two_rdm_x,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);
+
 }  // namespace rerdmft

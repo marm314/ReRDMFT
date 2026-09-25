@@ -597,4 +597,51 @@ template std::vector<double> hartreeExchangeJointHessianVector(
     const std::vector<double>& v, const std::vector<std::size_t>& pair_of,
     const Matrix<double>& two_rdm_l1, const Matrix<double>& two_rdm_l2);
 
+template <typename Eri>
+std::vector<double> hartreeExchangeJointHessianDiagonal(
+    const Matrix<std::complex<double>>& h, const Eri& eri,
+    const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
+    const Matrix<double>& two_rdm_x, const Matrix<std::complex<double>>& fock,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices,
+    const std::vector<std::size_t>& pair_of, const Matrix<double>& two_rdm_l1,
+    const Matrix<double>& two_rdm_l2) {
+  using C = std::complex<double>;
+  const std::size_t n = h.rows();
+  const std::size_t n_pairs = pair_indices.size();
+  checkHartreeExchangeHessianDimensions(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, 0, 0,
+                                         0, 0, "hartreeExchangeJointHessianDiagonal");
+  checkPairTerms(pair_of, two_rdm_l1, two_rdm_l2, n, "hartreeExchangeJointHessianDiagonal");
+  std::vector<double> d(2 * n_pairs, 0.0);
+#pragma omp parallel for schedule(dynamic)
+  for (std::size_t big_i = 0; big_i < n_pairs; ++big_i) {
+    const auto& [p, q] = pair_indices[big_i];
+    auto bare = [&](std::size_t a, std::size_t b, std::size_t c, std::size_t e) {
+      return rawFullBareG(h, eri, occupations, two_rdm_h, two_rdm_x, fock, n, a, b, c, e, pair_of,
+                          two_rdm_l1, two_rdm_l2);
+    };
+    // (r,s) = (p,q): g_pq_rs = G_pq,pq, g_pq_sr = G_pq,qp, g_qp_rs = G_qp,pq, g_qp_sr = G_qp,qp; the
+    // (ij) and (ji) orderings coincide, so the symmetrization 0.5(x_ij + x_ji) is the value itself.
+    const C g_pq_pq = bare(p, q, p, q), g_pq_qp = bare(p, q, q, p);
+    const C g_qp_pq = bare(q, p, p, q), g_qp_qp = bare(q, p, q, p);
+    d[big_i] = (g_pq_pq - g_pq_qp - g_qp_pq + g_qp_qp).real();
+    d[n_pairs + big_i] = -(g_pq_pq + g_pq_qp + g_qp_pq + g_qp_qp).real();
+  }
+  return d;
+}
+
+template std::vector<double> hartreeExchangeJointHessianDiagonal(
+    const Matrix<std::complex<double>>& h, const Tensor4<std::complex<double>>& eri,
+    const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
+    const Matrix<double>& two_rdm_x, const Matrix<std::complex<double>>& fock,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices,
+    const std::vector<std::size_t>& pair_of, const Matrix<double>& two_rdm_l1,
+    const Matrix<double>& two_rdm_l2);
+template std::vector<double> hartreeExchangeJointHessianDiagonal(
+    const Matrix<std::complex<double>>& h, const CholeskyEri<std::complex<double>>& eri,
+    const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
+    const Matrix<double>& two_rdm_x, const Matrix<std::complex<double>>& fock,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices,
+    const std::vector<std::size_t>& pair_of, const Matrix<double>& two_rdm_l1,
+    const Matrix<double>& two_rdm_l2);
+
 }  // namespace rerdmft

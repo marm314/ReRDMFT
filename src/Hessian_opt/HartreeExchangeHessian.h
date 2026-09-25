@@ -233,6 +233,21 @@ std::vector<double> hartreeExchangeJointHessianVector(
     const Matrix<double>& two_rdm_l1 = Matrix<double>(),
     const Matrix<double>& two_rdm_l2 = Matrix<double>());
 
+// The DIAGONAL of the matrix hartreeExchangeJointHessianVector applies, in the joint ordering
+// [t_0..t_{n-1}, y_0..y_{n-1}] (size 2*pair_indices.size()): tt(I,I) and yy(I,I) from the same
+// bare G_pq,rs combinations as the matrix builder with (r,s) = (p,q). O(n_pairs) elements
+// (O(n) each) -- negligible next to one Hessian-vector product -- so NEO can use it as its Davidson
+// preconditioner (NeoProblem::hessianDiagonal). Complex spinors only.
+template <typename Eri>
+std::vector<double> hartreeExchangeJointHessianDiagonal(
+    const Matrix<std::complex<double>>& h, const Eri& eri,
+    const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
+    const Matrix<double>& two_rdm_x, const Matrix<std::complex<double>>& fock,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices,
+    const std::vector<std::size_t>& pair_of = {},
+    const Matrix<double>& two_rdm_l1 = Matrix<double>(),
+    const Matrix<double>& two_rdm_l2 = Matrix<double>());
+
 
 
 // Builds the FULL, dense orbital-rotation Hessian, indexed by the

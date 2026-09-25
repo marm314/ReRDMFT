@@ -143,4 +143,30 @@ template std::vector<double> pnofJointHessianVector(
     const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices,
     const std::vector<double>& v);
 
+template <typename Eri>
+std::vector<double> pnofJointHessianDiagonal(
+    PnofFunctional functional, const Matrix<std::complex<double>>& h,
+    const Eri& eri, const std::vector<PnofGeminal>& geminals,
+    const std::vector<double>& occupations, bool relativistic,
+    const Matrix<std::complex<double>>& fock,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices) {
+  const auto full = buildPnofFullTwoRdm(functional, geminals, occupations, h.rows(), relativistic);
+  const auto pair_of = buildPnofPairOf(geminals, h.rows());
+  return hartreeExchangeJointHessianDiagonal(h, eri, occupations, full.two_rdm_h, full.two_rdm_x, fock,
+                                             pair_indices, pair_of, full.two_rdm_l1, full.two_rdm_l2);
+}
+
+template std::vector<double> pnofJointHessianDiagonal(
+    PnofFunctional functional, const Matrix<std::complex<double>>& h,
+    const Tensor4<std::complex<double>>& eri, const std::vector<PnofGeminal>& geminals,
+    const std::vector<double>& occupations, bool relativistic,
+    const Matrix<std::complex<double>>& fock,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);
+template std::vector<double> pnofJointHessianDiagonal(
+    PnofFunctional functional, const Matrix<std::complex<double>>& h,
+    const CholeskyEri<std::complex<double>>& eri, const std::vector<PnofGeminal>& geminals,
+    const std::vector<double>& occupations, bool relativistic,
+    const Matrix<std::complex<double>>& fock,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);
+
 }  // namespace rerdmft

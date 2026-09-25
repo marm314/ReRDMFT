@@ -129,6 +129,16 @@ std::vector<double> jkOnlyJointHessianVector(
     const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices,
     const std::vector<double>& v);
 
+// The DIAGONAL of jkOnlyJointHessianVector's matrix in the joint ordering [t_0.., y_0..] (size
+// 2*pair_indices.size()): tt(I,I), yy(I,I) from the same bare G with (r,s) = (p,q). O(n_pairs)
+// elements -- the NEO Davidson preconditioner. Complex spinors only.
+template <typename Eri>
+std::vector<double> jkOnlyJointHessianDiagonal(
+    const Matrix<std::complex<double>>& h, const Eri& eri,
+    const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
+    const Matrix<double>& two_rdm_x,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);
+
 Matrix<double> jkOnlyJointHessianMatrix(
     const Matrix<std::complex<double>>& h, const Tensor4<std::complex<double>>& eri,
     const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,

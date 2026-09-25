@@ -126,6 +126,16 @@ std::vector<double> pnofJointHessianVector(
     const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices,
     const std::vector<double>& v);
 
+// The diagonal of pnofJointHessianVector's matrix, joint ordering [t_0.., y_0..] (see
+// HartreeExchangeHessian.h's hartreeExchangeJointHessianDiagonal). Complex spinors only.
+template <typename Eri>
+std::vector<double> pnofJointHessianDiagonal(
+    PnofFunctional functional, const Matrix<std::complex<double>>& h,
+    const Eri& eri, const std::vector<PnofGeminal>& geminals,
+    const std::vector<double>& occupations, bool relativistic,
+    const Matrix<std::complex<double>>& fock,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);
+
 Matrix<double> pnofJointHessianMatrix(
     PnofFunctional functional, const Matrix<std::complex<double>>& h,
     const Tensor4<std::complex<double>>& eri, const std::vector<PnofGeminal>& geminals,
