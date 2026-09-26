@@ -1,5 +1,7 @@
 #include "RkbMoTransform.h"
 
+#include "SymmetricTransform.h"
+
 #include <cblas.h>
 
 #include <complex>
@@ -177,6 +179,14 @@ Matrix<std::complex<double>> occupiedPositiveEnergyDensity(std::size_t rkb_dim, 
     d(p, p) = std::complex<double>(1.0, 0.0);
   }
   return d;
+}
+
+SymmetricEri<std::complex<double>> rkbMoTwoElectronSymmetric(const RkbTwoElectronTensor& eri_ao_physics,
+                                                              const Matrix<std::complex<double>>& c_dhf) {
+  if (c_dhf.rows() != eri_ao_physics.dim()) {
+    throw std::runtime_error("rkbMoTwoElectronSymmetric: c_dhf row count does not match the RKB dimension");
+  }
+  return transformToSymmetric<std::complex<double>>(eri_ao_physics, eri_ao_physics.dim(), c_dhf);
 }
 
 }  // namespace rerdmft

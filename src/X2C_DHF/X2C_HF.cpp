@@ -36,10 +36,11 @@ double maxAbsDifference(const Matrix<std::complex<double>>& a,
   return max_diff;
 }
 
-}  // namespace
-
-X2CHartreeFockResult runX2CHartreeFockScf(const Matrix<std::complex<double>>& h_x2c,
-                                           const Tensor4<double>& eri,
+// The SCF loop, generic over the source of the two-electron integrals: the dense spin-orbital
+// tensor or the AO Cholesky vectors (anything with a matching x2cFockMatrix overload).
+template <typename Eri>
+X2CHartreeFockResult x2cScfImpl(const Matrix<std::complex<double>>& h_x2c,
+                                           const Eri& eri,
                                            const Matrix<std::complex<double>>& x_large,
                                            const Matrix<std::complex<double>>& initial_density,
                                            int n_electrons, const std::vector<Atom>& geometry,
@@ -129,6 +130,41 @@ X2CHartreeFockResult runX2CHartreeFockScf(const Matrix<std::complex<double>>& h_
 
   result.total_energy = result.electronic_energy + result.nuclear_repulsion_energy;
   return result;
+}
+}  // namespace
+
+X2CHartreeFockResult runX2CHartreeFockScf(const Matrix<std::complex<double>>& h_x2c, const Tensor4<double>& eri,
+                                           const Matrix<std::complex<double>>& x_large,
+                                           const Matrix<std::complex<double>>& initial_density, int n_electrons,
+                                           const std::vector<Atom>& geometry, double mixing,
+                                           const Matrix<std::complex<double>>& overlap, int diis_size,
+                                           int max_iterations, double energy_tolerance, double density_tolerance,
+                                           bool kramers_restricted) {
+  return x2cScfImpl(h_x2c, eri, x_large, initial_density, n_electrons, geometry, mixing, overlap, diis_size,
+                    max_iterations, energy_tolerance, density_tolerance, kramers_restricted);
+}
+
+X2CHartreeFockResult runX2CHartreeFockScf(const Matrix<std::complex<double>>& h_x2c,
+                                           const PackedTwoElectronTensor& eri,
+                                           const Matrix<std::complex<double>>& x_large,
+                                           const Matrix<std::complex<double>>& initial_density, int n_electrons,
+                                           const std::vector<Atom>& geometry, double mixing,
+                                           const Matrix<std::complex<double>>& overlap, int diis_size,
+                                           int max_iterations, double energy_tolerance, double density_tolerance,
+                                           bool kramers_restricted) {
+  return x2cScfImpl(h_x2c, eri, x_large, initial_density, n_electrons, geometry, mixing, overlap, diis_size,
+                    max_iterations, energy_tolerance, density_tolerance, kramers_restricted);
+}
+
+X2CHartreeFockResult runX2CHartreeFockScf(const Matrix<std::complex<double>>& h_x2c, const AoCholesky& eri,
+                                           const Matrix<std::complex<double>>& x_large,
+                                           const Matrix<std::complex<double>>& initial_density, int n_electrons,
+                                           const std::vector<Atom>& geometry, double mixing,
+                                           const Matrix<std::complex<double>>& overlap, int diis_size,
+                                           int max_iterations, double energy_tolerance, double density_tolerance,
+                                           bool kramers_restricted) {
+  return x2cScfImpl(h_x2c, eri, x_large, initial_density, n_electrons, geometry, mixing, overlap, diis_size,
+                    max_iterations, energy_tolerance, density_tolerance, kramers_restricted);
 }
 
 }  // namespace rerdmft

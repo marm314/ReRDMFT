@@ -4,6 +4,7 @@
 #include <complex>
 
 #include "Matrix.h"
+#include "ElectronRepulsion.h"
 #include "Tensor4.h"
 
 namespace rerdmft {
@@ -43,6 +44,14 @@ namespace rerdmft {
 // common dimension is not even (2*nLarge).
 Matrix<std::complex<double>> x2cFockMatrix(const Matrix<std::complex<double>>& h_x2c,
                                             const Tensor4<double>& eri,
+                                            const Matrix<std::complex<double>>& density_matrix);
+
+// The same Fock matrix straight from the packed SPATIAL AO integrals (chemist (pq|rs), 8-fold unique), using the
+// closed-shell spin structure <AB|CD> = (AC|BD) delta(s_A,s_C) delta(s_B,s_D) -- the dense (2 n_large)^4
+// spin-orbital tensor is never formed:
+//   J_{(m s)(n s)} = sum_{kl} (mn|kl) (P_aa + P_bb)(l,k),   K_{(m s)(n t)} = sum_{kl} (mk|ln) P_{(k s)(l t)}.
+Matrix<std::complex<double>> x2cFockMatrix(const Matrix<std::complex<double>>& h_x2c,
+                                            const PackedTwoElectronTensor& eri_spatial,
                                             const Matrix<std::complex<double>>& density_matrix);
 
 }  // namespace rerdmft

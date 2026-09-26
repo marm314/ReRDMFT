@@ -3,6 +3,7 @@
 #include <complex>
 
 #include "CholeskyEri.h"
+#include "SymmetricEri.h"
 #include "HartreeExchangeHessian.h"
 
 namespace rerdmft {
@@ -82,8 +83,16 @@ template std::complex<double> pnofHessianElementImag(
     PnofFunctional, const Matrix<std::complex<double>>&, const CholeskyEri<std::complex<double>>&,
     const std::vector<PnofGeminal>&, const std::vector<double>&, bool,
     const Matrix<std::complex<double>>&, std::size_t, std::size_t, std::size_t, std::size_t);
+template std::complex<double> pnofHessianElementImag(
+    PnofFunctional, const Matrix<std::complex<double>>&, const SymmetricEri<std::complex<double>>&,
+    const std::vector<PnofGeminal>&, const std::vector<double>&, bool,
+    const Matrix<std::complex<double>>&, std::size_t, std::size_t, std::size_t, std::size_t);
 template std::complex<double> pnofHessianElementMixed(
     PnofFunctional, const Matrix<std::complex<double>>&, const CholeskyEri<std::complex<double>>&,
+    const std::vector<PnofGeminal>&, const std::vector<double>&, bool,
+    const Matrix<std::complex<double>>&, std::size_t, std::size_t, std::size_t, std::size_t);
+template std::complex<double> pnofHessianElementMixed(
+    PnofFunctional, const Matrix<std::complex<double>>&, const SymmetricEri<std::complex<double>>&,
     const std::vector<PnofGeminal>&, const std::vector<double>&, bool,
     const Matrix<std::complex<double>>&, std::size_t, std::size_t, std::size_t, std::size_t);
 
@@ -99,8 +108,16 @@ template double pnofHessianElement(PnofFunctional, const Matrix<double>&, const 
                                     const std::vector<PnofGeminal>&, const std::vector<double>&,
                                     bool, const Matrix<double>&, std::size_t, std::size_t,
                                     std::size_t, std::size_t);
+template double pnofHessianElement(PnofFunctional, const Matrix<double>&, const SymmetricEri<double>&,
+                                    const std::vector<PnofGeminal>&, const std::vector<double>&,
+                                    bool, const Matrix<double>&, std::size_t, std::size_t,
+                                    std::size_t, std::size_t);
 template std::complex<double> pnofHessianElement(
     PnofFunctional, const Matrix<std::complex<double>>&, const CholeskyEri<std::complex<double>>&,
+    const std::vector<PnofGeminal>&, const std::vector<double>&, bool,
+    const Matrix<std::complex<double>>&, std::size_t, std::size_t, std::size_t, std::size_t);
+template std::complex<double> pnofHessianElement(
+    PnofFunctional, const Matrix<std::complex<double>>&, const SymmetricEri<std::complex<double>>&,
     const std::vector<PnofGeminal>&, const std::vector<double>&, bool,
     const Matrix<std::complex<double>>&, std::size_t, std::size_t, std::size_t, std::size_t);
 
@@ -142,6 +159,13 @@ template std::vector<double> pnofJointHessianVector(
     const Matrix<std::complex<double>>& fock,
     const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices,
     const std::vector<double>& v);
+template std::vector<double> pnofJointHessianVector(
+    PnofFunctional functional, const Matrix<std::complex<double>>& h,
+    const SymmetricEri<std::complex<double>>& eri, const std::vector<PnofGeminal>& geminals,
+    const std::vector<double>& occupations, bool relativistic,
+    const Matrix<std::complex<double>>& fock,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices,
+    const std::vector<double>& v);
 
 template <typename Eri>
 std::vector<double> pnofJointHessianDiagonal(
@@ -165,6 +189,12 @@ template std::vector<double> pnofJointHessianDiagonal(
 template std::vector<double> pnofJointHessianDiagonal(
     PnofFunctional functional, const Matrix<std::complex<double>>& h,
     const CholeskyEri<std::complex<double>>& eri, const std::vector<PnofGeminal>& geminals,
+    const std::vector<double>& occupations, bool relativistic,
+    const Matrix<std::complex<double>>& fock,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);
+template std::vector<double> pnofJointHessianDiagonal(
+    PnofFunctional functional, const Matrix<std::complex<double>>& h,
+    const SymmetricEri<std::complex<double>>& eri, const std::vector<PnofGeminal>& geminals,
     const std::vector<double>& occupations, bool relativistic,
     const Matrix<std::complex<double>>& fock,
     const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);

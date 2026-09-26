@@ -9,77 +9,15 @@
 
 #include "Matrix.h"
 #include "MolecularBasis.h"
+#include "SymmetricEri.h"
 #include "Tensor4.h"
 
 namespace rerdmft {
 
-// Dense storage for <Spinor_A Spinor_B|Spinor_C Spinor_D> that stores only
-// the integrals not related by the electron-exchange symmetry
-//   <A B|C D> = <B A|D C>
-// (swapping which particle is "1" and which is "2" leaves the Coulomb
-// kernel, and hence the integral, unchanged -- true for any spinors, real
-// or complex, so it always applies here). Writing x = pairIndex(A,C) for
-// the "electron-1 pair" and y = pairIndex(B,D) for the "electron-2 pair",
-// this symmetry says the integral only depends on the UNORDERED pair
-// {x,y}: exactly the structure of a symmetric matrix, so it is stored the
-// same way one would store a symmetric matrix -- a triangular array over
-// x<=y, size n^2*(n^2+1)/2 instead of the dense n^4, exactly half.
-//
-// Hermiticity, <A B|C D> = conj(<C D|A B>), is a second, independent
-// symmetry (see rkbTwoElectronIntegrals); it is not folded into this
-// storage layout (which would require a more intricate, case-splitting
-// index scheme -- fixed points of the "reverse a pair" map behave
-// differently from generic pairs -- for a further, and by itself modest,
-// 2x on top of this class's already-exact 2x). It is instead checked as a
-// runtime invariant (main.cpp, under DEBUG) rather than exploited for
-// storage.
-class RkbTwoElectronTensor {
- public:
-  RkbTwoElectronTensor() = default;
-  explicit RkbTwoElectronTensor(std::size_t n)
-      : n_(n), pairs_(n * n), data_(pairs_ * (pairs_ + 1) / 2, std::complex<double>(0.0, 0.0)) {}
-
-  // Trusted constructor for IntegralCache.h: takes already-packed raw
-  // data (e.g. read back from an on-disk cache file) as-is. Throws if
-  // its size does not match what dimension `n` implies, so a corrupt or
-  // mismatched cache file cannot silently lead to out-of-bounds reads
-  // via operator().
-  RkbTwoElectronTensor(std::size_t n, std::vector<std::complex<double>> data)
-      : n_(n), pairs_(n * n), data_(std::move(data)) {
-    if (data_.size() != pairs_ * (pairs_ + 1) / 2) {
-      throw std::runtime_error("RkbTwoElectronTensor: cached data size does not match dimension");
-    }
-  }
-
-  std::size_t dim() const { return n_; }
-  // Complex values actually stored -- half of the dense n^4 count.
-  std::size_t storedCount() const { return data_.size(); }
-  // Raw packed storage, for IntegralCache.h to write/read directly.
-  const std::vector<std::complex<double>>& rawData() const { return data_; }
-
-  std::complex<double> operator()(std::size_t a, std::size_t b, std::size_t c,
-                                   std::size_t d) const {
-    return data_[triangularIndex(pairIndex(a, c), pairIndex(b, d))];
-  }
-
-  // Used only during construction. (a,b,c,d) and its exchange partner
-  // (b,a,d,c) share one triangular slot, so it does not matter which of
-  // the two the caller passes -- both route to the same storage.
-  void set(std::size_t a, std::size_t b, std::size_t c, std::size_t d, std::complex<double> value) {
-    data_[triangularIndex(pairIndex(a, c), pairIndex(b, d))] = value;
-  }
-
- private:
-  std::size_t pairIndex(std::size_t a, std::size_t c) const { return a * n_ + c; }
-  std::size_t triangularIndex(std::size_t x, std::size_t y) const {
-    if (x > y) std::swap(x, y);
-    return y * (y + 1) / 2 + x;
-  }
-
-  std::size_t n_ = 0;
-  std::size_t pairs_ = 0;
-  std::vector<std::complex<double>> data_;
-};
+// Storage for <Spinor_A Spinor_B|Spinor_C Spinor_D>: only the integrals not related by the electron-exchange
+// symmetry <AB|CD> = <BA|DC> and the Hermiticity <AB|CD> = conj <CD|AB> are kept (about n^4/4 complex numbers),
+// every other element is rebuilt on access -- see Utils/SymmetricEri.h.
+using RkbTwoElectronTensor = SymmetricEri<std::complex<double>>;
 
 // Builds the full two-electron Coulomb repulsion tensor in the restricted-
 // kinetic-balance (RKB) 4-component spinor basis, in PHYSICS notation:
@@ -129,6 +67,14 @@ RkbTwoElectronTensor rkbTwoElectronIntegrals(const std::vector<BasisFunction>& l
                                               const std::vector<BasisFunction>& small_basis,
                                               const Matrix<std::complex<double>>& rkb_coefficients,
                                               bool use_cholesky = false, double cholesky_threshold = 1e-10);
+
+// Projects one real symmetric (n_small x n_small) pair vector of the Small-basis Coulomb matrix into the
+// RKB-Small(y) partner flavor (y = 0: alpha-partner, 1: beta-partner): W(p,q) = sum over the Small basis's
+// two spin blocks of conj(c(p,a)) v(a,b) c(q,b) -- the projection rkbTwoElectronIntegrals applies to each
+// Cholesky vector of (SS|SS), exposed for C4_DHF/RkbCholesky.h. Returns an (n_large x n_large) Hermitian matrix.
+Matrix<std::complex<double>> rkbProjectSmallVector(const Matrix<double>& v,
+                                                    const Matrix<std::complex<double>>& rkb_coefficients,
+                                                    std::size_t y, std::size_t n_large, std::size_t n_small);
 
 }  // namespace rerdmft
 

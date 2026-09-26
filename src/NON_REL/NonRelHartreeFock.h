@@ -3,6 +3,7 @@
 
 #include <vector>
 
+#include "AoCholesky.h"
 #include "ElectronRepulsion.h"
 #include "Input.h"
 #include "Matrix.h"
@@ -93,6 +94,14 @@ Matrix<double> nonRelFockMatrix(const Matrix<double>& h_core, const PackedTwoEle
 // F); `mixing` is then unused. `diis_size` < 2 keeps the linear mixing.
 NonRelHartreeFockResult runNonRelativisticHartreeFock(
     const PackedTwoElectronTensor& eri, const Matrix<double>& h_core,
+    const Matrix<double>& x_large, const Matrix<double>& initial_density, int n_electrons,
+    const std::vector<Atom>& geometry, double mixing, const Matrix<double>& overlap, int diis_size,
+    int max_iterations, double energy_tolerance, double density_tolerance);
+
+// The same SCF with the Fock matrices built from the AO Cholesky vectors (Utils/AoCholesky.h) instead of
+// the packed AO tensor -- CHOLESKY TRUE: the AO integrals are never used again after the decomposition.
+NonRelHartreeFockResult runNonRelativisticHartreeFock(
+    const AoCholesky& eri, const Matrix<double>& h_core,
     const Matrix<double>& x_large, const Matrix<double>& initial_density, int n_electrons,
     const std::vector<Atom>& geometry, double mixing, const Matrix<double>& overlap, int diis_size,
     int max_iterations, double energy_tolerance, double density_tolerance);

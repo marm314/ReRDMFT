@@ -37,8 +37,12 @@ double maxAbsDifference(const Matrix<std::complex<double>>& a,
 
 }  // namespace
 
-DiracHartreeFockResult runDiracHartreeFockScf(
-    const Matrix<std::complex<double>>& h_rkb, const RkbTwoElectronTensor& eri,
+namespace {
+// The SCF loop, generic over the source of the two-electron integrals: the packed RKB tensor or the RKB
+// Cholesky vectors (anything with a matching rkbFockMatrix overload).
+template <typename Eri>
+DiracHartreeFockResult dhfScfImpl(
+    const Matrix<std::complex<double>>& h_rkb, const Eri& eri,
     const Matrix<std::complex<double>>& x_full,
     const Matrix<std::complex<double>>& initial_density, int n_electrons,
     const std::vector<Atom>& geometry, double mixing, const Matrix<std::complex<double>>& overlap,
@@ -130,6 +134,29 @@ DiracHartreeFockResult runDiracHartreeFockScf(
 
   result.total_energy = result.electronic_energy + result.nuclear_repulsion_energy;
   return result;
+}
+}  // namespace
+
+DiracHartreeFockResult runDiracHartreeFockScf(
+    const Matrix<std::complex<double>>& h_rkb, const RkbTwoElectronTensor& eri,
+    const Matrix<std::complex<double>>& x_full,
+    const Matrix<std::complex<double>>& initial_density, int n_electrons,
+    const std::vector<Atom>& geometry, double mixing, const Matrix<std::complex<double>>& overlap,
+    int diis_size, int max_iterations, double energy_tolerance, double density_tolerance,
+    bool kramers_restricted) {
+  return dhfScfImpl(h_rkb, eri, x_full, initial_density, n_electrons, geometry, mixing, overlap, diis_size,
+                    max_iterations, energy_tolerance, density_tolerance, kramers_restricted);
+}
+
+DiracHartreeFockResult runDiracHartreeFockScf(
+    const Matrix<std::complex<double>>& h_rkb, const RkbCholesky& eri,
+    const Matrix<std::complex<double>>& x_full,
+    const Matrix<std::complex<double>>& initial_density, int n_electrons,
+    const std::vector<Atom>& geometry, double mixing, const Matrix<std::complex<double>>& overlap,
+    int diis_size, int max_iterations, double energy_tolerance, double density_tolerance,
+    bool kramers_restricted) {
+  return dhfScfImpl(h_rkb, eri, x_full, initial_density, n_electrons, geometry, mixing, overlap, diis_size,
+                    max_iterations, energy_tolerance, density_tolerance, kramers_restricted);
 }
 
 }  // namespace rerdmft

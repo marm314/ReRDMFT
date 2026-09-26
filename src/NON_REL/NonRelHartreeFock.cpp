@@ -107,8 +107,12 @@ Matrix<double> nonRelFockMatrix(const Matrix<double>& h_core, const PackedTwoEle
   return fock;
 }
 
-NonRelHartreeFockResult runNonRelativisticHartreeFock(
-    const PackedTwoElectronTensor& eri, const Matrix<double>& h_core,
+namespace {
+// The SCF loop, generic over the source of the two-electron integrals: the packed AO tensor or the AO
+// Cholesky vectors (anything with a matching nonRelFockMatrix overload).
+template <typename Eri>
+NonRelHartreeFockResult nonRelScfImpl(
+    const Eri& eri, const Matrix<double>& h_core,
     const Matrix<double>& x_large, const Matrix<double>& initial_density, int n_electrons,
     const std::vector<Atom>& geometry, double mixing, const Matrix<double>& overlap, int diis_size,
     int max_iterations, double energy_tolerance, double density_tolerance) {
@@ -179,6 +183,25 @@ NonRelHartreeFockResult runNonRelativisticHartreeFock(
 
   result.total_energy = result.electronic_energy + result.nuclear_repulsion_energy;
   return result;
+}
+}  // namespace
+
+NonRelHartreeFockResult runNonRelativisticHartreeFock(
+    const PackedTwoElectronTensor& eri, const Matrix<double>& h_core,
+    const Matrix<double>& x_large, const Matrix<double>& initial_density, int n_electrons,
+    const std::vector<Atom>& geometry, double mixing, const Matrix<double>& overlap, int diis_size,
+    int max_iterations, double energy_tolerance, double density_tolerance) {
+  return nonRelScfImpl(eri, h_core, x_large, initial_density, n_electrons, geometry, mixing, overlap, diis_size,
+                       max_iterations, energy_tolerance, density_tolerance);
+}
+
+NonRelHartreeFockResult runNonRelativisticHartreeFock(
+    const AoCholesky& eri, const Matrix<double>& h_core,
+    const Matrix<double>& x_large, const Matrix<double>& initial_density, int n_electrons,
+    const std::vector<Atom>& geometry, double mixing, const Matrix<double>& overlap, int diis_size,
+    int max_iterations, double energy_tolerance, double density_tolerance) {
+  return nonRelScfImpl(eri, h_core, x_large, initial_density, n_electrons, geometry, mixing, overlap, diis_size,
+                       max_iterations, energy_tolerance, density_tolerance);
 }
 
 }  // namespace rerdmft

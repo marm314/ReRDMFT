@@ -84,7 +84,7 @@ anywhere on a line) are comments.
 | `GEOMETRY` ... `END` | block | *required* | Molecular geometry as `<symbol> <x> <y> <z>` lines, one atom per line, coordinates in Angstrom (converted to Bohr internally). |
 | `NON_RELATIVISTIC` | bool | `FALSE` | Run the standard nonrelativistic Hartree-Fock SCF (`NON_REL`). |
 | `C4_SPINOR` | bool | `FALSE` | Run the 4-component Dirac-Hartree-Fock SCF (`C4_DHF`), building the RKB two-electron Coulomb tensor. Opt-in since both time and memory cost scale steeply with basis size. Both this SCF and the `X2C` one are Kramers-restricted for an even `NELEC`: every iteration's density is projected onto its time-reversal-even part (spin-orbit mixing of the spinors is kept; only the magnetization is removed), so they cannot drift into a lower-energy Kramers-broken solution at unstable geometries (e.g. stretched LiH with `CHOLESKY TRUE`). The output reports the largest element removed (~0 when the iteration stayed symmetric by itself). |
-| `DEBUG` | bool | `FALSE` | Print detailed basis/matrix diagnostics, plus internal cross-checks (efficient-vs-general gradient/Hessian formulas, finite-difference gradient/Hessian tests) for whichever of `NON_RELATIVISTIC`/`C4_SPINOR` is on. |
+| `DEBUG` | bool | `FALSE` | Print detailed basis/matrix diagnostics, plus internal cross-checks (efficient-vs-general gradient/Hessian formulas, finite-difference gradient/Hessian tests) for whichever of `NON_RELATIVISTIC`/`C4_SPINOR` is on. Every test that needs the two-electron integrals as a DENSE tensor (the RDMFT-ansatz gradient test, the Kramers/spin structure tests of the integrals, exact-vs-Cholesky rotation, the Hessian-diagonal finite difference, dense-vs-Cholesky comparisons of the Fock matrix and MO integrals) runs only with `DEBUG TRUE`; the dense tensors are built for it on demand. |
 | `VERBOSE` | int (>= 0) | `0` | Only with `DEBUG TRUE`. `0` skips the extra dense-2-RDM cross-check; `>0` runs it; `>1` (`C4_SPINOR` only) also checks the mixed real/imaginary Hessian block against a finite difference. |
 | `HESSIAN_NON_REL` | bool | `FALSE` | Build and diagonalize the full orbital-rotation Hessian of the converged `NON_REL` solution, reporting whether it is a genuine minimum. O(n^5)/O(n^6), opt-in. |
 | `HESSIAN_4C` | bool | `FALSE` | Same as `HESSIAN_NON_REL` for the converged `C4_DHF` solution; negative eigenvalues (a saddle) are physically expected there (negative-energy branch included). |
@@ -97,7 +97,7 @@ anywhere on a line) are comments.
 | `MAX_ITERATIONS` | int (> 0) | `100` | Maximum number of `C4_DHF` SCF cycles before giving up. |
 | `ENERGY_TOLERANCE` | double (> 0) | `1e-8` Hartree | `C4_DHF` SCF energy-change convergence threshold (OR'd with `DENSITY_TOLERANCE`). |
 | `DENSITY_TOLERANCE` | double (> 0) | `1e-6` | `C4_DHF` SCF density-change convergence threshold. |
-| `CHOLESKY` | bool | `FALSE` | Use a pivoted Cholesky decomposition (`Utils/Cholesky_Decomposition.h`) instead of a direct 4-leg transform for basis changes, and (with `FULL_OPTIMIZATION`) run the macro-iteration loop on Cholesky vectors (`Utils/CholeskyEri.h`) rather than a dense tensor. Compresses well for the UKB->RKB projection; often little to no compression for AO/spinor->MO transforms (complex spinor pairs lack real-AO symmetry) -- check with a timed run before relying on it for large `C4_SPINOR` bases. |
+| `CHOLESKY` | bool | `FALSE` | Hold the two-electron integrals as Cholesky vectors and never build an n^4 object. The real AO Coulomb matrix is decomposed ONCE (`Utils/Cholesky_Decomposition.h`: NON_REL/X2C decompose the AO integrals, C4_SPINOR the combined {Large-Large} u {Small-Small} pair matrix, `C4_DHF/RkbCholesky.h`); the SCF Fock matrices, the MO-basis integrals (`Utils/AoCholesky.h`) and `FULL_OPTIMIZATION` all work on those vectors, and the AO integrals are not used again (they are rebuilt only under `DEBUG`, for the dense-vs-Cholesky checks). Every decomposition is verified against the integrals and retried with a smaller pivot batch if it misses `100*CHOLESKY_THRESHOLD + 1e-9`. With `ORBITAL_OPTIMIZER NEO` the Hessian-vector product is a finite difference of the gradient on the rotated vectors, O(N_chol n^3) with no dense cache. Without `CHOLESKY` the integrals are held as unique-element stores (`Utils/SymmetricEri.h`: about n^4/8 real or n^4/4 complex numbers, the rest rebuilt by symmetry) and transformed in slabs, never as a dense n^4 tensor. |
 | `CHOLESKY_THRESHOLD` | double (> 0) | `1e-10` | Residual-diagonal cutoff for the decomposition; looser = fewer vectors (faster, less accurate), tighter = more (slower, more exact). Only with `CHOLESKY TRUE`. |
 | `CACHE_INTEGRALS` | bool | `FALSE` | Cache the two-electron integral tensors to disk and reuse them on a later run with matching geometry+basis (see below). |
 | `CACHE_DIR` | string | `.rerdmft_cache` | Directory (created if missing) used by `CACHE_INTEGRALS`. |
@@ -340,16 +340,13 @@ own orbital optimization into an ordinary minimization, same as `NON_REL`/`X2C` 
 check (`[PASS] the point is a genuine minimum`). The positive-energy branch is itself
 Kramers-paired the same way X2C's spinors are, so it is Kramers-restricted here too.
 
-`CHOLESKY TRUE` needs one more step: C4_SPINOR's MO integrals span an enormous dynamic range (the
-negative branch's diagonal is order -2mc^2, ~1e4 Hartree, next to chemically-scaled positive-energy
-integrals), and decomposing both together lets the negative branch's sheer magnitude dominate the
-pivoted decomposition's pivot selection, degrading the reconstruction accuracy of the (chemically
-relevant) positive-energy block itself (confirmed directly: ~3.5e-05 instead of the ~1e-15 CHOLESKY
-already achieves for NON_REL/X2C). Since no energy/gradient/Hessian sum ever needs the TRUE value
-of a negative-branch integral (its occupation is always exactly 0), that block is zeroed out
-before decomposition instead, eliminating the mixed-scale competition entirely and recovering the
-same ~1e-12-1e-15 accuracy as the other two paths, at roughly half as many Cholesky vectors as
-decomposing the untouched tensor needs.
+`CHOLESKY TRUE` for C4_SPINOR: the RKB integrals come from one Cholesky decomposition of the real AO
+Coulomb matrix over the {Large-Large} u {Small-Small} pairs (`C4_DHF/RkbCholesky.h`), each vector projected
+into the RKB spinor basis; the DHF SCF and the MO-basis vectors follow from them. The MO integrals span an
+enormous dynamic range (the negative branch's diagonal is order -2mc^2, ~1e4 Hartree), but since that
+branch never meets a nonzero occupation in the no-pair treatment, the MO vectors are restricted to the
+positive-energy block and recompressed (eigen-decomposition of their Gram matrix, element error below
+`CHOLESKY_THRESHOLD`) -- for LiH/6-31G 662 vectors become about 60.
 
 See `examples/lih_gnof_c4_full_optimization.inp` (`ADAM`, dense integrals, all three SCF paths in
 one run), `examples/lih_gnof_c4_neo_full_optimization.inp` (`NEO`), and

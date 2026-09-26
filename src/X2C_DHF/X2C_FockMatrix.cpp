@@ -73,4 +73,40 @@ Matrix<std::complex<double>> x2cFockMatrix(const Matrix<std::complex<double>>& h
   return fock;
 }
 
+Matrix<std::complex<double>> x2cFockMatrix(const Matrix<std::complex<double>>& h_x2c,
+                                            const PackedTwoElectronTensor& eri,
+                                            const Matrix<std::complex<double>>& density_matrix) {
+  const std::size_t n2 = h_x2c.rows();
+  if (h_x2c.cols() != n2 || n2 % 2 != 0) {
+    throw std::runtime_error("x2cFockMatrix: h_x2c must be square with an even dimension (2*nLarge)");
+  }
+  const std::size_t n = n2 / 2;
+  if (eri.dim() != n) throw std::runtime_error("x2cFockMatrix: spatial eri dimension inconsistent with h_x2c");
+  if (density_matrix.rows() != n2 || density_matrix.cols() != n2) {
+    throw std::runtime_error("x2cFockMatrix: density matrix dimensions are inconsistent with h_x2c");
+  }
+  using C = std::complex<double>;
+  Matrix<C> fock = h_x2c;
+#pragma omp parallel for schedule(dynamic)
+  for (std::size_t m = 0; m < n; ++m) {
+    for (std::size_t nu = 0; nu < n; ++nu) {
+      C hartree(0.0, 0.0);
+      C exch[2][2] = {{C{}, C{}}, {C{}, C{}}};
+      for (std::size_t k = 0; k < n; ++k) {
+        for (std::size_t l = 0; l < n; ++l) {
+          hartree += eri(m, nu, k, l) * (density_matrix(l, k) + density_matrix(n + l, n + k));
+          const double x = eri(m, k, l, nu);
+          for (int s = 0; s < 2; ++s)
+            for (int t = 0; t < 2; ++t) exch[s][t] += x * density_matrix(s * n + k, t * n + l);
+        }
+      }
+      for (int s = 0; s < 2; ++s) {
+        fock(s * n + m, s * n + nu) += hartree;
+        for (int t = 0; t < 2; ++t) fock(s * n + m, t * n + nu) -= exch[s][t];
+      }
+    }
+  }
+  return fock;
+}
+
 }  // namespace rerdmft

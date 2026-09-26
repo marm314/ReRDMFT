@@ -285,6 +285,12 @@ Tensor4<std::complex<double>> outerSumTensor(const std::vector<Matrix<std::compl
 
 }  // namespace
 
+Matrix<std::complex<double>> rkbProjectSmallVector(const Matrix<double>& v,
+                                                    const Matrix<std::complex<double>>& rkb_coefficients,
+                                                    std::size_t y, std::size_t n_large, std::size_t n_small) {
+  return projectCholeskyVectorToRkbSmall(v, rkb_coefficients, y * n_large, n_large, n_small);
+}
+
 RkbTwoElectronTensor rkbTwoElectronIntegrals(const std::vector<BasisFunction>& large_basis,
                                               const std::vector<BasisFunction>& small_basis,
                                               const Matrix<std::complex<double>>& rkb_coefficients,

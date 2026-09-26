@@ -4,6 +4,7 @@
 #include <cstddef>
 
 #include "Matrix.h"
+#include "SymmetricEri.h"
 #include "Tensor4.h"
 
 namespace rerdmft {
@@ -33,6 +34,11 @@ Matrix<double> closedShellSpinOrbitalOneElectron(const Matrix<double>& h_mo,
 // notation (see MoIntegralTransform.h's moTwoElectronTransformPhysics).
 Tensor4<double> closedShellSpinOrbitalTwoElectron(const Tensor4<double>& eri_mo_physics,
                                                    std::size_t n_spatial);
+
+// The same spin-orbital expansion for a unique-element spatial store, returning a unique-element spin-orbital
+// store (no dense (2n)^4 array): only the elements with a <= c are evaluated (the store rebuilds the rest).
+SymmetricEri<double> closedShellSpinOrbitalTwoElectron(const SymmetricEri<double>& eri_mo_physics,
+                                                        std::size_t n_spatial);
 
 // The idempotent 1-RDM of the closed-shell single determinant that
 // doubly occupies the lowest `n_occupied_spatial` spatial MOs: diagonal

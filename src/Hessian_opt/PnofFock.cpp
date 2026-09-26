@@ -1,4 +1,5 @@
 #include "CholeskyEri.h"
+#include "SymmetricEri.h"
 #include "PnofFock.h"
 
 #include <array>
@@ -161,11 +162,17 @@ template Matrix<double> pnofFockMatrix(PnofFunctional, const Matrix<double>&,
 template Matrix<double> pnofFockMatrix(PnofFunctional, const Matrix<double>&,
                                         const CholeskyEri<double>&, const std::vector<PnofGeminal>&,
                                         const std::vector<double>&, bool);
+template Matrix<double> pnofFockMatrix(PnofFunctional, const Matrix<double>&,
+                                        const SymmetricEri<double>&, const std::vector<PnofGeminal>&,
+                                        const std::vector<double>&, bool);
 template Matrix<std::complex<double>> pnofFockMatrix(
     PnofFunctional, const Matrix<std::complex<double>>&, const Tensor4<std::complex<double>>&,
     const std::vector<PnofGeminal>&, const std::vector<double>&, bool);
 template Matrix<std::complex<double>> pnofFockMatrix(
     PnofFunctional, const Matrix<std::complex<double>>&, const CholeskyEri<std::complex<double>>&,
+    const std::vector<PnofGeminal>&, const std::vector<double>&, bool);
+template Matrix<std::complex<double>> pnofFockMatrix(
+    PnofFunctional, const Matrix<std::complex<double>>&, const SymmetricEri<std::complex<double>>&,
     const std::vector<PnofGeminal>&, const std::vector<double>&, bool);
 
 }  // namespace rerdmft

@@ -6,6 +6,8 @@
 
 #include "Input.h"
 #include "Matrix.h"
+#include "AoCholesky.h"
+#include "ElectronRepulsion.h"
 #include "Tensor4.h"
 
 namespace rerdmft {
@@ -102,6 +104,26 @@ X2CHartreeFockResult runX2CHartreeFockScf(const Matrix<std::complex<double>>& h_
                                            double energy_tolerance = 1e-8,
                                            double density_tolerance = 1e-6,
                                            bool kramers_restricted = true);
+
+// The same SCF with the Fock matrices built from the packed SPATIAL AO integrals (no dense spin-orbital tensor).
+X2CHartreeFockResult runX2CHartreeFockScf(const Matrix<std::complex<double>>& h_x2c,
+                                           const PackedTwoElectronTensor& eri,
+                                           const Matrix<std::complex<double>>& x_large,
+                                           const Matrix<std::complex<double>>& initial_density, int n_electrons,
+                                           const std::vector<Atom>& geometry, double mixing,
+                                           const Matrix<std::complex<double>>& overlap, int diis_size,
+                                           int max_iterations = 100, double energy_tolerance = 1e-8,
+                                           double density_tolerance = 1e-6, bool kramers_restricted = true);
+
+// The same SCF with the Fock matrices built from the AO Cholesky vectors (Utils/AoCholesky.h): no dense
+// spin-orbital tensor is ever formed (CHOLESKY TRUE).
+X2CHartreeFockResult runX2CHartreeFockScf(const Matrix<std::complex<double>>& h_x2c, const AoCholesky& eri,
+                                           const Matrix<std::complex<double>>& x_large,
+                                           const Matrix<std::complex<double>>& initial_density, int n_electrons,
+                                           const std::vector<Atom>& geometry, double mixing,
+                                           const Matrix<std::complex<double>>& overlap, int diis_size,
+                                           int max_iterations = 100, double energy_tolerance = 1e-8,
+                                           double density_tolerance = 1e-6, bool kramers_restricted = true);
 
 }  // namespace rerdmft
 

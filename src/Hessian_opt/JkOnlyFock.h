@@ -63,8 +63,8 @@ Matrix<T> jkOnlyOrbitalGradient(const Matrix<T>& h, const Eri& eri,
 // repulsion separately) for the same ansatz as jkOnlyFockMatrix.
 // Returned as `double` even for T = std::complex<double> (via
 // std::real, valid for real T too).
-template <typename T>
-double jkOnlyEnergy(const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri = Tensor4<T>>
+double jkOnlyEnergy(const Matrix<T>& h, const Eri& eri,
                      const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
                      const Matrix<double>& two_rdm_x);
 

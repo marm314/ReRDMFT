@@ -147,6 +147,41 @@ template <typename T>
 std::vector<Matrix<T>> choleskyDecomposeEriChecked(const Tensor4<T>& eri, double threshold = 1e-10,
                                                     CholeskyCheckReport* report = nullptr);
 
+// A Hermitian positive-semi-definite matrix over an abstract pair index (size n2 x n2), given by its
+// diagonal, its rows and single elements: the input of the pivoted decomposition when the matrix is not a
+// plain n^4 tensor -- e.g. the combined {LL} u {SS} Coulomb matrix of the 4-component basis, which is
+// never assembled (C4_DHF/RkbCholesky.h).
+template <typename T>
+class PairMatrixSource {
+ public:
+  virtual ~PairMatrixSource() = default;
+  virtual std::size_t size() const = 0;
+  virtual double diagonal(std::size_t i) const = 0;            // real, >= 0 up to roundoff
+  virtual void row(std::size_t i, T* out) const = 0;           // out[j] = M(i,j), j < size()
+  virtual T at(std::size_t i, std::size_t j) const = 0;        // M(i,j)
+};
+
+// The Cholesky vectors of a pair matrix, M(i,j) = sum_L V_L(i) conj(V_L(j)): `count` rows of `pair_dim`.
+template <typename T>
+struct FlatVectors {
+  std::size_t pair_dim = 0;
+  std::size_t count = 0;
+  std::vector<T> data;  // count x pair_dim, row-major
+};
+
+// choleskyDecomposeEriChecked for an abstract pair matrix (same batch retry, sampled reconstruction check).
+template <typename T>
+FlatVectors<T> choleskyDecomposePairsChecked(const PairMatrixSource<T>& src, double threshold = 1e-10,
+                                              CholeskyCheckReport* report = nullptr);
+
+// The same, decomposing the REAL 8-fold-packed AO tensor (ElectronRepulsion.h's
+// PackedTwoElectronTensor, chemist notation (AB|CD) = sum_L V_L(A,B) V_L(C,D)) directly, so the AO
+// integrals are never expanded to a dense n^4 array. Declared here, defined in the .cpp.
+class PackedTwoElectronTensor;
+std::vector<Matrix<double>> choleskyDecomposeEriChecked(const PackedTwoElectronTensor& eri,
+                                                         double threshold = 1e-10,
+                                                         CholeskyCheckReport* report = nullptr);
+
 // Transforms every Cholesky vector from its old (n_old x n_old) basis
 // into a new one:
 //   V'_L = C^dagger * V_L * conj(C)

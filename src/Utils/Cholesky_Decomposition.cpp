@@ -1,5 +1,7 @@
 #include "Cholesky_Decomposition.h"
 
+#include "ElectronRepulsion.h"
+
 #include <cblas.h>
 
 #include <algorithm>
@@ -222,16 +224,44 @@ void subtractConjTransGemm(const std::complex<double>* lmat, std::size_t nchol, 
   for (std::size_t i = 0; i < batch_size * n2; ++i) mtilde[i] -= std::conj(temp[i]);
 }
 
+// Uniform access to the tensor being decomposed: a dense Tensor4 (bra pair (A,B), ket pair (C,D)), or
+// the real 8-fold-packed AO tensor (chemist notation (AB|CD), which IS that grouping) so the AO
+// integrals can be decomposed without ever being expanded to a dense n^4 array.
+template <typename T>
+std::size_t srcDim(const Tensor4<T>& e) { return e.dim0(); }
+std::size_t srcDim(const PackedTwoElectronTensor& e) { return e.dim(); }
+
+// out[c*n+d] = eri(a,b,c,d) for the bra pair q = a*n+b (one row of the pair matrix).
+template <typename T>
+void copyRow(const Tensor4<T>& e, std::size_t q, std::size_t n, T* out) {
+  const T* row = e.data() + q * n * n;
+  std::copy(row, row + n * n, out);
+}
+void copyRow(const PackedTwoElectronTensor& e, std::size_t q, std::size_t n, double* out) {
+  const std::size_t a = q / n, b = q % n;
+  for (std::size_t c = 0; c < n; ++c)
+    for (std::size_t d = 0; d < n; ++d) out[c * n + d] = e(a, b, c, d);
+}
+
+// eri element addressed by the flat index (A*n+B)*n^2 + (C*n+D).
+template <typename T>
+T elementAt(const Tensor4<T>& e, std::size_t flat, std::size_t) { return e.data()[flat]; }
+double elementAt(const PackedTwoElectronTensor& e, std::size_t flat, std::size_t n) {
+  const std::size_t n2 = n * n;
+  const std::size_t ab = flat / n2, cd = flat % n2;
+  return e(ab / n, ab % n, cd / n, cd % n);
+}
+
 }  // namespace
 
+namespace {
+// The pivoted Cholesky algorithm over an abstract Hermitian PSD PAIR MATRIX (size n2 x n2): a dense
+// or packed integral tensor grouped as (bra pair, ket pair), or an implicit matrix such as the
+// combined {LL} u {SS} Coulomb matrix of the 4-component basis (C4_DHF/RkbCholesky.h).
 template <typename T>
-std::vector<Matrix<T>> choleskyDecomposeEri(const Tensor4<T>& eri, double threshold,
-                                             std::size_t max_vectors, std::size_t max_batch) {
-  const std::size_t n = eri.dim0();
-  if (eri.dim1() != n || eri.dim2() != n || eri.dim3() != n) {
-    throw std::runtime_error("choleskyDecomposeEri: eri is not square in all four dimensions");
-  }
-  const std::size_t n2 = n * n;
+FlatVectors<T> decomposeFlat(const PairMatrixSource<T>& src, double threshold, std::size_t max_vectors,
+                             std::size_t max_batch) {
+  const std::size_t n2 = src.size();
   // Small numerical-noise allowance for a residual diagonal that should
   // be exactly >= 0 (Hermitian PSD matrix) but can drift slightly
   // negative from floating-point cancellation once it is already tiny.
@@ -243,11 +273,7 @@ std::vector<Matrix<T>> choleskyDecomposeEri(const Tensor4<T>& eri, double thresh
   // grouping used elsewhere, is the one that gives a genuine Hermitian
   // PSD matrix).
   std::vector<double> diag(n2);
-  for (std::size_t a = 0; a < n; ++a) {
-    for (std::size_t b = 0; b < n; ++b) {
-      diag[a * n + b] = realPart(eri(a, b, a, b));
-    }
-  }
+  for (std::size_t i = 0; i < n2; ++i) diag[i] = src.diagonal(i);
 
   // eT's own "efficient algorithm" (Folkestad, Kjonstad, Koch, J. Chem.
   // Phys. 150, 194112 (2019), Eqs. (8)-(14)): rather than picking ONE
@@ -346,8 +372,7 @@ std::vector<Matrix<T>> choleskyDecomposeEri(const Tensor4<T>& eri, double thresh
     // header comment already warns about for the conjugate step below.
     mtilde.assign(batch_size * n2, T(0));
     for (std::size_t j = 0; j < batch_size; ++j) {
-      const T* eri_row = eri.data() + candidates[j] * n2;
-      std::copy(eri_row, eri_row + n2, mtilde.data() + j * n2);
+      src.row(candidates[j], mtilde.data() + j * n2);
     }
     if (nchol_so_far > 0) {
       lmat_q.assign(nchol_so_far * batch_size, T(0));
@@ -429,32 +454,70 @@ std::vector<Matrix<T>> choleskyDecomposeEri(const Tensor4<T>& eri, double thresh
     if (built_count == 0) break;  // safety net; should not trigger since dmax's own index always qualifies
   }
 
-  const std::size_t nchol_final = lmat.size() / n2;
+  FlatVectors<T> flat;
+  flat.pair_dim = n2;
+  flat.count = lmat.size() / n2;
+  flat.data = std::move(lmat);
+  return flat;
+}
+
+// Adapter: a square tensor (Tensor4 or the packed AO tensor) grouped as bra pair (A,B), ket pair (C,D).
+template <typename T, typename Src>
+class TensorPairs : public PairMatrixSource<T> {
+ public:
+  explicit TensorPairs(const Src& e) : e_(e), n_(srcDim(e)) {}
+  std::size_t size() const override { return n_ * n_; }
+  double diagonal(std::size_t i) const override { return realPart(e_(i / n_, i % n_, i / n_, i % n_)); }
+  void row(std::size_t i, T* out) const override { copyRow(e_, i, n_, out); }
+  T at(std::size_t i, std::size_t j) const override { return elementAt(e_, i * n_ * n_ + j, n_); }
+
+ private:
+  const Src& e_;
+  std::size_t n_;
+};
+
+template <typename T>
+std::vector<Matrix<T>> flatToMatrices(const FlatVectors<T>& flat, std::size_t n) {
   std::vector<Matrix<T>> vectors;
-  vectors.reserve(nchol_final);
-  for (std::size_t k = 0; k < nchol_final; ++k) {
+  vectors.reserve(flat.count);
+  for (std::size_t k = 0; k < flat.count; ++k) {
     Matrix<T> v(n, n);
-    std::copy(lmat.data() + k * n2, lmat.data() + (k + 1) * n2, v.data());
+    std::copy(flat.data.data() + k * flat.pair_dim, flat.data.data() + (k + 1) * flat.pair_dim, v.data());
     vectors.push_back(std::move(v));
   }
   return vectors;
 }
 
-namespace {
-// max |sum_L V_L(A,B) conj(V_L(C,D)) - eri(A,B,C,D)| over a strided sample of at most `max_samples`
-// elements (all of them for a small tensor). The stride is made coprime to n^2 so it cannot alias
-// with the index structure. Rows W(AB, :) of the (n^2 x nchol) vector table make each sample one
-// contiguous dot product.
+template <typename T, typename Src>
+std::vector<Matrix<T>> decomposeImpl(const Src& eri, double threshold, std::size_t max_vectors,
+                                     std::size_t max_batch) {
+  const TensorPairs<T, Src> pairs(eri);
+  return flatToMatrices(decomposeFlat<T>(pairs, threshold, max_vectors, max_batch), srcDim(eri));
+}
+}  // namespace
+
 template <typename T>
-double sampledReconstructionError(const Tensor4<T>& eri, const std::vector<Matrix<T>>& vectors,
-                                  std::size_t max_samples) {
-  const std::size_t n = eri.dim0();
-  const std::size_t n2 = n * n;
-  const std::size_t nchol = vectors.size();
+std::vector<Matrix<T>> choleskyDecomposeEri(const Tensor4<T>& eri, double threshold,
+                                             std::size_t max_vectors, std::size_t max_batch) {
+  if (eri.dim1() != eri.dim0() || eri.dim2() != eri.dim0() || eri.dim3() != eri.dim0()) {
+    throw std::runtime_error("choleskyDecomposeEri: eri is not square in all four dimensions");
+  }
+  return decomposeImpl<T>(eri, threshold, max_vectors, max_batch);
+}
+
+namespace {
+// max |sum_L V_L(i) conj(V_L(j)) - M(i,j)| over a strided sample of at most `max_samples` elements of the
+// pair matrix (all of them for a small one). The stride is made coprime to the pair dimension so it cannot
+// alias with the index structure. The (pair_dim x nchol) vector table makes each sample one contiguous dot
+// product.
+template <typename T>
+double sampledPairError(const PairMatrixSource<T>& src, const FlatVectors<T>& v, std::size_t max_samples) {
+  const std::size_t n2 = v.pair_dim;
+  const std::size_t nchol = v.count;
   std::vector<T> w(n2 * nchol);
   for (std::size_t l = 0; l < nchol; ++l) {
-    const T* v = vectors[l].data();
-    for (std::size_t ab = 0; ab < n2; ++ab) w[ab * nchol + l] = v[ab];
+    const T* row = v.data.data() + l * n2;
+    for (std::size_t ab = 0; ab < n2; ++ab) w[ab * nchol + l] = row[ab];
   }
   const std::size_t total = n2 * n2;
   std::size_t stride = total > max_samples ? total / max_samples + 1 : 1;
@@ -464,28 +527,27 @@ double sampledReconstructionError(const Tensor4<T>& eri, const std::vector<Matri
 #pragma omp parallel for reduction(max : worst) schedule(static)
   for (std::size_t k = 0; k < n_samples; ++k) {
     const std::size_t flat = k * stride;
-    const T* left = &w[(flat / n2) * nchol];
-    const T* right = &w[(flat % n2) * nchol];
+    const std::size_t i = flat / n2, j = flat % n2;
+    const T* left = &w[i * nchol];
+    const T* right = &w[j * nchol];
     T sum{};
     for (std::size_t l = 0; l < nchol; ++l) sum += left[l] * conjugate(right[l]);
-    worst = std::max(worst, std::abs(std::complex<double>(sum - eri.data()[flat])));
+    worst = std::max(worst, std::abs(std::complex<double>(sum - src.at(i, j))));
   }
   return worst;
 }
-}  // namespace
 
 template <typename T>
-std::vector<Matrix<T>> choleskyDecomposeEriChecked(const Tensor4<T>& eri, double threshold,
-                                                    CholeskyCheckReport* report) {
+FlatVectors<T> checkedFlat(const PairMatrixSource<T>& src, double threshold, CholeskyCheckReport* report) {
   const double tolerance = 100.0 * threshold + 1e-9;
   constexpr std::size_t kSamples = 4000000;
-  std::vector<Matrix<T>> vectors;
+  FlatVectors<T> vectors;
   double worst = 0.0;
   std::size_t used = 0;
   bool retried = false;
   for (const std::size_t batch : {std::size_t{64}, std::size_t{8}, std::size_t{1}}) {
-    vectors = choleskyDecomposeEri(eri, threshold, 0, batch);
-    worst = sampledReconstructionError(eri, vectors, kSamples);
+    vectors = decomposeFlat<T>(src, threshold, 0, batch);
+    worst = sampledPairError<T>(src, vectors, kSamples);
     used = batch;
     if (worst <= tolerance) break;
     retried = true;
@@ -495,7 +557,7 @@ std::vector<Matrix<T>> choleskyDecomposeEriChecked(const Tensor4<T>& eri, double
   }
   if (report != nullptr) {
     report->batch_used = used;
-    report->n_vectors = vectors.size();
+    report->n_vectors = vectors.count;
     report->max_error = worst;
     report->tolerance = tolerance;
     report->retried = retried;
@@ -507,6 +569,30 @@ std::vector<Matrix<T>> choleskyDecomposeEriChecked(const Tensor4<T>& eri, double
         ") even with a one-pivot-at-a-time decomposition");
   }
   return vectors;
+}
+
+template <typename T, typename Src>
+std::vector<Matrix<T>> checkedImpl(const Src& eri, double threshold, CholeskyCheckReport* report) {
+  const TensorPairs<T, Src> pairs(eri);
+  return flatToMatrices(checkedFlat<T>(pairs, threshold, report), srcDim(eri));
+}
+}  // namespace
+
+template <typename T>
+FlatVectors<T> choleskyDecomposePairsChecked(const PairMatrixSource<T>& src, double threshold,
+                                              CholeskyCheckReport* report) {
+  return checkedFlat<T>(src, threshold, report);
+}
+
+template <typename T>
+std::vector<Matrix<T>> choleskyDecomposeEriChecked(const Tensor4<T>& eri, double threshold,
+                                                    CholeskyCheckReport* report) {
+  return checkedImpl<T>(eri, threshold, report);
+}
+
+std::vector<Matrix<double>> choleskyDecomposeEriChecked(const PackedTwoElectronTensor& eri,
+                                                         double threshold, CholeskyCheckReport* report) {
+  return checkedImpl<double>(eri, threshold, report);
 }
 
 template <typename T>
@@ -561,6 +647,10 @@ Tensor4<std::complex<double>> choleskyTransformEriMixed(const Tensor4<double>& e
   return choleskyReconstructEri(transformed);
 }
 
+template FlatVectors<double> choleskyDecomposePairsChecked(const PairMatrixSource<double>&, double,
+                                                          CholeskyCheckReport*);
+template FlatVectors<std::complex<double>> choleskyDecomposePairsChecked(
+    const PairMatrixSource<std::complex<double>>&, double, CholeskyCheckReport*);
 template std::vector<Matrix<double>> choleskyDecomposeEriChecked(const Tensor4<double>&, double,
                                                                    CholeskyCheckReport*);
 template std::vector<Matrix<std::complex<double>>> choleskyDecomposeEriChecked(

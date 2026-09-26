@@ -1,6 +1,7 @@
 #include "JkOnlyHessian.h"
 
 #include "CholeskyEri.h"
+#include "SymmetricEri.h"
 
 #include <complex>
 #include <cstddef>
@@ -124,8 +125,17 @@ template double jkOnlyHessianElement(const Matrix<double>& h, const CholeskyEri<
                                       const Matrix<double>& two_rdm_h,
                                       const Matrix<double>& two_rdm_x, std::size_t p,
                                       std::size_t q, std::size_t r, std::size_t s);
+template double jkOnlyHessianElement(const Matrix<double>& h, const SymmetricEri<double>& eri,
+                                      const std::vector<double>& occupations,
+                                      const Matrix<double>& two_rdm_h,
+                                      const Matrix<double>& two_rdm_x, std::size_t p,
+                                      std::size_t q, std::size_t r, std::size_t s);
 template std::complex<double> jkOnlyHessianElement(
     const Matrix<std::complex<double>>& h, const CholeskyEri<std::complex<double>>& eri,
+    const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
+    const Matrix<double>& two_rdm_x, std::size_t p, std::size_t q, std::size_t r, std::size_t s);
+template std::complex<double> jkOnlyHessianElement(
+    const Matrix<std::complex<double>>& h, const SymmetricEri<std::complex<double>>& eri,
     const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
     const Matrix<double>& two_rdm_x, std::size_t p, std::size_t q, std::size_t r, std::size_t s);
 
@@ -211,8 +221,16 @@ template std::complex<double> jkOnlyHessianElementImag(
     const Matrix<std::complex<double>>&, const CholeskyEri<std::complex<double>>&,
     const std::vector<double>&, const Matrix<double>&, const Matrix<double>&, std::size_t,
     std::size_t, std::size_t, std::size_t);
+template std::complex<double> jkOnlyHessianElementImag(
+    const Matrix<std::complex<double>>&, const SymmetricEri<std::complex<double>>&,
+    const std::vector<double>&, const Matrix<double>&, const Matrix<double>&, std::size_t,
+    std::size_t, std::size_t, std::size_t);
 template std::complex<double> jkOnlyHessianElementMixed(
     const Matrix<std::complex<double>>&, const CholeskyEri<std::complex<double>>&,
+    const std::vector<double>&, const Matrix<double>&, const Matrix<double>&, std::size_t,
+    std::size_t, std::size_t, std::size_t);
+template std::complex<double> jkOnlyHessianElementMixed(
+    const Matrix<std::complex<double>>&, const SymmetricEri<std::complex<double>>&,
     const std::vector<double>&, const Matrix<double>&, const Matrix<double>&, std::size_t,
     std::size_t, std::size_t, std::size_t);
 
@@ -288,6 +306,12 @@ template std::vector<double> jkOnlyJointHessianVector(
     const Matrix<double>& two_rdm_x,
     const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices,
     const std::vector<double>& v);
+template std::vector<double> jkOnlyJointHessianVector(
+    const Matrix<std::complex<double>>& h, const SymmetricEri<std::complex<double>>& eri,
+    const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
+    const Matrix<double>& two_rdm_x,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices,
+    const std::vector<double>& v);
 
 template <typename Eri>
 std::vector<double> jkOnlyJointHessianDiagonal(
@@ -321,6 +345,11 @@ template std::vector<double> jkOnlyJointHessianDiagonal(
     const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);
 template std::vector<double> jkOnlyJointHessianDiagonal(
     const Matrix<std::complex<double>>& h, const CholeskyEri<std::complex<double>>& eri,
+    const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
+    const Matrix<double>& two_rdm_x,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);
+template std::vector<double> jkOnlyJointHessianDiagonal(
+    const Matrix<std::complex<double>>& h, const SymmetricEri<std::complex<double>>& eri,
     const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
     const Matrix<double>& two_rdm_x,
     const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);

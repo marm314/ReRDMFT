@@ -3,6 +3,7 @@
 
 #include "ElectronRepulsion.h"
 #include "Matrix.h"
+#include "SymmetricEri.h"
 #include "Tensor4.h"
 
 namespace rerdmft {
@@ -46,6 +47,11 @@ Tensor4<double> moTwoElectronTransformPhysics(const PackedTwoElectronTensor& eri
 Tensor4<double> moTwoElectronTransformPhysicsCholesky(const PackedTwoElectronTensor& eri_ao_chemist,
                                                        const Matrix<double>& c,
                                                        double threshold = 1e-10);
+
+// The same MO-basis physics tensor as moTwoElectronTransformPhysics, but returned as a UNIQUE-ELEMENT store
+// (Utils/SymmetricEri.h, ~n^4/8 numbers) and computed in slabs (Utils/SymmetricTransform.h) -- no dense n^4
+// array is formed at any point.
+SymmetricEri<double> moTwoElectronSymmetric(const PackedTwoElectronTensor& eri_ao_chemist, const Matrix<double>& c);
 
 }  // namespace rerdmft
 

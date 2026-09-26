@@ -71,7 +71,7 @@ OBJS := $(addprefix $(BUILD_DIR)/,$(notdir $(SRCS:.cpp=.o)))
 CPPFLAGS := -I$(LIBCINT_INC) $(addprefix -I,$(ALL_SRC_DIRS))
 # LAPACKE (the C interface to LAPACK) is used for the RKB transformation's
 # overlap-matrix inverse; installed system-wide via liblapacke-dev.
-LDLIBS   := $(LIBCINT) -llapacke -llapack -lblas -lquadmath -lm
+LDLIBS   := $(LIBCINT) -llapacke -llapack -lblas -lquadmath -lm -ldl
 
 GIT_VERSION_HEADER := $(SRC_DIR)/GitVersion.h
 
@@ -183,6 +183,30 @@ test_diis: $(BUILD_DIR)/test_diis
 	./$(BUILD_DIR)/test_diis
 
 $(BUILD_DIR)/test_diis: tests/test_diis.cpp $(BUILD_DIR)/DIIS.o $(BUILD_DIR)/LinearAlgebra.o | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
+# Unit test of Utils/SymmetricEri.h (unique-element two-electron integral store).
+.PHONY: test_symmetric_eri
+test_symmetric_eri: $(BUILD_DIR)/test_symmetric_eri
+	./$(BUILD_DIR)/test_symmetric_eri
+
+$(BUILD_DIR)/test_symmetric_eri: tests/test_symmetric_eri.cpp | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
+# Unit test of Utils/AoCholesky.h (AO Cholesky vectors: NON_REL/X2C Fock builds, AO -> MO vector transforms).
+.PHONY: test_ao_cholesky
+test_ao_cholesky: $(BUILD_DIR)/test_ao_cholesky
+	./$(BUILD_DIR)/test_ao_cholesky
+
+$(BUILD_DIR)/test_ao_cholesky: tests/test_ao_cholesky.cpp $(BUILD_DIR)/AoCholesky.o $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o $(BUILD_DIR)/SpinorRotation.o $(BUILD_DIR)/LinearAlgebra.o | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
+# Unit test of Utils/SymmetricTransform.h (slab four-index transform into a SymmetricEri).
+.PHONY: test_symmetric_transform
+test_symmetric_transform: $(BUILD_DIR)/test_symmetric_transform
+	./$(BUILD_DIR)/test_symmetric_transform
+
+$(BUILD_DIR)/test_symmetric_transform: tests/test_symmetric_transform.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
 clean:

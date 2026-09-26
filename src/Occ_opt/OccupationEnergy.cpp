@@ -1,4 +1,5 @@
 #include "CholeskyEri.h"
+#include "SymmetricEri.h"
 #include "OccupationEnergy.h"
 
 #include <complex>
@@ -125,12 +126,19 @@ template double jkFunctionalEnergy(const Matrix<double>& h, const Tensor4<double
 template double jkFunctionalEnergy(const Matrix<double>& h, const CholeskyEri<double>& eri,
                                     const std::vector<double>& occupations,
                                     JkFunctional functional, std::size_t f_l, double power_alpha);
+template double jkFunctionalEnergy(const Matrix<double>& h, const SymmetricEri<double>& eri,
+                                    const std::vector<double>& occupations,
+                                    JkFunctional functional, std::size_t f_l, double power_alpha);
 template double jkFunctionalEnergy(const Matrix<std::complex<double>>& h,
                                     const Tensor4<std::complex<double>>& eri,
                                     const std::vector<double>& occupations,
                                     JkFunctional functional, std::size_t f_l, double power_alpha);
 template double jkFunctionalEnergy(const Matrix<std::complex<double>>& h,
                                     const CholeskyEri<std::complex<double>>& eri,
+                                    const std::vector<double>& occupations,
+                                    JkFunctional functional, std::size_t f_l, double power_alpha);
+template double jkFunctionalEnergy(const Matrix<std::complex<double>>& h,
+                                    const SymmetricEri<std::complex<double>>& eri,
                                     const std::vector<double>& occupations,
                                     JkFunctional functional, std::size_t f_l, double power_alpha);
 
@@ -144,6 +152,11 @@ template std::vector<double> jkFunctionalGradient(const Matrix<double>& h,
                                                    const std::vector<double>& occupations,
                                                    JkFunctional functional, std::size_t f_l,
                                                    double power_alpha);
+template std::vector<double> jkFunctionalGradient(const Matrix<double>& h,
+                                                   const SymmetricEri<double>& eri,
+                                                   const std::vector<double>& occupations,
+                                                   JkFunctional functional, std::size_t f_l,
+                                                   double power_alpha);
 template std::vector<double> jkFunctionalGradient(const Matrix<std::complex<double>>& h,
                                                    const Tensor4<std::complex<double>>& eri,
                                                    const std::vector<double>& occupations,
@@ -151,6 +164,11 @@ template std::vector<double> jkFunctionalGradient(const Matrix<std::complex<doub
                                                    double power_alpha);
 template std::vector<double> jkFunctionalGradient(const Matrix<std::complex<double>>& h,
                                                    const CholeskyEri<std::complex<double>>& eri,
+                                                   const std::vector<double>& occupations,
+                                                   JkFunctional functional, std::size_t f_l,
+                                                   double power_alpha);
+template std::vector<double> jkFunctionalGradient(const Matrix<std::complex<double>>& h,
+                                                   const SymmetricEri<std::complex<double>>& eri,
                                                    const std::vector<double>& occupations,
                                                    JkFunctional functional, std::size_t f_l,
                                                    double power_alpha);
@@ -163,6 +181,10 @@ template Matrix<double> jkFunctionalHessian(const Matrix<double>& h, const Chole
                                              const std::vector<double>& occupations,
                                              JkFunctional functional, std::size_t f_l,
                                              double power_alpha);
+template Matrix<double> jkFunctionalHessian(const Matrix<double>& h, const SymmetricEri<double>& eri,
+                                             const std::vector<double>& occupations,
+                                             JkFunctional functional, std::size_t f_l,
+                                             double power_alpha);
 template Matrix<double> jkFunctionalHessian(const Matrix<std::complex<double>>& h,
                                              const Tensor4<std::complex<double>>& eri,
                                              const std::vector<double>& occupations,
@@ -170,6 +192,11 @@ template Matrix<double> jkFunctionalHessian(const Matrix<std::complex<double>>& 
                                              double power_alpha);
 template Matrix<double> jkFunctionalHessian(const Matrix<std::complex<double>>& h,
                                              const CholeskyEri<std::complex<double>>& eri,
+                                             const std::vector<double>& occupations,
+                                             JkFunctional functional, std::size_t f_l,
+                                             double power_alpha);
+template Matrix<double> jkFunctionalHessian(const Matrix<std::complex<double>>& h,
+                                             const SymmetricEri<std::complex<double>>& eri,
                                              const std::vector<double>& occupations,
                                              JkFunctional functional, std::size_t f_l,
                                              double power_alpha);

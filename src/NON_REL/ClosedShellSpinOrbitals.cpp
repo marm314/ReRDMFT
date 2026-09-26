@@ -55,6 +55,29 @@ Tensor4<double> closedShellSpinOrbitalTwoElectron(const Tensor4<double>& eri_mo_
   return eri_spin;
 }
 
+SymmetricEri<double> closedShellSpinOrbitalTwoElectron(const SymmetricEri<double>& eri_mo_physics,
+                                                        std::size_t n_spatial) {
+  if (eri_mo_physics.dim0() != n_spatial) {
+    throw std::runtime_error(
+        "closedShellSpinOrbitalTwoElectron: eri_mo_physics dimension does not match n_spatial");
+  }
+  const std::size_t n_spin = 2 * n_spatial;
+  SymmetricEri<double> eri_spin(n_spin);
+  for (std::size_t a = 0; a < n_spin; ++a) {
+    for (std::size_t c = a; c < n_spin; ++c) {
+      if (spinOf(a, n_spatial) != spinOf(c, n_spatial)) continue;
+      for (std::size_t b = 0; b < n_spin; ++b) {
+        for (std::size_t d = 0; d < n_spin; ++d) {
+          if (spinOf(b, n_spatial) != spinOf(d, n_spatial)) continue;
+          eri_spin.set(a, b, c, d, eri_mo_physics(spatialIndex(a, n_spatial), spatialIndex(b, n_spatial),
+                                                   spatialIndex(c, n_spatial), spatialIndex(d, n_spatial)));
+        }
+      }
+    }
+  }
+  return eri_spin;
+}
+
 Matrix<double> closedShellSpinOrbitalDensity(std::size_t n_spatial, int n_occupied_spatial) {
   if (n_occupied_spatial < 0 || static_cast<std::size_t>(n_occupied_spatial) > n_spatial) {
     throw std::runtime_error(

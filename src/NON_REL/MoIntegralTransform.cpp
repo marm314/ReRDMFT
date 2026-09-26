@@ -1,5 +1,7 @@
 #include "MoIntegralTransform.h"
 
+#include "SymmetricTransform.h"
+
 #include <cblas.h>
 
 #include <cstddef>
@@ -191,6 +193,21 @@ Tensor4<double> moTwoElectronTransformPhysicsCholesky(const PackedTwoElectronTen
     }
   }
   return physics_mo;
+}
+
+namespace {
+// Physics-notation view of the packed chemist AO tensor: <ab|cd> = (ac|bd).
+struct PhysicsFromChemist {
+  const PackedTwoElectronTensor& e;
+  double operator()(std::size_t a, std::size_t b, std::size_t c, std::size_t d) const { return e(a, c, b, d); }
+};
+}  // namespace
+
+SymmetricEri<double> moTwoElectronSymmetric(const PackedTwoElectronTensor& eri_ao_chemist, const Matrix<double>& c) {
+  if (c.rows() != eri_ao_chemist.dim()) {
+    throw std::runtime_error("moTwoElectronSymmetric: C row count does not match the AO dimension");
+  }
+  return transformToSymmetric<double>(PhysicsFromChemist{eri_ao_chemist}, eri_ao_chemist.dim(), c);
 }
 
 }  // namespace rerdmft

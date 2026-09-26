@@ -24,6 +24,7 @@
 #include "PnofHessian.h"
 #include "SQP.h"
 #include "SpinorRotation.h"
+#include "SymmetricTransform.h"
 
 namespace rerdmft {
 
@@ -145,13 +146,22 @@ template <typename T>
 Tensor4<T> rotateEri(const Tensor4<T>& eri, const Matrix<T>& u) { return twoElectronRotated(eri, u); }
 template <typename T>
 CholeskyEri<T> rotateEri(const CholeskyEri<T>& eri, const Matrix<T>& u) { return eri.rotated(u); }
+// Unique-element store: transformed by slabs straight into a new store (no dense n^4 array).
+template <typename T>
+SymmetricEri<T> rotateEri(const SymmetricEri<T>& eri, const Matrix<T>& u) {
+  return transformToSymmetric<T>(eri, eri.dim0(), u);
+}
+
+// Cholesky vectors (as opposed to a dense tensor / unique-element store, which hold the integrals themselves).
+template <typename E> constexpr bool kIsCholesky = false;
+template <typename T> constexpr bool kIsCholesky<CholeskyEri<T>> = true;
+template <typename T> std::string eriKind(const CholeskyEri<T>& e) {
+  return "Cholesky-vector (" + std::to_string(e.nVectors()) + " vectors, O(Nchol n^3))";
+}
+template <typename E> std::string eriKind(const E&) { return "unique-element"; }
 
 // The dense tensor: a reference for a dense ERI, a freshly assembled O(n^4) tensor for Cholesky
 // vectors (used only by start-up/final checks).
-template <typename T>
-const Tensor4<T>& denseOf(const Tensor4<T>& eri) { return eri; }
-template <typename T>
-Tensor4<T> denseOf(const CholeskyEri<T>& eri) { return eri.toDense(); }
 
 }  // namespace
 
@@ -755,52 +765,104 @@ class NeoOrbitalProblem : public NeoProblem<double> {
  public:
   NeoOrbitalProblem(const RdmftModel<Scalar, Eri>& model, RotationProblem<Scalar, Eri>& problem)
       : model_(model), problem_(problem) {}
-  void setOccupations(const std::vector<double>& occ) { occ_ = occ; }
+  void setOccupations(const std::vector<double>& occ) {
+    occ_ = occ;
+    g0_valid_ = false;
+  }
   std::size_t dimension() const override {
     return std::is_same_v<Scalar, double> ? problem_.pairs().size() : 2 * problem_.pairs().size();
   }
   double energy() override { return model_.energy(problem_.h(), problem_.eri(), occ_); }
   std::vector<double> gradient() override {
-    return jointOrbitalGradient(model_.gradient(problem_.h(), problem_.eri(), occ_), problem_.pairs());
+    g0_ = jointOrbitalGradient(model_.gradient(problem_.h(), problem_.eri(), occ_), problem_.pairs());
+    g0_valid_ = true;
+    return g0_;
   }
   std::vector<double> hessianVector(const std::vector<double>& v) override {
-    if constexpr (std::is_same_v<Eri, Tensor4<Scalar>>) {
+    if constexpr (!kIsCholesky<Eri>) {
       if (!model_.hessian_vector) {
         throw std::runtime_error("NeoOrbitalProblem: the model has no hessian_vector");
       }
       return model_.hessian_vector(problem_.h(), problem_.eri(), occ_, v);
     } else {
-      // CholeskyEri: model_.hessian_vector would call CholeskyEri::operator()'s O(n_chol) element
-      // access O(n_pairs^2) times PER CALL, and a single Newton step's Davidson solve makes many
-      // such calls -- materialize a dense Tensor4 ONCE per accepted step instead (invalidated in
-      // accept() below) and reuse it for every hessianVector() call until the next one. Measured
-      // on lih_gnof_full_optimization_cholesky.inp (X2C): without this, a single macro-iteration
-      // did not finish in 5 minutes; with it, the whole run matches the dense/ADAM result and
-      // takes about as long as the dense NEO case.
-      if (!model_.hessian_vector_dense) {
-        throw std::runtime_error("NeoOrbitalProblem: the model has no hessian_vector_dense");
+      // Cholesky vectors: NO dense tensor. H*v is obtained matrix-free from the gradient (see
+      // finiteDifferenceHessianVector), O(N_chol n^3) per product.
+      return finiteDifferenceHessianVector(v);
+    }
+  }
+
+  // Matrix-free Hessian-vector product for integrals held ONLY as Cholesky vectors: a central
+  // difference of the orbital gradient along v, evaluated on the vectors rotated by exp(-/+ eta K(v)),
+  // plus the exponential-map correction. With U(d) = exp(-K(d)) and the rotations composed in the
+  // moving frame (C -> C U(d) U(eps), which is how accept() and trialEnergy() rotate), the LOCAL
+  // gradient g_loc(d) = dE(U(d)U(eps))/d eps satisfies grad_kappa f = A(kappa)^T g_loc, A = 1 +
+  // ad_K/2 + ..., so the symmetric Hessian of f(kappa) = E(exp(-K(kappa))) -- the operator the analytic
+  // hessian_vector applies -- is
+  //     (H v)_i = d/d eta g_loc(eta v)_i  -  (1/2) [K(v), G]_{p_i q_i},     G = K(g0)
+  // (real part -> t, imaginary part -> y for complex spinors). The first term is the finite
+  // difference. O(N_chol n^3) per product (two vector rotations and two gradients), n^2 memory -- no
+  // n^4 object and no per-step cache.
+  std::vector<double> finiteDifferenceHessianVector(const std::vector<double>& v) {
+    constexpr double kRotation = 1e-4;  // rotation "length" eta*|v| of the difference step
+    const std::size_t dim = v.size();
+    double vnorm = 0.0;
+    for (double x : v) vnorm += x * x;
+    vnorm = std::sqrt(vnorm);
+    std::vector<double> w(dim, 0.0);
+    if (vnorm == 0.0) return w;
+    const double eta = kRotation / vnorm;
+    const auto gradient_at = [&](double sign) {
+      std::vector<double> d(dim);
+      for (std::size_t i = 0; i < dim; ++i) d[i] = sign * eta * v[i];
+      const auto u = spinorRotationMatrix(buildKappa(d));
+      const auto h_trial = oneElectronRotated(problem_.h(), u);
+      const auto eri_trial = rotateEri(problem_.eri(), u);
+      return jointOrbitalGradient(model_.gradient(h_trial, eri_trial, occ_), problem_.pairs());
+    };
+    const std::vector<double> g_plus = gradient_at(+1.0), g_minus = gradient_at(-1.0);
+    for (std::size_t i = 0; i < dim; ++i) w[i] = (g_plus[i] - g_minus[i]) / (2.0 * eta);
+    if (!g0_valid_) gradient();
+    const Matrix<Scalar> kv = buildKappa(v), gh = buildKappa(g0_);
+    const Matrix<Scalar> kg = kv * gh, gk = gh * kv;  // [K(v), G] = kg - gk
+    const auto& pairs = problem_.pairs();
+    for (std::size_t i = 0; i < pairs.size(); ++i) {
+      const auto& [p, q] = pairs[i];
+      const std::complex<double> c(kg(p, q) - gk(p, q));
+      w[i] -= 0.5 * c.real();
+      if constexpr (!std::is_same_v<Scalar, double>) w[pairs.size() + i] -= 0.5 * c.imag();
+    }
+    return w;
+  }
+
+  // DEBUG: analytic (dense-tensor) vs finite-difference Hessian-vector product at the current point,
+  // for Cholesky vectors. Returns {max |analytic - fd|, max |analytic|}.
+  std::pair<double, double> compareHessianVector(const std::vector<double>& v) {
+    if constexpr (!kIsCholesky<Eri>) {
+      return {0.0, 0.0};
+    } else {
+      const Tensor4<Scalar> dense = problem_.eri().toDense();
+      const std::vector<double> analytic = model_.hessian_vector_dense(problem_.h(), dense, occ_, v);
+      const std::vector<double> fd = finiteDifferenceHessianVector(v);
+      double diff = 0.0, scale = 0.0;
+      for (std::size_t i = 0; i < v.size(); ++i) {
+        diff = std::max(diff, std::abs(analytic[i] - fd[i]));
+        scale = std::max(scale, std::abs(analytic[i]));
       }
-      if (!dense_eri_valid_) {
-        dense_eri_ = problem_.eri().toDense();
-        dense_eri_valid_ = true;
-      }
-      return model_.hessian_vector_dense(problem_.h(), dense_eri_, occ_, v);
+      return {diff, scale};
     }
   }
   // Diagonal of the Hessian the Hessian-vector product applies: NEO's Davidson preconditioner
   // (without it the unpreconditioned solve needs 150+ Hessian products per step on CO/cc-pVDZ).
   // O(n_pairs) elements, so cheap next to ONE hessianVector() call. Empty if the model has none.
   std::vector<double> hessianDiagonal() override {
-    if constexpr (std::is_same_v<Eri, Tensor4<Scalar>>) {
+    if constexpr (!kIsCholesky<Eri>) {
       if (!model_.hessian_diagonal) return {};
       return model_.hessian_diagonal(problem_.h(), problem_.eri(), occ_);
     } else {
-      if (!model_.hessian_diagonal_dense) return {};
-      if (!dense_eri_valid_) {
-        dense_eri_ = problem_.eri().toDense();
-        dense_eri_valid_ = true;
-      }
-      return model_.hessian_diagonal_dense(problem_.h(), dense_eri_, occ_);
+      // Cholesky vectors: O(n_pairs) elements, each O(N_chol) per integral access -- cheap next to one
+      // Hessian-vector product, and no dense tensor.
+      if (!model_.hessian_diagonal) return {};
+      return model_.hessian_diagonal(problem_.h(), problem_.eri(), occ_);
     }
   }
   double trialEnergy(const std::vector<double>& d) override {
@@ -811,7 +873,7 @@ class NeoOrbitalProblem : public NeoProblem<double> {
   }
   void accept(const std::vector<double>& d) override {
     problem_.rotate(toStep(d));
-    dense_eri_valid_ = false;  // problem_.eri() just changed -- the cache (if any) is stale.
+    g0_valid_ = false;  // the point moved
   }
 
  private:
@@ -847,9 +909,8 @@ class NeoOrbitalProblem : public NeoProblem<double> {
   const RdmftModel<Scalar, Eri>& model_;
   RotationProblem<Scalar, Eri>& problem_;
   std::vector<double> occ_;
-  // Only used when Eri != Tensor4<Scalar> -- see hessianVector()'s own comment.
-  Tensor4<Scalar> dense_eri_;
-  bool dense_eri_valid_ = false;
+  std::vector<double> g0_;  // gradient at the current point (for the exponential-map correction of the FD product)
+  bool g0_valid_ = false;
 };
 
 // The (pure-alpha-index, pure-beta-twin-index) pairs of pairs, one entry per orbit, canonically
@@ -964,7 +1025,7 @@ Matrix<T> generatorMatrix(std::size_t n, std::size_t p, std::size_t q, double t,
 template <typename T, typename Eri>
 bool runChecks(const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ,
                const RdmftModel<T, Eri>& model, bool kramers, const std::vector<std::size_t>& spin_partner,
-               std::ostream& log, std::size_t n_negative = 0, bool check_hessian_diagonal = false) {
+               std::ostream& log, std::size_t n_negative = 0, bool check_hessian_diagonal = false, bool debug = false) {
   const std::size_t n = h.rows();
   const auto pairs = lowerPairs(n, n_negative);
   bool ok = true;
@@ -978,7 +1039,7 @@ bool runChecks(const Matrix<T>& h, const Eri& eri, const std::vector<double>& oc
   for (double v : joint_gradient) g_max = std::max(g_max, std::abs(v));
   log << std::scientific << std::setprecision(2);
   log << "    max |orbital gradient entry| at the start: " << g_max << "\n";
-  if (model.symmetric_shortcut_energy) {
+  if (debug && model.symmetric_shortcut_energy) {
     // The occupation optimizer minimizes the pair-symmetric shortcut energy, the orbital
     // stage the full two-RDM energy whose derivative is the gradient: they must be the same
     // functional, else the two alternating stages would optimize different things.
@@ -1000,8 +1061,9 @@ bool runChecks(const Matrix<T>& h, const Eri& eri, const std::vector<double>& oc
   std::sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) { return mag(a) > mag(b); });
   const std::size_t n_test = std::min<std::size_t>(2, m);
 
-  // (1) the rotation of the two-electron integrals, at a probe rotation.
-  {
+  // (1) the rotation of the two-electron integrals, at a probe rotation (DEBUG only: it needs the dense
+  // integrals, exact rotation vs Cholesky-vector rotation).
+  if (debug) {
     const auto [p, q] = pairs[order[0]];
     const Matrix<T> u = spinorRotationMatrix(generatorMatrix<T>(n, p, q, 0.3, 0.15));
     if constexpr (std::is_same_v<Eri, Tensor4<T>>) {
@@ -1030,8 +1092,8 @@ bool runChecks(const Matrix<T>& h, const Eri& eri, const std::vector<double>& oc
           for (std::size_t c = 0; c < n; ++c)
             for (std::size_t d = 0; d < n; ++d)
               de = std::max(de, std::abs(std::complex<double>(exact(a, b, c, d) - rotated(a, b, c, d))));
-      log << "    Cholesky-vector rotation (" << eri.nVectors() << " vectors, O(Nchol n^3)) vs exact dense rotation: max |deri| = " << de << "\n";
-      verdict(de < 1e-9, "rotating the Cholesky vectors reproduces the exact rotation of the integrals");
+      log << "    " << eriKind(eri) << " rotation vs exact dense rotation: max |deri| = " << de << "\n";
+      verdict(de < 1e-9, "rotating the integral representation reproduces the exact rotation of the integrals");
     }
   }
 
@@ -1066,7 +1128,7 @@ bool runChecks(const Matrix<T>& h, const Eri& eri, const std::vector<double>& oc
   // a central difference of the gradient at the rotated integrals -- the definition NeoProblem's
   // hessianVector documents -- and against the Hessian-vector product's own I-th entry for the unit
   // vector e_I (must agree to roundoff: the diagonal is the diagonal of that very operator).
-  if (check_hessian_diagonal && model.hessian_diagonal_dense && model.hessian_vector_dense) {
+  if (debug && check_hessian_diagonal && model.hessian_diagonal_dense && model.hessian_vector_dense) {
     // Dense-tensor variants (identical computation; a Cholesky model's own would pay O(n_chol) per
     // element access). The Hessian-vector comparison costs one product per tested direction, so it
     // is skipped for very large rotation spaces.
@@ -1195,11 +1257,14 @@ bool runChecks(const Matrix<T>& h, const Eri& eri, const std::vector<double>& oc
           double h_scale = 0.0;
           for (std::size_t p = 0; p < n; ++p)
             for (std::size_t q = 0; q < n; ++q) h_scale = std::max(h_scale, std::abs(std::complex<double>(h(p, q))));
-          const auto [eri_dev, eri_scale] = twoBodyTimeReversalDeviation(denseOf(eri));
-          log << "    starting integrals: max |h(P p,P q) - s_p s_q conj h(p,q)| = " << h_dev << " (max |h| = " << h_scale
-              << "), max |<Pa Pb|Pc Pd> - s_a s_b s_c s_d conj <ab|cd>| = " << eri_dev << " (max |eri| = " << eri_scale << ")\n";
+          log << "    starting integrals: max |h(P p,P q) - s_p s_q conj h(p,q)| = " << h_dev << " (max |h| = " << h_scale << ")\n";
           verdict(h_dev <= 1e-8 * std::max(1.0, h_scale), "starting one-electron integrals have the Kramers-pair structure");
-          verdict(eri_dev <= 1e-8 * std::max(1.0, eri_scale), "starting two-electron integrals have the Kramers-pair structure");
+          if (debug) {  // two-electron structure: DEBUG only (dense integrals)
+            const auto [eri_dev, eri_scale] = twoBodyTimeReversalDeviation(denseOf(eri));
+            log << "    starting two-electron integrals: max |<Pa Pb|Pc Pd> - s_a s_b s_c s_d conj <ab|cd>| = " << eri_dev
+                << " (max |eri| = " << eri_scale << ")\n";
+            verdict(eri_dev <= 1e-8 * std::max(1.0, eri_scale), "starting two-electron integrals have the Kramers-pair structure");
+          }
         }
         const double occ_dev = kramersOccupationDeviation(occ);
         log << "    Kramers restriction: " << kr.nOrbits() << " orbit(s) (" << kr.reducedSize()
@@ -1228,22 +1293,25 @@ bool runChecks(const Matrix<T>& h, const Eri& eri, const std::vector<double>& oc
   if constexpr (std::is_same_v<T, double>) {
     if (!spin_partner.empty()) {
       double h_dev = 0.0, e_dev = 0.0, h_scale = 0.0, e_scale = 0.0;
-      const auto& eri_view = denseOf(eri);
       for (std::size_t p = 0; p < n; ++p)
         for (std::size_t q = 0; q < n; ++q) {
           h_scale = std::max(h_scale, std::abs(h(p, q)));
           h_dev = std::max(h_dev, std::abs(h(spin_partner[p], spin_partner[q]) - h(p, q)));
         }
-      for (std::size_t a = 0; a < n; ++a)
-        for (std::size_t b = 0; b < n; ++b)
-          for (std::size_t c = 0; c < n; ++c)
-            for (std::size_t d = 0; d < n; ++d) {
-              e_scale = std::max(e_scale, std::abs(eri_view(a, b, c, d)));
-              e_dev = std::max(e_dev, std::abs(eri_view(spin_partner[a], spin_partner[b], spin_partner[c], spin_partner[d]) - eri_view(a, b, c, d)));
-            }
-      log << "    starting integrals, alpha/beta symmetry: max |h(alpha)-h(beta)| = " << h_dev << ", max |eri(alpha..)-eri(beta..)| = " << e_dev << "\n";
+      log << "    starting one-electron integrals, alpha/beta symmetry: max |h(alpha)-h(beta)| = " << h_dev << "\n";
       verdict(h_dev <= 1e-8 * std::max(1.0, h_scale), "starting one-electron integrals are spin-restricted (alpha = beta)");
-      verdict(e_dev <= 1e-8 * std::max(1.0, e_scale), "starting two-electron integrals are spin-restricted (alpha = beta)");
+      if (debug) {  // two-electron part: DEBUG only (dense integrals)
+        const auto& eri_view = denseOf(eri);
+        for (std::size_t a = 0; a < n; ++a)
+          for (std::size_t b = 0; b < n; ++b)
+            for (std::size_t c = 0; c < n; ++c)
+              for (std::size_t d = 0; d < n; ++d) {
+                e_scale = std::max(e_scale, std::abs(eri_view(a, b, c, d)));
+                e_dev = std::max(e_dev, std::abs(eri_view(spin_partner[a], spin_partner[b], spin_partner[c], spin_partner[d]) - eri_view(a, b, c, d)));
+              }
+        log << "    starting two-electron integrals, alpha/beta symmetry: max |eri(alpha..)-eri(beta..)| = " << e_dev << "\n";
+        verdict(e_dev <= 1e-8 * std::max(1.0, e_scale), "starting two-electron integrals are spin-restricted (alpha = beta)");
+      }
     }
   }
   log << std::defaultfloat << std::setprecision(6);
@@ -1281,17 +1349,17 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
   }
   log << "):\n";
 
-  if constexpr (!std::is_same_v<Eri, Tensor4<T>>) {
+  if constexpr (kIsCholesky<Eri>) {
     log << "  Two-electron integrals held as " << eri.nVectors()
         << " Cholesky vectors (threshold " << settings.cholesky_threshold
         << "): orbital rotations act on the vectors (O(Nchol n^3) instead of O(n^5)), elements are\n"
-           "  evaluated on demand, and no dense n^4 tensor is kept in the loop (start-up and final\n"
-           "  Kramers/spin-structure tests assemble one transiently).\n";
+           "  evaluated on demand, and no dense n^4 tensor is kept anywhere in the loop (the checks that\n"
+           "  need one run only under DEBUG TRUE).\n";
   }
   log << "  a) Validation of the ADAM / Kramers-restriction machinery on this system:\n";
   result.checks_passed =
       runChecks<T, Eri>(h, eri, occupations, model, kramers_restricted, spin_partner, log, n_negative,
-                        /*check_hessian_diagonal=*/settings.orbital_optimizer == OrbitalOptimizer::kNeo);
+                        /*check_hessian_diagonal=*/settings.orbital_optimizer == OrbitalOptimizer::kNeo, settings.debug);
   if (!result.checks_passed) {
     log << "  A validation check FAILED -- the macro-iteration loop is NOT run.\n";
     return result;
@@ -1324,6 +1392,25 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
   if (settings.orbital_optimizer == OrbitalOptimizer::kNeo && model.hessian_vector) {
     neo_problem = std::make_unique<NeoOrbitalProblem<T, Eri>>(model, problem);
     use_neo = true;
+    if constexpr (kIsCholesky<Eri>) {
+      if (settings.debug) {
+        // DEBUG: the matrix-free (finite-difference) Hessian-vector product used with Cholesky vectors
+        // against the analytic one on a dense tensor, at the starting point.
+        neo_problem->setOccupations(occupations);
+        std::vector<double> probe(neo_problem->dimension());
+        double norm = 0.0;
+        for (std::size_t i = 0; i < probe.size(); ++i) {
+          probe[i] = std::sin(0.7 * static_cast<double>(i) + 0.3);
+          norm += probe[i] * probe[i];
+        }
+        for (double& x : probe) x /= std::sqrt(norm);
+        const auto [diff, scale] = neo_problem->compareHessianVector(probe);
+        log << "    [DEBUG] finite-difference vs analytic Hessian-vector product (Cholesky vectors, NEO): max |diff| = "
+            << std::scientific << std::setprecision(2) << diff << " (max |H v| = " << scale << ")"
+            << std::defaultfloat << std::setprecision(6) << "  [" << (diff <= 1e-5 * std::max(1.0, scale) ? "PASS" : "FAIL")
+            << "]\n";
+      }
+    }
   }
   if (settings.orbital_optimizer == OrbitalOptimizer::kNeo && !use_neo) {
     log << "    ORBITAL_OPTIMIZER NEO requested but the model has no Hessian-vector callback: using ADAM.\n";
@@ -1551,7 +1638,12 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
       for (std::size_t p = 0; p < problem.h().rows(); ++p)
         for (std::size_t q = 0; q < problem.h().cols(); ++q)
           h_scale = std::max(h_scale, std::abs(std::complex<double>(problem.h()(p, q))));
-      const auto [eri_dev, eri_scale] = twoBodyTimeReversalDeviation(denseOf(problem.eri()));
+      double eri_dev = 0.0, eri_scale = 0.0;
+      if (settings.debug) {  // two-electron structure of the final basis: DEBUG only (dense integrals)
+        const auto dev = twoBodyTimeReversalDeviation(denseOf(problem.eri()));
+        eri_dev = dev.first;
+        eri_scale = dev.second;
+      }
       const double occ_dev = kramersOccupationDeviation(occ);
       const auto joint_final = jointOrbitalGradient(g_final, problem.pairs());
       double nu_scale = 0.0;
@@ -1559,12 +1651,12 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
       const double nu_dev = kr->asymmetry(joint_final);
       log << "    total rotation U: max |U(P p,P q) - s_p s_q conj U(p,q)| = " << u_dev << "\n";
       log << "    h in the final basis: max |h(P p,P q) - s_p s_q conj h(p,q)| = " << h_dev << " (max |h| = " << h_scale << ")\n";
-      log << "    eri in the final basis: max |<Pa Pb|Pc Pd> - s_a s_b s_c s_d conj <ab|cd>| = " << eri_dev << " (max |eri| = " << eri_scale << ")\n";
+      if (settings.debug) log << "    eri in the final basis: max |<Pa Pb|Pc Pd> - s_a s_b s_c s_d conj <ab|cd>| = " << eri_dev << " (max |eri| = " << eri_scale << ")\n";
       log << "    occupations: max |n_a - n_abar| = " << occ_dev << "\n";
       log << "    final orbital gradient: max |nu - R nu| = " << nu_dev << " (max |nu| = " << nu_scale << ")\n";
       final_verdict(u_dev < 1e-8, "total orbital rotation commutes with time reversal (Theta|2k> = |2k+1> preserved)");
       final_verdict(h_dev <= 1e-8 * std::max(1.0, h_scale), "one-electron integrals keep the Kramers-pair structure");
-      final_verdict(eri_dev <= 1e-8 * std::max(1.0, eri_scale), "two-electron integrals keep the Kramers-pair structure");
+      if (settings.debug) final_verdict(eri_dev <= 1e-8 * std::max(1.0, eri_scale), "two-electron integrals keep the Kramers-pair structure");
       final_verdict(occ_dev < 1e-6, "occupation numbers equal within every Kramers pair");
       // The 1e-12 floor alone assumes roundoff scales with the GRADIENT's own magnitude
       // (nu_scale); for C4_DHF the gradient/occupation-optimization sums also touch h/eri
@@ -1584,29 +1676,32 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
     }
   } else if (!spin_partner.empty()) {
     const std::size_t n_so = problem.h().rows();
-    const auto& eri_final = denseOf(problem.eri());
     double h_dev = 0.0, e_dev = 0.0, h_scale = 0.0, e_scale = 0.0;
     for (std::size_t p = 0; p < n_so; ++p)
       for (std::size_t q = 0; q < n_so; ++q) {
         h_scale = std::max(h_scale, std::abs(problem.h()(p, q)));
         h_dev = std::max(h_dev, std::abs(problem.h()(spin_partner[p], spin_partner[q]) - problem.h()(p, q)));
       }
-    for (std::size_t a = 0; a < n_so; ++a)
-      for (std::size_t b = 0; b < n_so; ++b)
-        for (std::size_t c = 0; c < n_so; ++c)
-          for (std::size_t d = 0; d < n_so; ++d) {
-            e_scale = std::max(e_scale, std::abs(eri_final(a, b, c, d)));
-            e_dev = std::max(e_dev, std::abs(eri_final(spin_partner[a], spin_partner[b], spin_partner[c], spin_partner[d]) -
-                                              eri_final(a, b, c, d)));
-          }
-    log << "    spin symmetry of the final basis: max |h(alpha)-h(beta)| = " << h_dev << " (max |h| = " << h_scale
-        << "), max |eri(alpha..)-eri(beta..)| = " << e_dev << " (max |eri| = " << e_scale << ")\n";
+    if (settings.debug) {  // two-electron part: DEBUG only (dense integrals)
+      const auto& eri_final = denseOf(problem.eri());
+      for (std::size_t a = 0; a < n_so; ++a)
+        for (std::size_t b = 0; b < n_so; ++b)
+          for (std::size_t c = 0; c < n_so; ++c)
+            for (std::size_t d = 0; d < n_so; ++d) {
+              e_scale = std::max(e_scale, std::abs(eri_final(a, b, c, d)));
+              e_dev = std::max(e_dev, std::abs(eri_final(spin_partner[a], spin_partner[b], spin_partner[c], spin_partner[d]) -
+                                                eri_final(a, b, c, d)));
+            }
+    }
+    log << "    spin symmetry of the final basis: max |h(alpha)-h(beta)| = " << h_dev << " (max |h| = " << h_scale << ")";
+    if (settings.debug) log << ", max |eri(alpha..)-eri(beta..)| = " << e_dev << " (max |eri| = " << e_scale << ")";
+    log << "\n";
     final_verdict(h_dev <= 1e-8 * std::max(1.0, h_scale), "one-electron integrals keep alpha/beta (spin-restricted) symmetry");
-    final_verdict(e_dev <= 1e-8 * std::max(1.0, e_scale), "two-electron integrals keep alpha/beta (spin-restricted) symmetry");
+    if (settings.debug) final_verdict(e_dev <= 1e-8 * std::max(1.0, e_scale), "two-electron integrals keep alpha/beta (spin-restricted) symmetry");
   } else {
     log << "    (Kramers pairing test not applicable to real NON_REL spin-orbitals)\n";
   }
-  if (model.symmetric_shortcut_energy) {
+  if (settings.debug && model.symmetric_shortcut_energy) {
     const double e_full = model.energy(problem.h(), problem.eri(), occ);
     const double e_sym = model.symmetric_shortcut_energy(problem.h(), problem.eri(), occ);
     log << "    energy, full two-RDM vs pair-symmetric shortcut (pnofElectronicEnergy): " << std::setprecision(10)
@@ -1758,6 +1853,72 @@ FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const Tensor4<T>& eri,
                                              spin_partner, n_negative);
 }
 
+template <typename T>
+FullOptResult runFullOptimizationJk(const Matrix<T>& h, const CholeskyEri<T>& eri,
+                                    const std::vector<double>& occupations,
+                                    const std::vector<double>& state, JkFunctional functional,
+                                    std::size_t f_l, double n_electrons, std::size_t n_total,
+                                    std::size_t n_frozen, std::size_t n_inactive_below,
+                                    std::size_t n_active,
+                                    bool two_columns, const FullOptSettings& settings,
+                                    bool kramers_restricted, double nuclear_repulsion_energy,
+                                    std::ostream& log, const std::vector<std::size_t>& spin_partner,
+                                    std::size_t n_negative) {
+  const auto model = makeJkOnlyModel<T, CholeskyEri<T>>(functional, f_l, n_electrons, n_total, n_frozen,
+                                                        n_inactive_below, n_active, two_columns, n_negative);
+  return runFullOptimization<T, CholeskyEri<T>>(h, eri, occupations, state, model, settings, kramers_restricted,
+                                                 nuclear_repulsion_energy, log, spin_partner, n_negative);
+}
+
+template <typename T>
+FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const CholeskyEri<T>& eri,
+                                      const std::vector<double>& occupations,
+                                      const std::vector<double>& state, PnofFunctional functional,
+                                      const std::vector<PnofGeminal>& geminals, std::size_t n_core,
+                                      int pnof_subspaces, int pnof_coupling, bool relativistic,
+                                      bool sqp_occupations, std::size_t n_total,
+                                      const FullOptSettings& settings, bool kramers_restricted,
+                                      double nuclear_repulsion_energy, std::ostream& log,
+                                      const std::vector<std::size_t>& spin_partner, std::size_t n_negative) {
+  const auto model = makePnofModel<T, CholeskyEri<T>>(functional, geminals, n_core, pnof_subspaces, pnof_coupling,
+                                                      relativistic, sqp_occupations, n_total, n_negative);
+  return runFullOptimization<T, CholeskyEri<T>>(h, eri, occupations, state, model, settings, kramers_restricted,
+                                                 nuclear_repulsion_energy, log, spin_partner, n_negative);
+}
+
+template <typename T>
+FullOptResult runFullOptimizationJk(const Matrix<T>& h, const SymmetricEri<T>& eri,
+                                    const std::vector<double>& occupations,
+                                    const std::vector<double>& state, JkFunctional functional,
+                                    std::size_t f_l, double n_electrons, std::size_t n_total,
+                                    std::size_t n_frozen, std::size_t n_inactive_below,
+                                    std::size_t n_active,
+                                    bool two_columns, const FullOptSettings& settings,
+                                    bool kramers_restricted, double nuclear_repulsion_energy,
+                                    std::ostream& log, const std::vector<std::size_t>& spin_partner,
+                                    std::size_t n_negative) {
+  const auto model = makeJkOnlyModel<T, SymmetricEri<T>>(functional, f_l, n_electrons, n_total, n_frozen,
+                                                        n_inactive_below, n_active, two_columns, n_negative);
+  return runFullOptimization<T, SymmetricEri<T>>(h, eri, occupations, state, model, settings, kramers_restricted,
+                                                 nuclear_repulsion_energy, log, spin_partner, n_negative);
+}
+
+template <typename T>
+FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const SymmetricEri<T>& eri,
+                                      const std::vector<double>& occupations,
+                                      const std::vector<double>& state, PnofFunctional functional,
+                                      const std::vector<PnofGeminal>& geminals, std::size_t n_core,
+                                      int pnof_subspaces, int pnof_coupling, bool relativistic,
+                                      bool sqp_occupations, std::size_t n_total,
+                                      const FullOptSettings& settings, bool kramers_restricted,
+                                      double nuclear_repulsion_energy, std::ostream& log,
+                                      const std::vector<std::size_t>& spin_partner, std::size_t n_negative) {
+  const auto model = makePnofModel<T, SymmetricEri<T>>(functional, geminals, n_core, pnof_subspaces, pnof_coupling,
+                                                      relativistic, sqp_occupations, n_total, n_negative);
+  return runFullOptimization<T, SymmetricEri<T>>(h, eri, occupations, state, model, settings, kramers_restricted,
+                                                 nuclear_repulsion_energy, log, spin_partner, n_negative);
+}
+
 #define RERDMFT_INSTANTIATE_FULLOPT(T, ERI)                                                        \
   template RdmftModel<T, ERI> makeJkOnlyModel<T, ERI>(JkFunctional, std::size_t, double,           \
                                                       std::size_t, std::size_t, std::size_t,        \
@@ -1772,8 +1933,10 @@ FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const Tensor4<T>& eri,
 
 RERDMFT_INSTANTIATE_FULLOPT(double, Tensor4<double>)
 RERDMFT_INSTANTIATE_FULLOPT(double, CholeskyEri<double>)
+RERDMFT_INSTANTIATE_FULLOPT(double, SymmetricEri<double>)
 RERDMFT_INSTANTIATE_FULLOPT(std::complex<double>, Tensor4<std::complex<double>>)
 RERDMFT_INSTANTIATE_FULLOPT(std::complex<double>, CholeskyEri<std::complex<double>>)
+RERDMFT_INSTANTIATE_FULLOPT(std::complex<double>, SymmetricEri<std::complex<double>>)
 #undef RERDMFT_INSTANTIATE_FULLOPT
 
 template FullOptResult runFullOptimizationJk<double>(
@@ -1793,6 +1956,50 @@ template FullOptResult runFullOptimizationPnof<double>(
     const std::vector<std::size_t>&, std::size_t);
 template FullOptResult runFullOptimizationPnof<std::complex<double>>(
     const Matrix<std::complex<double>>&, const Tensor4<std::complex<double>>&,
+    const std::vector<double>&, const std::vector<double>&, PnofFunctional,
+    const std::vector<PnofGeminal>&, std::size_t, int, int, bool, bool, std::size_t,
+    const FullOptSettings&, bool, double, std::ostream&, const std::vector<std::size_t>&,
+    std::size_t);
+
+template FullOptResult runFullOptimizationJk<double>(
+    const Matrix<double>&, const CholeskyEri<double>&, const std::vector<double>&,
+    const std::vector<double>&, JkFunctional, std::size_t, double, std::size_t, std::size_t,
+    std::size_t, std::size_t, bool, const FullOptSettings&, bool, double, std::ostream&,
+    const std::vector<std::size_t>&, std::size_t);
+template FullOptResult runFullOptimizationJk<std::complex<double>>(
+    const Matrix<std::complex<double>>&, const CholeskyEri<std::complex<double>>&,
+    const std::vector<double>&, const std::vector<double>&, JkFunctional, std::size_t, double,
+    std::size_t, std::size_t, std::size_t, std::size_t, bool, const FullOptSettings&, bool, double,
+    std::ostream&, const std::vector<std::size_t>&, std::size_t);
+template FullOptResult runFullOptimizationPnof<double>(
+    const Matrix<double>&, const CholeskyEri<double>&, const std::vector<double>&,
+    const std::vector<double>&, PnofFunctional, const std::vector<PnofGeminal>&, std::size_t, int,
+    int, bool, bool, std::size_t, const FullOptSettings&, bool, double, std::ostream&,
+    const std::vector<std::size_t>&, std::size_t);
+template FullOptResult runFullOptimizationPnof<std::complex<double>>(
+    const Matrix<std::complex<double>>&, const CholeskyEri<std::complex<double>>&,
+    const std::vector<double>&, const std::vector<double>&, PnofFunctional,
+    const std::vector<PnofGeminal>&, std::size_t, int, int, bool, bool, std::size_t,
+    const FullOptSettings&, bool, double, std::ostream&, const std::vector<std::size_t>&,
+    std::size_t);
+
+template FullOptResult runFullOptimizationJk<double>(
+    const Matrix<double>&, const SymmetricEri<double>&, const std::vector<double>&,
+    const std::vector<double>&, JkFunctional, std::size_t, double, std::size_t, std::size_t,
+    std::size_t, std::size_t, bool, const FullOptSettings&, bool, double, std::ostream&,
+    const std::vector<std::size_t>&, std::size_t);
+template FullOptResult runFullOptimizationJk<std::complex<double>>(
+    const Matrix<std::complex<double>>&, const SymmetricEri<std::complex<double>>&,
+    const std::vector<double>&, const std::vector<double>&, JkFunctional, std::size_t, double,
+    std::size_t, std::size_t, std::size_t, std::size_t, bool, const FullOptSettings&, bool, double,
+    std::ostream&, const std::vector<std::size_t>&, std::size_t);
+template FullOptResult runFullOptimizationPnof<double>(
+    const Matrix<double>&, const SymmetricEri<double>&, const std::vector<double>&,
+    const std::vector<double>&, PnofFunctional, const std::vector<PnofGeminal>&, std::size_t, int,
+    int, bool, bool, std::size_t, const FullOptSettings&, bool, double, std::ostream&,
+    const std::vector<std::size_t>&, std::size_t);
+template FullOptResult runFullOptimizationPnof<std::complex<double>>(
+    const Matrix<std::complex<double>>&, const SymmetricEri<std::complex<double>>&,
     const std::vector<double>&, const std::vector<double>&, PnofFunctional,
     const std::vector<PnofGeminal>&, std::size_t, int, int, bool, bool, std::size_t,
     const FullOptSettings&, bool, double, std::ostream&, const std::vector<std::size_t>&,

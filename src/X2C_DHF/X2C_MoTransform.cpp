@@ -1,5 +1,7 @@
 #include "X2C_MoTransform.h"
 
+#include "SymmetricTransform.h"
+
 #include <cblas.h>
 
 #include <complex>
@@ -142,6 +144,27 @@ Tensor4<std::complex<double>> x2cMoTwoElectronTransformPhysicsCholesky(
         "eri_ao_physics's dimension");
   }
   return choleskyTransformEriMixed(eri_ao_physics, c_matrix, threshold);
+}
+
+namespace {
+// <AB|CD> of the closed-shell spin-orbital tensor over the [alpha; beta] Large AO basis, from the packed
+// chemist spatial integrals: (AC|BD) if spin(A) = spin(C) and spin(B) = spin(D), else 0.
+struct SpinBlockSource {
+  const PackedTwoElectronTensor& e;
+  std::size_t n;
+  double operator()(std::size_t a, std::size_t b, std::size_t c, std::size_t d) const {
+    if (a / n != c / n || b / n != d / n) return 0.0;
+    return e(a % n, c % n, b % n, d % n);
+  }
+};
+}  // namespace
+
+SymmetricEri<std::complex<double>> x2cMoTwoElectronSymmetric(const PackedTwoElectronTensor& eri,
+                                                              const Matrix<std::complex<double>>& c) {
+  if (c.rows() != 2 * eri.dim()) {
+    throw std::runtime_error("x2cMoTwoElectronSymmetric: C must have 2*n_AO rows ([alpha; beta] blocks)");
+  }
+  return transformToSymmetric<std::complex<double>>(SpinBlockSource{eri, eri.dim()}, 2 * eri.dim(), c);
 }
 
 }  // namespace rerdmft

@@ -1,4 +1,5 @@
 #include "CholeskyEri.h"
+#include "SymmetricEri.h"
 #include "JkOnlyFock.h"
 
 #include <complex>
@@ -93,15 +94,21 @@ template Matrix<double> jkOnlyOrbitalGradient(const Matrix<double>&, const Tenso
 template Matrix<double> jkOnlyOrbitalGradient(const Matrix<double>&, const CholeskyEri<double>&,
                                                const std::vector<double>&, const Matrix<double>&,
                                                const Matrix<double>&);
+template Matrix<double> jkOnlyOrbitalGradient(const Matrix<double>&, const SymmetricEri<double>&,
+                                               const std::vector<double>&, const Matrix<double>&,
+                                               const Matrix<double>&);
 template Matrix<std::complex<double>> jkOnlyOrbitalGradient(
     const Matrix<std::complex<double>>&, const Tensor4<std::complex<double>>&,
     const std::vector<double>&, const Matrix<double>&, const Matrix<double>&);
 template Matrix<std::complex<double>> jkOnlyOrbitalGradient(
     const Matrix<std::complex<double>>&, const CholeskyEri<std::complex<double>>&,
     const std::vector<double>&, const Matrix<double>&, const Matrix<double>&);
+template Matrix<std::complex<double>> jkOnlyOrbitalGradient(
+    const Matrix<std::complex<double>>&, const SymmetricEri<std::complex<double>>&,
+    const std::vector<double>&, const Matrix<double>&, const Matrix<double>&);
 
-template <typename T>
-double jkOnlyEnergy(const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri>
+double jkOnlyEnergy(const Matrix<T>& h, const Eri& eri,
                      const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
                      const Matrix<double>& two_rdm_x) {
   const std::size_t n = h.rows();
@@ -163,6 +170,20 @@ template Tensor4<std::complex<double>> jkOnlyDenseTwoRdm(std::size_t n,
                                                            const Matrix<double>& two_rdm_h,
                                                            const Matrix<double>& two_rdm_x);
 
+template double jkOnlyEnergy(const Matrix<double>& h, const CholeskyEri<double>& eri,
+                              const std::vector<double>& occupations,
+                              const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x);
+template double jkOnlyEnergy(const Matrix<double>& h, const SymmetricEri<double>& eri,
+                              const std::vector<double>& occupations,
+                              const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x);
+template double jkOnlyEnergy(const Matrix<std::complex<double>>& h,
+                              const CholeskyEri<std::complex<double>>& eri,
+                              const std::vector<double>& occupations,
+                              const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x);
+template double jkOnlyEnergy(const Matrix<std::complex<double>>& h,
+                              const SymmetricEri<std::complex<double>>& eri,
+                              const std::vector<double>& occupations,
+                              const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x);
 template double jkOnlyEnergy(const Matrix<double>& h, const Tensor4<double>& eri,
                               const std::vector<double>& occupations,
                               const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x);

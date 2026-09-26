@@ -16,7 +16,7 @@ namespace rerdmft {
 // changes -- a cache built by an older version of this code must never
 // be silently reused as if it were still correct. loadX below already
 // refuses to load a file whose stored version does not match this one.
-constexpr std::uint32_t kIntegralCacheFormatVersion = 1;
+constexpr std::uint32_t kIntegralCacheFormatVersion = 2;  // 2: the RKB tensor is a SymmetricEri (unique elements only)
 
 // Order-sensitive 64-bit hash over the concrete, already-built basis
 // functions (element, center, angular momentum, exponents, contraction

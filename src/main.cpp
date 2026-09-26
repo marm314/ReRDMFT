@@ -13,6 +13,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "AoCholesky.h"
 #include "BasisSet.h"
 #include "C4_DHF.h"
 #include "ClosedShellSpinOrbitals.h"
@@ -1358,6 +1359,23 @@ inline bool kramersStructureTest(const std::string& label,
   return h_ok && eri_ok;
 }
 
+// The one-electron half of kramersStructureTest, for runs that hold the two-electron integrals only as
+// Cholesky vectors (CHOLESKY TRUE without DEBUG): the two-electron structure test needs a dense tensor and
+// runs under DEBUG only. The same one-body test decides whether the exact re-pairing correction is applied.
+inline bool kramersStructureTestOneBody(const std::string& label,
+                                        const rerdmft::Matrix<std::complex<double>>& h_mo,
+                                        bool repairs_if_failed = false) {
+  double h_scale = 0.0;
+  const double h_dev = rerdmft::kramersOneBodyDeviation(h_mo, &h_scale);
+  const bool h_ok = h_dev <= 1e-8 * std::max(1.0, h_scale);
+  std::cout << label << " Kramers-pair structure of the one-electron MO integrals (Theta|2k> = |2k+1>): "
+            << "max |h(P p,P q) - s_p s_q conj h(p,q)| = " << std::scientific << std::setprecision(2) << h_dev
+            << " (max |h| = " << h_scale << ")" << std::defaultfloat << std::setprecision(6) << "\n  ["
+            << (h_ok ? "PASS" : (repairs_if_failed ? "NEEDS RE-PAIRING" : "FAIL"))
+            << "] one-electron integrals keep the Kramers-pair structure\n";
+  return h_ok;
+}
+
 inline void printKramersPairingReport(const std::string& label,
                                       const rerdmft::KramersPairingReport& pairing) {
   std::cout << label << " Kramers pairing correction (exact re-pairing, Utils/KramersPairing.h): "
@@ -1393,6 +1411,7 @@ inline rerdmft::FullOptSettings fullOptSettings(const rerdmft::Input& input) {
   settings.gradient_tolerance = input.orbital_gradient_tolerance();
   settings.cholesky = input.cholesky();
   settings.cholesky_threshold = input.cholesky_threshold();
+  settings.debug = input.debug();
   settings.orbital_optimizer = input.orbital_optimizer() == "NEO" ? rerdmft::OrbitalOptimizer::kNeo
                                                                   : rerdmft::OrbitalOptimizer::kAdam;
   return settings;
@@ -2112,9 +2131,12 @@ std::string jkOnlyHartreeFockLimitReport(const rerdmft::Matrix<T>& h, const rerd
   return out.str();
 }
 
-template <typename T>
+// `Eri` is the dense Tensor4<T> or Cholesky vectors (rerdmft::CholeskyEri<T>): the energy/gradient/Hessian
+// code below only needs element access, so it takes either; the DEBUG-only validation blocks that need a
+// dense tensor take a dense view (denseOf) of it.
+template <typename T, typename Eri>
 std::string buildFunctionalReport(const std::string& label, const rerdmft::Matrix<T>& h,
-                                   const rerdmft::Tensor4<T>& eri,
+                                   const Eri& eri_in,
                                    const std::vector<double>& orbital_energies_active,
                                    std::size_t n_inactive_below, double n_electrons,
                                    int jk_frozen_pairs, int jk_active_pairs,
@@ -2127,6 +2149,9 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
                                    std::chrono::steady_clock::time_point& t_checkpoint,
                                    std::vector<TimingRecord>& timing_records,
                                    rerdmft::RestartCapture* restart = nullptr) {
+  // Generic (element-access) view of the integrals, used by the production code below; the DEBUG /
+  // HESSIAN_FUNCTIONAL validation blocks that need a dense Tensor4 re-bind `eri` to a dense view of `eri_in`.
+  const Eri& eri = eri_in;
   const std::size_t n_total = h.rows();
   constexpr double kOccupationEpsilon = 1e-6;
 
@@ -2471,6 +2496,7 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
     // plain, unrestricted function of (p,q) and occupations alone, valid
     // for ANY h/eri, not just a Kramers-symmetric one.
     if (debug && n_active >= 2) {
+    const auto& eri = rerdmft::denseOf(eri_in);  // dense view (a temporary for Cholesky vectors): DEBUG-only block
       const auto optimized_occ = embed(sqp_result.x);
       const auto opt_two_rdm_h = rerdmft::jkHartreeCoupling(functional, optimized_occ, f_l);
       const auto opt_two_rdm_x = rerdmft::jkExchangeCoupling(functional, optimized_occ, f_l);
@@ -3101,6 +3127,7 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
     // HESSIAN_FUNCTIONAL: full orbital-rotation Hessian at the optimized
     // occupations, diagonalized (see functionalFullHessianReport).
     if (full_hessian) {
+    const auto& eri = rerdmft::denseOf(eri_in);  // dense view (a temporary for Cholesky vectors): DEBUG-only block
       try {
         const auto occ_opt = embed(sqp_result.x);
         const auto hc_opt = rerdmft::jkHartreeCoupling(functional, occ_opt, f_l);
@@ -3302,9 +3329,9 @@ std::string pnofJointBlocksReport(rerdmft::PnofFunctional functional,
 // subspaces' own geminals (buildPnofGeminals emits these AFTER every
 // frozen_occupied geminal, `pnof_coupling` geminals per subspace, in
 // subspace order) are SQP variables.
-template <typename T>
+template <typename T, typename Eri>
 std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::Matrix<T>& h,
-                                       const rerdmft::Tensor4<T>& eri, std::size_t n_active,
+                                       const Eri& eri_in, std::size_t n_active,
                                        std::size_t n_inactive_below, double n_electrons,
                                        const std::string& functional_name,
                                        double nuclear_repulsion_energy, int pnof_subspaces,
@@ -3316,6 +3343,8 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
                                        std::chrono::steady_clock::time_point& t_checkpoint,
                                        std::vector<TimingRecord>& timing_records,
                                        rerdmft::RestartCapture* restart = nullptr) {
+  // See buildFunctionalReport: generic view here, dense re-binding in the DEBUG / HESSIAN_FUNCTIONAL blocks.
+  const Eri& eri = eri_in;
   constexpr double kOccupationEpsilon = 1e-6;
   const std::size_t n_total = h.rows();
   const auto functional = rerdmft::parsePnofFunctional(functional_name);
@@ -3665,6 +3694,7 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
   // so the two sides of this check share no code besides the rotated
   // integrals themselves.
   if (debug) {
+  const auto& eri = rerdmft::denseOf(eri_in);  // dense view (a temporary for Cholesky vectors): DEBUG-only block
     // A pair WITHIN the frontier (fractionally-occupied) subspace(s)
     // when available -- exactly where a genuinely nonzero orbital-
     // rotation gradient is expected, since occupation-only optimization
@@ -3779,6 +3809,7 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
 
   {
     if (debug && verbose > 0 && n_active >= 4) {
+    const auto& eri = rerdmft::denseOf(eri_in);  // dense view: DEBUG-only block
       try {
         out << pnofJointBlocksReport<T>(functional, h, eri, geminals, n_core, n_inactive_below,
                                          n_active, relativistic, optimized_occ);
@@ -3791,6 +3822,7 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
   // HESSIAN_FUNCTIONAL: full orbital-rotation Hessian at the optimized
   // occupations, diagonalized (see functionalFullHessianReport).
   if (full_hessian) {
+  const auto& eri = rerdmft::denseOf(eri_in);  // dense view (a temporary for Cholesky vectors): DEBUG-only block
     try {
       const auto fock_full = rerdmft::pnofFockMatrix(functional, h, eri, geminals, optimized_occ,
                                                        relativistic);
@@ -3934,7 +3966,7 @@ rerdmft::PackedTwoElectronTensor buildOrLoadNonRelEri(
 rerdmft::RkbTwoElectronTensor buildOrLoadC4SpinorEri(
     const rerdmft::Input& input, const std::vector<rerdmft::BasisFunction>& large_basis,
     const std::vector<rerdmft::BasisFunction>& small_basis,
-    const rerdmft::Matrix<std::complex<double>>& rkb_coefficients) {
+    const rerdmft::Matrix<std::complex<double>>& rkb_coefficients, bool use_cholesky) {
   const std::size_t dim = 4 * large_basis.size();
   const std::uint64_t fingerprint = rerdmft::combineFingerprints(
       rerdmft::basisFingerprint(large_basis), rerdmft::basisFingerprint(small_basis));
@@ -3947,13 +3979,13 @@ rerdmft::RkbTwoElectronTensor buildOrLoadC4SpinorEri(
       return cached;
     }
     rerdmft::RkbTwoElectronTensor built = rerdmft::rkbTwoElectronIntegrals(
-        large_basis, small_basis, rkb_coefficients, input.cholesky(), input.cholesky_threshold());
+        large_basis, small_basis, rkb_coefficients, use_cholesky, input.cholesky_threshold());
     rerdmft::saveRkbTwoElectronTensor(path, fingerprint, built);
     std::cout << "C4_DHF two-electron integrals: wrote disk cache (" << path << ")\n";
     return built;
   }
   return rerdmft::rkbTwoElectronIntegrals(large_basis, small_basis, rkb_coefficients,
-                                           input.cholesky(), input.cholesky_threshold());
+                                           use_cholesky, input.cholesky_threshold());
 }
 
 // How the SCF loops were accelerated, for their headers.
@@ -4258,6 +4290,15 @@ int main(int argc, char** argv) {
   rerdmft::Matrix<double> h_core_nonrel_ortho;
   rerdmft::SymmetricEigenResult h_core_nonrel_eig;
   rerdmft::PackedTwoElectronTensor nonrel_eri;
+  // CHOLESKY TRUE: the AO integrals are decomposed ONCE into AO Cholesky vectors (Utils/AoCholesky.h), shared
+  // by the NON_REL and X2C paths; the SCF Fock matrices and every MO-basis integral representation come from
+  // them, and the packed AO tensor is dropped unless DEBUG needs it for the dense-vs-Cholesky checks.
+  rerdmft::AoCholesky ao_cholesky;
+  bool ao_cholesky_ready = false;
+  std::string ao_cholesky_report;     // what the decomposition (and, under DEBUG, the checks) found
+  std::size_t nonrel_eri_dim = 0, nonrel_eri_stored = 0;
+  bool nonrel_rdmft_gradient_computed = false;
+  bool x2c_rdmft_gradient_computed = false;
   rerdmft::NonRelHartreeFockResult nonrel_hf_result;
   bool nonrel_gradient_computed = false;
   double nonrel_gradient_norm = 0.0;
@@ -4303,7 +4344,14 @@ int main(int argc, char** argv) {
   std::string x2c_functional_report;
   rerdmft::Matrix<std::complex<double>> c_dhf;
   rerdmft::Matrix<std::complex<double>> density_matrix;
-  rerdmft::RkbTwoElectronTensor c4_spinor_eri;
+  rerdmft::RkbTwoElectronTensor c4_spinor_eri;   // packed RKB tensor: without CHOLESKY, and under DEBUG
+  // CHOLESKY TRUE: the RKB integrals are ONE decomposition of the real AO {LL} u {SS} Coulomb matrix
+  // (C4_DHF/RkbCholesky.h); the SCF Fock matrices and the MO-basis vectors come from it, no packed RKB tensor.
+  rerdmft::RkbCholesky rkb_cholesky;
+  std::string rkb_cholesky_report;
+  std::size_t c4_eri_dim = 0, c4_eri_stored = 0;
+  bool c4_eri_available = false;                 // c4_spinor_eri holds data
+  bool dhf_rdmft_gradient_computed = false;
   rerdmft::Matrix<std::complex<double>> fock_matrix;
   rerdmft::DiracHartreeFockResult dhf_result;
   const auto t_start = std::chrono::steady_clock::now();
@@ -4373,6 +4421,33 @@ int main(int argc, char** argv) {
         rerdmft::positiveEnergyOrthoHamiltonian(h_positive_energy, x_large);
     h_positive_energy_eig = rerdmft::diagonalizeHermitian(h_positive_energy_ortho);
 
+    // Builds (or loads) the packed AO integrals. With CHOLESKY TRUE they are decomposed once into AO Cholesky
+    // vectors (checked and, if needed, retried with a smaller batch -- Utils/Cholesky_Decomposition.h) and the
+    // packed tensor is released unless DEBUG will compare against it.
+    const auto prepareNonRelEri = [&](const std::string& what) {
+      nonrel_eri = buildOrLoadNonRelEri(input, large_basis.functions());
+      nonrel_eri_dim = nonrel_eri.dim();
+      nonrel_eri_stored = nonrel_eri.storedCount();
+      logTiming("Two-electron integrals built (" + what + ")", t_start, t_checkpoint, timing_records);
+      if (input.cholesky() && !ao_cholesky_ready) {
+        rerdmft::CholeskyCheckReport check;
+        ao_cholesky = rerdmft::AoCholesky::fromPacked(nonrel_eri, input.cholesky_threshold(), &check);
+        ao_cholesky_ready = true;
+        std::ostringstream report;
+        report << std::scientific << std::setprecision(2)
+               << "  AO integrals held as " << ao_cholesky.nVectors() << " Cholesky vectors (threshold "
+               << input.cholesky_threshold() << ", batch " << check.batch_used << (check.retried ? ", retried" : "")
+               << "; max |reconstruction - packed| on the sampled elements = " << check.max_error << ", tolerance "
+               << check.tolerance << ")\n"
+               << "  NON_REL and X2C SCF Fock matrices and all MO-basis integrals are built from these vectors;\n"
+               << "  " << (input.debug() ? "the packed AO tensor is kept only for the DEBUG dense-vs-Cholesky checks."
+                                           : "the packed AO tensor has been released.") << "\n";
+        ao_cholesky_report = report.str();
+        logTiming("AO Cholesky decomposition complete", t_start, t_checkpoint, timing_records);
+        if (!input.debug()) nonrel_eri = rerdmft::PackedTwoElectronTensor();
+      }
+    };
+
     if (input.non_relativistic()) {
       const auto schrodinger_kinetic = rerdmft::schrodingerKineticMatrix(large_basis.functions());
       const auto vext_large =
@@ -4384,12 +4459,14 @@ int main(int argc, char** argv) {
       const auto nonrel_c_initial = x_large * h_core_nonrel_eig.eigenvectors;
       const auto nonrel_density_initial =
           rerdmft::nonRelDensityMatrix(nonrel_c_initial, input.n_electrons());
-      nonrel_eri = buildOrLoadNonRelEri(input, large_basis.functions());
-      logTiming("Two-electron integrals built (NON_REL)", t_start, t_checkpoint, timing_records);
-      nonrel_hf_result = rerdmft::runNonRelativisticHartreeFock(
-          nonrel_eri, h_core_nonrel, x_large, nonrel_density_initial,
-          input.n_electrons(), input.geometry(), input.mixing(), s_large, input.scf_diis_size(),
-          input.max_iterations(), input.energy_tolerance(), input.density_tolerance());
+      prepareNonRelEri("NON_REL");
+      const auto run_nonrel_scf = [&](const auto& eri_source) {
+        return rerdmft::runNonRelativisticHartreeFock(
+            eri_source, h_core_nonrel, x_large, nonrel_density_initial,
+            input.n_electrons(), input.geometry(), input.mixing(), s_large, input.scf_diis_size(),
+            input.max_iterations(), input.energy_tolerance(), input.density_tolerance());
+      };
+      nonrel_hf_result = input.cholesky() ? run_nonrel_scf(ao_cholesky) : run_nonrel_scf(nonrel_eri);
       logTiming("Nonrelativistic HF SCF complete", t_start, t_checkpoint, timing_records);
 
       // Transform h and the ERIs into the converged natural (canonical
@@ -4401,17 +4478,53 @@ int main(int argc, char** argv) {
       // is unavoidable if the gradient is built directly from
       // Hessian_opt/HartreeExchangeGradient.h's simplified sums.
       const auto h_mo = rerdmft::moOneElectronTransform(h_core_nonrel, nonrel_hf_result.c_matrix);
-      const auto eri_mo =
-          input.cholesky()
-              ? rerdmft::moTwoElectronTransformPhysicsCholesky(
-                    nonrel_eri, nonrel_hf_result.c_matrix, input.cholesky_threshold())
-              : rerdmft::moTwoElectronTransformPhysics(nonrel_eri, nonrel_hf_result.c_matrix);
+      // CHOLESKY TRUE: the MO-basis spin-orbital integrals are the AO vectors transformed to the MO basis --
+      // no dense tensor. A dense tensor (exact transform of the packed AO integrals) is built only where it is
+      // needed: without CHOLESKY (unchanged), and under DEBUG (dense-vs-Cholesky checks, dense validation
+      // suites); with CHOLESKY TRUE and HESSIAN_NON_REL only, it is expanded from the vectors.
+      // The integrals as elements (a unique-element store, Utils/SymmetricEri.h -- never a dense n^4 array): without
+      // CHOLESKY always, with CHOLESKY TRUE only under DEBUG (the exact reference) or for HESSIAN_NON_REL. A DENSE
+      // Tensor4 exists only for the DEBUG validation suites and the HESSIAN_NON_REL diagnostic.
+      const bool nonrel_dense = input.debug() || input.hessian_non_rel();
+      rerdmft::CholeskyEri<double> eri_spin_chol;
+      if (input.cholesky()) {
+        eri_spin_chol = rerdmft::aoCholeskyToMoSpinOrbital(ao_cholesky, nonrel_hf_result.c_matrix);
+      }
       logTiming("NON_REL MO integral transform complete", t_start, t_checkpoint, timing_records);
 
       const std::size_t n_spatial = h_mo.rows();
       const int n_occ_spatial = input.n_electrons() / 2;
       const auto h_spin = rerdmft::closedShellSpinOrbitalOneElectron(h_mo, n_spatial);
-      const auto eri_spin = rerdmft::closedShellSpinOrbitalTwoElectron(eri_mo, n_spatial);
+      rerdmft::SymmetricEri<double> eri_spin_sym;
+      if (!input.cholesky() || input.debug()) {
+        eri_spin_sym = rerdmft::closedShellSpinOrbitalTwoElectron(
+            rerdmft::moTwoElectronSymmetric(nonrel_eri, nonrel_hf_result.c_matrix), n_spatial);
+      } else if (input.hessian_non_rel()) {
+        eri_spin_sym = rerdmft::symmetricFromCholesky(eri_spin_chol);
+      }
+      rerdmft::Tensor4<double> eri_spin;
+      if (nonrel_dense) eri_spin = rerdmft::denseOf(eri_spin_sym);
+      if (input.cholesky() && input.debug()) {
+        // DEBUG: dense (exact) vs Cholesky, for the Fock matrix at the converged density and for the MO integrals.
+        const auto f_dense = rerdmft::nonRelFockMatrix(h_core_nonrel, nonrel_eri, nonrel_hf_result.density_matrix);
+        const auto f_chol = rerdmft::nonRelFockMatrix(h_core_nonrel, ao_cholesky, nonrel_hf_result.density_matrix);
+        double f_dev = 0.0, e_dev = 0.0;
+        for (std::size_t i = 0; i < f_dense.rows(); ++i)
+          for (std::size_t j = 0; j < f_dense.cols(); ++j) f_dev = std::max(f_dev, std::abs(f_dense(i, j) - f_chol(i, j)));
+        const std::size_t n_so = 2 * n_spatial;
+        const std::size_t total = n_so * n_so * n_so * n_so;
+        const std::size_t stride = total > 4000000 ? total / 4000000 + 1 : 1;
+        for (std::size_t flat = 0; flat < total; flat += stride) {
+          const std::size_t d = flat % n_so, c = (flat / n_so) % n_so, b = (flat / (n_so * n_so)) % n_so,
+                            a = flat / (n_so * n_so * n_so);
+          e_dev = std::max(e_dev, std::abs(eri_spin(a, b, c, d) - eri_spin_chol(a, b, c, d)));
+        }
+        std::ostringstream chk;
+        chk << std::scientific << std::setprecision(2)
+            << "  [DEBUG] NON_REL dense vs Cholesky: max |F(packed AO) - F(AO vectors)| = " << f_dev
+            << ", max |eri_MO(dense) - eri_MO(vectors)| = " << e_dev << (stride > 1 ? " (sampled)" : "") << "\n";
+        ao_cholesky_report += chk.str();
+      }
 
       // Default, always-on check: the RDMFT-ansatz gradient
       // (Hessian_opt/HartreeExchangeGradient.h -- 1-RDM diagonal in the
@@ -4430,12 +4543,16 @@ int main(int argc, char** argv) {
         hf_occ_spin[n_spatial + static_cast<std::size_t>(p)] = 1.0;
       }
       const auto hx_test = occupationOuterProduct(hf_occ_spin);
-      const auto fock_rdmft =
-          rerdmft::hartreeExchangeFockMatrix(h_spin, eri_spin, hf_occ_spin, hx_test, hx_test);
-      const auto gradient_rdmft = rerdmft::orbitalGradient(fock_rdmft);
-      gradientNormAndMax(gradient_rdmft, nonrel_gradient_rdmft_norm, nonrel_gradient_rdmft_max_abs);
-      logTiming("NON_REL RDMFT-ansatz orbital gradient complete", t_start, t_checkpoint,
-                timing_records);
+      // A test involving the two-electron integrals: DEBUG (or HESSIAN_NON_REL, which needs the dense tensor anyway).
+      rerdmft::Matrix<double> fock_rdmft, gradient_rdmft;
+      if (nonrel_dense) {
+        fock_rdmft = rerdmft::hartreeExchangeFockMatrix(h_spin, eri_spin, hf_occ_spin, hx_test, hx_test);
+        gradient_rdmft = rerdmft::orbitalGradient(fock_rdmft);
+        gradientNormAndMax(gradient_rdmft, nonrel_gradient_rdmft_norm, nonrel_gradient_rdmft_max_abs);
+        nonrel_rdmft_gradient_computed = true;
+        logTiming("NON_REL RDMFT-ansatz orbital gradient complete", t_start, t_checkpoint,
+                  timing_records);
+      }
 
       // DEBUG-only cross-checks against the RDMFT-ansatz path above:
       // Hessian_opt's general (dense 2-RDM, O(n^5) contraction) path
@@ -4581,24 +4698,28 @@ int main(int argc, char** argv) {
           nonrel_orbital_energies_spin[p] = nonrel_hf_result.orbital_energies[p % n_spatial];
         }
         rerdmft::RestartCapture nonrel_restart;
-        if (isPnofFunctionalName(input.functional())) {
-          nonrel_functional_report = buildPnofFunctionalReport(
-              "NON_REL", h_spin, eri_spin, 2 * n_spatial, 0, input.n_electrons(),
-              input.functional(), nonrel_hf_result.nuclear_repulsion_energy,
-              input.pnof_subspaces(), input.pnof_coupling(), /*relativistic=*/false,
-              input.sqp_pnof_occ(), input.debug(), input.verbose(), input.hessian_functional(), fullOptSettings(input),
-              input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records,
-              &nonrel_restart);
-        } else {
-          nonrel_functional_report = buildFunctionalReport(
-              "NON_REL", h_spin, eri_spin, nonrel_orbital_energies_spin, 0, input.n_electrons(),
+        // The functional stage (occupation optimization, FULL_OPTIMIZATION) runs on the Cholesky vectors when
+        // CHOLESKY TRUE, on the dense tensor otherwise.
+        const auto nonrel_functional = [&](const auto& eri_any) {
+          if (isPnofFunctionalName(input.functional())) {
+            return buildPnofFunctionalReport(
+                "NON_REL", h_spin, eri_any, 2 * n_spatial, 0, input.n_electrons(),
+                input.functional(), nonrel_hf_result.nuclear_repulsion_energy,
+                input.pnof_subspaces(), input.pnof_coupling(), /*relativistic=*/false,
+                input.sqp_pnof_occ(), input.debug(), input.verbose(), input.hessian_functional(), fullOptSettings(input),
+                input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records,
+                &nonrel_restart);
+          }
+          return buildFunctionalReport(
+              "NON_REL", h_spin, eri_any, nonrel_orbital_energies_spin, 0, input.n_electrons(),
               input.jk_frozen_pairs(), input.jk_active_pairs(),
               input.temperature(), input.functional(), input.occupation_init(),
               nonrel_hf_result.nuclear_repulsion_energy, input.debug(), input.verbose(),
               input.hessian_functional(), fullOptSettings(input), input.full_optimization_4c_neg(),
               t_start, t_checkpoint, timing_records,
               &nonrel_restart);
-        }
+        };
+        nonrel_functional_report = input.cholesky() ? nonrel_functional(eri_spin_chol) : nonrel_functional(eri_spin_sym);
         // RESTART file: spin-orbital coefficients [alpha; beta] x [alpha MOs, beta MOs] in the
         // spin-orbital AO basis, blockdiag(C, C) times the FULL_OPTIMIZATION rotation.
         const auto blockDiagTwice = [](const rerdmft::Matrix<double>& m) {
@@ -4622,10 +4743,7 @@ int main(int argc, char** argv) {
       // geometry+basis, independent of any relativistic setting); build
       // it fresh otherwise -- the X2C-HF SCF below does not require
       // NON_RELATIVISTIC.
-      if (!input.non_relativistic()) {
-        nonrel_eri = buildOrLoadNonRelEri(input, large_basis.functions());
-        logTiming("Two-electron integrals built (X2C_HF)", t_start, t_checkpoint, timing_records);
-      }
+      if (!input.non_relativistic()) prepareNonRelEri("X2C_HF");
 
       // The ORDINARY (real, non-relativistic) two-electron Coulomb
       // integrals over the Large AO basis, in dense PHYSICS notation --
@@ -4641,14 +4759,19 @@ int main(int argc, char** argv) {
       // (picture-change) correction is applied to these integrals at
       // all, by explicit design (see X2C_DHF/X2C_HF.h).
       const std::size_t n_large = x_large.rows();
-      rerdmft::Matrix<double> identity_large(n_large, n_large, 0.0);
-      for (std::size_t i = 0; i < n_large; ++i) identity_large(i, i) = 1.0;
-      const auto eri_large_physics =
-          rerdmft::moTwoElectronTransformPhysics(nonrel_eri, identity_large);
-      const auto eri_x2c_spin =
-          rerdmft::closedShellSpinOrbitalTwoElectron(eri_large_physics, n_large);
-      logTiming("X2C_HF spin-orbital two-electron integrals built", t_start, t_checkpoint,
-                timing_records);
+      // The X2C SCF Fock matrices come from the packed SPATIAL AO integrals (or the AO Cholesky vectors with CHOLESKY
+      // TRUE) using the closed-shell spin structure -- the dense (2 n_large)^4 spin-orbital tensor is not needed. It
+      // is built only under DEBUG, for the efficient-gradient cross-check.
+      const bool x2c_dense = input.debug() || input.hessian_x2c();  // dense Tensor4s: DEBUG suites / HESSIAN_X2C
+      rerdmft::Tensor4<double> eri_x2c_spin;
+      if (input.debug()) {
+        rerdmft::Matrix<double> identity_large(n_large, n_large, 0.0);
+        for (std::size_t i = 0; i < n_large; ++i) identity_large(i, i) = 1.0;
+        const auto eri_large_physics =
+            rerdmft::moTwoElectronTransformPhysics(nonrel_eri, identity_large);
+        eri_x2c_spin = rerdmft::closedShellSpinOrbitalTwoElectron(eri_large_physics, n_large);
+        logTiming("X2C_HF spin-orbital two-electron integrals built (DEBUG)", t_start, t_checkpoint, timing_records);
+      }
 
       // Fixed core Hamiltonian: the EXACT X2C Hamiltonian built once
       // above (x2c_hamiltonian.h_x2c) -- no picture-change correction
@@ -4668,11 +4791,14 @@ int main(int argc, char** argv) {
       const auto c_initial = x_large_block * initial_eig.eigenvectors;
       const auto p_initial = rerdmft::x2cDensityMatrix(c_initial, input.n_electrons());
 
-      x2c_hf_result = rerdmft::runX2CHartreeFockScf(
-          x2c_hamiltonian.h_x2c, eri_x2c_spin, x_large_block, p_initial, input.n_electrons(),
-          input.geometry(), input.mixing(),
-          rerdmft::extractLargeComponentBlock(s_full, x_large_block.rows()), input.scf_diis_size(),
-          input.max_iterations(), input.energy_tolerance(), input.density_tolerance());
+      const auto run_x2c_scf = [&](const auto& eri_source) {
+        return rerdmft::runX2CHartreeFockScf(
+            x2c_hamiltonian.h_x2c, eri_source, x_large_block, p_initial, input.n_electrons(),
+            input.geometry(), input.mixing(),
+            rerdmft::extractLargeComponentBlock(s_full, x_large_block.rows()), input.scf_diis_size(),
+            input.max_iterations(), input.energy_tolerance(), input.density_tolerance());
+      };
+      x2c_hf_result = input.cholesky() ? run_x2c_scf(ao_cholesky) : run_x2c_scf(nonrel_eri);
       logTiming("X2C-HF SCF complete", t_start, t_checkpoint, timing_records);
 
       // Canonicalize each converged Kramers pair's relative phase
@@ -4692,28 +4818,46 @@ int main(int argc, char** argv) {
       // comment above), just in the smaller 2*nLarge-dimensional
       // X2C-HF space (no negative-energy branch at all).
       rerdmft::Matrix<std::complex<double>> h_x2c_mo;
-      rerdmft::Tensor4<std::complex<double>> eri_x2c_mo;
+      rerdmft::Tensor4<std::complex<double>> eri_x2c_mo;                // dense: DEBUG / HESSIAN_X2C only
+      rerdmft::SymmetricEri<std::complex<double>> x2c_mo_sym;           // unique elements (no CHOLESKY, or DEBUG)
+      rerdmft::CholeskyEri<std::complex<double>> x2c_mo_chol;           // CHOLESKY TRUE: MO-basis vectors
       const auto transformX2cToMo = [&]() {
         h_x2c_mo = rerdmft::x2cMoOneElectronTransform(x2c_hamiltonian.h_x2c, x2c_hf_result.c_matrix);
-        eri_x2c_mo =
-            input.cholesky()
-                ? rerdmft::x2cMoTwoElectronTransformPhysicsCholesky(
-                      eri_x2c_spin, x2c_hf_result.c_matrix, input.cholesky_threshold())
-                : rerdmft::x2cMoTwoElectronTransformPhysics(eri_x2c_spin, x2c_hf_result.c_matrix);
+        if (input.cholesky()) x2c_mo_chol = rerdmft::aoCholeskyToMoSpinor(ao_cholesky, x2c_hf_result.c_matrix);
+        if (!input.cholesky() || input.debug()) {
+          x2c_mo_sym = rerdmft::x2cMoTwoElectronSymmetric(nonrel_eri, x2c_hf_result.c_matrix);
+        } else if (input.hessian_x2c()) {
+          x2c_mo_sym = rerdmft::symmetricFromCholesky(x2c_mo_chol);
+        }
+        if (x2c_dense) eri_x2c_mo = rerdmft::denseOf(x2c_mo_sym);
       };
       transformX2cToMo();
+      // The Kramers-structure test of the integrals: full (one- and two-electron) where a dense tensor exists,
+      // one-electron only for a vectors-only run (the two-electron part is a DEBUG test).
+      const auto x2cKramersTest = [&](const std::string& label, bool repairs_if_failed) {
+        return x2c_dense ? kramersStructureTest(label, h_x2c_mo, eri_x2c_mo, repairs_if_failed)
+                         : kramersStructureTestOneBody(label, h_x2c_mo, repairs_if_failed);
+      };
 
       // Kramers-pair test of the MO integrals; ONLY IF IT FAILS (consecutive eigenvector
       // columns are not guaranteed to be (psi, Theta psi) pairs when Kramers pairs are
       // near-degenerate, e.g. a spin-orbit-split p shell of a stretched molecule) rebuild the
       // pairs exactly (Utils/KramersPairing.h), retransform and test again.
-      if (!kramersStructureTest("X2C-HF", h_x2c_mo, eri_x2c_mo, /*repairs_if_failed=*/true)) {
+      // Vectors-only run (no two-electron test outside DEBUG): apply the exact re-pairing unconditionally (cheap;
+      // a no-op up to SCF noise for well-separated pairs) -- see the same step in the C4_DHF path.
+      const auto repairX2cKramers = [&]() {
         rerdmft::KramersPairingReport pairing;
         x2c_hf_result.c_matrix = rerdmft::fixKramersPairingLarge(
             x2c_hf_result.c_matrix, x2c_hf_result.orbital_energies, s_large, 1e-4, &pairing);
         printKramersPairingReport("X2C-HF", pairing);
         transformX2cToMo();
-        kramersStructureTest("X2C-HF (after the correction)", h_x2c_mo, eri_x2c_mo);
+        x2cKramersTest("X2C-HF (after the correction)", /*repairs_if_failed=*/false);
+      };
+      if (!x2c_dense) {
+        x2cKramersTest("X2C-HF", /*repairs_if_failed=*/true);
+        repairX2cKramers();
+      } else if (!x2cKramersTest("X2C-HF", /*repairs_if_failed=*/true)) {
+        repairX2cKramers();
       }
       logTiming("X2C-HF MO integral transform complete", t_start, t_checkpoint, timing_records);
 
@@ -4728,12 +4872,17 @@ int main(int argc, char** argv) {
       std::vector<double> x2c_hf_occupations(x2c_dim, 0.0);
       for (int p = 0; p < input.n_electrons(); ++p) x2c_hf_occupations[static_cast<std::size_t>(p)] = 1.0;
       const auto hx_test_x2c = occupationOuterProduct(x2c_hf_occupations);
-      const auto fock_rdmft_x2c = rerdmft::hartreeExchangeFockMatrix(
-          h_x2c_mo, eri_x2c_mo, x2c_hf_occupations, hx_test_x2c, hx_test_x2c);
-      const auto gradient_rdmft_x2c = rerdmft::orbitalGradient(fock_rdmft_x2c);
-      gradientNormAndMax(gradient_rdmft_x2c, x2c_gradient_rdmft_norm, x2c_gradient_rdmft_max_abs);
-      logTiming("X2C-HF RDMFT-ansatz orbital gradient complete", t_start, t_checkpoint,
-                timing_records);
+      // A test of the two-electron integrals: DEBUG (or HESSIAN_X2C, which needs the dense tensor anyway).
+      rerdmft::Matrix<std::complex<double>> fock_rdmft_x2c, gradient_rdmft_x2c;
+      if (x2c_dense) {
+        fock_rdmft_x2c = rerdmft::hartreeExchangeFockMatrix(
+            h_x2c_mo, eri_x2c_mo, x2c_hf_occupations, hx_test_x2c, hx_test_x2c);
+        gradient_rdmft_x2c = rerdmft::orbitalGradient(fock_rdmft_x2c);
+        gradientNormAndMax(gradient_rdmft_x2c, x2c_gradient_rdmft_norm, x2c_gradient_rdmft_max_abs);
+        x2c_rdmft_gradient_computed = true;
+        logTiming("X2C-HF RDMFT-ansatz orbital gradient complete", t_start, t_checkpoint,
+                  timing_records);
+      }
 
       // DEBUG-only cross-checks against the RDMFT-ansatz path above,
       // mirroring DHF's own exactly (see its comment above).
@@ -4875,24 +5024,26 @@ int main(int argc, char** argv) {
       // there is nothing left to hold at exactly zero.
       if (input.has_functional()) {
         rerdmft::RestartCapture x2c_restart;
-        if (isPnofFunctionalName(input.functional())) {
-          x2c_functional_report = buildPnofFunctionalReport(
-              "X2C_HF", h_x2c_mo, eri_x2c_mo, h_x2c_mo.rows(), 0, input.n_electrons(),
-              input.functional(), x2c_hf_result.nuclear_repulsion_energy, input.pnof_subspaces(),
-              input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
-              input.verbose(), input.hessian_functional(), fullOptSettings(input),
-              input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records,
-              &x2c_restart);
-        } else {
-          x2c_functional_report = buildFunctionalReport(
-              "X2C_HF", h_x2c_mo, eri_x2c_mo, x2c_hf_result.orbital_energies, 0,
+        const auto x2c_functional = [&](const auto& eri_any) {
+          if (isPnofFunctionalName(input.functional())) {
+            return buildPnofFunctionalReport(
+                "X2C_HF", h_x2c_mo, eri_any, h_x2c_mo.rows(), 0, input.n_electrons(),
+                input.functional(), x2c_hf_result.nuclear_repulsion_energy, input.pnof_subspaces(),
+                input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
+                input.verbose(), input.hessian_functional(), fullOptSettings(input),
+                input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records,
+                &x2c_restart);
+          }
+          return buildFunctionalReport(
+              "X2C_HF", h_x2c_mo, eri_any, x2c_hf_result.orbital_energies, 0,
               input.n_electrons(), input.jk_frozen_pairs(), input.jk_active_pairs(),
               input.temperature(), input.functional(),
               input.occupation_init(), x2c_hf_result.nuclear_repulsion_energy, input.debug(),
               input.verbose(), input.hessian_functional(), fullOptSettings(input),
               input.full_optimization_4c_neg(), t_start, t_checkpoint,
               timing_records, &x2c_restart);
-        }
+        };
+        x2c_functional_report = input.cholesky() ? x2c_functional(x2c_mo_chol) : x2c_functional(x2c_mo_sym);
         // RESTART file: the (Kramers-fixed) X2C-HF spinor coefficients times the FULL_OPTIMIZATION
         // rotation, in the Large-component spin-orbital AO basis.
         writeRestartFile<std::complex<double>>(
@@ -4906,11 +5057,40 @@ int main(int argc, char** argv) {
       c_dhf = rerdmft::rkbCoefficientMatrix(x_full, h_rkb_ortho_eig.eigenvectors);
       density_matrix = rerdmft::rkbDensityMatrix(c_dhf, input.n_electrons());
 
-      c4_spinor_eri = buildOrLoadC4SpinorEri(input, large_basis.functions(),
-                                              small_basis.functions(), rkb_coefficients);
-      logTiming("Two-electron integrals built (C4_DHF)", t_start, t_checkpoint, timing_records);
+      c4_eri_dim = 4 * large_basis.functions().size();
+      if (input.cholesky()) {
+        // ONE decomposition of the real AO Coulomb matrix over {LL} u {SS} pairs; everything else (SCF Fock
+        // matrices, MO-basis vectors) follows from the vectors. The packed RKB tensor is built only under
+        // DEBUG, exactly (no Cholesky), as the dense reference for the dense-vs-Cholesky checks.
+        rerdmft::CholeskyCheckReport check;
+        rkb_cholesky = rerdmft::RkbCholesky::build(large_basis.functions(), small_basis.functions(),
+                                                    rkb_coefficients, input.cholesky_threshold(), &check);
+        std::ostringstream report;
+        report << std::scientific << std::setprecision(2) << "  RKB integrals held as " << rkb_cholesky.nVectors()
+               << " Cholesky vectors from one decomposition of the AO {LL} u {SS} Coulomb matrix (threshold "
+               << input.cholesky_threshold() << ", batch " << check.batch_used << (check.retried ? ", retried" : "")
+               << "; max |reconstruction - AO| on the sampled elements = " << check.max_error << ", tolerance "
+               << check.tolerance << ")\n  the SCF Fock matrices and all MO-basis integrals are built from these vectors"
+               << (input.debug() ? "; the packed RKB tensor is built only for the DEBUG checks.\n"
+                                 : "; no packed RKB tensor is formed.\n");
+        rkb_cholesky_report = report.str();
+        logTiming("Two-electron integrals built (C4_DHF, Cholesky vectors)", t_start, t_checkpoint, timing_records);
+        if (input.debug()) {
+          c4_spinor_eri = buildOrLoadC4SpinorEri(input, large_basis.functions(), small_basis.functions(),
+                                                  rkb_coefficients, /*use_cholesky=*/false);
+          c4_eri_available = true;
+          c4_eri_stored = c4_spinor_eri.storedCount();
+        }
+      } else {
+        c4_spinor_eri = buildOrLoadC4SpinorEri(input, large_basis.functions(), small_basis.functions(),
+                                                rkb_coefficients, /*use_cholesky=*/false);
+        c4_eri_available = true;
+        c4_eri_stored = c4_spinor_eri.storedCount();
+        logTiming("Two-electron integrals built (C4_DHF)", t_start, t_checkpoint, timing_records);
+      }
 
-      fock_matrix = rerdmft::rkbFockMatrix(h_rkb, c4_spinor_eri, density_matrix);
+      fock_matrix = input.cholesky() ? rerdmft::rkbFockMatrix(h_rkb, rkb_cholesky, density_matrix)
+                                     : rerdmft::rkbFockMatrix(h_rkb, c4_spinor_eri, density_matrix);
 
       {
         // The Kramers-restricted SCF below projects the density onto its time-reversal-even part
@@ -4926,10 +5106,13 @@ int main(int argc, char** argv) {
                   << (h_dev <= 1e-8 * std::max(1.0, h_scale) ? "PASS" : "FAIL")
                   << "] h_RKB is time-reversal symmetric\n";
       }
-      dhf_result = rerdmft::runDiracHartreeFockScf(
-          h_rkb, c4_spinor_eri, x_full, density_matrix, input.n_electrons(), input.geometry(),
-          input.mixing(), s_full, input.scf_diis_size(), input.max_iterations(),
-          input.energy_tolerance(), input.density_tolerance());
+      const auto run_dhf_scf = [&](const auto& eri_source) {
+        return rerdmft::runDiracHartreeFockScf(
+            h_rkb, eri_source, x_full, density_matrix, input.n_electrons(), input.geometry(),
+            input.mixing(), s_full, input.scf_diis_size(), input.max_iterations(),
+            input.energy_tolerance(), input.density_tolerance());
+      };
+      dhf_result = input.cholesky() ? run_dhf_scf(rkb_cholesky) : run_dhf_scf(c4_spinor_eri);
       logTiming("SCF loop complete", t_start, t_checkpoint, timing_records);
 
       // Canonicalize each converged Kramers pair's relative phase
@@ -4959,22 +5142,71 @@ int main(int argc, char** argv) {
       // bases (e.g. h2.inp, cc-pVTZ, RKB dim ~120).
       dhf_result.c_dhf = x_full * dhf_result.fock_ortho_eigenvectors;
       rerdmft::Matrix<std::complex<double>> h_mo;
+      // MO integrals as a unique-element store (no CHOLESKY, or DEBUG as the exact reference, or expanded from the
+      // vectors for HESSIAN_4C) and/or Cholesky vectors (CHOLESKY TRUE); a DENSE Tensor4 only for the DEBUG suites
+      // and HESSIAN_4C (see the NON_REL/X2C comments).
+      const bool c4_dense = input.debug() || input.hessian_4c();
       rerdmft::Tensor4<std::complex<double>> eri_mo;
+      rerdmft::SymmetricEri<std::complex<double>> c4_mo_sym;
+      rerdmft::CholeskyEri<std::complex<double>> c4_mo_chol;
       const auto transformToMo = [&]() {
         h_mo = rerdmft::rkbMoOneElectronTransform(h_rkb, dhf_result.c_dhf);
-        eri_mo = input.cholesky()
-                     ? rerdmft::rkbMoTwoElectronTransformPhysicsCholesky(
-                           c4_spinor_eri, dhf_result.c_dhf, input.cholesky_threshold())
-                     : rerdmft::rkbMoTwoElectronTransformPhysics(c4_spinor_eri, dhf_result.c_dhf);
+        // No-pair: negative-energy block dropped, vectors recompressed (see rkbCholeskyToMo).
+        if (input.cholesky()) {
+          c4_mo_chol = rerdmft::rkbCholeskyToMo(rkb_cholesky, dhf_result.c_dhf, h_mo.rows() / 2, input.cholesky_threshold());
+        }
+        if (!input.cholesky() || input.debug()) {
+          c4_mo_sym = rerdmft::rkbMoTwoElectronSymmetric(c4_spinor_eri, dhf_result.c_dhf);
+        } else if (input.hessian_4c()) {
+          c4_mo_sym = rerdmft::symmetricFromCholesky(c4_mo_chol);
+        }
+        if (c4_dense) eri_mo = rerdmft::denseOf(c4_mo_sym);
       };
       transformToMo();
+      const auto c4KramersTest = [&](const std::string& label, bool repairs_if_failed) {
+        return c4_dense ? kramersStructureTest(label, h_mo, eri_mo, repairs_if_failed)
+                        : kramersStructureTestOneBody(label, h_mo, repairs_if_failed);
+      };
+
+      if (input.cholesky() && input.debug()) {
+        // DEBUG: exact (packed RKB tensor) vs Cholesky vectors, for the Fock matrix at the converged density
+        // and for the MO-basis integrals.
+        const auto f_dense = rerdmft::rkbFockMatrix(h_rkb, c4_spinor_eri, dhf_result.density_matrix);
+        const auto f_chol = rerdmft::rkbFockMatrix(h_rkb, rkb_cholesky, dhf_result.density_matrix);
+        double f_dev = 0.0, e_dev = 0.0, f_scale = 0.0, e_scale = 0.0;
+        for (std::size_t i = 0; i < f_dense.rows(); ++i)
+          for (std::size_t j = 0; j < f_dense.cols(); ++j) {
+            f_dev = std::max(f_dev, std::abs(f_dense(i, j) - f_chol(i, j)));
+            f_scale = std::max(f_scale, std::abs(f_dense(i, j)));
+          }
+        // The MO vectors hold the positive-energy block only (no-pair), so compare that block.
+        const std::size_t n_neg = h_mo.rows() / 2, n_pos = h_mo.rows() - n_neg;
+        const std::size_t total = n_pos * n_pos * n_pos * n_pos;
+        const std::size_t stride = total > 4000000 ? total / 4000000 + 1 : 1;
+        for (std::size_t flat = 0; flat < total; flat += stride) {
+          const std::size_t d = n_neg + flat % n_pos, c = n_neg + (flat / n_pos) % n_pos,
+                            b = n_neg + (flat / (n_pos * n_pos)) % n_pos, a = n_neg + flat / (n_pos * n_pos * n_pos);
+          e_dev = std::max(e_dev, std::abs(eri_mo(a, b, c, d) - c4_mo_chol(a, b, c, d)));
+          e_scale = std::max(e_scale, std::abs(eri_mo(a, b, c, d)));
+        }
+        std::ostringstream chk;
+        chk << std::scientific << std::setprecision(2)
+            << "  [DEBUG] C4_DHF dense vs Cholesky: max |F(packed RKB) - F(RKB vectors)| = " << f_dev
+            << " (max |F| = " << f_scale << "), max |eri_MO(dense) - eri_MO(vectors)| = " << e_dev
+            << " (max |eri| = " << e_scale << ")" << (stride > 1 ? " (sampled)" : "") << "\n";
+        rkb_cholesky_report += chk.str();
+      }
 
       // Kramers-pair test of the 4-component MO integrals; ONLY IF IT FAILS rebuild the
       // Kramers pairs exactly inside near-degenerate clusters (Utils/KramersSymmetry.h's
       // fixKramersPairing / Utils/KramersPairing.h), retransform and test again. (Consecutive
       // eigenvector columns are only guaranteed to be (psi, Theta psi) pairs while every level
       // is well separated, e.g. not for a spin-orbit-split p shell of a stretched molecule.)
-      if (!kramersStructureTest("C4_DHF", h_mo, eri_mo, /*repairs_if_failed=*/true)) {
+      // With a dense tensor the two-electron structure test decides whether the exact re-pairing is needed.
+      // A vectors-only run has no two-electron test (DEBUG only), and the one-electron test alone can miss
+      // it (h_MO's scale is dominated by the negative-energy branch), so the re-pairing -- cheap, and a no-op
+      // up to SCF noise for well-separated pairs -- is applied unconditionally there.
+      const auto repairC4Kramers = [&]() {
         rerdmft::KramersPairingReport pairing;
         dhf_result.fock_ortho_eigenvectors = rerdmft::fixKramersPairing(
             dhf_result.fock_ortho_eigenvectors, dhf_result.orbital_energies, rkb_coefficients,
@@ -4982,7 +5214,13 @@ int main(int argc, char** argv) {
         printKramersPairingReport("C4_DHF", pairing);
         dhf_result.c_dhf = x_full * dhf_result.fock_ortho_eigenvectors;
         transformToMo();
-        kramersStructureTest("C4_DHF (after the correction)", h_mo, eri_mo);
+        c4KramersTest("C4_DHF (after the correction)", /*repairs_if_failed=*/false);
+      };
+      if (!c4_dense) {
+        c4KramersTest("C4_DHF", /*repairs_if_failed=*/true);
+        repairC4Kramers();
+      } else if (!c4KramersTest("C4_DHF", /*repairs_if_failed=*/true)) {
+        repairC4Kramers();
       }
       logTiming("C4_DHF MO integral transform complete", t_start, t_checkpoint, timing_records);
 
@@ -5003,12 +5241,16 @@ int main(int argc, char** argv) {
       std::vector<double> dhf_occupations(rkb_dim, 0.0);
       for (std::size_t p = 0; p < rkb_dim; ++p) dhf_occupations[p] = d_occ_check(p, p).real();
       const auto hx_test = occupationOuterProduct(dhf_occupations);
-      const auto fock_rdmft =
-          rerdmft::hartreeExchangeFockMatrix(h_mo, eri_mo, dhf_occupations, hx_test, hx_test);
-      const auto gradient_rdmft = rerdmft::orbitalGradient(fock_rdmft);
-      gradientNormAndMax(gradient_rdmft, dhf_gradient_rdmft_norm, dhf_gradient_rdmft_max_abs);
-      logTiming("C4_DHF RDMFT-ansatz orbital gradient complete", t_start, t_checkpoint,
-                timing_records);
+      // A test of the two-electron integrals: DEBUG (or HESSIAN_4C, which needs the dense tensor anyway).
+      rerdmft::Matrix<std::complex<double>> fock_rdmft, gradient_rdmft;
+      if (c4_dense) {
+        fock_rdmft = rerdmft::hartreeExchangeFockMatrix(h_mo, eri_mo, dhf_occupations, hx_test, hx_test);
+        gradient_rdmft = rerdmft::orbitalGradient(fock_rdmft);
+        gradientNormAndMax(gradient_rdmft, dhf_gradient_rdmft_norm, dhf_gradient_rdmft_max_abs);
+        dhf_rdmft_gradient_computed = true;
+        logTiming("C4_DHF RDMFT-ansatz orbital gradient complete", t_start, t_checkpoint,
+                  timing_records);
+      }
 
       // DEBUG-only cross-checks against the RDMFT-ansatz path above:
       // the DHF-specific efficient (O(n^4), hardcoded to idempotent
@@ -5172,23 +5414,25 @@ int main(int argc, char** argv) {
             dhf_result.orbital_energies.begin() +
                 static_cast<std::ptrdiff_t>(n_negative),
             dhf_result.orbital_energies.end());
-        if (isPnofFunctionalName(input.functional())) {
-          dhf_functional_report = buildPnofFunctionalReport(
-              "C4_DHF", h_mo, eri_mo, h_mo.rows() - n_negative, n_negative, input.n_electrons(),
-              input.functional(), dhf_result.nuclear_repulsion_energy, input.pnof_subspaces(),
-              input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
-              input.verbose(), input.hessian_functional(), fullOptSettings(input),
-              input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records);
-        } else {
-          dhf_functional_report = buildFunctionalReport(
-              "C4_DHF", h_mo, eri_mo, dhf_orbital_energies_positive, n_negative,
+        const auto dhf_functional = [&](const auto& eri_any) {
+          if (isPnofFunctionalName(input.functional())) {
+            return buildPnofFunctionalReport(
+                "C4_DHF", h_mo, eri_any, h_mo.rows() - n_negative, n_negative, input.n_electrons(),
+                input.functional(), dhf_result.nuclear_repulsion_energy, input.pnof_subspaces(),
+                input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
+                input.verbose(), input.hessian_functional(), fullOptSettings(input),
+                input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records);
+          }
+          return buildFunctionalReport(
+              "C4_DHF", h_mo, eri_any, dhf_orbital_energies_positive, n_negative,
               input.n_electrons(), input.jk_frozen_pairs(), input.jk_active_pairs(),
               input.temperature(), input.functional(),
               input.occupation_init(), dhf_result.nuclear_repulsion_energy, input.debug(),
               input.verbose(), input.hessian_functional(), fullOptSettings(input),
               input.full_optimization_4c_neg(), t_start, t_checkpoint,
               timing_records);
-        }
+        };
+        dhf_functional_report = input.cholesky() ? dhf_functional(c4_mo_chol) : dhf_functional(c4_mo_sym);
       }
     }
   } catch (const std::exception& e) {
@@ -5442,13 +5686,14 @@ int main(int argc, char** argv) {
     }
 
     {
-      const std::size_t n_large = nonrel_eri.dim();
+      const std::size_t n_large = nonrel_eri_dim;
       std::cout << "\nTwo-electron Coulomb repulsion tensor (pq|rs), Large-component AO basis "
                    "(chemist notation, full real-orbital 8-fold symmetry):\n";
       std::cout << "  Dimensions: " << n_large << " x " << n_large << " x " << n_large << " x "
                  << n_large << "\n";
-      std::cout << "  Stored values (real-orbital 8-fold-unique): " << nonrel_eri.storedCount()
+      std::cout << "  Stored values (real-orbital 8-fold-unique): " << nonrel_eri_stored
                  << " (dense would be " << n_large * n_large * n_large * n_large << ")\n";
+      std::cout << ao_cholesky_report;
     }
     std::cout << "\nNonrelativistic (restricted, closed-shell) Hartree-Fock SCF (NON_REL, "
                << scfAccelerationLabel(input) << "):\n";
@@ -5484,12 +5729,17 @@ int main(int argc, char** argv) {
 
     std::cout << "\nHessian_opt cross-check (Dyall Eq. 8.30/8.32 generalized Fock/gradient, MO\n"
                  "basis, natural-orbital RDMFT ansatz -- tested here with HF occupations):\n";
-    std::cout << "  RDMFT-ansatz (Hartree+exchange, O(n^3) contraction) gradient norm (expect ~0): "
-               << std::setprecision(10) << nonrel_gradient_rdmft_norm << std::setprecision(6)
-               << "\n";
-    std::cout << "  RDMFT-ansatz (Hartree+exchange, O(n^3) contraction) gradient max |g_pq|:       "
-               << std::setprecision(10) << nonrel_gradient_rdmft_max_abs << std::setprecision(6)
-               << "\n";
+    if (nonrel_rdmft_gradient_computed) {
+      std::cout << "  RDMFT-ansatz (Hartree+exchange, O(n^3) contraction) gradient norm (expect ~0): "
+                 << std::setprecision(10) << nonrel_gradient_rdmft_norm << std::setprecision(6)
+                 << "\n";
+      std::cout << "  RDMFT-ansatz (Hartree+exchange, O(n^3) contraction) gradient max |g_pq|:       "
+                 << std::setprecision(10) << nonrel_gradient_rdmft_max_abs << std::setprecision(6)
+                 << "\n";
+    } else {
+      std::cout << "  (RDMFT-ansatz gradient test skipped: it needs the dense two-electron integrals; "
+                   "run with DEBUG TRUE)\n";
+    }
     if (input.debug()) {
       std::cout << "  HF-specific efficient (O(n^4)) gradient norm (expect ~0):          "
                  << std::setprecision(10) << nonrel_gradient_efficient_norm
@@ -5720,12 +5970,17 @@ int main(int argc, char** argv) {
     std::cout << "\nHessian_opt cross-check (Dyall Eq. 8.30/8.32 generalized Fock/gradient,\n"
                  "X2C-HF spinor MO basis, natural-spinor RDMFT ansatz -- tested here with\n"
                  "X2C-HF occupations):\n";
-    std::cout << "  RDMFT-ansatz (Hartree+exchange, O(n^3) contraction) gradient norm (expect ~0): "
-               << std::setprecision(10) << x2c_gradient_rdmft_norm << std::setprecision(6)
-               << "\n";
-    std::cout << "  RDMFT-ansatz (Hartree+exchange, O(n^3) contraction) gradient max |g_pq|:       "
-               << std::setprecision(10) << x2c_gradient_rdmft_max_abs << std::setprecision(6)
-               << "\n";
+    if (x2c_rdmft_gradient_computed) {
+      std::cout << "  RDMFT-ansatz (Hartree+exchange, O(n^3) contraction) gradient norm (expect ~0): "
+                 << std::setprecision(10) << x2c_gradient_rdmft_norm << std::setprecision(6)
+                 << "\n";
+      std::cout << "  RDMFT-ansatz (Hartree+exchange, O(n^3) contraction) gradient max |g_pq|:       "
+                 << std::setprecision(10) << x2c_gradient_rdmft_max_abs << std::setprecision(6)
+                 << "\n";
+    } else {
+      std::cout << "  (RDMFT-ansatz gradient test skipped: it needs the dense two-electron integrals; "
+                   "run with DEBUG TRUE)\n";
+    }
     if (input.debug()) {
       std::cout << "  X2C-HF-specific efficient (O(n^4)) gradient norm (expect ~0):      "
                  << std::setprecision(10) << x2c_gradient_efficient_norm << std::setprecision(6)
@@ -5761,15 +6016,18 @@ int main(int argc, char** argv) {
   }
 
   if (input.c4_spinor()) {
-    const std::size_t n_spinor = c4_spinor_eri.dim();
+    const std::size_t n_spinor = c4_eri_dim;
     std::cout << "\nTwo-electron Coulomb repulsion tensor <Spinor_A Spinor_B|Spinor_C Spinor_D>,\n"
                  "restricted kinetic balance basis (physics notation; A,C on electron 1, B,D on\n"
                  "electron 2):\n";
     std::cout << "  Dimensions: " << n_spinor << " x " << n_spinor << " x " << n_spinor << " x "
                << n_spinor << "\n";
-    std::cout << "  Stored values (electron-exchange-unique half): " << c4_spinor_eri.storedCount()
-               << " (dense would be " << n_spinor * n_spinor * n_spinor * n_spinor << ")\n";
-    if (input.debug()) {
+    if (c4_eri_available) {
+      std::cout << "  Stored values (electron-exchange-unique half): " << c4_eri_stored
+                 << " (dense would be " << n_spinor * n_spinor * n_spinor * n_spinor << ")\n";
+    }
+    std::cout << rkb_cholesky_report;
+    if (input.debug() && c4_eri_available) {
       double max_exchange_err = 0.0;
       double max_herm_err = 0.0;
       for (std::size_t a = 0; a < n_spinor; ++a) {
@@ -5858,12 +6116,17 @@ int main(int argc, char** argv) {
     std::cout << "\nHessian_opt cross-check (Dyall Eq. 8.30/8.32 generalized Fock/gradient, DHF\n"
                  "spinor MO basis, natural-spinor RDMFT ansatz -- tested here with DHF\n"
                  "occupations):\n";
-    std::cout << "  RDMFT-ansatz (Hartree+exchange, O(n^3) contraction) gradient norm (expect ~0): "
-               << std::setprecision(10) << dhf_gradient_rdmft_norm << std::setprecision(6)
-               << "\n";
-    std::cout << "  RDMFT-ansatz (Hartree+exchange, O(n^3) contraction) gradient max |g_pq|:       "
-               << std::setprecision(10) << dhf_gradient_rdmft_max_abs << std::setprecision(6)
-               << "\n";
+    if (dhf_rdmft_gradient_computed) {
+      std::cout << "  RDMFT-ansatz (Hartree+exchange, O(n^3) contraction) gradient norm (expect ~0): "
+                 << std::setprecision(10) << dhf_gradient_rdmft_norm << std::setprecision(6)
+                 << "\n";
+      std::cout << "  RDMFT-ansatz (Hartree+exchange, O(n^3) contraction) gradient max |g_pq|:       "
+                 << std::setprecision(10) << dhf_gradient_rdmft_max_abs << std::setprecision(6)
+                 << "\n";
+    } else {
+      std::cout << "  (RDMFT-ansatz gradient test skipped: it needs the dense two-electron integrals; "
+                   "run with DEBUG TRUE)\n";
+    }
     if (input.debug()) {
       std::cout << "  DHF-specific efficient (O(n^4)) gradient norm (expect ~0):         "
                  << std::setprecision(10) << dhf_gradient_efficient_norm << std::setprecision(6)

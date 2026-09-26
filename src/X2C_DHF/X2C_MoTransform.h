@@ -4,6 +4,8 @@
 #include <complex>
 
 #include "Matrix.h"
+#include "ElectronRepulsion.h"
+#include "SymmetricEri.h"
 #include "Tensor4.h"
 
 namespace rerdmft {
@@ -56,6 +58,12 @@ Tensor4<std::complex<double>> x2cMoTwoElectronTransformPhysics(
 Tensor4<std::complex<double>> x2cMoTwoElectronTransformPhysicsCholesky(
     const Tensor4<double>& eri_ao_physics, const Matrix<std::complex<double>>& c_matrix,
     double threshold = 1e-10);
+
+// The MO-basis spinor integrals as a unique-element store (Utils/SymmetricEri.h), computed in slabs straight
+// from the packed SPATIAL AO integrals (closed-shell spin structure <AB|CD> = (AC|BD) delta delta) -- neither the
+// dense spin-orbital AO tensor nor a dense MO tensor is formed.
+SymmetricEri<std::complex<double>> x2cMoTwoElectronSymmetric(const PackedTwoElectronTensor& eri_spatial_chemist,
+                                                              const Matrix<std::complex<double>>& c_matrix);
 
 }  // namespace rerdmft
 

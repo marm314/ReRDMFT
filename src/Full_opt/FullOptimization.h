@@ -11,6 +11,7 @@
 #include "HartreeExchangeHessian.h"
 #include "IntegralRotation.h"
 #include "JK_only.h"
+#include "CholeskyEri.h"
 #include "Matrix.h"
 #include "PNOFs.h"
 #include "Tensor4.h"
@@ -48,6 +49,10 @@ struct FullOptSettings {
   // elements are evaluated on demand.
   bool cholesky = false;
   double cholesky_threshold = 1e-10;
+  // DEBUG TRUE: also run the validation checks that need dense two-electron integrals (exact-vs-Cholesky
+  // rotation, Kramers/spin structure of the integrals, Hessian-diagonal finite difference); without it
+  // only tests that work on the (Cholesky) representation itself run.
+  bool debug = false;
   // ADAM (default) or NEO (Utils/NEO.h, second-order trust-region Newton, matrix-free
   // Hessian-vector products -- Hessian_opt/JkOnlyHessian.h's/HartreeExchangeHessian.h's
   // ...JointHessianVector or a plain symmetrized per-element sum for real orbitals, see
@@ -249,6 +254,59 @@ FullOptResult runFullOptimizationJk(const Matrix<T>& h, const Tensor4<T>& eri,
 
 template <typename T>
 FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const Tensor4<T>& eri,
+                                      const std::vector<double>& occupations,
+                                      const std::vector<double>& state, PnofFunctional functional,
+                                      const std::vector<PnofGeminal>& geminals, std::size_t n_core,
+                                      int pnof_subspaces, int pnof_coupling, bool relativistic,
+                                      bool sqp_occupations, std::size_t n_total,
+                                      const FullOptSettings& settings, bool kramers_restricted,
+                                      double nuclear_repulsion_energy, std::ostream& log,
+                                      const std::vector<std::size_t>& spin_partner = {},
+                                      std::size_t n_negative = 0);
+
+// The same two entry points for integrals that ALREADY are Cholesky vectors (AO vectors transformed to the
+// MO basis, Utils/AoCholesky.h): no dense tensor is formed, decomposed or verified here.
+template <typename T>
+FullOptResult runFullOptimizationJk(const Matrix<T>& h, const CholeskyEri<T>& eri,
+                                    const std::vector<double>& occupations,
+                                    const std::vector<double>& state, JkFunctional functional,
+                                    std::size_t f_l, double n_electrons, std::size_t n_total,
+                                    std::size_t n_frozen, std::size_t n_inactive_below,
+                                    std::size_t n_active,
+                                    bool two_columns, const FullOptSettings& settings,
+                                    bool kramers_restricted, double nuclear_repulsion_energy,
+                                    std::ostream& log,
+                                    const std::vector<std::size_t>& spin_partner = {},
+                                    std::size_t n_negative = 0);
+
+template <typename T>
+FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const CholeskyEri<T>& eri,
+                                      const std::vector<double>& occupations,
+                                      const std::vector<double>& state, PnofFunctional functional,
+                                      const std::vector<PnofGeminal>& geminals, std::size_t n_core,
+                                      int pnof_subspaces, int pnof_coupling, bool relativistic,
+                                      bool sqp_occupations, std::size_t n_total,
+                                      const FullOptSettings& settings, bool kramers_restricted,
+                                      double nuclear_repulsion_energy, std::ostream& log,
+                                      const std::vector<std::size_t>& spin_partner = {},
+                                      std::size_t n_negative = 0);
+
+// The same two entry points for integrals that are held as a unique-element store (Utils/SymmetricEri.h): no dense tensor is formed.
+template <typename T>
+FullOptResult runFullOptimizationJk(const Matrix<T>& h, const SymmetricEri<T>& eri,
+                                    const std::vector<double>& occupations,
+                                    const std::vector<double>& state, JkFunctional functional,
+                                    std::size_t f_l, double n_electrons, std::size_t n_total,
+                                    std::size_t n_frozen, std::size_t n_inactive_below,
+                                    std::size_t n_active,
+                                    bool two_columns, const FullOptSettings& settings,
+                                    bool kramers_restricted, double nuclear_repulsion_energy,
+                                    std::ostream& log,
+                                    const std::vector<std::size_t>& spin_partner = {},
+                                    std::size_t n_negative = 0);
+
+template <typename T>
+FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const SymmetricEri<T>& eri,
                                       const std::vector<double>& occupations,
                                       const std::vector<double>& state, PnofFunctional functional,
                                       const std::vector<PnofGeminal>& geminals, std::size_t n_core,

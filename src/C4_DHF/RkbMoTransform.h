@@ -70,6 +70,10 @@ Tensor4<std::complex<double>> rkbMoTwoElectronTransformPhysicsCholesky(
 // one that diagonalizes the converged Fock operator).
 Matrix<std::complex<double>> occupiedPositiveEnergyDensity(std::size_t rkb_dim, int n_electrons);
 
+// The MO-basis spinor integrals as a unique-element store, in slabs straight from the (unique-element) RKB tensor.
+SymmetricEri<std::complex<double>> rkbMoTwoElectronSymmetric(const RkbTwoElectronTensor& eri_ao_physics,
+                                                              const Matrix<std::complex<double>>& c_dhf);
+
 }  // namespace rerdmft
 
 #endif  // RERDMFT_RKBMOTRANSFORM_H

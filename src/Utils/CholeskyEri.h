@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "Matrix.h"
+#include "SymmetricEri.h"
 #include "Tensor4.h"
 
 namespace rerdmft {
@@ -66,6 +67,37 @@ class CholeskyEri {
   // w_[(x*n + y)*nchol + L] = V_L(x,y): the L-sum of an element is a contiguous dot product.
   std::vector<T> w_;
 };
+
+// A dense view of either representation (DEBUG-only validation code that needs a Tensor4): the tensor
+// itself, or the Cholesky vectors expanded to a dense n^4 array (a temporary).
+template <typename T>
+const Tensor4<T>& denseOf(const Tensor4<T>& eri) { return eri; }
+template <typename T>
+Tensor4<T> denseOf(const CholeskyEri<T>& eri) { return eri.toDense(); }
+
+template <typename T>
+Tensor4<T> denseOf(const SymmetricEri<T>& eri) {
+  const std::size_t n = eri.dim0();
+  Tensor4<T> t(n, n, n, n);
+  for (std::size_t a = 0; a < n; ++a)
+    for (std::size_t b = 0; b < n; ++b)
+      for (std::size_t c = 0; c < n; ++c)
+        for (std::size_t d = 0; d < n; ++d) t(a, b, c, d) = eri(a, b, c, d);
+  return t;
+}
+
+// A unique-element store from Cholesky vectors (only the a <= c elements are evaluated: O(N_chol n^4 / 2)),
+// for the opt-in diagnostics that need integrals without a dense n^4 array.
+template <typename T>
+SymmetricEri<T> symmetricFromCholesky(const CholeskyEri<T>& eri) {
+  const std::size_t n = eri.dim0();
+  SymmetricEri<T> out(n);
+  for (std::size_t a = 0; a < n; ++a)
+    for (std::size_t c = a; c < n; ++c)
+      for (std::size_t b = 0; b < n; ++b)
+        for (std::size_t d = 0; d < n; ++d) out.set(a, b, c, d, eri(a, b, c, d));
+  return out;
+}
 
 }  // namespace rerdmft
 
