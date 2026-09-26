@@ -379,10 +379,11 @@ spinor <-> negative-energy spinor), i.e. a saddle point.
   Cost: a few Hessian-vector products per Newton step, independent of the saddle order.
 * *Occupation step.* The occupation numbers are fully re-minimized at the new orbitals (the negative-energy
   branch stays at zero occupation), macro-iterated like the first stage.
-* *Checks.* The integrals rotated to the starting point must reproduce the first stage's energy; at the end
-  the Hessian is verified block-wise (minimum over the positive-energy rotations, maximum over the occupied
-  electron-positron ones); `DEBUG TRUE` additionally counts all negative eigenvalues (about as many Hessian
-  products as the order of the saddle).
+* *Checks.* The integrals rotated to the starting point must reproduce the first stage's energy. Verifying
+  the type of the saddle runs only under `DEBUG TRUE` (it needs many Hessian products, which is very slow
+  with Cholesky vectors for CO/cc-pVDZ-size systems): a block-wise test (minimum over the positive-energy
+  rotations, maximum over the occupied electron-positron ones) followed by the count of all negative
+  eigenvalues (about as many Hessian products as the order of the saddle).
 
 For light systems the second stage moves the energy by ~1e-10 Hartree (the electron-positron gradient at the
 no-pair minimum is tiny); it is a check that the no-pair minimum really is the min-max point and it is exact

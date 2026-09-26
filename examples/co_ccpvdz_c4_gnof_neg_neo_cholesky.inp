@@ -1,0 +1,27 @@
+# Example ReRDMFT input file: carbon monoxide (R = 1.128 Angstrom), cc-pVDZ basis, GNOF (3 coupling subspaces of
+# 2 orbitals), 4-component with the MIN-MAX stage (FULL_OPTIMIZATION_4C_NEG), NEO and CHOLESKY TRUE.
+# Same first stage as co_ccpvdz_c4_gnof_neo_cholesky.inp (no-pair minimization over the 56 positive-energy
+# spinors, -113.0044414 Ha). FULL_OPTIMIZATION_4C_NEG TRUE then continues from that minimum with rotations that also
+# mix the 20 occupied positive-energy spinors (occupation > 1e-6) with the 60 negative-energy ones: NEO converges the
+# orbitals to the saddle point of order 1200 (energy maximized along those electron-positron directions, minimized
+# along the rest), alternating with the full re-minimization of the occupation numbers. The stage needs the
+# negative-energy block of the MO Cholesky vectors too, built separately. Measured: ~8 min in total (~4 min for the
+# first stage, ~2 min for the min-max stage, 2 macro-iterations), the min-max stage moves the energy by 1.5e-9 Ha.
+# The check of the saddle type (block-wise test + count of the negative Hessian eigenvalues) runs only with
+# DEBUG TRUE and is very slow at this size with Cholesky vectors (finite-difference Hessian products).
+# Follow the run with `tail -f co_ccpvdz_c4_gnof_neg_neo_cholesky.live`.
+NELEC 14
+BASIS co-cc-pvdz.gbs
+C4_SPINOR TRUE
+FUNCTIONAL GNOF
+PNOF_SUBSPACES 3
+PNOF_COUPLING 2
+FULL_OPTIMIZATION TRUE
+FULL_OPTIMIZATION_4C_NEG TRUE
+ORBITAL_OPTIMIZER NEO
+CHOLESKY TRUE
+
+GEOMETRY
+C   0.000000   0.000000   0.000000
+O   0.000000   0.000000   1.128000
+END

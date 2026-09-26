@@ -1668,6 +1668,12 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
     result.gradient_max = g_max;
 
     if (!use_neo) break;  // ADAM has no Hessian to check and nothing to escape.
+    if (saddle && !settings.debug) {
+      // Verifying the type of the saddle costs many Hessian products (finite-difference gradients on the Cholesky vectors);
+      // it runs on request only.
+      log << "    Hessian check of the saddle type not run (DEBUG TRUE runs it: block-wise minimum/maximum test and the count of negative eigenvalues).\n";
+      break;
+    }
 
     progress("FULL_OPTIMIZATION (NEO): post-loop Hessian check (minimum vs saddle)");
     neo_problem->setOccupations(occ);
@@ -1676,12 +1682,12 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
     constexpr std::size_t kRoots = 3;
     bool escaping = false;
     withReduced([&](NeoProblem<double>& reduced) {
-      if (saddle && !settings.debug) {
+      if (saddle) {
         // The electron-positron block (curvature ~ -4 c^2 n_i) is separated by ~1e4-1e5 from everything else, so the Hessian
         // index is verified block-wise: the lowest eigenvalue of H restricted to the non-electron-positron parameters must
         // not be negative (a minimum there) and the highest one of H restricted to the occupied electron-positron
         // parameters must be negative (a maximum there). Counting all `saddle_order` negative eigenvalues instead is
-        // O(saddle_order) Hessian products (the full check runs under DEBUG TRUE).
+        // O(saddle_order) Hessian products (also run, after this one, under DEBUG TRUE).
         const std::size_t dim = reduced.dimension();
         constexpr double kLift = 1e8;  // pushes the complement of the block above its spectrum
         const auto blockExtreme = [&](const std::vector<char>& mask, double sign) {
@@ -1707,7 +1713,6 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
         const bool ok = pp_min > -1e-6 && ep_max < -1e-6;
         log << "    [" << (ok ? "PASS" : "FAIL") << "] the point is a minimum over the positive-energy rotations and a maximum over the "
             << saddle_order << " occupied electron-positron ones, i.e. a saddle of order " << saddle_order << "\n";
-        return;
       }
       const std::size_t n_roots = std::min<std::size_t>(saddle ? saddle_order_max + 1 : kRoots, reduced.dimension());
       const NeoEigenResult<double> eig = neoLowestHessianEigenpairs<double>(
