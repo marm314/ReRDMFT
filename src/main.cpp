@@ -6011,7 +6011,7 @@ int main(int argc, char** argv) {
     std::cout << "  Dimensions: " << n_spinor << " x " << n_spinor << " x " << n_spinor << " x "
                << n_spinor << "\n";
     if (c4_eri_available) {
-      std::cout << "  Stored values (electron-exchange-unique half): " << c4_eri_stored
+      std::cout << "  Stored values (unique elements, exchange + Hermitian symmetry): " << c4_eri_stored
                  << " (dense would be " << n_spinor * n_spinor * n_spinor * n_spinor << ")\n";
     }
     std::cout << rkb_cholesky_report;

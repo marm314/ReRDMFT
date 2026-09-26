@@ -1,0 +1,21 @@
+# Example ReRDMFT input file: carbon monoxide (R = 1.128 Angstrom), cc-pVDZ basis (co-cc-pvdz.gbs, from
+# https://www.basissetexchange.org/, includes D shells), GNOF with 3 coupling subspaces of 2 orbitals each,
+# FULL_OPTIMIZATION with the second-order NEO orbital optimizer and CHOLESKY TRUE: the AO integrals are decomposed
+# once into Cholesky vectors and nothing of size n^4 is ever stored (see README.md, CHOLESKY).
+# X2C path (complex spinors, Kramers-restricted rotations). Measured: ~2.3 min, ~140 MB peak, converges in 7
+# macro-iterations to -113.0844731 Ha (a genuine minimum). Follow the run with `tail -f
+# co_ccpvdz_x2c_gnof_neo_cholesky.live`.
+NELEC 14
+BASIS co-cc-pvdz.gbs
+X2C TRUE
+FUNCTIONAL GNOF
+PNOF_SUBSPACES 3
+PNOF_COUPLING 2
+FULL_OPTIMIZATION TRUE
+ORBITAL_OPTIMIZER NEO
+CHOLESKY TRUE
+
+GEOMETRY
+C   0.000000   0.000000   0.000000
+O   0.000000   0.000000   1.128000
+END

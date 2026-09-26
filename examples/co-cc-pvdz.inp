@@ -2,10 +2,16 @@
 # (downloaded from https://www.basissetexchange.org/), which includes D
 # shells for both atoms (see co-cc-pvdz.gbs). Small enough (nLarge=30,
 # nSmall=136) to actually build the RKB two-electron Coulomb repulsion
-# tensor (C4_SPINOR): measured peak RSS ~5.0 GB, ~5.5 minutes wall clock
-# -- unlike co-cc-pvtz.inp's cc-pVTZ basis (nLarge=70, nSmall=224), whose
-# tensor would need ~82 GB of peak memory even with the electron-
-# exchange-symmetry packing (RkbTwoElectron.h).
+# tensor (C4_SPINOR) without CHOLESKY: it is stored as unique elements only
+# (52.7 million of the 207 million complex values, Utils/SymmetricEri.h;
+# the rest is rebuilt by symmetry). This input also runs with DEBUG TRUE, which
+# builds dense tensors on demand for its validation suites: measured on the
+# current build ~2.6 minutes wall clock, ~5.8 GB peak RSS (not measured without
+# DEBUG). For a lighter 4-component run of the same molecule see
+# co_ccpvdz_c4_gnof_neo_cholesky.inp (CHOLESKY TRUE, ~0.9 GB).
+# co-cc-pvtz.inp's cc-pVTZ basis (nLarge=70, nSmall=224) is far larger: an
+# estimate of ~82 GB of peak memory was made for the earlier (exchange-symmetry
+# only) storage and has not been re-measured with the current scheme.
 NELEC 14
 BASIS co-cc-pvdz.gbs
 C4_SPINOR TRUE
