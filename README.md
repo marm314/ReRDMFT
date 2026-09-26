@@ -121,6 +121,7 @@ anywhere on a line) are comments.
 | `MACRO_ENERGY_TOLERANCE` | float | `1e-9` | Energy convergence threshold of the macro-iteration loop. |
 | `ORBITAL_GRADIENT_TOLERANCE` | float | `1e-5` | ADAM's/NEO's orbital-gradient convergence threshold (max gradient entry). |
 | `ORBITAL_OPTIMIZER` | string | `ADAM` | Which method drives `FULL_OPTIMIZATION`'s orbital-rotation step. `ADAM`: DoNOF's own first-order optimizer (`Utils/ADAM.h`). `NEO`: `Utils/NEO.h`'s matrix-free, second-order Newton method targeting the ground state, using a row-based Hessian-vector product (no dense Hessian formed); also works with `CHOLESKY TRUE` and `C4_SPINOR`. Converges in far fewer macro-iterations than ADAM and usually matches its energy to 1e-6-1e-9. On some PNOF/GNOF NON_REL systems NEO can land on a different stationary point; a post-loop Hessian check detects this and automatically escapes a detected saddle (perturb along the negative-curvature eigenvector, retry up to 3 times), but a residual gap to a genuine alternate minimum is reported rather than silently fixed -- compare against `ADAM` as a routine cross-check. Templates: `examples/*_neo_full_optimization.inp`. |
+| `READ_RESTART` | bool | `FALSE` | Requires a `FUNCTIONAL`. `TRUE` skips the HF/DHF SCF of every requested method (`NON_RELATIVISTIC`, `X2C`, `C4_SPINOR`) and starts the functional calculation from `RESTART.NON_REL` / `RESTART.X2C_HF` / `RESTART.4C` of an earlier run, possibly at another geometry (potential-energy scans) -- see *Restarting from a previous run* below. |
 | `FULL_OPTIMIZATION_4C_NEG` | bool | `FALSE` | Only meaningful for `C4_SPINOR` + `FULL_OPTIMIZATION` (any `FUNCTIONAL`, `CHOLESKY` TRUE or FALSE). After the positive-energy-only optimization has converged, runs the genuine **min-max** stage: orbital rotations now include the positive <-> negative-energy pairs, driven by NEO to a saddle point (whatever `ORBITAL_OPTIMIZER` says), alternating with a full re-minimization of the occupation numbers -- see below. Skipped, with a message, if the first stage did not converge. |
 | `X2C` | bool | `FALSE` | Print the one-electron X2C decoupling report and run the approximate X2C-HF SCF (see below), between the `NON_RELATIVISTIC` and `C4_SPINOR` reports. Independent of `C4_SPINOR` (the RKB Hamiltonian it needs is always built). With `DEBUG`, adds extra cross-checks. |
 
@@ -392,14 +393,11 @@ for any `FUNCTIONAL`. See `examples/lih_gnof_c4_neg_full_optimization.inp` (GNOF
 
 At the end of a `NON_RELATIVISTIC`, `X2C` and/or `C4_SPINOR` run with a `FUNCTIONAL`,
 the final RDMFT state is written in **binary** to `RESTART.NON_REL`,
-`RESTART.X2C_HF` and, for the 4-component path, `RESTART.4C`
-(the positive-energy-only minimization) and `RESTART.4C_NEG` (the
-`FULL_OPTIMIZATION_4C_NEG` min-max stage, written only when that stage ran and its
-checks passed), in the working
-directory. The format, writer and reader
-are in `Utils/Restart.h`; the program only writes the files for now (the
-reader is used to verify them), reading a restart to start a calculation
-is not implemented yet.
+`RESTART.X2C_HF` and, for the 4-component path, `RESTART.4C` (the
+positive-energy-only minimization; the min-max stage of `FULL_OPTIMIZATION_4C_NEG` writes no
+file of its own, it is meant to be run on top of `RESTART.4C` at each geometry), in the working
+directory. The format, writer and reader are in `Utils/Restart.h`. The files are read back
+right after writing (an identity check) and by `READ_RESTART` (below).
 
 Contents:
 
@@ -413,10 +411,9 @@ Contents:
   parameterization of `Occ_opt/PNOFs.h`), obtained from the final
   occupations, so the SQP and the L-BFGS branches write the same thing;
 - the final **molecular-orbital coefficients** `C = C_scf * U_total` in the
-  AO spin-orbital basis (`4C`/`4C_NEG`: the 4-component RKB spinor basis
+  AO spin-orbital basis (`4C`: the 4-component RKB spinor basis
   [Large-alpha; Large-beta; Small; Small], columns in ascending energy with the
-  negative-energy branch first and occupation 0; `4C_NEG`'s rotation includes the
-  positive <-> negative mixing): `U_total` is the accumulated `FULL_OPTIMIZATION`
+  negative-energy branch first and occupation 0): `U_total` is the accumulated `FULL_OPTIMIZATION`
   rotation (identity without it). `NON_REL`: `blockdiag(C, C)`, real,
   `2 n_AO x 2 n_MO`, ordered `[alpha, beta]`. `X2C`: the Kramers-fixed
   spinors, complex, `2 n_Large x 2 n_Large`. Column `j` is MO `j` and has
@@ -432,6 +429,44 @@ the checks: identity with what was written, `C^dagger S C = 1`,
 `C_new = C_old U` convention) and, for PNOF, that the gamma angles
 regenerate the occupation numbers. The file layout is documented at the
 top of `Utils/Restart.h`. Unit test: `make test_restart LIBCINT=...`.
+
+
+### Restarting from a previous run (`READ_RESTART TRUE`)
+
+For every requested method the SCF is skipped and the restart file supplies the state:
+
+1. `RESTART.<method>` is read and checked against the run (method, `NELEC`, number and type of the
+   coefficients). The basis *fingerprint* is not compared: it contains the atomic centers and would
+   forbid the geometry changes this is meant for.
+2. **Orthonormality.** `S_check = C_read^dagger S C_read` is formed with the overlap of the *current*
+   geometry (`blockdiag(S, S)` for `NON_REL`/`X2C`, the RKB overlap for the 4-component basis). If it is
+   not the identity, the orbitals are Loewdin-orthonormalized, `C = C_read S_check^(-1/2)` (then
+   `C^dagger S C = S_check^(-1/2) S_check S_check^(-1/2) = 1`, the closest orthonormal set), and both
+   deviations are printed.
+3. **Kramers pairs (`X2C`, `C4_SPINOR`).** The pairing `Theta|2k> = |2k+1>` is re-established exactly
+   after the Loewdin step (`Utils/KramersPairing.h`; the deviation before/after is printed) and the
+   Kramers structure of `h` in the new basis is tested. `NON_REL` checks that alpha and beta orbitals are
+   still identical.
+4. **4-component positive-energy space.** The no-pair calculation is restricted to the positive-energy
+   spinors, so that space has to be the one of the *current* geometry: the space read from the file is the
+   old geometry's and carries a negative-energy admixture (~1e-4 for a 0.1 bohr step in LiH) that would
+   lower the positive-only energy by ~1e-4 Hartree and give the min-max stage a large electron-positron
+   gradient. When the orbitals had to be re-orthonormalized, one Fock build from the restart density (no SCF
+   iteration) defines the split at the new geometry: the read positive spinors are projected onto its
+   positive-energy eigenspace and re-orthonormalized, the negative-energy columns are its negative-energy
+   eigenvectors. The admixture is printed. LiH/6-31G at 1.70 bohr from a 1.5949 bohr restart reproduces the
+   from-scratch energies of `NON_REL`, `X2C` and `C4_SPINOR` (also with `FULL_OPTIMIZATION_4C_NEG`) to ~1e-8
+   Hartree, dense and Cholesky, GNOF and MULLER.
+5. **Occupations.** The occupation numbers (the gammas for PNOF, through the occupations) replace the
+   smeared-orbital-energy guess as the starting point of the occupation optimization, which still runs at
+   the fixed orbitals before `FULL_OPTIMIZATION`. A PNOF file that does not fit the current geminal
+   structure falls back to the default guess with a note; a JK-only file whose frozen/deep-virtual positions
+   disagree with the current `JK_FROZEN_PAIRS`/`JK_ACTIVE_PAIRS` window is refused.
+
+The SCF-based diagnostics (HF energies, the HF-occupation gradient/Hessian tests, `HESSIAN_*` and the DEBUG
+checks against SCF quantities) do not exist in this mode and are not printed. The new results overwrite
+`RESTART.*`, so a scan is a chain: run the first geometry, then edit the geometry, add `READ_RESTART TRUE`
+and repeat -- see `examples/lih_gnof_read_restart.inp`.
 
 ## Contributors
 

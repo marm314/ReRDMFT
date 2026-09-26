@@ -174,7 +174,7 @@ $(BUILD_DIR)/test_cholesky_eri: tests/test_cholesky_eri.cpp $(BUILD_DIR)/Cholesk
 test_restart: $(BUILD_DIR)/test_restart
 	./$(BUILD_DIR)/test_restart
 
-$(BUILD_DIR)/test_restart: tests/test_restart.cpp $(BUILD_DIR)/Restart.o $(BUILD_DIR)/PNOFs.o $(BUILD_DIR)/Orb_subspaces.o $(BUILD_DIR)/StringUtils.o $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o | $(BUILD_DIR)
+$(BUILD_DIR)/test_restart: tests/test_restart.cpp $(BUILD_DIR)/Restart.o $(BUILD_DIR)/RestartLoader.o $(BUILD_DIR)/LinearAlgebra.o $(BUILD_DIR)/PNOFs.o $(BUILD_DIR)/Orb_subspaces.o $(BUILD_DIR)/StringUtils.o $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
 # Unit test of Utils/DIIS (Pulay DIIS with the SCF commutator error, real and complex).

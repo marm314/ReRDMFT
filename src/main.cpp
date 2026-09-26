@@ -36,6 +36,8 @@
 #include "KramersPairing.h"
 #include "KramersRestriction.h"
 #include "Restart.h"
+#include "RestartLoader.h"
+#include "NuclearRepulsion.h"
 #include "KramersSymmetry.h"
 #include "LBFGS.h"
 #include "LinearAlgebra.h"
@@ -2158,7 +2160,7 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
                                    std::vector<TimingRecord>& timing_records,
                                    rerdmft::RestartCapture* restart = nullptr,
                                    const Eri* eri_full_block = nullptr,
-                                   rerdmft::RestartCapture* restart_neg = nullptr) {
+                                   const std::vector<double>* initial_occupations = nullptr) {
   // Generic (element-access) view of the integrals, used by the production code below; the DEBUG /
   // HESSIAN_FUNCTIONAL validation blocks that need a dense Tensor4 re-bind `eri` to a dense view of `eri_in`.
   const Eri& eri = eri_in;
@@ -2237,9 +2239,44 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
   }
 
   const auto occupation_init_method = rerdmft::parseOccupationInitMethod(occupation_init_name);
-  const auto occupations_active = rerdmft::generateInitialOccupations(
+  auto occupations_active = rerdmft::generateInitialOccupations(
       occupation_init_method, orbital_energies_window, n_electrons_active, temperature_kelvin,
       kOccupationEpsilon);
+  const bool occupations_from_restart = initial_occupations != nullptr;
+  if (occupations_from_restart) {
+    // READ_RESTART: the occupation numbers of the restart file replace the smeared-orbital-energy guess. The
+    // frozen and deep-virtual positions must agree with this run's window (pinned at exactly 1 and 0).
+    if (initial_occupations->size() != n_total) throw std::runtime_error(label + ": READ_RESTART occupations have the wrong length");
+    std::vector<bool> in_window(n_total, false);
+    for (const auto idx : active_indices) in_window[idx] = true;
+    for (std::size_t i = 0; i < n_total; ++i) {
+      if (in_window[i]) continue;
+      const double expected = std::find(frozen_indices.begin(), frozen_indices.end(), i) != frozen_indices.end() ? 1.0 : 0.0;
+      if (std::abs((*initial_occupations)[i] - expected) > 1e-6) {
+        throw std::runtime_error(label + ": READ_RESTART occupation " + std::to_string(i) + " = " +
+                                 std::to_string((*initial_occupations)[i]) + " lies outside the JK_FROZEN_PAIRS/JK_ACTIVE_PAIRS window of this run"
+                                 " (it must be exactly " + std::to_string(static_cast<int>(expected)) + ") -- a different window than the restart file's?");
+      }
+    }
+    std::vector<double> act(n_active_window);
+    double sum = 0.0;
+    for (std::size_t i = 0; i < n_active_window; ++i) {
+      act[i] = std::min(1.0 - kOccupationEpsilon, std::max(kOccupationEpsilon, (*initial_occupations)[active_indices[i]]));
+      sum += act[i];
+    }
+    if (std::abs(sum - n_electrons_active) > 1e-3) {
+      throw std::runtime_error(label + ": READ_RESTART occupations in the window sum to " + std::to_string(sum) + " but NELEC - 2*JK_FROZEN_PAIRS = " +
+                               std::to_string(n_electrons_active));
+    }
+    // Restore the exact electron count after the interior clamp, spreading the residual over the partially occupied ones.
+    const double delta = n_electrons_active - sum;
+    double weight = 0.0;
+    for (const double a : act) weight += a * (1.0 - a);
+    if (weight > 0.0) {
+      for (double& a : act) a = std::min(1.0 - kOccupationEpsilon, std::max(kOccupationEpsilon, a + delta * a * (1.0 - a) / weight));
+    }
+    occupations_active = act;
+  }
   logTiming(label + " initial occupations generated (OCCUPATION_INIT " + occupation_init_name +
                 ", FUNCTIONAL " + functional_name + ")",
             t_start, t_checkpoint, timing_records);
@@ -2271,7 +2308,8 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
       << label
       << " fractional-occupation RDMFT functional evaluation (Occ_opt/JK_only.h + "
          "Occ_opt/OccupationInit.h, on the converged HF/DHF orbitals):\n";
-  out << "  Functional: " << functional_name << "   Occupation init: " << occupation_init_name;
+  out << "  Functional: " << functional_name << "   Occupation init: "
+      << (occupations_from_restart ? std::string("READ_RESTART (occupation numbers of the restart file)") : occupation_init_name);
   if (occupation_init_method == rerdmft::OccupationInitMethod::kFermiDirac) {
     out << "   Temperature: " << temperature_kelvin << " K";
   }
@@ -3214,17 +3252,6 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
                 h, *eri_full_block, full_result.occupations, full_result.occupation_state, functional, f_l,
                 n_electrons_active, n_total, n_frozen, n_inactive_below, n_active, /*two_columns=*/true, saddle_settings,
                 /*kramers_restricted=*/true, nuclear_repulsion_energy, out, std::vector<std::size_t>{}, /*n_negative=*/0);
-            if (restart_neg != nullptr && saddle_result.checks_passed) {
-              restart_neg->valid = true;
-              restart_neg->kind = "OCCUPATIONS";
-              restart_neg->jk_frozen_pairs = static_cast<std::int64_t>(n_frozen / 2);
-              restart_neg->jk_active_pairs = static_cast<std::int64_t>(n_active_window / 2);
-              restart_neg->occupations = saddle_result.occupations;
-              restart_neg->electronic_energy = saddle_result.electronic_energy;
-              restart_neg->converged = saddle_result.converged;
-              restart_neg->orbitals_optimized = true;
-              restart_neg->total_rotation = saddle_result.total_rotation;
-            }
             out << "  FULL_OPTIMIZATION_4C_NEG " << (saddle_result.checks_passed && saddle_result.converged ? "converged" : "did NOT converge")
                 << ": total energy " << std::setprecision(10)
                 << saddle_result.electronic_energy + nuclear_repulsion_energy << std::setprecision(6) << " Hartree ("
@@ -3392,7 +3419,7 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
                                        std::vector<TimingRecord>& timing_records,
                                        rerdmft::RestartCapture* restart = nullptr,
                                        const Eri* eri_full_block = nullptr,
-                                       rerdmft::RestartCapture* restart_neg = nullptr) {
+                                       const std::vector<double>* initial_occupations = nullptr) {
   // See buildFunctionalReport: generic view here, dense re-binding in the DEBUG / HESSIAN_FUNCTIONAL blocks.
   const Eri& eri = eri_in;
   rerdmft::progressContext() = label;  // live progress lines (stderr) are prefixed with the method
@@ -3456,6 +3483,7 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
   // construction (unlike an exactly-n=1 aufbau start) -- exactly what
   // the SQP below needs, since several Pi functions here have a
   // divergent second derivative right at the true n=0/1 boundary.
+  std::string restart_note;
   const auto guess_gammas = rerdmft::pnofDefaultGuessGammas(pnof_coupling);
   const auto guess_occ = rerdmft::pnofSubspaceOccupationsFromGammas(pnof_coupling, guess_gammas);
   std::vector<double> x0(n_frontier);
@@ -3463,6 +3491,33 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
     const std::size_t base = static_cast<std::size_t>(s) * static_cast<std::size_t>(pnof_coupling);
     for (int v = 0; v < pnof_coupling; ++v) {
       x0[base + static_cast<std::size_t>(v)] = guess_occ[static_cast<std::size_t>(v)];
+    }
+  }
+
+  bool occupations_from_restart = false;
+  if (initial_occupations != nullptr) {
+    // READ_RESTART: start from the restart file's occupation numbers (they carry the file's gammas); they must have
+    // this run's geminal structure (Kramers/spin-pair equality, unit sum per subspace) -- otherwise the default guess stays.
+    try {
+      if (initial_occupations->size() != n_total) throw std::runtime_error("wrong length");
+      std::vector<double> x = x0;
+      for (std::size_t a = n_core; a < geminals.size(); ++a) {
+        const double n = (*initial_occupations)[geminals[a].i];
+        if (std::abs(n - (*initial_occupations)[geminals[a].ibar]) > 1e-6) throw std::runtime_error("unequal Kramers/spin-pair occupations");
+        x[a - n_core] = std::min(1.0 - 1e-6, std::max(1e-6, n));
+      }
+      for (int s = 0; s < pnof_subspaces; ++s) {
+        double sum = 0.0;
+        const std::size_t base = static_cast<std::size_t>(s) * static_cast<std::size_t>(pnof_coupling);
+        for (int v = 0; v < pnof_coupling; ++v) sum += x[base + static_cast<std::size_t>(v)];
+        if (std::abs(sum - 1.0) > 1e-4) throw std::runtime_error("subspace occupations do not sum to 1 (a different functional/subspace structure?)");
+        for (int v = 0; v < pnof_coupling; ++v) x[base + static_cast<std::size_t>(v)] /= sum;
+      }
+      x0 = x;
+      occupations_from_restart = true;
+    } catch (const std::exception& e) {
+      restart_note = std::string("  READ_RESTART: the occupation numbers of the file do not fit this PNOF geminal structure (") + e.what() +
+                     ") -- the default starting guess is used instead.\n";
     }
   }
 
@@ -3509,6 +3564,8 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
          "Occ_opt/Orb_subspaces.h, on the converged HF/DHF orbitals):\n";
   out << "  Functional: " << functional_name << "   PNOF_SUBSPACES: " << pnof_subspaces
       << "   PNOF_COUPLING: " << pnof_coupling << "\n";
+  if (occupations_from_restart) out << "  Starting occupations: READ_RESTART (occupation numbers / gammas of the restart file)\n";
+  out << restart_note;
   out << "  Frozen-occupied (core) geminals: " << n_core
       << "   Frontier geminals: " << n_frontier << "\n";
   out << "  Initial electronic energy: " << std::setprecision(10) << initial_electronic_energy
@@ -3957,16 +4014,6 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
                 h, *eri_full_block, full_result.occupations, full_result.occupation_state, functional, geminals, n_core,
                 pnof_subspaces, pnof_coupling, relativistic, sqp_pnof_occ, n_total, saddle_settings,
                 /*kramers_restricted=*/true, nuclear_repulsion_energy, out, std::vector<std::size_t>{}, /*n_negative=*/0);
-            if (restart_neg != nullptr && saddle_result.checks_passed) {
-              restart_neg->valid = true;  // gamma angles are added with the 4C ones below
-              restart_neg->kind = "GAMMAS";
-              restart_neg->n_core = static_cast<std::int64_t>(n_core);
-              restart_neg->occupations = saddle_result.occupations;
-              restart_neg->electronic_energy = saddle_result.electronic_energy;
-              restart_neg->converged = saddle_result.converged;
-              restart_neg->orbitals_optimized = true;
-              restart_neg->total_rotation = saddle_result.total_rotation;
-            }
             out << "  FULL_OPTIMIZATION_4C_NEG " << (saddle_result.checks_passed && saddle_result.converged ? "converged" : "did NOT converge")
                 << ": total energy " << std::setprecision(10)
                 << saddle_result.electronic_energy + nuclear_repulsion_energy << std::setprecision(6) << " Hartree ("
@@ -4013,7 +4060,6 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
     try {
       addGammas(*restart);
       restart->valid = true;
-      if (restart_neg != nullptr && restart_neg->valid) addGammas(*restart_neg);
     } catch (const std::exception& e) {
       out << "\n  RESTART data (gamma angles) FAILED: " << e.what() << "\n";
     }
@@ -4052,6 +4098,17 @@ template <typename T>
 rerdmft::Matrix<std::complex<double>> toComplexMatrix(const rerdmft::Matrix<T>& m) {
   rerdmft::Matrix<std::complex<double>> out(m.rows(), m.cols());
   for (std::size_t i = 0; i < m.rows() * m.cols(); ++i) out.data()[i] = std::complex<double>(m.data()[i]);
+  return out;
+}
+
+// blockdiag(m, m) of a real matrix as a complex matrix -- NON_REL's spin-orbital AO basis [alpha; beta].
+inline rerdmft::Matrix<std::complex<double>> blockDiagTwice(const rerdmft::Matrix<double>& m) {
+  rerdmft::Matrix<std::complex<double>> out(2 * m.rows(), 2 * m.cols());
+  for (std::size_t i = 0; i < m.rows(); ++i)
+    for (std::size_t j = 0; j < m.cols(); ++j) {
+      out(i, j) = m(i, j);
+      out(m.rows() + i, m.cols() + j) = m(i, j);
+    }
   return out;
 }
 
@@ -4520,7 +4577,243 @@ int main(int argc, char** argv) {
       }
     };
 
-    if (input.non_relativistic()) {
+    // READ_RESTART: skip the HF/DHF SCF of every requested method; RESTART.<method> supplies the MO coefficients
+    // (Loewdin-orthonormalized in this geometry's overlap, Kramers pairing verified/enforced) and the occupation
+    // numbers, from which the FUNCTIONAL calculation (FULL_OPTIMIZATION, ...) starts. Written for potential-energy
+    // scans: run one geometry, keep RESTART.*, change the geometry, set READ_RESTART TRUE.
+    if (input.read_restart()) {
+      if (!input.has_functional()) {
+        throw std::runtime_error("READ_RESTART TRUE requires a FUNCTIONAL (the restart files hold an RDMFT state)");
+      }
+      std::cout << "READ_RESTART TRUE: the HF/DHF SCF is skipped; orbitals and occupation numbers come from RESTART.<method>.\n";
+      const double restart_nuclear_repulsion = rerdmft::nuclearRepulsionEnergy(input.geometry());
+      const auto dummyEnergies = [](std::size_t n) {
+        std::vector<double> e(n);
+        for (std::size_t i = 0; i < n; ++i) e[i] = static_cast<double>(i);
+        return e;
+      };
+      const auto restartFingerprint = rerdmft::basisFingerprint(large_basis.functions());
+      // JK_only windows must agree with the file's; a difference is reported (the occupations are still checked against the
+      // window of this run when the functional stage starts, and refused if a frozen/deep-virtual position is not exactly 1/0).
+      const auto noteWindow = [&](const rerdmft::RestartOrbitals& ro) {
+        if (ro.data.kind != "OCCUPATIONS" || isPnofFunctionalName(input.functional())) return;
+        if (ro.data.jk_frozen_pairs != input.jk_frozen_pairs() ||
+            (input.jk_active_pairs() >= 0 && ro.data.jk_active_pairs != input.jk_active_pairs())) {
+          std::cout << "    Note: the restart file's JK_only window (" << ro.data.jk_frozen_pairs << " frozen / " << ro.data.jk_active_pairs
+                    << " active pair(s)) differs from this run's (" << input.jk_frozen_pairs() << " / "
+                    << (input.jk_active_pairs() >= 0 ? std::to_string(input.jk_active_pairs()) : std::string("all the rest")) << ").\n";
+        }
+      };
+      const auto pseudoKramersEnergies = [](std::size_t n) {  // one Kramers pair per cluster: no cluster mixing
+        std::vector<double> e(n);
+        for (std::size_t i = 0; i < n; ++i) e[i] = 1000.0 * static_cast<double>(i / 2);
+        return e;
+      };
+
+      if (input.non_relativistic()) {
+        const auto h_core_nonrel = rerdmft::schrodingerKineticMatrix(large_basis.functions()) +
+                                   rerdmft::nuclearAttractionMatrix(large_basis.functions(), input.geometry());
+        prepareNonRelEri("NON_REL");
+        const std::size_t n = s_large.rows();
+        const auto ro = rerdmft::readRestartOrbitals("RESTART.NON_REL", "NON_REL", input.n_electrons(), 2 * n, 2 * n,
+                                                     /*expected_complex=*/false, blockDiagTwice(s_large), std::cout);
+        noteWindow(ro);
+        rerdmft::Matrix<double> c_spatial(n, n);
+        double off_block = 0.0, spin_dev = 0.0;
+        for (std::size_t i = 0; i < n; ++i)
+          for (std::size_t j = 0; j < n; ++j) {
+            c_spatial(i, j) = ro.c(i, j).real();
+            off_block = std::max({off_block, std::abs(ro.c(i, n + j)), std::abs(ro.c(n + i, j))});
+            spin_dev = std::max(spin_dev, std::abs(ro.c(n + i, n + j) - ro.c(i, j)));
+          }
+        std::cout << std::scientific << std::setprecision(2) << "    spin structure of the orbitals: max |alpha-beta block| = " << off_block
+                  << ", max |C_beta - C_alpha| = " << spin_dev << std::defaultfloat << std::setprecision(6) << "\n";
+        if (off_block > 1e-8 || spin_dev > 1e-8) {
+          throw std::runtime_error("READ_RESTART: the NON_REL restart orbitals are not spin-restricted (alpha and beta differ)");
+        }
+        const auto h_mo_nr = rerdmft::moOneElectronTransform(h_core_nonrel, c_spatial);
+        const auto h_spin = rerdmft::closedShellSpinOrbitalOneElectron(h_mo_nr, n);
+        rerdmft::CholeskyEri<double> eri_spin_chol;
+        rerdmft::SymmetricEri<double> eri_spin_sym;
+        if (input.cholesky()) {
+          eri_spin_chol = rerdmft::aoCholeskyToMoSpinOrbital(ao_cholesky, c_spatial);
+        } else {
+          eri_spin_sym = rerdmft::closedShellSpinOrbitalTwoElectron(rerdmft::moTwoElectronSymmetric(nonrel_eri, c_spatial), n);
+        }
+        logTiming("NON_REL MO integral transform complete (READ_RESTART)", t_start, t_checkpoint, timing_records);
+        rerdmft::RestartCapture nonrel_restart;
+        const auto nonrel_functional = [&](const auto& eri_any) {
+          if (isPnofFunctionalName(input.functional())) {
+            return buildPnofFunctionalReport(
+                "NON_REL", h_spin, eri_any, 2 * n, 0, input.n_electrons(), input.functional(), restart_nuclear_repulsion,
+                input.pnof_subspaces(), input.pnof_coupling(), /*relativistic=*/false, input.sqp_pnof_occ(), input.debug(),
+                input.verbose(), input.hessian_functional(), fullOptSettings(input), input.full_optimization_4c_neg(),
+                t_start, t_checkpoint, timing_records, &nonrel_restart, &eri_any, &ro.data.occupations);
+          }
+          return buildFunctionalReport(
+              "NON_REL", h_spin, eri_any, dummyEnergies(2 * n), 0, input.n_electrons(), input.jk_frozen_pairs(),
+              input.jk_active_pairs(), input.temperature(), input.functional(), input.occupation_init(),
+              restart_nuclear_repulsion, input.debug(), input.verbose(), input.hessian_functional(), fullOptSettings(input),
+              input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &nonrel_restart, &eri_any, &ro.data.occupations);
+        };
+        nonrel_functional_report = input.cholesky() ? nonrel_functional(eri_spin_chol) : nonrel_functional(eri_spin_sym);
+        writeRestartFile<double>(input, "NON_REL", nonrel_restart, blockDiagTwice(c_spatial), blockDiagTwice(h_core_nonrel),
+                                 blockDiagTwice(s_large), h_spin, restartFingerprint, restart_nuclear_repulsion);
+      }
+
+      if (input.x2c()) {
+        if (!input.non_relativistic()) prepareNonRelEri("X2C_HF");
+        const std::size_t dim = 2 * x_large.rows();
+        const auto s_x2c = rerdmft::extractLargeComponentBlock(s_full, dim);
+        const auto ro = rerdmft::readRestartOrbitals("RESTART.X2C_HF", "X2C_HF", input.n_electrons(), dim, dim,
+                                                     /*expected_complex=*/true, s_x2c, std::cout);
+        noteWindow(ro);
+        // Kramers pairing after the Loewdin step: the pairs must be exact (Theta|2k> = |2k+1>) for the coupled-pair
+        // quantities of the functionals; every pair is its own cluster (the columns are not eigenvectors any more).
+        rerdmft::KramersPairingReport pairing;
+        const auto c_x2c = rerdmft::fixKramersPairingLarge(ro.c, pseudoKramersEnergies(dim), s_large, 1e-4, &pairing);
+        printKramersPairingReport("X2C-HF (READ_RESTART)", pairing);
+        const auto h_x2c_mo = rerdmft::x2cMoOneElectronTransform(x2c_hamiltonian.h_x2c, c_x2c);
+        kramersStructureTestOneBody("X2C-HF (READ_RESTART)", h_x2c_mo, /*repairs_if_failed=*/false);
+        rerdmft::CholeskyEri<std::complex<double>> x2c_mo_chol;
+        rerdmft::SymmetricEri<std::complex<double>> x2c_mo_sym;
+        if (input.cholesky()) {
+          x2c_mo_chol = rerdmft::aoCholeskyToMoSpinor(ao_cholesky, c_x2c);
+        } else {
+          x2c_mo_sym = rerdmft::x2cMoTwoElectronSymmetric(nonrel_eri, c_x2c);
+        }
+        logTiming("X2C-HF MO integral transform complete (READ_RESTART)", t_start, t_checkpoint, timing_records);
+        rerdmft::RestartCapture x2c_restart;
+        const auto x2c_functional = [&](const auto& eri_any) {
+          if (isPnofFunctionalName(input.functional())) {
+            return buildPnofFunctionalReport(
+                "X2C_HF", h_x2c_mo, eri_any, dim, 0, input.n_electrons(), input.functional(), restart_nuclear_repulsion,
+                input.pnof_subspaces(), input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
+                input.verbose(), input.hessian_functional(), fullOptSettings(input), input.full_optimization_4c_neg(),
+                t_start, t_checkpoint, timing_records, &x2c_restart, &eri_any, &ro.data.occupations);
+          }
+          return buildFunctionalReport(
+              "X2C_HF", h_x2c_mo, eri_any, dummyEnergies(dim), 0, input.n_electrons(), input.jk_frozen_pairs(),
+              input.jk_active_pairs(), input.temperature(), input.functional(), input.occupation_init(),
+              restart_nuclear_repulsion, input.debug(), input.verbose(), input.hessian_functional(), fullOptSettings(input),
+              input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &x2c_restart, &eri_any, &ro.data.occupations);
+        };
+        x2c_functional_report = input.cholesky() ? x2c_functional(x2c_mo_chol) : x2c_functional(x2c_mo_sym);
+        writeRestartFile<std::complex<double>>(input, "X2C_HF", x2c_restart, c_x2c, x2c_hamiltonian.h_x2c, s_x2c, h_x2c_mo,
+                                               restartFingerprint, restart_nuclear_repulsion);
+      }
+
+      if (input.c4_spinor()) {
+        const std::size_t dim = 4 * large_basis.functions().size();
+        c4_eri_dim = dim;
+        if (input.cholesky()) {
+          rerdmft::CholeskyCheckReport check;
+          rkb_cholesky = rerdmft::RkbCholesky::build(large_basis.functions(), small_basis.functions(), rkb_coefficients,
+                                                      input.cholesky_threshold(), &check);
+          logTiming("Two-electron integrals built (C4_DHF, Cholesky vectors, READ_RESTART)", t_start, t_checkpoint, timing_records);
+        } else {
+          c4_spinor_eri = buildC4SpinorEri(input, large_basis.functions(), small_basis.functions(), rkb_coefficients,
+                                           /*use_cholesky=*/false);
+          logTiming("Two-electron integrals built (C4_DHF, READ_RESTART)", t_start, t_checkpoint, timing_records);
+        }
+        const auto ro = rerdmft::readRestartOrbitals("RESTART.4C", "4C", input.n_electrons(), dim, dim,
+                                                     /*expected_complex=*/true, s_full, std::cout);
+        noteWindow(ro);
+        // Coefficients in the orthonormal H_RKB_ortho basis: U = X^-1 C = X^dagger S C.
+        auto u_ortho = rerdmft::dagger(x_full) * (s_full * ro.c);
+        std::vector<double> kramers_energies = pseudoKramersEnergies(dim);
+        if (ro.lowdin_applied) {
+          // The no-pair positive-energy space must be the one of THIS geometry: the positive-energy spinors read from
+          // the file span the OLD geometry's space, whose negative-energy admixture here (through the geometry-dependent
+          // small components) would lower the energy of the positive-only calculation and put a large
+          // electron-positron gradient at the start of the min-max stage. One Fock build from the restart density
+          // (no SCF iteration) defines the positive/negative split at the new geometry: the read positive spinors are
+          // projected onto its positive-energy eigenspace and re-orthonormalized; the negative-energy columns are its
+          // negative-energy eigenvectors.
+          const std::size_t n_neg_space = dim / 2;
+          rerdmft::Matrix<std::complex<double>> density(dim, dim, std::complex<double>(0.0, 0.0));
+          for (std::size_t col = n_neg_space; col < dim; ++col) {
+            const double occ = ro.data.occupations[col];
+            if (occ <= 0.0) continue;
+            for (std::size_t i = 0; i < dim; ++i)
+              for (std::size_t j = 0; j < dim; ++j) density(i, j) += occ * ro.c(i, col) * std::conj(ro.c(j, col));
+          }
+          const auto fock_restart = input.cholesky() ? rerdmft::rkbFockMatrix(h_rkb, rkb_cholesky, density)
+                                                     : rerdmft::rkbFockMatrix(h_rkb, c4_spinor_eri, density);
+          const auto eig_restart = rerdmft::diagonalizeHermitian(rerdmft::dagger(x_full) * (fock_restart * x_full));
+          rerdmft::Matrix<std::complex<double>> v_neg(dim, n_neg_space), v_pos(dim, dim - n_neg_space),
+              u_pos_old(dim, dim - n_neg_space);
+          for (std::size_t i = 0; i < dim; ++i) {
+            for (std::size_t j = 0; j < n_neg_space; ++j) v_neg(i, j) = eig_restart.eigenvectors(i, j);
+            for (std::size_t j = n_neg_space; j < dim; ++j) {
+              v_pos(i, j - n_neg_space) = eig_restart.eigenvectors(i, j);
+              u_pos_old(i, j - n_neg_space) = u_ortho(i, j);
+            }
+          }
+          const auto admixture = rerdmft::dagger(v_neg) * u_pos_old;  // negative-energy content of the read positive spinors
+          double max_admixture = 0.0;
+          for (std::size_t i = 0; i < admixture.rows(); ++i)
+            for (std::size_t j = 0; j < admixture.cols(); ++j) max_admixture = std::max(max_admixture, std::abs(admixture(i, j)));
+          const auto projected = v_pos * (rerdmft::dagger(v_pos) * u_pos_old);
+          rerdmft::Matrix<std::complex<double>> identity(dim, dim, std::complex<double>(0.0, 0.0));
+          for (std::size_t i = 0; i < dim; ++i) identity(i, i) = 1.0;
+          const auto positive_new = rerdmft::lowdinOrthonormalize(projected, identity);
+          for (std::size_t i = 0; i < dim; ++i) {
+            for (std::size_t j = 0; j < n_neg_space; ++j) u_ortho(i, j) = v_neg(i, j);
+            for (std::size_t j = n_neg_space; j < dim; ++j) u_ortho(i, j) = positive_new(i, j - n_neg_space);
+          }
+          for (std::size_t j = 0; j < n_neg_space; ++j) kramers_energies[j] = eig_restart.eigenvalues[j];
+          for (std::size_t j = n_neg_space; j < dim; ++j)
+            kramers_energies[j] = eig_restart.eigenvalues[n_neg_space - 1] + 1000.0 * static_cast<double>((j - n_neg_space) / 2 + 1);
+          std::cout << std::scientific << std::setprecision(2)
+                    << "    positive-energy space re-established at this geometry (one Fock build from the restart density, no SCF): "
+                       "max negative-energy admixture in the read positive spinors = "
+                    << max_admixture << std::defaultfloat << std::setprecision(6) << "\n";
+        }
+        rerdmft::KramersPairingReport pairing;
+        u_ortho = rerdmft::fixKramersPairing(u_ortho, kramers_energies, rkb_coefficients, x_full, s_large, s_small_ukb, 1e-4,
+                                             &pairing);
+        printKramersPairingReport("C4_DHF (READ_RESTART)", pairing);
+        const auto c_dhf_restart = x_full * u_ortho;
+        const auto h_mo_restart = rerdmft::rkbMoOneElectronTransform(h_rkb, c_dhf_restart);
+        kramersStructureTestOneBody("C4_DHF (READ_RESTART)", h_mo_restart, /*repairs_if_failed=*/false);
+        rerdmft::SymmetricEri<std::complex<double>> c4_mo_sym_r;
+        rerdmft::CholeskyEri<std::complex<double>> c4_mo_chol_r, c4_mo_full_chol_r;
+        if (input.cholesky()) {
+          c4_mo_chol_r = rerdmft::rkbCholeskyToMo(rkb_cholesky, c_dhf_restart, dim / 2, input.cholesky_threshold());
+          if (input.full_optimization_4c_neg() && fullOptSettings(input).enabled) {
+            c4_mo_full_chol_r = rerdmft::rkbCholeskyToMo(rkb_cholesky, c_dhf_restart, /*n_negative=*/0, input.cholesky_threshold());
+          }
+        } else {
+          c4_mo_sym_r = rerdmft::rkbMoTwoElectronSymmetric(c4_spinor_eri, c_dhf_restart);
+        }
+        logTiming("C4_DHF MO integral transform complete (READ_RESTART)", t_start, t_checkpoint, timing_records);
+        const std::size_t n_negative_r = dim / 2;
+        rerdmft::RestartCapture c4_restart;
+        const auto dhf_functional_r = [&](const auto& eri_any, const auto* eri_full) {
+          if (isPnofFunctionalName(input.functional())) {
+            return buildPnofFunctionalReport(
+                "C4_DHF", h_mo_restart, eri_any, dim - n_negative_r, n_negative_r, input.n_electrons(), input.functional(),
+                restart_nuclear_repulsion, input.pnof_subspaces(), input.pnof_coupling(), /*relativistic=*/true,
+                input.sqp_pnof_occ(), input.debug(), input.verbose(), input.hessian_functional(), fullOptSettings(input),
+                input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &c4_restart, eri_full,
+                &ro.data.occupations);
+          }
+          return buildFunctionalReport(
+              "C4_DHF", h_mo_restart, eri_any, dummyEnergies(dim - n_negative_r), n_negative_r, input.n_electrons(),
+              input.jk_frozen_pairs(), input.jk_active_pairs(), input.temperature(), input.functional(),
+              input.occupation_init(), restart_nuclear_repulsion, input.debug(), input.verbose(),
+              input.hessian_functional(), fullOptSettings(input), input.full_optimization_4c_neg(), t_start, t_checkpoint,
+              timing_records, &c4_restart, eri_full, &ro.data.occupations);
+        };
+        dhf_functional_report = input.cholesky() ? dhf_functional_r(c4_mo_chol_r, &c4_mo_full_chol_r)
+                                                 : dhf_functional_r(c4_mo_sym_r, &c4_mo_sym_r);
+        writeRestartFile<std::complex<double>>(input, "4C", c4_restart, c_dhf_restart, h_rkb, s_full, h_mo_restart,
+                                               restartFingerprint, restart_nuclear_repulsion);
+      }
+    }
+
+    if (input.non_relativistic() && !input.read_restart()) {
       const auto schrodinger_kinetic = rerdmft::schrodingerKineticMatrix(large_basis.functions());
       const auto vext_large =
           rerdmft::nuclearAttractionMatrix(large_basis.functions(), input.geometry());
@@ -4810,7 +5103,7 @@ int main(int argc, char** argv) {
       }
     }
 
-    if (input.x2c()) {
+    if (input.x2c() && !input.read_restart()) {
       // Reuse nonrel_eri if NON_RELATIVISTIC already built it (same
       // geometry+basis, independent of any relativistic setting); build
       // it fresh otherwise -- the X2C-HF SCF below does not require
@@ -5125,7 +5418,7 @@ int main(int argc, char** argv) {
       }
     }
 
-    if (input.c4_spinor()) {
+    if (input.c4_spinor() && !input.read_restart()) {
       c_dhf = rerdmft::rkbCoefficientMatrix(x_full, h_rkb_ortho_eig.eigenvectors);
       density_matrix = rerdmft::rkbDensityMatrix(c_dhf, input.n_electrons());
 
@@ -5486,7 +5779,7 @@ int main(int argc, char** argv) {
             dhf_result.orbital_energies.begin() +
                 static_cast<std::ptrdiff_t>(n_negative),
             dhf_result.orbital_energies.end());
-        rerdmft::RestartCapture c4_restart, c4_neg_restart;
+        rerdmft::RestartCapture c4_restart;
         const auto dhf_functional = [&](const auto& eri_any, const auto* eri_full) {
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(
@@ -5494,7 +5787,7 @@ int main(int argc, char** argv) {
                 input.functional(), dhf_result.nuclear_repulsion_energy, input.pnof_subspaces(),
                 input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
                 input.verbose(), input.hessian_functional(), fullOptSettings(input),
-                input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &c4_restart, eri_full, &c4_neg_restart);
+                input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &c4_restart, eri_full);
           }
           return buildFunctionalReport(
               "C4_DHF", h_mo, eri_any, dhf_orbital_energies_positive, n_negative,
@@ -5503,7 +5796,7 @@ int main(int argc, char** argv) {
               input.occupation_init(), dhf_result.nuclear_repulsion_energy, input.debug(),
               input.verbose(), input.hessian_functional(), fullOptSettings(input),
               input.full_optimization_4c_neg(), t_start, t_checkpoint,
-              timing_records, &c4_restart, eri_full, &c4_neg_restart);
+              timing_records, &c4_restart, eri_full);
         };
         if (input.cholesky()) {
           // FULL_OPTIMIZATION_4C_NEG needs the negative-energy block too: the trimmed vectors above have it zeroed
@@ -5517,15 +5810,10 @@ int main(int argc, char** argv) {
         } else {
           dhf_functional_report = dhf_functional(c4_mo_sym, &c4_mo_sym);
         }
-        // RESTART files: RESTART.4C (the positive-energy-only minimization) and RESTART.4C_NEG (the min-max stage,
-        // only when FULL_OPTIMIZATION_4C_NEG ran and converged its checks). Coefficients in the RKB spinor basis.
+        // RESTART files: RESTART.4C (the positive-energy-only minimization); coefficients in the RKB spinor basis.
         const auto restart_fingerprint = rerdmft::basisFingerprint(large_basis.functions());
         writeRestartFile<std::complex<double>>(input, "4C", c4_restart, dhf_result.c_dhf, h_rkb, s_full, h_mo,
                                                restart_fingerprint, dhf_result.nuclear_repulsion_energy);
-        if (input.full_optimization_4c_neg()) {
-          writeRestartFile<std::complex<double>>(input, "4C_NEG", c4_neg_restart, dhf_result.c_dhf, h_rkb, s_full, h_mo,
-                                                 restart_fingerprint, dhf_result.nuclear_repulsion_energy);
-        }
       }
     }
   } catch (const std::exception& e) {
@@ -5533,6 +5821,25 @@ int main(int argc, char** argv) {
     printTimings(timing_records);
     printFarewell();
     return 1;
+  }
+
+  if (input.read_restart()) {
+    // READ_RESTART run: no SCF diagnostics exist -- print the input record and the functional reports.
+    std::cout << "Number of electrons: " << input.n_electrons() << "\n";
+    std::cout << "Basis set file:      " << input.basis_file() << "\n";
+    std::cout << "Speed of light (c):  " << input.speed_of_light() << " a.u.\n";
+    std::cout << "Geometry (" << input.geometry().size() << " atoms):\n";
+    std::cout << std::fixed << std::setprecision(6);
+    for (const auto& atom : input.geometry()) {
+      std::cout << "  " << std::setw(2) << atom.symbol << "  " << std::setw(12) << atom.x << "  " << std::setw(12) << atom.y << "  "
+                << std::setw(12) << atom.z << "\n";
+    }
+    input.print(std::cout);
+    std::cout << std::fixed << std::setprecision(6);
+    std::cout << nonrel_functional_report << x2c_functional_report << dhf_functional_report;
+    printTimings(timing_records);
+    printFarewell();
+    return 0;
   }
 
   std::cout << "Number of electrons: " << input.n_electrons() << "\n";

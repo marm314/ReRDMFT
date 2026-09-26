@@ -215,6 +215,13 @@ class Input {
   // tighten it (more vectors, slower, closer to exact) without a rebuild.
   // Only meaningful when CHOLESKY is TRUE.
   double cholesky_threshold() const { return cholesky_threshold_; }
+  // Optional; defaults to FALSE. TRUE: the HF/DHF SCF of every requested method (NON_RELATIVISTIC, X2C,
+  // C4_SPINOR) is skipped; RESTART.NON_REL / RESTART.X2C_HF / RESTART.4C (written by an earlier run, possibly
+  // at another geometry -- a potential-energy-curve scan) supply the MO coefficients and the occupation numbers
+  // (gammas for the PNOF functionals). The orbitals are Loewdin-orthonormalized in the current overlap if needed,
+  // their Kramers pairing is verified (and repaired) and the FUNCTIONAL calculation (FULL_OPTIMIZATION, ...) starts
+  // from them. Requires a FUNCTIONAL; the diagnostics that need SCF results are skipped.
+  bool read_restart() const { return read_restart_; }
   // Optional; defaults to "SD" when FUNCTIONAL is absent. Selects which
   // JK-only density matrix functional approximation (Occ_opt/JK_only.h,
   // Table 1 of Rodriguez-Mayorga et al., PCCP (2017)) main.cpp's
@@ -387,6 +394,7 @@ class Input {
   double density_tolerance_ = 1e-6;
   bool cholesky_ = false;
   double cholesky_threshold_ = 1e-10;
+  bool read_restart_ = false;
   std::string functional_ = "SD";
   bool has_functional_ = false;
   double temperature_ = 1000.0;

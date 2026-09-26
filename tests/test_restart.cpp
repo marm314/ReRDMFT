@@ -7,12 +7,14 @@
 #include <cstdio>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
 #include "Matrix.h"
 #include "PNOFs.h"
 #include "Restart.h"
+#include "RestartLoader.h"
 
 using namespace rerdmft;
 using C = std::complex<double>;
@@ -106,6 +108,57 @@ int main() {
     d.jk_active_pairs = 4;
     writeRestart(path, d);
     check(sameData(d, readRestart(path)), "OCCUPATIONS file round trip");
+  }
+
+  std::cout << "Loewdin orthonormalization and READ_RESTART loading\n";
+  {
+    // A positive-definite "overlap" S and coefficients that are orthonormal in a slightly different metric.
+    const std::size_t n = 6, m = 5;
+    Matrix<C> b(n, n);
+    for (std::size_t i = 0; i < n; ++i)
+      for (std::size_t j = 0; j < n; ++j) b(i, j) = C(rng.next() - 0.5, rng.next() - 0.5) * 0.3 + (i == j ? 1.0 : 0.0);
+    const Matrix<C> s = dagger(b) * b;  // Hermitian positive definite
+    Matrix<C> c(n, m);
+    for (std::size_t i = 0; i < n; ++i)
+      for (std::size_t j = 0; j < m; ++j) c(i, j) = C(rng.next() - 0.5, rng.next() - 0.5);
+    double before = 0.0, after = 0.0, lowest = 0.0;
+    const Matrix<C> c_new = lowdinOrthonormalize(c, s, &before, &after, &lowest);
+    check(before > 1e-3, "random coefficients are not orthonormal in S");
+    check(after < 1e-12, "Loewdin result satisfies C^dagger S C = 1 (deviation " + std::to_string(after) + ")");
+    check(lowest > 0.0, "smallest S_check eigenvalue reported");
+    // Already orthonormal input is reproduced (S_check = 1 -> S_check^(-1/2) = 1).
+    double b2 = 0.0, a2 = 0.0;
+    const Matrix<C> c_again = lowdinOrthonormalize(c_new, s, &b2, &a2);
+    double diff = 0.0;
+    for (std::size_t i = 0; i < n; ++i)
+      for (std::size_t j = 0; j < m; ++j) diff = std::max(diff, std::abs(c_again(i, j) - c_new(i, j)));
+    check(diff < 1e-12 && b2 < 1e-12, "an orthonormal set is left unchanged (max change " + std::to_string(diff) + ")");
+    // Linearly dependent columns are refused.
+    Matrix<C> dep = c;
+    for (std::size_t i = 0; i < n; ++i) dep(i, 1) = dep(i, 0);
+    check(throws([&] { lowdinOrthonormalize(dep, s); }), "linearly dependent orbitals refused");
+
+    // readRestartOrbitals: validation against the run and the Loewdin step.
+    RestartData d = sample(true, rng);
+    d.method = "X2C_HF";
+    d.n_electrons = 4;
+    d.kind = "OCCUPATIONS";
+    d.gammas.clear();
+    d.pnof_subspaces = d.pnof_coupling = d.n_core = 0;
+    d.occupations.assign(5, 0.5);
+    d.setCoefficients(c);  // 6 x 5, not orthonormal in s
+    writeRestart(path, d);
+    std::ostringstream log;
+    const RestartOrbitals ro = readRestartOrbitals(path, "X2C_HF", 4, 6, 5, true, s, log);
+    check(ro.lowdin_applied && ro.overlap_deviation_final < 1e-12, "readRestartOrbitals applies Loewdin when needed");
+    check(throws([&] { readRestartOrbitals(path, "NON_REL", 4, 6, 5, true, s, log); }), "wrong method refused");
+    check(throws([&] { readRestartOrbitals(path, "X2C_HF", 2, 6, 5, true, s, log); }), "wrong NELEC refused");
+    check(throws([&] { readRestartOrbitals(path, "X2C_HF", 4, 8, 5, true, s, log); }), "wrong basis size refused");
+    check(throws([&] { readRestartOrbitals(path, "X2C_HF", 4, 6, 5, false, s, log); }), "real/complex mismatch refused");
+    d.setCoefficients(c_new);
+    writeRestart(path, d);
+    const RestartOrbitals ro2 = readRestartOrbitals(path, "X2C_HF", 4, 6, 5, true, s, log);
+    check(!ro2.lowdin_applied, "orthonormal coefficients are kept as read");
   }
 
   std::cout << "Rejection of bad input\n";

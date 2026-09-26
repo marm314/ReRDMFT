@@ -1,0 +1,27 @@
+# Example ReRDMFT input file: continuing from RESTART files at another geometry (READ_RESTART), the
+# building block of a potential-energy scan.
+#
+# 1) Run examples/lih_gnof_c4_full_optimization.inp (LiH, R = 1.5949 bohr, NON_REL + X2C + C4_SPINOR, GNOF,
+#    FULL_OPTIMIZATION): it writes RESTART.NON_REL, RESTART.X2C_HF and RESTART.4C in the working directory.
+# 2) Run this file from the same directory. The geometry below is stretched to 1.70 bohr. READ_RESTART TRUE
+#    skips the HF/DHF SCF of every method; the orbitals and occupation numbers (gammas) of the RESTART files are
+#    Loewdin-orthonormalized in the new overlap (S_check = C^dagger S C is printed before/after), the Kramers
+#    pairing is re-established and checked, the 4-component positive-energy space is re-defined at the new
+#    geometry, and FULL_OPTIMIZATION starts from that state. The RESTART files are overwritten, so the next
+#    geometry of the scan can read them in turn. The energies agree with a from-scratch run at 1.70 bohr to ~1e-8
+#    Hartree, in a fraction of the time.
+NELEC 4
+BASIS lih-6-31g.gbs
+NON_RELATIVISTIC TRUE
+X2C TRUE
+C4_SPINOR TRUE
+FUNCTIONAL GNOF
+PNOF_SUBSPACES 2
+PNOF_COUPLING 2
+FULL_OPTIMIZATION TRUE
+READ_RESTART TRUE
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.700000
+END

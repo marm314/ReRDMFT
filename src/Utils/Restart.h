@@ -11,17 +11,17 @@
 
 namespace rerdmft {
 
-// RESTART file: the final result of an RDMFT run (NON_REL, X2C_HF, 4C or 4C_NEG), written in BINARY so that
+// RESTART file: the final result of an RDMFT run (NON_REL, X2C_HF or 4C), written in BINARY so that
 // a later run can start from it: the occupation numbers (JK_only functionals) or the GAMMA
 // angles (PNOF functionals) and the final molecular-orbital coefficients. Only the WRITER is
 // used by the program for now; readRestart exists to verify the file (main.cpp reads every file
-// back right after writing it) and for the future restart itself.
+// back right after writing it) and, through Utils/RestartLoader.h, for READ_RESTART.
 //
 // File layout (all integers little-endian, doubles IEEE-754 binary64 little-endian):
 //   8 bytes   magic "RERDMFT\0"
 //   uint32    format version (kRestartVersion)
 //   uint32    byte-order marker 0x01020304 (a reader on a big-endian host refuses the file)
-//   string    method            ("NON_REL" | "X2C_HF" | "4C" | "4C_NEG")           string = uint64 length + bytes
+//   string    method            ("NON_REL" | "X2C_HF" | "4C")           string = uint64 length + bytes
 //   string    functional        (the FUNCTIONAL keyword, upper case)
 //   string    kind              ("OCCUPATIONS" | "GAMMAS")
 //   uint64    basis fingerprint (BasisFingerprint.h's basisFingerprint of the Large AO basis)
@@ -48,9 +48,9 @@ namespace rerdmft {
 //            integrals): C = blockdiag(C_scf, C_scf) * U_total, real;
 //   X2C_HF:  rows/cols 2 n_large (Large-component spin-orbital AO basis / spinors ordered as
 //            the MO integrals, Kramers pairs (2k, 2k+1)): C = C_scf * U_total, complex;
-//   4C, 4C_NEG: rows/cols 4 n_large (RKB spinor basis [Large-alpha; Large-beta; Small; Small] /
+//   4C:      rows/cols 4 n_large (RKB spinor basis [Large-alpha; Large-beta; Small; Small] /
 //            MOs in ascending energy, the negative-energy branch first with occupation 0): C = C_dhf * U_total,
-//            complex; 4C's U_total leaves the negative branch untouched (no-pair), 4C_NEG's mixes it;
+//            complex; U_total leaves the negative branch untouched (no-pair approximation);
 // with U_total the accumulated FULL_OPTIMIZATION rotation (identity when no orbital
 // optimization was done). Column j of C is MO j: |MO_j> = sum_mu C(mu, j) |AO_mu>; its
 // occupation is occupations[j].
@@ -98,7 +98,7 @@ struct RestartCapture {
   Matrix<std::complex<double>> total_rotation;  // FULL_OPTIMIZATION rotation; empty = identity
 };
 
-constexpr std::uint32_t kRestartVersion = 2;
+constexpr std::uint32_t kRestartVersion = 1;
 
 // Writes `data` to `path` (overwriting). Throws std::runtime_error if the file cannot be
 // written or the data are inconsistent (empty/mismatched sizes, unknown kind).

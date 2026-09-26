@@ -181,6 +181,8 @@ void Input::read(const std::string& filename) {
       }
     } else if (keyword == "CHOLESKY") {
       cholesky_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "READ_RESTART") {
+      read_restart_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "CHOLESKY_THRESHOLD") {
       cholesky_threshold_ = parseDouble(iss, line_number, keyword);
       if (!(cholesky_threshold_ > 0.0)) {
@@ -362,6 +364,7 @@ void Input::print(std::ostream& out) const {
   line("DENSITY_TOLERANCE") << density_tolerance_ << "\n";
   line("CHOLESKY") << flag(cholesky_) << "\n";
   line("CHOLESKY_THRESHOLD") << cholesky_threshold_ << "\n";
+  line("READ_RESTART") << flag(read_restart_) << "\n";
   line("FUNCTIONAL") << functional_ << (has_functional_ ? "" : " (default; not set in input)")
                       << "\n";
   line("TEMPERATURE") << temperature_ << "\n";
