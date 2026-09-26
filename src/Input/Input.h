@@ -355,16 +355,12 @@ class Input {
   // two-electron integrals and falls back to ADAM (with a printed note) when CHOLESKY TRUE has
   // decomposed them into vectors instead.
   const std::string& orbital_optimizer() const { return orbital_optimizer_; }
-  // Optional; defaults to FALSE. Only meaningful for C4_SPINOR + FULL_OPTIMIZATION: requests
-  // orbital rotations that also mix occupied positive-energy spinors into the negative-energy
-  // (Dirac sea) branch -- the genuine min-max saddle-point problem relativistic SCF is
-  // characterized by (Talman 1986; Saue, ChemPhysChem 12, 3077 (2011)), as opposed to the
-  // positive-energy-only restriction FULL_OPTIMIZATION always uses today (see README.md's own
-  // "FULL_OPTIMIZATION for C4_SPINOR" section). NOT YET IMPLEMENTED: setting this TRUE does not
-  // change what actually runs (still the positive-energy-only restriction) -- it only makes
-  // main.cpp print a warning after that restricted optimization completes, so a user who
-  // explicitly asked for the full negative-energy-inclusive treatment is told it isn't
-  // available yet rather than silently getting the restricted one with no comment at all.
+  // Optional; defaults to FALSE. Only meaningful for C4_SPINOR + FULL_OPTIMIZATION: once the
+  // positive-energy-only optimization has converged, runs the genuine min-max saddle-point stage
+  // (Talman 1986; Saue, ChemPhysChem 12, 3077 (2011)): rotations that also mix the occupied
+  // positive-energy spinors with the negative-energy branch, NEO to the saddle point (order from the
+  // occupations > 1e-6) alternating with a full occupation re-minimization -- see README.md's
+  // "FULL_OPTIMIZATION_4C_NEG: the min-max stage" and Full_opt/FullOptimization.h's SaddleStage.
   bool full_optimization_4c_neg() const { return full_optimization_4c_neg_; }
 
   // Prints the current value of EVERY input variable (one per line, after

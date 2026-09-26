@@ -1,0 +1,18 @@
+# Example ReRDMFT input file: LiH, 6-31G, MULLER (a JK-only functional), 4-component min-max stage with
+# Cholesky vectors (CHOLESKY TRUE). Same two stages as lih_gnof_c4_neg_full_optimization.inp: the
+# positive-energy-only minimization (here with ADAM), then the min-max stage (NEO, saddle point of the order set
+# by the occupied positive-energy spinors -- 484 Kramers-reduced electron-positron parameters here). The stage
+# needs the negative-energy block of the MO Cholesky vectors, which the first stage drops; they are built
+# separately only when FULL_OPTIMIZATION_4C_NEG is TRUE.
+NELEC 4
+BASIS lih-6-31g.gbs
+C4_SPINOR TRUE
+FUNCTIONAL MULLER
+CHOLESKY TRUE
+FULL_OPTIMIZATION TRUE
+FULL_OPTIMIZATION_4C_NEG TRUE
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.594900
+END

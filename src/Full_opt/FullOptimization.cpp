@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <type_traits>
@@ -1326,7 +1327,7 @@ bool runChecks(const Matrix<T>& h, const Eri& eri, const std::vector<double>& oc
 // =====================================================================
 
 template <typename T, typename Eri>
-FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
+FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
                                   const std::vector<double>& occupations,
                                   const std::vector<double>& state, const RdmftModel<T, Eri>& model,
                                   const FullOptSettings& settings, bool kramers_restricted,
@@ -1335,8 +1336,31 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
                                   std::size_t n_negative) {
   FullOptResult result;
   result.occupations = occupations;
+  // Min-max stage (FullOptSettings::saddle): NEO with a saddle target, integrals rotated to the no-pair minimum first.
+  const bool saddle = settings.saddle.n_negative > 0;
+  const bool want_neo = saddle || settings.orbital_optimizer == OrbitalOptimizer::kNeo;
+  if (saddle && !model.hessian_vector) {
+    throw std::runtime_error("FULL_OPTIMIZATION_4C_NEG: the model has no Hessian-vector callback (NEO is required)");
+  }
+  std::optional<Matrix<T>> h_start;
+  std::optional<Eri> eri_start;
+  if (saddle) {
+    const std::size_t n = h_in.rows();
+    if (settings.saddle.start_rotation.rows() != n || settings.saddle.start_rotation.cols() != n) {
+      throw std::runtime_error("FULL_OPTIMIZATION_4C_NEG: the starting rotation has the wrong dimension");
+    }
+    Matrix<T> u0(n, n);
+    for (std::size_t i = 0; i < n * n; ++i) {
+      if constexpr (std::is_same_v<T, double>) u0.data()[i] = settings.saddle.start_rotation.data()[i].real();
+      else u0.data()[i] = settings.saddle.start_rotation.data()[i];
+    }
+    h_start = oneElectronRotated(h_in, u0);
+    eri_start = rotateEri(eri_in, u0);
+  }
+  const Matrix<T>& h = h_start ? *h_start : h_in;
+  const Eri& eri = eri_start ? *eri_start : eri_in;
   log << "\n  FULL orbital + occupation optimization ("
-      << (settings.orbital_optimizer == OrbitalOptimizer::kNeo ? "NEO" : "ADAM")
+      << (want_neo ? "NEO" : "ADAM")
       << " orbital rotations at fixed occupations, then\n"
          "  occupation re-optimization at the new orbitals, macro-iterated to convergence; energy tolerance "
       << settings.energy_tolerance << ", orbital-gradient tolerance " << settings.gradient_tolerance << ", at most "
@@ -1347,6 +1371,10 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
     log << "; rotations excluded from the " << n_negative
         << " negative-energy (Dirac sea) spinors (no-pair approximation, Talman 1986/Saue"
            " ChemPhysChem 2011's min-max characterization -- see project notes)";
+  }
+  if (saddle) {
+    log << "; MIN-MAX (saddle-point) stage: rotations include the " << settings.saddle.n_negative
+        << " negative-energy spinors, starting from the no-pair minimum";
   }
   log << "):\n";
 
@@ -1361,7 +1389,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
   log << "  a) Validation of the ADAM / Kramers-restriction machinery on this system:\n";
   result.checks_passed =
       runChecks<T, Eri>(h, eri, occupations, model, kramers_restricted, spin_partner, log, n_negative,
-                        /*check_hessian_diagonal=*/settings.orbital_optimizer == OrbitalOptimizer::kNeo, settings.debug);
+                        /*check_hessian_diagonal=*/want_neo, settings.debug);
   if (!result.checks_passed) {
     log << "  A validation check FAILED -- the macro-iteration loop is NOT run.\n";
     return result;
@@ -1369,7 +1397,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
   log << "  All validation checks passed.\n";
 
   log << "  b) Macro-iteration loop:\n";
-  ProgressLine() << "FULL_OPTIMIZATION (" << (settings.orbital_optimizer == OrbitalOptimizer::kNeo ? "NEO" : "ADAM")
+  ProgressLine() << "FULL_OPTIMIZATION (" << (want_neo ? "NEO" : "ADAM")
                  << "): macro-iteration loop starting";
   RotationProblem<T, Eri> problem(model, h, eri, spin_partner, n_negative);
   AdamOptions adam_options;
@@ -1393,7 +1421,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
   // makePnofModel sets it).
   bool use_neo = false;
   std::unique_ptr<NeoOrbitalProblem<T, Eri>> neo_problem;
-  if (settings.orbital_optimizer == OrbitalOptimizer::kNeo && model.hessian_vector) {
+  if (want_neo && model.hessian_vector) {
     neo_problem = std::make_unique<NeoOrbitalProblem<T, Eri>>(model, problem);
     use_neo = true;
     if constexpr (kIsCholesky<Eri>) {
@@ -1416,7 +1444,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
       }
     }
   }
-  if (settings.orbital_optimizer == OrbitalOptimizer::kNeo && !use_neo) {
+  if (want_neo && !use_neo) {
     log << "    ORBITAL_OPTIMIZER NEO requested but the model has no Hessian-vector callback: using ADAM.\n";
   }
   NeoOptions neo_options;
@@ -1426,17 +1454,86 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
   // Tolerance = min(residual_tolerance, 0.1*|g|), so it still tightens as the gradient falls.
   neo_options.step.residual_tolerance = 1e-3;
   neo_options.progress = true;  // one live line per Newton step (Utils/Progress.h)
-  neo_options.step.target_order = 0;  // ground state (a minimum) only -- no saddle-point search here.
+  // Minimum (target_order 0) for the ordinary loop. Min-max stage: a saddle of order m = number of
+  // (occupied positive, negative) rotation parameters in the space NEO searches (the Kramers-reduced
+  // one when kr is set) -- the electron-positron rotations are maximized, everything else minimized.
+  // The Hessian index expected at the min-max point, from the occupations: every (positive spinor with
+  // occupation > threshold) x (negative spinor) rotation parameter is a maximization direction. Pairs whose
+  // occupation lies below the threshold but is not negligible still curve downward by -O(4 c^2 n_i), so the
+  // end-of-run check accepts anything between the count at `occupied_threshold` and the count at 1e-10.
+  std::size_t saddle_order = 0, saddle_order_max = 0;
+  std::vector<char> mask_ep_occupied, mask_rest;  // saddle mode: occupied electron-positron / all other parameters
+  if (saddle) {
+    const std::size_t nn = settings.saddle.n_negative;
+    const auto countMixed = [&](double threshold, std::size_t& n_occupied, std::size_t& n_pairs) {
+      std::vector<Pair> mixed;
+      n_occupied = 0;
+      for (std::size_t i = nn; i < occupations.size(); ++i) n_occupied += occupations[i] > threshold;
+      for (const auto& pr : problem.pairs()) {
+        const std::size_t lo = std::min(pr.first, pr.second), hi = std::max(pr.first, pr.second);
+        if (lo < nn && hi >= nn && occupations[hi] > threshold) mixed.push_back(pr);
+      }
+      n_pairs = mixed.size();
+      return kr ? KramersRestriction(h.rows(), mixed).reducedSize() : (std::is_same_v<T, double> ? 1 : 2) * mixed.size();
+    };
+    std::size_t n_occupied = 0, n_pairs = 0, n_occupied_max = 0, n_pairs_max = 0;
+    saddle_order = countMixed(settings.saddle.occupied_threshold, n_occupied, n_pairs);
+    saddle_order_max = countMixed(1e-10, n_occupied_max, n_pairs_max);
+    log << "    Saddle-point order from the occupations: " << saddle_order << " = the " << (kr ? "Kramers-reduced " : "")
+        << "electron-positron rotation parameters (" << n_pairs << " pairs) of the " << n_occupied
+        << " positive-energy spinors with occupation > " << settings.saddle.occupied_threshold << " times the " << nn
+        << " negative-energy spinors -- those directions are maximized, all others minimized"
+        << (saddle_order_max > saddle_order ? " (" + std::to_string(saddle_order_max) + " counting occupations > 1e-10)" : std::string())
+        << ".\n"
+        << "    NEO applies it as a dynamic order: at every Newton step, the number of gradient-coupled Hessian directions with curvature below -"
+        << settings.saddle.curvature_cutoff << " (symmetry leaves only some of them coupled to the gradient).\n";
+  }
+  neo_options.step.target_order = 0;
+  if (saddle) {
+    neo_options.step.saddle_cutoff = settings.saddle.curvature_cutoff;
+    neo_options.step.guess_from_diagonal = false;
+    // Electron-positron parameters form the stiff sector NEO keeps its trial vectors pure in (see NeoStepOptions::sector).
+    const std::size_t nn = settings.saddle.n_negative;
+    const auto& prs = problem.pairs();
+    const auto electronPositron = [&](std::size_t pair) {
+      return std::min(prs[pair].first, prs[pair].second) < nn && std::max(prs[pair].first, prs[pair].second) >= nn;
+    };
+    const auto occupiedElectronPositron = [&](std::size_t pair) {
+      return electronPositron(pair) && occupations[std::max(prs[pair].first, prs[pair].second)] > settings.saddle.occupied_threshold;
+    };
+    // Mask over the parameters NEO sees (Kramers-reduced [t_orbits; y_orbits] or the full joint layout).
+    const auto buildMask = [&](const auto& predicate) {
+      std::vector<char> mask;
+      if (kr) {
+        const std::size_t n_orb = kr->nOrbits();
+        mask.assign(kr->reducedSize(), 0);
+        for (std::size_t j = 0; j < n_orb; ++j) mask[j] = mask[n_orb + j] = predicate(kr->orbits()[j].first);
+      } else {
+        const std::size_t reps = std::is_same_v<T, double> ? 1 : 2;
+        mask.assign(reps * prs.size(), 0);
+        for (std::size_t i = 0; i < prs.size(); ++i)
+          for (std::size_t r = 0; r < reps; ++r) mask[r * prs.size() + i] = predicate(i);
+      }
+      return mask;
+    };
+    neo_options.step.sector = buildMask(electronPositron);
+    mask_ep_occupied = buildMask(occupiedElectronPositron);
+    mask_rest = buildMask([&](std::size_t pair) { return !electronPositron(pair); });
+  }
   neo_options.gradient_tolerance = settings.gradient_tolerance;
   neo_options.max_iterations = settings.neo_max_iterations;  // fixed budget -- see its own comment.
 
   std::vector<double> occ = occupations;
   std::vector<double> occ_state = state;
-  double e_elec = model.energy(h, eri, occ);
+  double e_elec = model.energy(problem.h(), problem.eri(), occ);
   double e_old = e_elec;
   const double e_start = e_elec;
   log << "    starting point (occupation-optimized HF orbitals): total energy " << std::setprecision(10)
       << e_elec + nuclear_repulsion_energy << std::setprecision(6) << " Hartree\n";
+  if (saddle && !std::isnan(settings.saddle.start_energy)) {
+    log << "    (rotating to the no-pair minimum's orbitals reproduces its energy to " << std::scientific << std::setprecision(2)
+        << std::abs(settings.saddle.start_energy - e_elec) << std::defaultfloat << std::setprecision(6) << " Ha)\n";
+  }
   log << (use_neo ? "    iter      total energy (Ha)          dE        max|grad|  NEO steps    trust radius\n"
                   : "    iter      total energy (Ha)          dE        max|grad|  ADAM steps  learning rate\n");
 
@@ -1562,6 +1659,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
         result.total_rotation.data()[i] = std::complex<double>(u_final.data()[i]);
       }
     }
+    if (saddle) result.total_rotation = settings.saddle.start_rotation * result.total_rotation;
     result.electronic_energy = e_elec;
 
     g_final = model.gradient(problem.h(), problem.eri(), occ);
@@ -1574,10 +1672,44 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
     progress("FULL_OPTIMIZATION (NEO): post-loop Hessian check (minimum vs saddle)");
     neo_problem->setOccupations(occ);
     NeoEigenOptions eig_options;
+    if (saddle) eig_options.residual_tolerance = 1e-4;  // ~176 roots at curvatures up to -1e5: the count needs no more
     constexpr std::size_t kRoots = 3;
     bool escaping = false;
     withReduced([&](NeoProblem<double>& reduced) {
-      const std::size_t n_roots = std::min<std::size_t>(kRoots, reduced.dimension());
+      if (saddle && !settings.debug) {
+        // The electron-positron block (curvature ~ -4 c^2 n_i) is separated by ~1e4-1e5 from everything else, so the Hessian
+        // index is verified block-wise: the lowest eigenvalue of H restricted to the non-electron-positron parameters must
+        // not be negative (a minimum there) and the highest one of H restricted to the occupied electron-positron
+        // parameters must be negative (a maximum there). Counting all `saddle_order` negative eigenvalues instead is
+        // O(saddle_order) Hessian products (the full check runs under DEBUG TRUE).
+        const std::size_t dim = reduced.dimension();
+        constexpr double kLift = 1e8;  // pushes the complement of the block above its spectrum
+        const auto blockExtreme = [&](const std::vector<char>& mask, double sign) {
+          const auto op = [&](const std::vector<double>& v) {
+            std::vector<double> masked(dim, 0.0);
+            for (std::size_t i = 0; i < dim; ++i) masked[i] = mask[i] ? v[i] : 0.0;
+            std::vector<double> hv = reduced.hessianVector(masked);
+            for (std::size_t i = 0; i < dim; ++i) hv[i] = mask[i] ? sign * hv[i] : kLift * v[i];
+            return hv;
+          };
+          NeoEigenOptions block_options = eig_options;
+          block_options.residual_tolerance = 1e-2;
+          block_options.max_iterations = 100;
+          const NeoEigenResult<double> e = neoLowestHessianEigenpairs<double>(dim, op, 1, {}, block_options);
+          return std::make_pair(sign * e.eigenvalues.front(), e.converged);
+        };
+        const auto [pp_min, pp_ok] = blockExtreme(mask_rest, +1.0);
+        const auto [ep_max, ep_ok] = blockExtreme(mask_ep_occupied, -1.0);
+        log << "    Hessian check, block-wise: lowest eigenvalue of the Hessian over the positive-positive (non-electron-positron) rotations "
+            << std::scientific << std::setprecision(3) << pp_min << ", highest over the " << saddle_order
+            << " occupied electron-positron ones " << ep_max << std::defaultfloat << std::setprecision(6)
+            << (pp_ok && ep_ok ? "" : "  (Davidson NOT converged)") << "\n";
+        const bool ok = pp_min > -1e-6 && ep_max < -1e-6;
+        log << "    [" << (ok ? "PASS" : "FAIL") << "] the point is a minimum over the positive-energy rotations and a maximum over the "
+            << saddle_order << " occupied electron-positron ones, i.e. a saddle of order " << saddle_order << "\n";
+        return;
+      }
+      const std::size_t n_roots = std::min<std::size_t>(saddle ? saddle_order_max + 1 : kRoots, reduced.dimension());
       const NeoEigenResult<double> eig = neoLowestHessianEigenpairs<double>(
           reduced.dimension(), [&](const std::vector<double>& v) { return reduced.hessianVector(v); }, n_roots, {},
           eig_options);
@@ -1588,7 +1720,12 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
           << " orbital-rotation Hessian at this point):";
       for (double e : eig.eigenvalues) log << " " << std::scientific << std::setprecision(3) << e;
       log << std::defaultfloat << std::setprecision(6) << (eig.converged ? "" : "  (Davidson NOT converged)") << "\n";
-      if (n_negative > 0 && !eig.eigenvectors.empty() && escape_attempt < kMaxSaddleEscapeAttempts) {
+      if (saddle) {
+        const std::size_t found = static_cast<std::size_t>(n_negative);
+        log << "    [" << (found >= saddle_order && found <= saddle_order_max ? "PASS" : "FAIL") << "] the point is a saddle of order "
+            << saddle_order << (saddle_order_max > saddle_order ? "-" + std::to_string(saddle_order_max) : std::string())
+            << " (found " << n_negative << " negative eigenvalue(s) among the lowest " << eig.eigenvalues.size() << ")\n";
+      } else if (n_negative > 0 && !eig.eigenvectors.empty() && escape_attempt < kMaxSaddleEscapeAttempts) {
         const auto& v = eig.eigenvectors.front();  // most negative eigenvalue: eigenvalues is ascending
         constexpr double kEscapeStep = 0.3;
         std::vector<double> step_plus(v.size()), step_minus(v.size());

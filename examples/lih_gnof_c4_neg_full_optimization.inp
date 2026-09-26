@@ -1,0 +1,22 @@
+# Example ReRDMFT input file: LiH, 6-31G, GNOF, 4-component with the min-max stage.
+#
+# FULL_OPTIMIZATION first minimizes over the positive-energy spinors only (no-pair approximation, the
+# negative-energy branch excluded from the rotations). FULL_OPTIMIZATION_4C_NEG TRUE then continues from that
+# minimum with rotations that also mix the occupied positive-energy spinors with the negative-energy ones:
+# NEO drives the orbitals to the saddle point (energy maximized along the electron-positron rotations, minimized
+# along the rest -- Talman 1986, Saue 2011), and the occupation numbers are re-minimized, macro-iterated.
+# The log gives the order of the saddle (from the occupations > 1e-6), the check that the rotated integrals
+# reproduce the first stage's energy, and the block-wise Hessian check at the end.
+NELEC 4
+BASIS lih-6-31g.gbs
+C4_SPINOR TRUE
+FUNCTIONAL GNOF
+PNOF_SUBSPACES 2
+PNOF_COUPLING 2
+FULL_OPTIMIZATION TRUE
+FULL_OPTIMIZATION_4C_NEG TRUE
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.594900
+END

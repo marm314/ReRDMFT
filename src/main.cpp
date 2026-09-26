@@ -2156,7 +2156,8 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
                                    std::chrono::steady_clock::time_point t_start,
                                    std::chrono::steady_clock::time_point& t_checkpoint,
                                    std::vector<TimingRecord>& timing_records,
-                                   rerdmft::RestartCapture* restart = nullptr) {
+                                   rerdmft::RestartCapture* restart = nullptr,
+                                   const Eri* eri_full_block = nullptr) {
   // Generic (element-access) view of the integrals, used by the production code below; the DEBUG /
   // HESSIAN_FUNCTIONAL validation blocks that need a dense Tensor4 re-bind `eri` to a dense view of `eri_in`.
   const Eri& eri = eri_in;
@@ -3193,11 +3194,35 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
         out << "\n  FULL_OPTIMIZATION FAILED: " << e.what() << "\n";
       }
       if (label == "C4_DHF" && full_optimization_4c_neg) {
-        out << "\n  Warning: FULL_OPTIMIZATION_4C_NEG TRUE requested orbital rotations involving\n"
-               "  the negative-energy states, but 4-component full optimization involving\n"
-               "  negative energy states is not available -- the run above used the\n"
-               "  positive-energy-only restriction instead (see README.md's own"
-               " \"FULL_OPTIMIZATION\n  for C4_SPINOR\" section).\n";
+        if (!(full_result.checks_passed && full_result.converged && full_result.total_rotation.rows() > 0)) {
+          out << "\n  FULL_OPTIMIZATION_4C_NEG skipped: the positive-energy-only optimization did not converge"
+                 " (or a validation check failed).\n";
+        } else if (eri_full_block == nullptr) {
+          out << "\n  FULL_OPTIMIZATION_4C_NEG skipped: the integrals including the negative-energy block are not available.\n";
+        } else {
+          try {
+            out << "\n  FULL_OPTIMIZATION_4C_NEG: min-max stage. Starting from the positive-energy-only minimum above, orbital rotations now\n"
+                   "  include the positive <-> negative-energy pairs: NEO (whatever ORBITAL_OPTIMIZER says) converges the orbitals to the saddle\n"
+                   "  point of the order set by the occupied positive-energy spinors, then the occupations are fully re-minimized, macro-iterated.\n";
+            rerdmft::FullOptSettings saddle_settings = full_opt;
+            saddle_settings.orbital_optimizer = rerdmft::OrbitalOptimizer::kNeo;
+            saddle_settings.saddle.n_negative = frozen_base;
+            saddle_settings.saddle.start_rotation = full_result.total_rotation;
+            saddle_settings.saddle.start_energy = full_result.electronic_energy;
+            const auto saddle_result = rerdmft::runFullOptimizationJk<T>(
+                h, *eri_full_block, full_result.occupations, full_result.occupation_state, functional, f_l,
+                n_electrons_active, n_total, n_frozen, n_inactive_below, n_active, /*two_columns=*/true, saddle_settings,
+                /*kramers_restricted=*/true, nuclear_repulsion_energy, out, std::vector<std::size_t>{}, /*n_negative=*/0);
+            out << "  FULL_OPTIMIZATION_4C_NEG " << (saddle_result.checks_passed && saddle_result.converged ? "converged" : "did NOT converge")
+                << ": total energy " << std::setprecision(10)
+                << saddle_result.electronic_energy + nuclear_repulsion_energy << std::setprecision(6) << " Hartree ("
+                << std::scientific << std::setprecision(3)
+                << saddle_result.electronic_energy - full_result.electronic_energy << std::defaultfloat << std::setprecision(6)
+                << " relative to the positive-energy-only minimum)\n";
+          } catch (const std::exception& e) {
+            out << "\n  FULL_OPTIMIZATION_4C_NEG FAILED: " << e.what() << "\n";
+          }
+        }
       }
     }
 
@@ -3351,7 +3376,8 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
                                        std::chrono::steady_clock::time_point t_start,
                                        std::chrono::steady_clock::time_point& t_checkpoint,
                                        std::vector<TimingRecord>& timing_records,
-                                       rerdmft::RestartCapture* restart = nullptr) {
+                                       rerdmft::RestartCapture* restart = nullptr,
+                                       const Eri* eri_full_block = nullptr) {
   // See buildFunctionalReport: generic view here, dense re-binding in the DEBUG / HESSIAN_FUNCTIONAL blocks.
   const Eri& eri = eri_in;
   rerdmft::progressContext() = label;  // live progress lines (stderr) are prefixed with the method
@@ -3897,11 +3923,35 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
         out << "\n  FULL_OPTIMIZATION FAILED: " << e.what() << "\n";
       }
       if (label == "C4_DHF" && full_optimization_4c_neg) {
-        out << "\n  Warning: FULL_OPTIMIZATION_4C_NEG TRUE requested orbital rotations involving\n"
-               "  the negative-energy states, but 4-component full optimization involving\n"
-               "  negative energy states is not available -- the run above used the\n"
-               "  positive-energy-only restriction instead (see README.md's own"
-               " \"FULL_OPTIMIZATION\n  for C4_SPINOR\" section).\n";
+        if (!(full_result.checks_passed && full_result.converged && full_result.total_rotation.rows() > 0)) {
+          out << "\n  FULL_OPTIMIZATION_4C_NEG skipped: the positive-energy-only optimization did not converge"
+                 " (or a validation check failed).\n";
+        } else if (eri_full_block == nullptr) {
+          out << "\n  FULL_OPTIMIZATION_4C_NEG skipped: the integrals including the negative-energy block are not available.\n";
+        } else {
+          try {
+            out << "\n  FULL_OPTIMIZATION_4C_NEG: min-max stage. Starting from the positive-energy-only minimum above, orbital rotations now\n"
+                   "  include the positive <-> negative-energy pairs: NEO (whatever ORBITAL_OPTIMIZER says) converges the orbitals to the saddle\n"
+                   "  point of the order set by the occupied positive-energy spinors, then the occupations are fully re-minimized, macro-iterated.\n";
+            rerdmft::FullOptSettings saddle_settings = full_opt;
+            saddle_settings.orbital_optimizer = rerdmft::OrbitalOptimizer::kNeo;
+            saddle_settings.saddle.n_negative = n_inactive_below;
+            saddle_settings.saddle.start_rotation = full_result.total_rotation;
+            saddle_settings.saddle.start_energy = full_result.electronic_energy;
+            const auto saddle_result = rerdmft::runFullOptimizationPnof<T>(
+                h, *eri_full_block, full_result.occupations, full_result.occupation_state, functional, geminals, n_core,
+                pnof_subspaces, pnof_coupling, relativistic, sqp_pnof_occ, n_total, saddle_settings,
+                /*kramers_restricted=*/true, nuclear_repulsion_energy, out, std::vector<std::size_t>{}, /*n_negative=*/0);
+            out << "  FULL_OPTIMIZATION_4C_NEG " << (saddle_result.checks_passed && saddle_result.converged ? "converged" : "did NOT converge")
+                << ": total energy " << std::setprecision(10)
+                << saddle_result.electronic_energy + nuclear_repulsion_energy << std::setprecision(6) << " Hartree ("
+                << std::scientific << std::setprecision(3)
+                << saddle_result.electronic_energy - full_result.electronic_energy << std::defaultfloat << std::setprecision(6)
+                << " relative to the positive-energy-only minimum)\n";
+          } catch (const std::exception& e) {
+            out << "\n  FULL_OPTIMIZATION_4C_NEG FAILED: " << e.what() << "\n";
+          }
+        }
       }
     }
   }
@@ -5402,14 +5452,14 @@ int main(int argc, char** argv) {
             dhf_result.orbital_energies.begin() +
                 static_cast<std::ptrdiff_t>(n_negative),
             dhf_result.orbital_energies.end());
-        const auto dhf_functional = [&](const auto& eri_any) {
+        const auto dhf_functional = [&](const auto& eri_any, const auto* eri_full) {
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(
                 "C4_DHF", h_mo, eri_any, h_mo.rows() - n_negative, n_negative, input.n_electrons(),
                 input.functional(), dhf_result.nuclear_repulsion_energy, input.pnof_subspaces(),
                 input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
                 input.verbose(), input.hessian_functional(), fullOptSettings(input),
-                input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records);
+                input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, nullptr, eri_full);
           }
           return buildFunctionalReport(
               "C4_DHF", h_mo, eri_any, dhf_orbital_energies_positive, n_negative,
@@ -5418,9 +5468,20 @@ int main(int argc, char** argv) {
               input.occupation_init(), dhf_result.nuclear_repulsion_energy, input.debug(),
               input.verbose(), input.hessian_functional(), fullOptSettings(input),
               input.full_optimization_4c_neg(), t_start, t_checkpoint,
-              timing_records);
+              timing_records, nullptr, eri_full);
         };
-        dhf_functional_report = input.cholesky() ? dhf_functional(c4_mo_chol) : dhf_functional(c4_mo_sym);
+        if (input.cholesky()) {
+          // FULL_OPTIMIZATION_4C_NEG needs the negative-energy block too: the trimmed vectors above have it zeroed
+          // and recompressed away, so the full-block vectors are built separately (only when that stage will run).
+          rerdmft::CholeskyEri<std::complex<double>> c4_mo_full_chol;
+          if (input.full_optimization_4c_neg() && fullOptSettings(input).enabled) {
+            c4_mo_full_chol = rerdmft::rkbCholeskyToMo(rkb_cholesky, dhf_result.c_dhf, /*n_negative=*/0,
+                                                       input.cholesky_threshold());
+          }
+          dhf_functional_report = dhf_functional(c4_mo_chol, &c4_mo_full_chol);
+        } else {
+          dhf_functional_report = dhf_functional(c4_mo_sym, &c4_mo_sym);
+        }
       }
     }
   } catch (const std::exception& e) {

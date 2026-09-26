@@ -432,6 +432,96 @@ void testDriverComplex() {
   }
 }
 
+// Two-scale quadratic model of the relativistic min-max problem: a "stiff" sector of strongly negative
+// curvatures (electron-positron rotations, -1e4 .. -10) and a "soft" positive-definite one, weakly coupled.
+// A fixed target_order would count only the stiff directions COUPLED to g; the dynamic order with a sector
+// partition (saddle_cutoff > 0, sector) must find the stationary point regardless, in a few products.
+class TwoScaleQuadratic : public NeoProblem<double> {
+ public:
+  TwoScaleQuadratic(std::size_t n_stiff, std::size_t n_soft, double coupling) : n_(n_stiff + n_soft), n_stiff_(n_stiff) {
+    Rng rng;
+    h_ = Matrix<double>(n_, n_, 0.0);
+    for (std::size_t i = 0; i < n_stiff; ++i) h_(i, i) = -(10.0 + 1e4 * std::pow(0.7, static_cast<double>(i)));
+    for (std::size_t i = n_stiff; i < n_; ++i) h_(i, i) = 0.2 + 1.5 * (rng.next() + 0.5);
+    for (std::size_t i = 0; i < n_; ++i)
+      for (std::size_t j = 0; j < i; ++j) {
+        const double c = coupling * rng.next();
+        h_(i, j) = h_(j, i) = (i < n_stiff) == (j < n_stiff) ? 0.05 * c / coupling * 0.1 : c;
+      }
+    g_.resize(n_);
+    for (std::size_t i = 0; i < n_; ++i) g_[i] = (i < n_stiff ? 1e-2 : 1e-3) * (rng.next() + 0.3);
+    x_.assign(n_, 0.0);
+  }
+  std::size_t dimension() const override { return n_; }
+  std::vector<char> sector() const {
+    std::vector<char> s(n_, 0);
+    for (std::size_t i = 0; i < n_stiff_; ++i) s[i] = 1;
+    return s;
+  }
+  double value(const std::vector<double>& x) const {
+    const auto hx = apply(x);
+    double e = 0.0;
+    for (std::size_t i = 0; i < n_; ++i) e += g_[i] * x[i] + 0.5 * x[i] * hx[i];
+    return e;
+  }
+  std::vector<double> apply(const std::vector<double>& v) const {
+    std::vector<double> out(n_, 0.0);
+    for (std::size_t i = 0; i < n_; ++i)
+      for (std::size_t j = 0; j < n_; ++j) out[i] += h_(i, j) * v[j];
+    return out;
+  }
+  double energy() override { return value(x_); }
+  std::vector<double> gradient() override {
+    auto g = apply(x_);
+    for (std::size_t i = 0; i < n_; ++i) g[i] += g_[i];
+    return g;
+  }
+  std::vector<double> hessianVector(const std::vector<double>& v) override { ++products; return apply(v); }
+  std::vector<double> hessianDiagonal() override {
+    std::vector<double> d(n_);
+    for (std::size_t i = 0; i < n_; ++i) d[i] = h_(i, i);
+    return d;
+  }
+  double trialEnergy(const std::vector<double>& d) override {
+    auto y = x_;
+    for (std::size_t i = 0; i < n_; ++i) y[i] += d[i];
+    return value(y);
+  }
+  void accept(const std::vector<double>& d) override {
+    for (std::size_t i = 0; i < n_; ++i) x_[i] += d[i];
+  }
+  const std::vector<double>& x() const { return x_; }
+  std::size_t products = 0;
+
+ private:
+  std::size_t n_, n_stiff_;
+  Matrix<double> h_;
+  std::vector<double> g_, x_;
+};
+
+void testDynamicSaddleOrder() {
+  const std::size_t n_stiff = 40, n_soft = 30;
+  TwoScaleQuadratic problem(n_stiff, n_soft, 1e-2);
+  NeoOptions opt;
+  opt.gradient_tolerance = 1e-10;
+  opt.step.saddle_cutoff = 1e-2;
+  opt.step.guess_from_diagonal = false;
+  opt.step.sector = problem.sector();
+  const NeoResult res = neoOptimize<double>(problem, opt);
+  std::cout << "dynamic saddle order (two-scale quadratic, " << n_stiff << " stiff + " << n_soft << " soft): converged=" << res.converged
+            << " iterations=" << res.iterations << " H*v products=" << problem.products << " |g|max=" << std::scientific
+            << std::setprecision(2) << res.gradient_max << std::fixed << "\n";
+  check(res.converged, "dynamic saddle order: converged");
+  check(problem.products < 3 * (n_stiff + n_soft), "dynamic saddle order: far fewer products than one per stiff direction (" +
+                                                       std::to_string(problem.products) + ")");
+  // The stationary point of the quadratic has the stiff sector maximized and the soft one minimized: g = 0 there and the
+  // energy along any soft direction is above it, along any stiff direction below it.
+  auto g = problem.gradient();
+  double gmax = 0.0;
+  for (double v : g) gmax = std::max(gmax, std::abs(v));
+  check(gmax < 1e-9, "dynamic saddle order: stationary point reached");
+}
+
 void testTrustRule() {
   NeoTrustOptions o;
   check(!neoTrustDecision(0, -0.1, 0.5, o).accept, "trust: min, r<0 rejects");
@@ -461,6 +551,7 @@ int main() {
   testDriverReal();
   testDriverHard();
   testDriverComplex();
+  testDynamicSaddleOrder();
   std::cout << "\n" << g_checks - g_failures << " / " << g_checks << " checks passed\n";
   return g_failures == 0 ? 0 : 1;
 }

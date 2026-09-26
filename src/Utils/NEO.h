@@ -111,6 +111,22 @@ struct NeoStepOptions {
   // starting space so the lowest roots of L are represented from the
   // beginning.
   bool guess_from_diagonal = true;
+  // > 0: DYNAMIC saddle order. Every solve() sets the target order to the number of coupled roots of
+  // L(1) below -saddle_cutoff (target_order is then only the caller's expectation and is ignored),
+  // i.e. the energy is maximized along every g-coupled Hessian direction more negative than the
+  // cutoff and minimized along the rest. This is what a problem with a known energy-scale gap
+  // between its negative- and positive-curvature directions needs (the relativistic min-max
+  // problem: electron-positron rotations at -O(2 c^2 n_i), everything else >= 0): a fixed
+  // target_order counts only directions COUPLED to g (see the SADDLE-POINT CAVEAT above), which
+  // symmetry can make far fewer than the Hessian index. Pair it with guess_from_diagonal = false.
+  double saddle_cutoff = 0.0;
+  // With `sector` set the count is instead the number of leading roots whose Ritz vector lies mostly in the stiff sector.
+  // Optional partition of the parameters (size n, nonzero = "stiff" sector; empty = none): every trial vector is
+  // added as two sector-PURE vectors. With a dynamic saddle order this keeps the Ritz vectors of the two
+  // decoupled sectors (electron-positron rotations at -1e4 versus everything else at O(1)) from mixing, which
+  // otherwise gives mixed Ritz pairs with Rayleigh quotients anywhere -- including near 0 -- and makes the
+  // "roots below -cutoff" count chase spurious roots.
+  std::vector<char> sector;
 };
 
 template <typename T>
@@ -161,11 +177,14 @@ class NeoStepSolver {
   const std::vector<std::vector<T>>& lowestRoots() const { return roots_; }
 
   std::size_t hessianProducts() const { return products_; }
+  // Target order in force (the option's, or the dynamic count when saddle_cutoff > 0).
+  std::size_t targetOrder() const { return target_; }
 
  private:
   struct RitzSet;  // eigenpairs of the reduced matrix at one alpha
 
   bool addVector(std::vector<T> ext);
+  bool addTrial(std::vector<T> ext);  // addVector, split into sector-pure parts when opt_.sector is set
   void initialize();
   bool addUnitVector();
   RitzSet ritz(double alpha) const;
@@ -181,6 +200,7 @@ class NeoStepSolver {
   NeoHessianVectorFn<T> hvec_;
   std::vector<double> diag_;
   NeoStepOptions opt_;
+  std::size_t target_ = 0;
   std::vector<std::vector<T>> guesses_;
 
   // Orthonormal trial basis in the EXTENDED space (element 0 = z0

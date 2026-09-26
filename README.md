@@ -122,7 +122,7 @@ anywhere on a line) are comments.
 | `MACRO_ENERGY_TOLERANCE` | float | `1e-9` | Energy convergence threshold of the macro-iteration loop. |
 | `ORBITAL_GRADIENT_TOLERANCE` | float | `1e-5` | ADAM's/NEO's orbital-gradient convergence threshold (max gradient entry). |
 | `ORBITAL_OPTIMIZER` | string | `ADAM` | Which method drives `FULL_OPTIMIZATION`'s orbital-rotation step. `ADAM`: DoNOF's own first-order optimizer (`Utils/ADAM.h`). `NEO`: `Utils/NEO.h`'s matrix-free, second-order Newton method targeting the ground state, using a row-based Hessian-vector product (no dense Hessian formed); also works with `CHOLESKY TRUE` and `C4_SPINOR`. Converges in far fewer macro-iterations than ADAM and usually matches its energy to 1e-6-1e-9. On some PNOF/GNOF NON_REL systems NEO can land on a different stationary point; a post-loop Hessian check detects this and automatically escapes a detected saddle (perturb along the negative-curvature eigenvector, retry up to 3 times), but a residual gap to a genuine alternate minimum is reported rather than silently fixed -- compare against `ADAM` as a routine cross-check. Templates: `examples/*_neo_full_optimization.inp`. |
-| `FULL_OPTIMIZATION_4C_NEG` | bool | `FALSE` | Only meaningful for `C4_SPINOR` + `FULL_OPTIMIZATION`. Requests orbital rotations that also mix occupied positive-energy spinors into the negative-energy branch (the genuine min-max saddle relativistic SCF is characterized by, as opposed to the positive-energy-only restriction always used today -- see below). **Not yet implemented**: setting it `TRUE` does not change what runs; it only prints a warning after the (still positive-energy-only) optimization completes, saying so. |
+| `FULL_OPTIMIZATION_4C_NEG` | bool | `FALSE` | Only meaningful for `C4_SPINOR` + `FULL_OPTIMIZATION` (any `FUNCTIONAL`, `CHOLESKY` TRUE or FALSE). After the positive-energy-only optimization has converged, runs the genuine **min-max** stage: orbital rotations now include the positive <-> negative-energy pairs, driven by NEO to a saddle point (whatever `ORBITAL_OPTIMIZER` says), alternating with a full re-minimization of the occupation numbers -- see below. Skipped, with a message, if the first stage did not converge. |
 | `X2C` | bool | `FALSE` | Print the one-electron X2C decoupling report and run the approximate X2C-HF SCF (see below), between the `NON_RELATIVISTIC` and `C4_SPINOR` reports. Independent of `C4_SPINOR` (the RKB Hamiltonian it needs is always built). With `DEBUG`, adds extra cross-checks. |
 
 ## X2C decoupling and X2C-HF
@@ -360,10 +360,34 @@ one run), `examples/lih_gnof_c4_neo_full_optimization.inp` (`NEO`), and
 `examples/lih_gnof_c4_full_optimization_cholesky.inp` (`CHOLESKY TRUE`) -- all three converge to
 the same C4_DHF energy to ~1e-9 Hartree.
 
-The genuine min-max version -- letting rotations explore the negative-energy branch too, rather
-than excluding it from the search entirely -- is not implemented yet; setting
-`FULL_OPTIMIZATION_4C_NEG TRUE` prints a warning saying so rather than silently running the
-positive-energy-only version with no comment.
+### `FULL_OPTIMIZATION_4C_NEG`: the min-max stage
+
+With `FULL_OPTIMIZATION_4C_NEG TRUE` a second stage follows the positive-energy-only minimization above
+(only if it converged and passed its checks). It starts from that minimum's orbitals and occupations and
+solves the genuine relativistic min-max problem (Talman 1986; Saue 2011): the energy is **minimized** over
+the positive-energy rotations and **maximized** over the electron-positron ones (occupied positive-energy
+spinor <-> negative-energy spinor), i.e. a saddle point.
+
+* *Order of the saddle.* Every parameter of a rotation between a positive-energy spinor with occupation
+  `> 1e-6` and a negative-energy spinor is a maximization direction (Kramers-reduced count when the
+  Kramers restriction applies: 176 for LiH/6-31G with GNOF, 484 with MULLER). The log prints it.
+* *Orbital step.* NEO (`Utils/NEO.h`) with a **dynamic** saddle order: at every Newton step the target
+  eigenvector index is the number of leading Ritz roots that are electron-positron directions, because a fixed
+  `target_order` only counts the negative-curvature directions *coupled to the gradient*, which symmetry makes
+  far fewer than the Hessian index. The electron-positron sector (curvature `-4 c^2 n_i`, ~1e5 below everything
+  else) is kept apart in the Davidson space by a sector partition, so the usual trust-radius machinery works.
+  Cost: a few Hessian-vector products per Newton step, independent of the saddle order.
+* *Occupation step.* The occupation numbers are fully re-minimized at the new orbitals (the negative-energy
+  branch stays at zero occupation), macro-iterated like the first stage.
+* *Checks.* The integrals rotated to the starting point must reproduce the first stage's energy; at the end
+  the Hessian is verified block-wise (minimum over the positive-energy rotations, maximum over the occupied
+  electron-positron ones); `DEBUG TRUE` additionally counts all negative eigenvalues (about as many Hessian
+  products as the order of the saddle).
+
+For light systems the second stage moves the energy by ~1e-10 Hartree (the electron-positron gradient at the
+no-pair minimum is tiny); it is a check that the no-pair minimum really is the min-max point and it is exact
+for any `FUNCTIONAL`. See `examples/lih_gnof_c4_neg_full_optimization.inp` (GNOF, dense) and
+`examples/lih_muller_c4_neg_full_optimization_cholesky.inp` (MULLER, `CHOLESKY TRUE`).
 
 ## Restart file
 

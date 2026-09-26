@@ -128,6 +128,7 @@ NeoStepSolver<T>::NeoStepSolver(std::vector<T> gradient, NeoHessianVectorFn<T> h
       hvec_(std::move(hessian_vector)),
       diag_(std::move(hessian_diagonal)),
       opt_(options),
+      target_(options.target_order),
       guesses_(std::move(guess_vectors)) {
   if (n_ == 0) throw std::runtime_error("NeoStepSolver: empty gradient");
   if (!hvec_) throw std::runtime_error("NeoStepSolver: no Hessian-vector callback");
@@ -141,6 +142,9 @@ NeoStepSolver<T>::NeoStepSolver(std::vector<T> gradient, NeoHessianVectorFn<T> h
     if (v.size() != n_ + 1) {
       throw std::runtime_error("NeoStepSolver: guess vectors must have size n+1");
     }
+  }
+  if (!opt_.sector.empty() && opt_.sector.size() != n_) {
+    throw std::runtime_error("NeoStepSolver: bad sector size");
   }
   g_norm_ = norm2(g_);
   opt_.max_subspace = std::max(opt_.max_subspace, 4 * (opt_.target_order + 1));
@@ -192,6 +196,23 @@ bool NeoStepSolver<T>::addVector(std::vector<T> ext) {
   return true;
 }
 
+template <typename T>
+bool NeoStepSolver<T>::addTrial(std::vector<T> ext) {
+  if (opt_.sector.empty()) return addVector(std::move(ext));
+  std::vector<T> stiff(n_ + 1, T{});
+  bool any_stiff = false;
+  for (std::size_t p = 0; p < n_; ++p) {
+    if (opt_.sector[p]) {
+      stiff[1 + p] = ext[1 + p];
+      ext[1 + p] = T{};
+      any_stiff = true;
+    }
+  }
+  bool added = addVector(std::move(ext));
+  if (any_stiff && addVector(std::move(stiff))) added = true;
+  return added;
+}
+
 // Adds the next not-yet-tried coordinate unit vector (coordinates ordered
 // by ascending diag(H) when a diagonal is known, else naturally).
 template <typename T>
@@ -223,12 +244,12 @@ void NeoStepSolver<T>::initialize() {
   if (g_norm_ > 0.0) {
     std::vector<T> eg(n_ + 1, T{});
     for (std::size_t p = 0; p < n_; ++p) eg[1 + p] = g_[p] / g_norm_;
-    addVector(std::move(eg));
+    addTrial(std::move(eg));
   }
-  if (opt_.target_order > 0 && opt_.guess_from_diagonal && !diag_.empty()) {
+  if (opt_.saddle_cutoff <= 0.0 && opt_.target_order > 0 && opt_.guess_from_diagonal && !diag_.empty()) {
     for (std::size_t s = 0; s < opt_.target_order; ++s) addUnitVector();
   }
-  for (auto& v : guesses_) addVector(v);
+  for (auto& v : guesses_) addTrial(v);
   guesses_.clear();
 }
 
@@ -275,18 +296,24 @@ void NeoStepSolver<T>::collapse(const RitzSet& set, const std::vector<std::size_
       gx[j] += y[k] * gx_[k];
     }
   }
+  // Y^dagger M Y in two O(m^2 k) / O(m k^2) passes (k = kept roots); the one-pass triple loop was O(m^2 k^2),
+  // which dominated collapses for high-order saddle targets (k ~ hundreds).
   auto rotate = [&](const std::vector<std::vector<T>>& mat) {
+    std::vector<std::vector<T>> tmp(k_new, std::vector<T>(m, T{}));  // tmp[l][a] = sum_b mat[a][b] y_l[b]
+    for (std::size_t l = 0; l < k_new; ++l) {
+      const auto& yl = set.y[keep[l]];
+      for (std::size_t a = 0; a < m; ++a) {
+        T inner{};
+        for (std::size_t b = 0; b < m; ++b) inner += mat[a][b] * yl[b];
+        tmp[l][a] = inner;
+      }
+    }
     std::vector<std::vector<T>> out(k_new, std::vector<T>(k_new, T{}));
     for (std::size_t j = 0; j < k_new; ++j) {
       const auto& yj = set.y[keep[j]];
       for (std::size_t l = 0; l < k_new; ++l) {
-        const auto& yl = set.y[keep[l]];
         T sum{};
-        for (std::size_t a = 0; a < m; ++a) {
-          T inner{};
-          for (std::size_t b = 0; b < m; ++b) inner += mat[a][b] * yl[b];
-          sum += conjugate(yj[a]) * inner;
-        }
+        for (std::size_t a = 0; a < m; ++a) sum += conjugate(yj[a]) * tmp[l][a];
         out[j][l] = sum;
       }
     }
@@ -304,12 +331,34 @@ void NeoStepSolver<T>::collapse(const RitzSet& set, const std::vector<std::size_
 // roots, Sec. 6.3 step 2). Leaves lowestRoots() set.
 template <typename T>
 bool NeoStepSolver<T>::davidson(double alpha, int& micro, double& residual) {
-  const std::size_t need = opt_.target_order + 1;
   const double tol = effectiveTolerance();
   const double floor_value = opt_.preconditioner_floor;
   for (int it = 0; it < opt_.max_micro_iterations; ++it) {
     ++micro;
     const RitzSet set = ritz(alpha);
+    if (opt_.saddle_cutoff > 0.0 && alpha == 1.0) {
+      target_ = 0;
+      if (opt_.sector.empty()) {
+        for (std::size_t r : set.coupled) target_ += set.w[r] < -opt_.saddle_cutoff;
+      } else {
+        // Leading roots that are stiff-sector Ritz pairs (not the z0-dominated Newton root): those are the directions
+        // to maximize. Genuine negative curvature elsewhere (which a displaced point can have) is descended, not counted.
+        for (std::size_t r : set.coupled) {
+          if (std::abs(set.z0[r]) > 0.5 || set.w[r] >= 0.0) break;
+          double stiff = 0.0, total = 0.0;
+          for (std::size_t p = 0; p < n_; ++p) {
+            T xp{};
+            for (std::size_t k = 0; k < basis_.size(); ++k) xp += set.y[r][k] * basis_[k][1 + p];
+            const double w2 = std::norm(std::complex<double>(xp));
+            total += w2;
+            if (opt_.sector[p]) stiff += w2;
+          }
+          if (stiff <= 0.5 * total) break;
+          ++target_;
+        }
+      }
+    }
+    const std::size_t need = target_ + 1;
     if (set.coupled.size() < need) {
       if (!addUnitVector()) return false;
       continue;
@@ -319,7 +368,11 @@ bool NeoStepSolver<T>::davidson(double alpha, int& micro, double& residual) {
     std::vector<std::vector<T>> corrections;
     std::vector<std::vector<T>> roots;
     double max_res = 0.0;
-    for (std::size_t c = 0; c < need; ++c) {
+    // Dynamic saddle order (saddle_cutoff > 0): only the target root has to converge -- the roots below it are
+    // the (numerous) strongly negative directions whose exact values do not enter the step; they stay in the
+    // trial space (kept on collapse) but cost no residual evaluation, corrections or convergence test.
+    const std::size_t c_begin = opt_.saddle_cutoff > 0.0 ? need - 1 : 0;
+    for (std::size_t c = c_begin; c < need; ++c) {
       const std::size_t r = keep[c];
       const double theta = set.w[r];
       std::vector<T> z(n_ + 1, T{});
@@ -353,10 +406,10 @@ bool NeoStepSolver<T>::davidson(double alpha, int& micro, double& residual) {
     roots_ = std::move(roots);
     if (max_res <= tol) return true;
 
-    if (m + corrections.size() > opt_.max_subspace) collapse(set, keep);
+    if (m + corrections.size() > std::max(opt_.max_subspace, 4 * need)) collapse(set, keep);
     std::size_t added = 0;
     for (auto& corr : corrections) {
-      if (addVector(std::move(corr))) ++added;
+      if (addTrial(std::move(corr))) ++added;
     }
     if (added == 0 && !addUnitVector()) {
       // Nothing left to add: exact if the space is complete, else stuck.
@@ -372,8 +425,8 @@ bool NeoStepSolver<T>::davidson(double alpha, int& micro, double& residual) {
 template <typename T>
 bool NeoStepSolver<T>::reducedStepNorm(double alpha, double& norm) const {
   const RitzSet set = ritz(alpha);
-  if (set.coupled.size() <= opt_.target_order) return false;
-  const double z0 = std::abs(set.z0[set.coupled[opt_.target_order]]);
+  if (set.coupled.size() <= target_) return false;
+  const double z0 = std::abs(set.z0[set.coupled[target_]]);
   norm = std::sqrt(std::max(0.0, 1.0 - z0 * z0)) / (z0 * alpha);
   return true;
 }
@@ -432,9 +485,9 @@ NeoStep<T> NeoStepSolver<T>::solve(double radius) {
   bool have_root = false;
   auto extract = [&](double a) {
     const RitzSet set = ritz(a);
-    have_root = set.coupled.size() > opt_.target_order;
+    have_root = set.coupled.size() > target_;
     if (!have_root) return;
-    const std::size_t r = set.coupled[opt_.target_order];
+    const std::size_t r = set.coupled[target_];
     theta = set.w[r];
     const T z0 = set.z0[r];
     std::fill(d.begin(), d.end(), T{});
@@ -747,7 +800,7 @@ NeoResult neoOptimize(NeoProblem<T>& problem, const NeoOptions& o) {
       } else {
         ratio = d_e / d_q;
       }
-      const NeoTrustDecision decision = neoTrustDecision(order, ratio, radius, o.trust);
+      const NeoTrustDecision decision = neoTrustDecision(solver.targetOrder(), ratio, radius, o.trust);
       if (o.progress) {
         ProgressLine() << "  NEO Newton step " << iteration + 1 << ": E = " << std::setprecision(10) << e0 << std::scientific
                        << std::setprecision(2) << "  max|g| = " << gmax << "  radius = " << radius << "  |d| = " << step.step_norm

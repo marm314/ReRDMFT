@@ -4,6 +4,7 @@
 #include <complex>
 #include <cstddef>
 #include <functional>
+#include <limits>
 #include <ostream>
 #include <string>
 #include <vector>
@@ -58,8 +59,8 @@ struct FullOptSettings {
   // ...JointHessianVector or a plain symmetrized per-element sum for real orbitals, see
   // RdmftModel::hessian_vector). Falls back to ADAM with a printed note when the model has no
   // hessian_vector (a Cholesky-vector model: CHOLESKY TRUE has no cheap per-element Hessian).
-  // NEO always targets the GROUND STATE (target_order = 0, a minimum) here -- no saddle-point
-  // search. Every macro-iteration's Newton descent is run to ITS OWN full convergence
+  // NEO targets the GROUND STATE (target_order = 0, a minimum) here, except in the C4_SPINOR min-max
+  // stage (`saddle` below), where it targets the saddle point with a dynamic order. Every macro-iteration's Newton descent is run to ITS OWN full convergence
   // (ORBITAL_GRADIENT_TOLERANCE), up to `neo_max_iterations` Newton steps -- NOT an ADAM-style
   // small-then-growing budget: that was tried and measured to only ever hurt, never help. Cutting
   // a Newton descent short mid-iteration hands the next occupation re-optimization a
@@ -72,6 +73,27 @@ struct FullOptSettings {
   // of steps per macro-iteration would itself be a sign of trouble.
   OrbitalOptimizer orbital_optimizer = OrbitalOptimizer::kAdam;
   int neo_max_iterations = 100;
+  // C4_SPINOR min-max stage (FULL_OPTIMIZATION_4C_NEG): when saddle.n_negative > 0 the loop is the
+  // genuine relativistic min-max problem (Talman 1986; Saue, ChemPhysChem 12, 3077 (2011)) instead of
+  // a minimization. The caller passes the FULL integrals (negative block included, entry point
+  // n_negative = 0 -- no positive-block trim), the occupations/state of the no-pair minimum, and here
+  // the rotation of that minimum: the integrals are first rotated by `start_rotation` (C_start = C_dhf *
+  // start_rotation), so the loop starts exactly at the no-pair minimum. Orbital rotations then include
+  // the positive <-> negative pairs, NEO is used whatever `orbital_optimizer` says, its target order is
+  // the number of (occupied positive, negative) rotation parameters -- occupied = occupation >
+  // `occupied_threshold` -- and the Hessian check at the end expects exactly that many negative
+  // eigenvalues. Occupations stay confined to the positive branch (the model's own window). The
+  // returned total_rotation is start_rotation * (rotation found here).
+  struct SaddleStage {
+    std::size_t n_negative = 0;  // size of the negative-energy branch (indices [0, n_negative)); 0 = off
+    Matrix<std::complex<double>> start_rotation;
+    double occupied_threshold = 1e-6;
+    // NEO's dynamic saddle order: maximize along every gradient-coupled Hessian direction more negative
+    // than this (electron-positron curvatures are ~ -4 c^2 n_i, i.e. far below it for any occupied spinor).
+    double curvature_cutoff = 1e-2;
+    // Electronic energy of the no-pair minimum the stage starts from (NaN = unknown): the rotated integrals must reproduce it.
+    double start_energy = std::numeric_limits<double>::quiet_NaN();
+  } saddle;
 };
 
 struct RdmftOccupationResult {
