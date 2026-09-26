@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "BlasThreads.h"
 #include "Cholesky_Decomposition.h"
 #include "ElectronRepulsion.h"
 
@@ -154,26 +155,6 @@ void addInPlace(Tensor4<std::complex<double>>& total, const Tensor4<std::complex
   for (std::size_t i = 0; i < len; ++i) t[i] += s[i];
 }
 
-// Swaps the electron-1 pair (legs 0,1) with the electron-2 pair (legs 2,3):
-// result(p,q,r,s) = src(r,s,p,q). Used to derive the RKB-Small(beta-
-// partner),RKB-Small(alpha-partner) block from the RKB-Small(alpha-
-// partner),RKB-Small(beta-partner) one via the electron-exchange symmetry,
-// instead of running a second, equally expensive quarter-transform chain.
-Tensor4<std::complex<double>> swapElectronPairs(const Tensor4<std::complex<double>>& src) {
-  const std::size_t d0 = src.dim0(), d1 = src.dim1(), d2 = src.dim2(), d3 = src.dim3();
-  Tensor4<std::complex<double>> result(d2, d3, d0, d1);
-  for (std::size_t p = 0; p < d0; ++p) {
-    for (std::size_t q = 0; q < d1; ++q) {
-      for (std::size_t r = 0; r < d2; ++r) {
-        for (std::size_t s = 0; s < d3; ++s) {
-          result(r, s, p, q) = src(p, q, r, s);
-        }
-      }
-    }
-  }
-  return result;
-}
-
 // Transforms a same-electron leg pair (leg_bra, leg_ket -- either (0,1) or
 // (2,3)) from the unrestricted-kinetic-balance Small spin-orbital space
 // into a single RKB-Small "partner" flavor: the one built from
@@ -203,6 +184,114 @@ Tensor4<std::complex<double>> transformPairToRkbSmall(
     }
   }
   return total;
+}
+
+// The RKB-Small(y1),RKB-Small(y2) blocks of the two-electron tensor,
+//   out[y1][y2](a,c,b,d) = sum_{s1,s2} sum_{k,t,l,u} conj(c1(a,k)) c1(c,t) conj(c2(b,l)) c2(d,u) (kt|lu),
+// with c1 = the (y1, spin s1) block of the RKB coefficients (n_large x n_small), c2 likewise for (y2, s2), from the
+// PACKED real (SS|SS) tensor -- computed in slabs, so neither the dense n_small^4 tensor nor its dense transformed
+// intermediates ever exist. The projection factorizes leg by leg, so the work is done chunk by chunk of the second
+// index t: (1) a chunk X[k][t][lu] of (SS|SS) is read from the packed tensor once; (2) for every (y1,s1) the
+// first leg for ALL Large indices a at once is a GEMM, T1[a][t][lu] = sum_k conj(c1(a,k)) X[k][t][lu]; (3) the
+// second leg is accumulated into T2[y1][a][c][lu] += c1(c,t) T1[a][t][lu]; finally (4) the electron-2 pair is
+// projected for every (a,c): sum_{lu} conj(c2(b,l)) c2(d,u) T2[a][c][lu]. Memory: the packed tensor plus
+// ~2 n_large^2 n_small^2 complex numbers of T2 and a chunk of X/T1; flops ~ n_large n_small^4.
+void smallSmallBlocksSlab(const PackedTwoElectronTensor& ss, const Matrix<std::complex<double>>& rkb,
+                          std::size_t nl, std::size_t ns, Tensor4<std::complex<double>> out[2][2]) {
+  using C = std::complex<double>;
+  const std::size_t nq = ns * ns;
+  // Coefficient blocks A[y][s] (nl x ns) and the derived matrices used below.
+  Matrix<C> a_blk[2][2], a_re[2][2], a_imneg[2][2], a_conj[2][2], a_trans[2][2];
+  for (std::size_t y = 0; y < 2; ++y)
+    for (std::size_t s = 0; s < 2; ++s) {
+      const Matrix<C> blk = subBlock(rkb, y * nl, nl, s * ns, ns);
+      a_blk[y][s] = blk;
+      a_conj[y][s] = conjMatrix(blk);
+      a_trans[y][s] = Matrix<C>(ns, nl);
+      Matrix<double> re(nl, ns), im(nl, ns);  // conj(A) = re + i*im
+      for (std::size_t p = 0; p < nl; ++p)
+        for (std::size_t k = 0; k < ns; ++k) {
+          a_trans[y][s](k, p) = blk(p, k);
+          re(p, k) = blk(p, k).real();
+          im(p, k) = -blk(p, k).imag();
+        }
+      a_re[y][s] = Matrix<C>(nl, ns);  // (real parts of conj(A), as complex for storage convenience)
+      a_imneg[y][s] = Matrix<C>(nl, ns);
+      for (std::size_t i = 0; i < nl * ns; ++i) {
+        a_re[y][s].data()[i] = C(re.data()[i], 0.0);
+        a_imneg[y][s].data()[i] = C(im.data()[i], 0.0);
+      }
+    }
+  const std::size_t budget_doubles = 12u * 1024u * 1024u;  // ~100 MB for the chunk of (SS|SS)
+  const std::size_t tb_max = std::max<std::size_t>(1, std::min<std::size_t>(ns, budget_doubles / (ns * nq)));
+  std::vector<C> t2[2];
+  for (std::size_t y = 0; y < 2; ++y) t2[y].assign(nl * nl * nq, C{});
+  std::vector<double> x(ns * tb_max * nq), t_re(nl * tb_max * nq), t_im(nl * tb_max * nq);
+  std::vector<C> t1(nl * tb_max * nq);
+  for (std::size_t t0 = 0; t0 < ns; t0 += tb_max) {
+    const std::size_t tb = std::min(tb_max, ns - t0);
+    // (1) chunk of (SS|SS): X[k][tl][l*ns+u] = (k, t0+tl | l, u)
+#pragma omp parallel for collapse(2) schedule(static)
+    for (std::size_t k = 0; k < ns; ++k)
+      for (std::size_t tl = 0; tl < tb; ++tl) {
+        double* row = &x[(k * tb + tl) * nq];
+        for (std::size_t l = 0; l < ns; ++l)
+          for (std::size_t u = 0; u < ns; ++u) row[l * ns + u] = ss(k, t0 + tl, l, u);
+      }
+    for (std::size_t y1 = 0; y1 < 2; ++y1)
+      for (std::size_t s1 = 0; s1 < 2; ++s1) {
+        // (2) first leg for all a: T = conj(A) X  (real GEMMs with the real and imaginary parts of conj(A))
+        std::vector<double> a_r(nl * ns), a_i(nl * ns);
+        for (std::size_t i = 0; i < nl * ns; ++i) {
+          a_r[i] = a_re[y1][s1].data()[i].real();
+          a_i[i] = a_imneg[y1][s1].data()[i].real();
+        }
+        cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, static_cast<int>(nl), static_cast<int>(tb * nq),
+                    static_cast<int>(ns), 1.0, a_r.data(), static_cast<int>(ns), x.data(), static_cast<int>(tb * nq),
+                    0.0, t_re.data(), static_cast<int>(tb * nq));
+        cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, static_cast<int>(nl), static_cast<int>(tb * nq),
+                    static_cast<int>(ns), 1.0, a_i.data(), static_cast<int>(ns), x.data(), static_cast<int>(tb * nq),
+                    0.0, t_im.data(), static_cast<int>(tb * nq));
+#pragma omp parallel for schedule(static)
+        for (std::size_t i = 0; i < nl * tb * nq; ++i) t1[i] = C(t_re[i], t_im[i]);
+        // (3) second leg, accumulated over the chunk: T2[y1][a][c][lu] += sum_tl A(c,t0+tl) T1[a][tl][lu]
+        {
+          const SerialBlasScope serial_blas;
+          const C one(1.0, 0.0);
+#pragma omp parallel for schedule(static)
+          for (std::size_t a = 0; a < nl; ++a)
+            cblas_zgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, static_cast<int>(nl), static_cast<int>(nq),
+                        static_cast<int>(tb), &one, a_blk[y1][s1].data() + t0, static_cast<int>(ns),
+                        t1.data() + a * tb * nq, static_cast<int>(nq), &one, t2[y1].data() + a * nl * nq,
+                        static_cast<int>(nq));
+        }
+      }
+  }
+  // (4) electron-2 pair, for every Large pair (a,c): out[y1][y2](a,c,b,d) += sum_{lu} conj(A2(b,l)) A2(d,u) T2(l,u)
+  for (std::size_t y1 = 0; y1 < 2; ++y1)
+    for (std::size_t y2 = 0; y2 < 2; ++y2) out[y1][y2] = Tensor4<C>(nl, nl, nl, nl, C{});
+  {
+    const SerialBlasScope serial_blas;
+#pragma omp parallel
+    {
+      Matrix<C> u(nl, ns), v(nl, nl);
+      const C one(1.0, 0.0), zero(0.0, 0.0);
+#pragma omp for schedule(dynamic)
+      for (std::size_t ac = 0; ac < nl * nl; ++ac)
+        for (std::size_t y1 = 0; y1 < 2; ++y1)
+          for (std::size_t y2 = 0; y2 < 2; ++y2)
+            for (std::size_t s2 = 0; s2 < 2; ++s2) {
+              cblas_zgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, static_cast<int>(nl), static_cast<int>(ns),
+                          static_cast<int>(ns), &one, a_conj[y2][s2].data(), static_cast<int>(ns),
+                          t2[y1].data() + ac * nq, static_cast<int>(ns), &zero, u.data(), static_cast<int>(ns));
+              cblas_zgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, static_cast<int>(nl), static_cast<int>(nl),
+                          static_cast<int>(ns), &one, u.data(), static_cast<int>(ns), a_trans[y2][s2].data(),
+                          static_cast<int>(nl), &zero, v.data(), static_cast<int>(nl));
+              C* dst = out[y1][y2].data() + ac * nl * nl;
+              for (std::size_t i = 0; i < nl * nl; ++i) dst[i] += v.data()[i];
+            }
+    }
+  }
 }
 
 Matrix<std::complex<double>> promoteToComplex(const Matrix<double>& m) {
@@ -303,7 +392,7 @@ RkbTwoElectronTensor rkbTwoElectronIntegrals(const std::vector<BasisFunction>& l
   // ll_ss Large electron-1 pair / Small electron-2 pair, ss_ss all-Small.
   const Tensor4<double> ll_ll = twoElectronIntegrals(large_basis);
   const Tensor4<double> ll_ss = twoElectronIntegralsCross(large_basis, small_basis);
-  const Tensor4<double> ss_ss = twoElectronIntegrals(small_basis);
+  const PackedTwoElectronTensor ss_ss = twoElectronIntegralsPacked(small_basis);  // 8-fold packed, never dense
 
   // (Large,Large | RKB-Small(y2),RKB-Small(y2)): transform ll_ss's
   // electron-2 pair (legs 2,3). Index y in {0,1} means {alpha-partner,
@@ -332,7 +421,7 @@ RkbTwoElectronTensor rkbTwoElectronIntegrals(const std::vector<BasisFunction>& l
     // (projectCholeskyVectorToRkbSmall, y*n_large row offset) -- and the
     // fully-transformed block follows as
     //   ss_Y1Y2[y1][y2](p,q,r,s) = sum_L W_L^{y1}(p,q) * W_L^{y2}(r,s)
-    // (no swapElectronPairs shortcut needed: computing all four y1,y2
+    // (computing all four y1,y2
     // combinations this way is already O(Nchol*n_large^4), cheaper than
     // even one direct quarter-transform of the untouched ss_ss tensor).
     const auto vectors = choleskyDecomposeEriChecked(ss_ss, cholesky_threshold);
@@ -350,26 +439,8 @@ RkbTwoElectronTensor rkbTwoElectronIntegrals(const std::vector<BasisFunction>& l
       }
     }
   } else {
-    // Transform ss_ss's electron-1 pair (legs 0,1) once per y1 -- reused
-    // for both y2 choices -- then its electron-2 pair (legs 2,3) once
-    // per y2.
-    Tensor4<std::complex<double>> ss_sY1[2];
-    for (std::size_t y1 = 0; y1 < 2; ++y1) {
-      ss_sY1[y1] =
-          transformPairToRkbSmall(ss_ss, 0, 1, rkb_coefficients, y1 * n_large, n_large, n_small);
-    }
-    // ss_Y1Y2[1][0] (electron-1=beta-partner, electron-2=alpha-partner) is
-    // never computed directly: electron-exchange symmetry gives
-    //   ss_Y1Y2[1][0](p,q,r,s) = ss_Y1Y2[0][1](r,s,p,q),
-    // so it is recovered from ss_Y1Y2[0][1] by an index permutation
-    // instead of a second, equally expensive quarter-transform chain.
-    ss_Y1Y2[0][0] =
-        transformPairToRkbSmall(ss_sY1[0], 2, 3, rkb_coefficients, 0, n_large, n_small);
-    ss_Y1Y2[0][1] =
-        transformPairToRkbSmall(ss_sY1[0], 2, 3, rkb_coefficients, n_large, n_large, n_small);
-    ss_Y1Y2[1][1] =
-        transformPairToRkbSmall(ss_sY1[1], 2, 3, rkb_coefficients, n_large, n_large, n_small);
-    ss_Y1Y2[1][0] = swapElectronPairs(ss_Y1Y2[0][1]);
+    // Exact projection of (SS|SS) into the four RKB-Small(y1),RKB-Small(y2) blocks, in slabs from the packed tensor.
+    smallSmallBlocksSlab(ss_ss, rkb_coefficients, n_large, n_small, ss_Y1Y2);
   }
 
   // Assemble the full (4*nLarge)^4 physics-notation tensor <A B|C D> (only
