@@ -108,7 +108,7 @@ anywhere on a line) are comments.
 | `DENSITY_TOLERANCE` | double (> 0) | `1e-6` | `C4_DHF` SCF density-change convergence threshold. |
 | `CHOLESKY` | bool | `FALSE` | Hold the two-electron integrals as Cholesky vectors and never build an n^4 object. The real AO Coulomb matrix is decomposed ONCE (`Utils/Cholesky_Decomposition.h`: NON_REL/X2C decompose the AO integrals, C4_SPINOR the combined {Large-Large} u {Small-Small} pair matrix, `C4_DHF/RkbCholesky.h`); the SCF Fock matrices, the MO-basis integrals (`Utils/AoCholesky.h`) and `FULL_OPTIMIZATION` all work on those vectors, and the AO integrals are not used again (they are rebuilt only under `DEBUG`, for the dense-vs-Cholesky checks). Every decomposition is verified against the integrals and retried with a smaller pivot batch if it misses `100*CHOLESKY_THRESHOLD + 1e-9`. With `ORBITAL_OPTIMIZER NEO` the Hessian-vector product is a finite difference of the gradient on the rotated vectors, O(N_chol n^3) with no dense cache. Without `CHOLESKY` the integrals are held as unique-element stores (`Utils/SymmetricEri.h`: about n^4/8 real or n^4/4 complex numbers, the rest rebuilt by symmetry) and transformed in slabs, never as a dense n^4 tensor. |
 | `CHOLESKY_THRESHOLD` | double (> 0) | `1e-10` | Residual-diagonal cutoff for the decomposition; looser = fewer vectors (faster, less accurate), tighter = more (slower, more exact). Only with `CHOLESKY TRUE`. |
-| `RESTART_FILE` | string | `RESTART` | Base name of the binary restart files written after a `NON_RELATIVISTIC`/`X2C` run with a `FUNCTIONAL` (see *Restart file* below). `NONE` disables them; `C4_SPINOR` writes none. |
+| `RESTART_FILE` | string | `RESTART` | Base name of the binary restart files written after a `NON_RELATIVISTIC`/`X2C`/`C4_SPINOR` run with a `FUNCTIONAL` (see *Restart file* below). `NONE` disables them. |
 | `FUNCTIONAL` | string | *(none)* | Selects the density matrix functional to evaluate on the converged orbitals: a JK-only functional (`Occ_opt/JK_only.h`) -- `SD`, `MBB`/`MULLER`, `BBC2`, `CA`, `CGA`, `ML`, `MLSIC`, `GU`, `POWER` -- or a Piris natural orbital functional (`Occ_opt/PNOFs.h`) -- `PNOF5`, `PNOF7`, `PNOF7S`, `GNOF`. Unset: the whole RDMFT evaluation step below is skipped. |
 | `OCCUPATION_INIT` | string | `PROPORTIONAL` | Initial fractional occupations for a JK-only `FUNCTIONAL`. `PROPORTIONAL`: aufbau redistributed into an interior box. `FERMI_DIRAC`: smeared at `TEMPERATURE`. (PNOF functionals build their own guess.) |
 | `JK_FROZEN_PAIRS` | int (>= 0) | `0` | Only with a JK-only `FUNCTIONAL`. Freezes the `2*JK_FROZEN_PAIRS` LOWEST-energy spin-orbitals/spinors at EXACTLY occupation 1 (never an SQP variable), mirroring PNOF's own frozen core. Counted in pairs (spin/Kramers partners) so no separate evenness check is ever needed. |
@@ -391,9 +391,12 @@ for any `FUNCTIONAL`. See `examples/lih_gnof_c4_neg_full_optimization.inp` (GNOF
 
 ## Restart file
 
-At the end of a `NON_RELATIVISTIC` and/or `X2C` run with a `FUNCTIONAL`,
-the final RDMFT state is written in **binary** to `<RESTART_FILE>.NON_REL`
-and `<RESTART_FILE>.X2C_HF` (default base name `RESTART`, in the working
+At the end of a `NON_RELATIVISTIC`, `X2C` and/or `C4_SPINOR` run with a `FUNCTIONAL`,
+the final RDMFT state is written in **binary** to `<RESTART_FILE>.NON_REL`,
+`<RESTART_FILE>.X2C_HF` and, for the 4-component path, `<RESTART_FILE>.4C`
+(the positive-energy-only minimization) and `<RESTART_FILE>.4C_NEG` (the
+`FULL_OPTIMIZATION_4C_NEG` min-max stage, written only when that stage ran and its
+checks passed); default base name `RESTART`, in the working
 directory; `RESTART_FILE NONE` disables it). The format, writer and reader
 are in `Utils/Restart.h`; the program only writes the files for now (the
 reader is used to verify them), reading a restart to start a calculation
@@ -408,7 +411,10 @@ Contents:
   parameterization of `Occ_opt/PNOFs.h`), obtained from the final
   occupations, so the SQP and the L-BFGS branches write the same thing;
 - the final **molecular-orbital coefficients** `C = C_scf * U_total` in the
-  AO spin-orbital basis: `U_total` is the accumulated `FULL_OPTIMIZATION`
+  AO spin-orbital basis (`4C`/`4C_NEG`: the 4-component RKB spinor basis
+  [Large-alpha; Large-beta; Small; Small], columns in ascending energy with the
+  negative-energy branch first and occupation 0; `4C_NEG`'s rotation includes the
+  positive <-> negative mixing): `U_total` is the accumulated `FULL_OPTIMIZATION`
   rotation (identity without it). `NON_REL`: `blockdiag(C, C)`, real,
   `2 n_AO x 2 n_MO`, ordered `[alpha, beta]`. `X2C`: the Kramers-fixed
   spinors, complex, `2 n_Large x 2 n_Large`. Column `j` is MO `j` and has

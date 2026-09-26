@@ -2157,7 +2157,8 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
                                    std::chrono::steady_clock::time_point& t_checkpoint,
                                    std::vector<TimingRecord>& timing_records,
                                    rerdmft::RestartCapture* restart = nullptr,
-                                   const Eri* eri_full_block = nullptr) {
+                                   const Eri* eri_full_block = nullptr,
+                                   rerdmft::RestartCapture* restart_neg = nullptr) {
   // Generic (element-access) view of the integrals, used by the production code below; the DEBUG /
   // HESSIAN_FUNCTIONAL validation blocks that need a dense Tensor4 re-bind `eri` to a dense view of `eri_in`.
   const Eri& eri = eri_in;
@@ -3213,6 +3214,15 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
                 h, *eri_full_block, full_result.occupations, full_result.occupation_state, functional, f_l,
                 n_electrons_active, n_total, n_frozen, n_inactive_below, n_active, /*two_columns=*/true, saddle_settings,
                 /*kramers_restricted=*/true, nuclear_repulsion_energy, out, std::vector<std::size_t>{}, /*n_negative=*/0);
+            if (restart_neg != nullptr && saddle_result.checks_passed) {
+              restart_neg->valid = true;
+              restart_neg->kind = "OCCUPATIONS";
+              restart_neg->occupations = saddle_result.occupations;
+              restart_neg->electronic_energy = saddle_result.electronic_energy;
+              restart_neg->converged = saddle_result.converged;
+              restart_neg->orbitals_optimized = true;
+              restart_neg->total_rotation = saddle_result.total_rotation;
+            }
             out << "  FULL_OPTIMIZATION_4C_NEG " << (saddle_result.checks_passed && saddle_result.converged ? "converged" : "did NOT converge")
                 << ": total energy " << std::setprecision(10)
                 << saddle_result.electronic_energy + nuclear_repulsion_energy << std::setprecision(6) << " Hartree ("
@@ -3377,7 +3387,8 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
                                        std::chrono::steady_clock::time_point& t_checkpoint,
                                        std::vector<TimingRecord>& timing_records,
                                        rerdmft::RestartCapture* restart = nullptr,
-                                       const Eri* eri_full_block = nullptr) {
+                                       const Eri* eri_full_block = nullptr,
+                                       rerdmft::RestartCapture* restart_neg = nullptr) {
   // See buildFunctionalReport: generic view here, dense re-binding in the DEBUG / HESSIAN_FUNCTIONAL blocks.
   const Eri& eri = eri_in;
   rerdmft::progressContext() = label;  // live progress lines (stderr) are prefixed with the method
@@ -3942,6 +3953,16 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
                 h, *eri_full_block, full_result.occupations, full_result.occupation_state, functional, geminals, n_core,
                 pnof_subspaces, pnof_coupling, relativistic, sqp_pnof_occ, n_total, saddle_settings,
                 /*kramers_restricted=*/true, nuclear_repulsion_energy, out, std::vector<std::size_t>{}, /*n_negative=*/0);
+            if (restart_neg != nullptr && saddle_result.checks_passed) {
+              restart_neg->valid = true;  // gamma angles are added with the 4C ones below
+              restart_neg->kind = "GAMMAS";
+              restart_neg->n_core = static_cast<std::int64_t>(n_core);
+              restart_neg->occupations = saddle_result.occupations;
+              restart_neg->electronic_energy = saddle_result.electronic_energy;
+              restart_neg->converged = saddle_result.converged;
+              restart_neg->orbitals_optimized = true;
+              restart_neg->total_rotation = saddle_result.total_rotation;
+            }
             out << "  FULL_OPTIMIZATION_4C_NEG " << (saddle_result.checks_passed && saddle_result.converged ? "converged" : "did NOT converge")
                 << ": total energy " << std::setprecision(10)
                 << saddle_result.electronic_energy + nuclear_repulsion_energy << std::setprecision(6) << " Hartree ("
@@ -3972,19 +3993,23 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
       restart->orbitals_optimized = true;
       restart->total_rotation = full_result.total_rotation;
     }
-    try {
-      restart->gammas.clear();
+    const auto addGammas = [&](rerdmft::RestartCapture& r) {
+      r.gammas.clear();
       for (int s = 0; s < pnof_subspaces; ++s) {
         std::vector<double> occ_subspace(static_cast<std::size_t>(pnof_coupling));
         for (int v = 0; v < pnof_coupling; ++v) {
           const auto& g = geminals[n_core + static_cast<std::size_t>(s) * static_cast<std::size_t>(pnof_coupling) +
                                    static_cast<std::size_t>(v)];
-          occ_subspace[static_cast<std::size_t>(v)] = restart->occupations[g.i];
+          occ_subspace[static_cast<std::size_t>(v)] = r.occupations[g.i];
         }
         const auto gammas = rerdmft::pnofSubspaceGammasFromOccupations(pnof_coupling, occ_subspace);
-        restart->gammas.insert(restart->gammas.end(), gammas.begin(), gammas.end());
+        r.gammas.insert(r.gammas.end(), gammas.begin(), gammas.end());
       }
+    };
+    try {
+      addGammas(*restart);
       restart->valid = true;
+      if (restart_neg != nullptr && restart_neg->valid) addGammas(*restart_neg);
     } catch (const std::exception& e) {
       out << "\n  RESTART data (gamma angles) FAILED: " << e.what() << "\n";
     }
@@ -5452,6 +5477,7 @@ int main(int argc, char** argv) {
             dhf_result.orbital_energies.begin() +
                 static_cast<std::ptrdiff_t>(n_negative),
             dhf_result.orbital_energies.end());
+        rerdmft::RestartCapture c4_restart, c4_neg_restart;
         const auto dhf_functional = [&](const auto& eri_any, const auto* eri_full) {
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(
@@ -5459,7 +5485,7 @@ int main(int argc, char** argv) {
                 input.functional(), dhf_result.nuclear_repulsion_energy, input.pnof_subspaces(),
                 input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
                 input.verbose(), input.hessian_functional(), fullOptSettings(input),
-                input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, nullptr, eri_full);
+                input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &c4_restart, eri_full, &c4_neg_restart);
           }
           return buildFunctionalReport(
               "C4_DHF", h_mo, eri_any, dhf_orbital_energies_positive, n_negative,
@@ -5468,7 +5494,7 @@ int main(int argc, char** argv) {
               input.occupation_init(), dhf_result.nuclear_repulsion_energy, input.debug(),
               input.verbose(), input.hessian_functional(), fullOptSettings(input),
               input.full_optimization_4c_neg(), t_start, t_checkpoint,
-              timing_records, nullptr, eri_full);
+              timing_records, &c4_restart, eri_full, &c4_neg_restart);
         };
         if (input.cholesky()) {
           // FULL_OPTIMIZATION_4C_NEG needs the negative-energy block too: the trimmed vectors above have it zeroed
@@ -5481,6 +5507,15 @@ int main(int argc, char** argv) {
           dhf_functional_report = dhf_functional(c4_mo_chol, &c4_mo_full_chol);
         } else {
           dhf_functional_report = dhf_functional(c4_mo_sym, &c4_mo_sym);
+        }
+        // RESTART files: RESTART.4C (the positive-energy-only minimization) and RESTART.4C_NEG (the min-max stage,
+        // only when FULL_OPTIMIZATION_4C_NEG ran and converged its checks). Coefficients in the RKB spinor basis.
+        const auto restart_fingerprint = rerdmft::basisFingerprint(large_basis.functions());
+        writeRestartFile<std::complex<double>>(input, "4C", c4_restart, dhf_result.c_dhf, h_rkb, s_full, h_mo,
+                                               restart_fingerprint, dhf_result.nuclear_repulsion_energy);
+        if (input.full_optimization_4c_neg()) {
+          writeRestartFile<std::complex<double>>(input, "4C_NEG", c4_neg_restart, dhf_result.c_dhf, h_rkb, s_full, h_mo,
+                                                 restart_fingerprint, dhf_result.nuclear_repulsion_energy);
         }
       }
     }
