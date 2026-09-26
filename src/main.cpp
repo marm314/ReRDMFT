@@ -87,8 +87,6 @@ namespace {
 // overloads keep a T-templated caller's real (T=double) instantiation
 // real, the same established pattern used throughout Hessian_opt/ (e.g.
 // OrbitalGradient.cpp).
-double conjugateScalar(double x) { return x; }
-std::complex<double> conjugateScalar(std::complex<double> x) { return std::conj(x); }
 
 // One recorded checkpoint from logTiming below -- kept instead of printed
 // immediately, so every checkpoint from a run can be shown together in
@@ -330,21 +328,15 @@ rerdmft::Matrix<T> densityFromRotation(const rerdmft::Matrix<T>& u,
 // decide where in the overall report this appears -- built right after
 // each SCF's own results become available, but intended to be printed
 // later, alongside the final gradient-norm report (see main() below).
-// This project builds the analytic HF/DHF orbital gradient THREE
-// independent ways; `gradient` is the RDMFT-ansatz one
+// `gradient` is the RDMFT-ansatz orbital gradient
 // (HartreeExchangeGradient.h's hartreeExchangeFockMatrix -> orbitalGradient,
 // O(n^3)) actually compared against the numerical values below.
-// `gradient_general` and `gradient_efficient` are the other two, printed
-// alongside it purely as further independent cross-checks at this exact
-// (p_idx,q_idx) element -- all three are mathematically equivalent for
-// the idempotent HF/DHF occupations used here (already cross-checked in
-// aggregate via the gradient-norm summary), so this additionally
-// confirms that equivalence holds element-by-element, not just in
-// Frobenius norm/max|g_pq|.
-// `gradient_general`: GeneralizedFock.h's generalizedFockMatrix (dense
-// 2-RDM, O(n^5)) -> orbitalGradient. Passed as a possibly-null pointer
-// since this contraction is only actually computed by the caller when
-// VERBOSE > 0 (see main.cpp/Input.h); nullptr skips this line entirely.
+// `gradient_efficient` is printed alongside it purely as a further
+// independent cross-check at this exact (p_idx,q_idx) element -- the two
+// are mathematically equivalent for the idempotent HF/DHF occupations
+// used here (already cross-checked in aggregate via the gradient-norm
+// summary), so this additionally confirms that equivalence holds
+// element-by-element, not just in Frobenius norm/max|g_pq|.
 // `gradient_efficient`: the HF/DHF-specific O(n^4) shortcut
 // (NON_REL/NonRelOrbitalGradient.h's nonRelOrbitalGradientEfficient or
 // C4_DHF/RkbOrbitalGradient.h's dhfOrbitalGradientEfficient, built
@@ -358,7 +350,6 @@ std::string finiteDifferenceCheckReport(const std::string& label, const rerdmft:
                                          std::size_t p_idx, std::size_t q_idx,
                                          double nuclear_repulsion,
                                          const rerdmft::Matrix<T>& gradient,
-                                         const rerdmft::Matrix<T>* gradient_general,
                                          const rerdmft::Matrix<T>& gradient_efficient) {
   const std::size_t n = h.rows();
   rerdmft::Matrix<T> identity(n, n, T{});
@@ -381,14 +372,6 @@ std::string finiteDifferenceCheckReport(const std::string& label, const rerdmft:
   out << "  Analytic g_pq (Hessian_opt/OrbitalGradient.h, includes its "
          "deliberate factor of 2 -- see derivation above): "
       << analytic_g_pq << "\n";
-  if (gradient_general != nullptr) {
-    const std::complex<double> analytic_g_pq_general =
-        std::complex<double>((*gradient_general)(p_idx, q_idx));
-    out << "  Analytic g_pq (GeneralizedFock.h, dense 2-RDM, general path -- "
-           "cross-check, |diff| from the line above: "
-        << std::abs(analytic_g_pq_general - analytic_g_pq) << "): " << analytic_g_pq_general
-        << "\n";
-  }
   out << "  Analytic g_pq (NonRelOrbitalGradient.h/RkbOrbitalGradient.h, "
          "HF/DHF-specific efficient O(n^4) path -- cross-check, |diff| from "
          "the first line: "
@@ -487,7 +470,7 @@ double wickSingleDeterminantEnergy(const rerdmft::Matrix<T>& h, const rerdmft::T
 
 // DEBUG-only: validates Hessian_opt/HartreeExchangeHessian.h's cheap,
 // Hartree/exchange-only analytic Hess_pq,rs (always shown, ALWAYS runs
-// under DEBUG TRUE regardless of VERBOSE -- cheap, like
+// under DEBUG TRUE -- cheap, like
 // hartreeExchangeFockMatrix's own gradient) against a genuine 2D finite
 // difference
 //   d^2E/dkappa_pq dkappa_rs ~ [E(+h,+h) - E(+h,-h) - E(-h,+h) + E(-h,-h)] / (4h^2)
@@ -496,22 +479,15 @@ double wickSingleDeterminantEnergy(const rerdmft::Matrix<T>& h, const rerdmft::T
 // finiteDifferenceCheckReport's own "numerical H_pq,pq" estimate),
 // using wickSingleDeterminantEnergy above (never
 // singleDeterminantMoFock, see its own comment for why) so this check
-// carries no eri-symmetry caveat. `analytic_hess_general`
-// (GeneralizedHessian.h's fully general, expensive path) is printed
-// alongside it, with their |diff|, ONLY when the caller actually
-// computed it (VERBOSE > 0, see main() below) -- mirrors exactly how
-// finiteDifferenceCheckReport's `gradient_general` is a nullable
-// pointer for the SAME reason.
+// carries no eri-symmetry caveat.
 //
-// `analytic_hess_imag`/`analytic_hess_imag_general` are the analogous
-// IMAGINARY-step direction (Hessian_opt/*.h's `*HessianElementImag`),
-// checked against a 2D finite difference using
-// kappa_pq = kappa_qp = i*step (see finiteDifferenceCheckReport's own
-// imaginary-direction derivation) instead of the antisymmetric real
-// pair -- only meaningful for T = std::complex<double> (C4_DHF), so
-// both are nullable pointers ALWAYS passed as nullptr for T = double
-// (NON_REL), exactly mirroring finiteDifferenceCheckReport's own
-// `if constexpr` gating for the gradient's imaginary direction.
+// `analytic_hess_imag` is the analogous IMAGINARY-step direction
+// (Hessian_opt/*.h's `*HessianElementImag`), checked against a 2D finite
+// difference using kappa_pq = kappa_qp = i*step (see
+// finiteDifferenceCheckReport's own imaginary-direction derivation)
+// instead of the antisymmetric real pair -- only meaningful for
+// T = std::complex<double>, so it is a nullable pointer ALWAYS passed as
+// nullptr for T = double (NON_REL).
 template <typename T>
 std::string hessianFiniteDifferenceReport(const std::string& label, const rerdmft::Matrix<T>& h,
                                            const rerdmft::Tensor4<T>& eri,
@@ -519,9 +495,7 @@ std::string hessianFiniteDifferenceReport(const std::string& label, const rerdmf
                                            std::size_t p_idx, std::size_t q_idx,
                                            std::size_t r_idx, std::size_t s_idx,
                                            double nuclear_repulsion, T analytic_hess,
-                                           const T* analytic_hess_general,
-                                           const T* analytic_hess_imag,
-                                           const T* analytic_hess_imag_general) {
+                                           const T* analytic_hess_imag) {
   const std::size_t n = h.rows();
   auto kappa_pair = [&](std::size_t a, std::size_t b, T step) {
     rerdmft::Matrix<T> kappa(n, n, T{});
@@ -547,13 +521,6 @@ std::string hessianFiniteDifferenceReport(const std::string& label, const rerdmf
       << ",r=" << r_idx << ",s=" << s_idx << "):\n";
   out << "  Analytic Hess_pq,rs (Hessian_opt/HartreeExchangeHessian.h, cheap): "
       << std::complex<double>(analytic_hess) << "\n";
-  if (analytic_hess_general != nullptr) {
-    out << "  Analytic Hess_pq,rs (Hessian_opt/GeneralizedHessian.h, dense "
-           "2-RDM, general path -- cross-check, |diff| from the line above: "
-        << std::abs(std::complex<double>(*analytic_hess_general) -
-                    std::complex<double>(analytic_hess))
-        << "): " << std::complex<double>(*analytic_hess_general) << "\n";
-  }
   for (const double step : {1e-2, 1e-3, 1e-4}) {
     const rerdmft::Matrix<T> kp = kappa_pair(p_idx, q_idx, T(step));
     const rerdmft::Matrix<T> km = kappa_pair(p_idx, q_idx, T(-step));
@@ -581,12 +548,6 @@ std::string hessianFiniteDifferenceReport(const std::string& label, const rerdmf
       out << "  Analytic Hess^yy_pq,rs (Hessian_opt/HartreeExchangeHessian.h, cheap, "
              "IMAGINARY direction): "
           << *analytic_hess_imag << "\n";
-      if (analytic_hess_imag_general != nullptr) {
-        out << "  Analytic Hess^yy_pq,rs (Hessian_opt/GeneralizedHessian.h, dense "
-               "2-RDM, general path -- cross-check, |diff| from the line above: "
-            << std::abs(*analytic_hess_imag_general - *analytic_hess_imag)
-            << "): " << *analytic_hess_imag_general << "\n";
-      }
       auto kappa_pair_imag = [&](std::size_t a, std::size_t b, double y) {
         rerdmft::Matrix<T> kappa(n, n, T{});
         const std::complex<double> val(0.0, y);
@@ -609,95 +570,6 @@ std::string hessianFiniteDifferenceReport(const std::string& label, const rerdmf
             << std::setprecision(6) << "\n";
       }
     }
-  }
-  return out.str();
-}
-
-// DEBUG + VERBOSE > 1 only (see Input.h): validates Hessian_opt/
-// HartreeExchangeHessian.h's newly-derived MIXED real/imaginary
-// Hessian block, Hess^{ty}_pq,rs = d^2E/dkappa_pq dy_rs (t-direction on
-// the FIRST pair, y-direction on the SECOND pair -- hartreeExchange
-// HessianElementMixed's own header documents the derivation), against
-// a genuine MIXED-direction 2D finite difference: a real step on
-// (p_idx,q_idx) crossed with an imaginary step on (r_idx,s_idx). Also
-// checks the Schwarz-symmetry partner, Hess^{yt}_pq,rs = d^2E/dy_pq
-// dkappa_rs = Hess^{ty}_rs,pq (just the same analytic function called with
-// the two pairs swapped -- `analytic_mixed_swapped`, supplied by the
-// caller), against the OTHER ordering's finite difference (y on the
-// first pair, t on the second). Only meaningful for T =
-// std::complex<double> (C4_DHF's genuinely complex spinors, same
-// reason the imaginary-direction check in
-// hessianFiniteDifferenceReport only applies there) -- unlike that
-// function, this one is not templated over T at all, since
-// hartreeExchangeHessianElementMixed itself is only instantiated for
-// complex<double> (a real orbital basis has no y-direction to mix with
-// t- in the first place, not just "not meaningful").
-std::string mixedHessianFiniteDifferenceReport(
-    const std::string& label, const rerdmft::Matrix<std::complex<double>>& h,
-    const rerdmft::Tensor4<std::complex<double>>& eri, const std::vector<double>& occupations,
-    std::size_t p_idx, std::size_t q_idx, std::size_t r_idx, std::size_t s_idx,
-    double nuclear_repulsion, std::complex<double> analytic_mixed,
-    std::complex<double> analytic_mixed_swapped) {
-  const std::size_t n = h.rows();
-  using C = std::complex<double>;
-  auto kappa_real = [&](std::size_t a, std::size_t b, double step) {
-    rerdmft::Matrix<C> kappa(n, n, C{});
-    kappa(a, b) = C(step, 0.0);
-    kappa(b, a) = C(-step, 0.0);
-    return kappa;
-  };
-  auto kappa_imag = [&](std::size_t a, std::size_t b, double y) {
-    rerdmft::Matrix<C> kappa(n, n, C{});
-    const C val(0.0, y);
-    kappa(a, b) = val;
-    kappa(b, a) = val;
-    return kappa;
-  };
-  auto energy_at = [&](const rerdmft::Matrix<C>& k1, const rerdmft::Matrix<C>& k2) {
-    rerdmft::Matrix<C> ksum(n, n, C{});
-    for (std::size_t i = 0; i < n; ++i)
-      for (std::size_t j = 0; j < n; ++j) ksum(i, j) = k1(i, j) + k2(i, j);
-    const auto d = densityFromRotation(rerdmft::spinorRotationMatrix(ksum), occupations);
-    return wickSingleDeterminantEnergy(h, eri, d, nuclear_repulsion);
-  };
-
-  std::ostringstream out;
-  out << "\n"
-      << label << " MIXED real/imaginary finite-difference HESSIAN check (pair1=(p="
-      << p_idx << ",q=" << q_idx << "), pair2=(r=" << r_idx << ",s=" << s_idx << ")):\n";
-  out << "  Analytic Hess^ty_pair1,pair2 [t on pair1, y on pair2] (Hessian_opt/\n"
-         "  HartreeExchangeHessian.h, cheap): "
-      << analytic_mixed << "\n";
-  out << "  Analytic Hess^ty_pair2,pair1 [Schwarz check: equals Hess^yt_pair1,pair2 =\n"
-         "  d^2E/dy_pair1 dkappa_pair2]: "
-      << analytic_mixed_swapped << "\n";
-  for (const double step : {1e-2, 1e-3, 1e-4}) {
-    const auto kt_p = kappa_real(p_idx, q_idx, step);
-    const auto kt_m = kappa_real(p_idx, q_idx, -step);
-    const auto ky_p = kappa_imag(r_idx, s_idx, step);
-    const auto ky_m = kappa_imag(r_idx, s_idx, -step);
-    const double e_pp = energy_at(kt_p, ky_p);
-    const double e_pm = energy_at(kt_p, ky_m);
-    const double e_mp = energy_at(kt_m, ky_p);
-    const double e_mm = energy_at(kt_m, ky_m);
-    const double d2_numerical = (e_pp - e_pm - e_mp + e_mm) / (4.0 * step * step);
-    out << "  step = " << std::setprecision(3) << step << std::setprecision(10)
-        << "   t(pair1)/y(pair2) step: numerical d^2E/dkappa_pair1 dy_pair2 = " << d2_numerical
-        << std::setprecision(6) << "\n";
-  }
-  for (const double step : {1e-2, 1e-3, 1e-4}) {
-    const auto ky_p = kappa_imag(p_idx, q_idx, step);
-    const auto ky_m = kappa_imag(p_idx, q_idx, -step);
-    const auto kt_p = kappa_real(r_idx, s_idx, step);
-    const auto kt_m = kappa_real(r_idx, s_idx, -step);
-    const double e_pp = energy_at(ky_p, kt_p);
-    const double e_pm = energy_at(ky_p, kt_m);
-    const double e_mp = energy_at(ky_m, kt_p);
-    const double e_mm = energy_at(ky_m, kt_m);
-    const double d2_numerical = (e_pp - e_pm - e_mp + e_mm) / (4.0 * step * step);
-    out << "  step = " << std::setprecision(3) << step << std::setprecision(10)
-        << "   y(pair1)/t(pair2) step: numerical d^2E/dy_pair1 dkappa_pair2 = " << d2_numerical
-        << std::setprecision(6) << "\n";
   }
   return out.str();
 }
@@ -847,496 +719,11 @@ bool isPnofFunctionalName(const std::string& functional_name) {
          functional_name == "PNOF7S" || functional_name == "GNOF";
 }
 
-// Full real-step orbital-rotation Hessian of a JK-only or PNOF functional
-// at the OPTIMIZED occupations (HESSIAN_FUNCTIONAL, see Input.h): the
-// fractional-occupation analogue of buildFullHessianReport (which covers
-// HF/DHF only). `hess` is the raw, unsymmetrized matrix over the
-// independent pairs p>q (jkOnlyHessianMatrix / pnofHessianMatrix); it is
-// real for physical input (the real-step parameters are real numbers),
-// so only its real part is used (max|Im| reported), and it is symmetrized
-// as (H+H^T)/2 before diagonalization -- the bare Hess_pq,rs is
-// asymmetric off orbital stationarity by an amount tracking the orbital
-// gradient (see HartreeExchangeHessian.h), and the symmetric part IS the
-// Hessian in these coordinates. NOTE the point is stationary w.r.t. the
-// OCCUPATIONS only (orbitals are the converged HF/DHF ones), so
-// `max_gradient` (max |g_pq|, printed) is generally nonzero and the
-// eigenvalue signs describe local curvature of E along rotations at this
-// point, not a stationary-point classification.
-template <typename T>
-std::string functionalFullHessianReport(const std::string& label, const std::string& what,
-                                         const rerdmft::Matrix<T>& hess, double max_gradient,
-                                         std::chrono::steady_clock::time_point t_start,
-                                         std::chrono::steady_clock::time_point& t_checkpoint,
-                                         std::vector<TimingRecord>& timing_records) {
-  const std::size_t m = hess.rows();
-  rerdmft::Matrix<double> sym(m, m, 0.0);
-  double max_asym = 0.0, max_imag = 0.0;
-  for (std::size_t i = 0; i < m; ++i) {
-    for (std::size_t j = 0; j < m; ++j) {
-      const double a = std::real(hess(i, j));
-      const double b = std::real(hess(j, i));
-      sym(i, j) = 0.5 * (a + b);
-      max_asym = std::max(max_asym, std::abs(a - b));
-      max_imag = std::max(max_imag, std::abs(std::imag(std::complex<double>(hess(i, j)))));
-    }
-  }
-  logTiming(label + " full " + what + " orbital-rotation Hessian built and symmetrized (" +
-                std::to_string(m) + "x" + std::to_string(m) + ")",
-            t_start, t_checkpoint, timing_records);
-  const auto eigenvalues = rerdmft::diagonalizeSymmetric(sym).eigenvalues;
-  logTiming(label + " full " + what + " Hessian diagonalized", t_start, t_checkpoint,
-            timing_records);
-
-  constexpr double kZeroTolerance = 1e-6;
-  std::size_t n_negative = 0, n_near_zero = 0, n_positive = 0;
-  for (const double e : eigenvalues) {
-    if (e < -kZeroTolerance) ++n_negative;
-    else if (e > kZeroTolerance) ++n_positive;
-    else ++n_near_zero;
-  }
-  std::ostringstream out;
-  out << "\n  Full orbital-rotation Hessian of the " << what << " functional at the OPTIMIZED\n"
-      << "  occupations (" << m << "x" << m << ", real-step pairs p>q, symmetrized):\n";
-  out << "    Eigenvalues: " << n_negative << " negative, " << n_near_zero
-      << " near-zero (|lambda| <= " << kZeroTolerance << "), " << n_positive << " positive\n";
-  out << "    min eigenvalue: " << std::setprecision(10) << eigenvalues.front()
-      << "   max eigenvalue: " << eigenvalues.back() << std::setprecision(6) << "\n";
-  out << "    lowest 6 eigenvalues:" << std::setprecision(4);
-  for (std::size_t k = 0; k < std::min<std::size_t>(6, eigenvalues.size()); ++k) {
-    out << " " << eigenvalues[k];
-  }
-  out << std::setprecision(6) << "\n";
-  out << "    max |g_pq| (orbital gradient; nonzero: orbitals are the HF/DHF ones, only the\n"
-         "    occupations are optimized): "
-      << max_gradient << "   max |H - H^T|: " << max_asym << "   max |Im H|: " << max_imag
-      << "\n";
-  out << "    "
-      << (n_negative == 0
-              ? "No negative curvature (locally a minimum w.r.t. orbital rotations)."
-              : "Negative curvature along " + std::to_string(n_negative) +
-                    " orbital-rotation direction(s) (saddle-like: orbital relaxation lowers the "
-                    "energy).")
-      << "\n";
-  return out.str();
-}
-
-// ---------------------------------------------------------------------
-// Validation of the real-real (tt), imaginary-imaginary (yy) and mixed
-// real-imaginary (ty) orbital-rotation Hessian blocks (and the joint
-// real gradient vector / joint symmetric Hessian matrix a Newton-Raphson
-// step needs) for a functional family (JK_only or PNOF), complex spinors
-// only. Parameters per pair (p>q): t (kappa_pq=+t, kappa_qp=-t) and y
-// (kappa_pq=kappa_qp=iy). All checks are against FINITE DIFFERENCES:
-//  * gradient: joint vector [Re g, Im g] vs. central differences of the
-//    ENERGY along t and along y at rotated integrals;
-//  * sequential blocks: analytic tt/yy/mixed elements vs. central
-//    differences of the (independent, reference) gradient at rotated
-//    integrals, FDab(I;J) = d/da_J [b-component gradient of pair I];
-//  * joint symmetric matrix vs. the symmetrization built from those same
-//    finite differences (tt,yy: (FD(I;J)+FD(J;I))/2; ty: (FDty(I;J) +
-//    FDyt(J;I))/2), and vs. 2D finite differences of the ENERGY along
-//    exp(-(x K_a + y K_b)) (the true second derivative), optionally.
-// ---------------------------------------------------------------------
-template <typename T>
-struct JointRotations {
-  std::vector<std::pair<std::size_t, std::size_t>> pairs;
-  double step = 1e-4;
-  std::vector<rerdmft::RotatedIntegrals<T>> t_plus, t_minus, y_plus, y_minus;
-};
-
-template <typename T>
-rerdmft::Matrix<T> jointGeneratorMatrix(std::size_t n, std::size_t p, std::size_t q, bool imag,
-                                         double scale) {
-  rerdmft::Matrix<T> k(n, n, T{});
-  if (!imag) {
-    k(p, q) = T(scale);
-    k(q, p) = T(-scale);
-  } else if constexpr (!std::is_same_v<T, double>) {
-    k(p, q) = T(0.0, scale);
-    k(q, p) = T(0.0, scale);
-  }
-  return k;
-}
-
-template <typename T>
-JointRotations<T> buildJointRotations(const rerdmft::Matrix<T>& h, const rerdmft::Tensor4<T>& eri,
-                                       const std::vector<std::pair<std::size_t, std::size_t>>& pairs,
-                                       double step) {
-  JointRotations<T> rot;
-  rot.pairs = pairs;
-  rot.step = step;
-  const std::size_t n = h.rows();
-  for (const auto& [p, q] : pairs) {
-    for (const bool imag : {false, true}) {
-      if (imag && std::is_same_v<T, double>) continue;  // real orbitals: no y direction
-      auto& plus = imag ? rot.y_plus : rot.t_plus;
-      auto& minus = imag ? rot.y_minus : rot.t_minus;
-      plus.push_back(rerdmft::rotateIntegrals(
-          h, eri, rerdmft::spinorRotationMatrix(jointGeneratorMatrix<T>(n, p, q, imag, step))));
-      minus.push_back(rerdmft::rotateIntegrals(
-          h, eri, rerdmft::spinorRotationMatrix(jointGeneratorMatrix<T>(n, p, q, imag, -step))));
-    }
-  }
-  return rot;
-}
-
-// Test pairs for the joint-block checks: the two largest-|g| active pairs
-// plus a pair sharing exactly one orbital index (s) with the first one
-// (p,q) -- (s,x) -- chosen to maximize |g(q or p, x)|: for such pairs the
-// sequential second derivatives are asymmetric by an amount proportional
-// to the gradient of the THIRD pair formed by the two non-shared indices,
-// so only this choice makes the check discriminate between the raw
-// (sequential) blocks and the symmetrized joint Hessian.
-template <typename T>
-std::vector<std::pair<std::size_t, std::size_t>> selectJointTestPairs(
-    const rerdmft::Matrix<T>& gradient, std::size_t lo, std::size_t hi) {
-  std::vector<std::pair<double, std::pair<std::size_t, std::size_t>>> ranked;
-  for (std::size_t p = lo; p < hi; ++p) {
-    for (std::size_t q = lo; q < p; ++q) ranked.push_back({std::abs(gradient(p, q)), {p, q}});
-  }
-  std::sort(ranked.rbegin(), ranked.rend());
-  std::vector<std::pair<std::size_t, std::size_t>> pairs;
-  if (ranked.size() < 3) return pairs;
-  pairs = {ranked[0].second, ranked[1].second};
-  auto grad_abs = [&](std::size_t a, std::size_t b) {
-    return a == b ? 0.0 : std::abs(gradient(std::max(a, b), std::min(a, b)));
-  };
-  double best = -1.0;
-  std::pair<std::size_t, std::size_t> best_pair = ranked[2].second;
-  const auto p0 = pairs[0];
-  for (std::size_t k = 2; k < ranked.size(); ++k) {
-    const auto& c = ranked[k].second;
-    for (const std::size_t shared : {p0.first, p0.second}) {
-      if (c.first != shared && c.second != shared) continue;
-      const std::size_t other0 = (shared == p0.first) ? p0.second : p0.first;
-      const std::size_t x = (c.first == shared) ? c.second : c.first;
-      if (x == other0) continue;
-      const double driver = grad_abs(other0, x) + 0.01 * ranked[k].first;
-      if (driver > best) {
-        best = driver;
-        best_pair = c;
-      }
-    }
-  }
-  pairs.push_back(best_pair);
-  return pairs;
-}
-
-// Real parts of (H + H^T)/2 -- the symmetric part of a raw (sequential)
-// real-step Hessian matrix, i.e. the true second derivative in the t
-// coordinates (see jkOnlyJointHessianMatrix's comment).
-template <typename T>
-rerdmft::Matrix<double> symmetrizeReal(const rerdmft::Matrix<T>& m) {
-  rerdmft::Matrix<double> out(m.rows(), m.cols(), 0.0);
-  for (std::size_t i = 0; i < m.rows(); ++i) {
-    for (std::size_t j = 0; j < m.cols(); ++j) {
-      out(i, j) = 0.5 * (std::real(std::complex<double>(m(i, j))) +
-                         std::real(std::complex<double>(m(j, i))));
-    }
-  }
-  return out;
-}
-
-template <typename T>
-struct JointCheckCallbacks {
-  using GradFn = std::function<rerdmft::Matrix<T>(const rerdmft::Matrix<T>&,
-                                                   const rerdmft::Tensor4<T>&)>;
-  GradFn gradient_new;   // analytic gradient under test
-  GradFn gradient_ref;   // independent gradient used for the sequential finite differences
-  std::function<double(const rerdmft::Matrix<T>&, const rerdmft::Tensor4<T>&)> energy;
-  std::function<T(std::size_t, std::size_t, std::size_t, std::size_t)> hess_tt, hess_yy,
-      hess_mixed;
-  std::function<rerdmft::Matrix<double>(
-      const std::vector<std::pair<std::size_t, std::size_t>>&)> joint;
-};
-
-struct JointCheckResult {
-  double grad_t = 0, grad_y = 0, tt = 0, yy = 0, mixed = 0, joint_vs_fd = 0, joint_asym = 0;
-  double max_hess = 0, max_imag = 0, energy2d = -1.0, energy2d_scale = 0.0, seq_asym = 0.0,
-         tt_sym = 0, yy_sym = 0, mixed_sym = 0, tt_T = 0, yy_T = 0, mixed_T = 0;
-  std::size_t n_energy2d = 0;
-  bool real_only = false;
-};
-
-template <typename T>
-JointCheckResult jointBlocksCheck(const rerdmft::Matrix<T>& h, const rerdmft::Tensor4<T>& eri,
-                                   const JointRotations<T>& rot, const JointCheckCallbacks<T>& cb,
-                                   bool with_energy_2d, bool all_2d = true) {
-  JointCheckResult res;
-  if constexpr (std::is_same_v<T, double>) {
-    // Real orbitals: only the t (real antisymmetric) directions exist, the
-    // "joint" gradient/Hessian are the real gradient and the symmetrized
-    // real-real Hessian. yy/mixed fields stay 0.
-    res.real_only = true;
-    const auto& pairs = rot.pairs;
-    const std::size_t k_pairs = pairs.size();
-    const std::size_t n = h.rows();
-    const double s1 = rot.step;
-    const auto g0 = cb.gradient_new(h, eri);
-    const auto joint_g = rerdmft::jointOrbitalGradient(g0, pairs);
-    for (std::size_t k = 0; k < k_pairs; ++k) {
-      const double fd_t = (cb.energy(rot.t_plus[k].h, rot.t_plus[k].eri) -
-                           cb.energy(rot.t_minus[k].h, rot.t_minus[k].eri)) / (2.0 * s1);
-      res.grad_t = std::max(res.grad_t, std::abs(joint_g[k] - fd_t));
-    }
-    std::vector<std::vector<double>> fd_tt(k_pairs, std::vector<double>(k_pairs));
-    for (std::size_t b = 0; b < k_pairs; ++b) {
-      const auto gtp = cb.gradient_ref(rot.t_plus[b].h, rot.t_plus[b].eri);
-      const auto gtm = cb.gradient_ref(rot.t_minus[b].h, rot.t_minus[b].eri);
-      for (std::size_t a = 0; a < k_pairs; ++a) {
-        fd_tt[a][b] = (gtp(pairs[a].first, pairs[a].second) -
-                       gtm(pairs[a].first, pairs[a].second)) / (2.0 * s1);
-      }
-    }
-    for (std::size_t a = 0; a < k_pairs; ++a) {
-      for (std::size_t b = 0; b < k_pairs; ++b) {
-        const double htt = cb.hess_tt(pairs[a].first, pairs[a].second, pairs[b].first,
-                                      pairs[b].second);
-        res.tt = std::max(res.tt, std::abs(htt - fd_tt[a][b]));
-        res.tt_sym = std::max(res.tt_sym, std::abs(htt - 0.5 * (fd_tt[a][b] + fd_tt[b][a])));
-        res.tt_T = std::max(res.tt_T, std::abs(htt - fd_tt[b][a]));
-        res.max_hess = std::max(res.max_hess, std::abs(fd_tt[a][b]));
-        res.seq_asym = std::max(res.seq_asym, std::abs(fd_tt[a][b] - fd_tt[b][a]));
-      }
-    }
-    const auto joint = cb.joint(pairs);
-    for (std::size_t a = 0; a < k_pairs; ++a) {
-      for (std::size_t b = 0; b < k_pairs; ++b) {
-        res.joint_vs_fd = std::max(res.joint_vs_fd,
-                                   std::abs(joint(a, b) - 0.5 * (fd_tt[a][b] + fd_tt[b][a])));
-        res.joint_asym = std::max(res.joint_asym, std::abs(joint(a, b) - joint(b, a)));
-      }
-    }
-    if (with_energy_2d) {
-      constexpr double s2 = 1e-3;
-      auto energy_at = [&](std::size_t a, std::size_t b, double x, double y) {
-        rerdmft::Matrix<T> kappa = jointGeneratorMatrix<T>(n, pairs[a].first, pairs[a].second, false, x);
-        const auto kb = jointGeneratorMatrix<T>(n, pairs[b].first, pairs[b].second, false, y);
-        for (std::size_t i = 0; i < n; ++i)
-          for (std::size_t j = 0; j < n; ++j) kappa(i, j) += kb(i, j);
-        const auto rt = rerdmft::rotateIntegrals(h, eri, rerdmft::spinorRotationMatrix(kappa));
-        return cb.energy(rt.h, rt.eri);
-      };
-      res.energy2d = 0.0;
-      for (std::size_t a = 0; a < k_pairs; ++a) {
-        for (std::size_t b = a; b < k_pairs; ++b) {
-          if (!all_2d && !(a == 0 && (b == 0 || b == k_pairs - 1))) continue;
-          const double d = (energy_at(a, b, s2, s2) - energy_at(a, b, s2, -s2) -
-                            energy_at(a, b, -s2, s2) + energy_at(a, b, -s2, -s2)) /
-                           (4.0 * s2 * s2);
-          res.energy2d = std::max(res.energy2d, std::abs(d - joint(a, b)));
-          res.energy2d_scale = std::max(res.energy2d_scale, std::abs(d));
-          ++res.n_energy2d;
-        }
-      }
-    }
-    return res;
-  } else {
-    const auto& pairs = rot.pairs;
-    const std::size_t k_pairs = pairs.size();
-    const std::size_t n = h.rows();
-    const double s1 = rot.step;
-
-    // gradient vs energy finite differences
-    const auto g0 = cb.gradient_new(h, eri);
-    const auto joint_g = rerdmft::jointOrbitalGradient(g0, pairs);
-    for (std::size_t k = 0; k < k_pairs; ++k) {
-      const double fd_t = (cb.energy(rot.t_plus[k].h, rot.t_plus[k].eri) -
-                           cb.energy(rot.t_minus[k].h, rot.t_minus[k].eri)) / (2.0 * s1);
-      const double fd_y = (cb.energy(rot.y_plus[k].h, rot.y_plus[k].eri) -
-                           cb.energy(rot.y_minus[k].h, rot.y_minus[k].eri)) / (2.0 * s1);
-      res.grad_t = std::max(res.grad_t, std::abs(joint_g[k] - fd_t));
-      res.grad_y = std::max(res.grad_y, std::abs(joint_g[k_pairs + k] - fd_y));
-    }
-
-    // sequential finite differences of the reference gradient
-    auto comp = [&](const rerdmft::Matrix<T>& g, std::size_t a, bool imag) {
-      const std::complex<double> v(g(pairs[a].first, pairs[a].second));
-      return imag ? v.imag() : v.real();
-    };
-    std::vector<std::vector<double>> fd_tt(k_pairs, std::vector<double>(k_pairs)),
-        fd_yt = fd_tt, fd_ty = fd_tt, fd_yy = fd_tt;
-    for (std::size_t b = 0; b < k_pairs; ++b) {
-      const auto gtp = cb.gradient_ref(rot.t_plus[b].h, rot.t_plus[b].eri);
-      const auto gtm = cb.gradient_ref(rot.t_minus[b].h, rot.t_minus[b].eri);
-      const auto gyp = cb.gradient_ref(rot.y_plus[b].h, rot.y_plus[b].eri);
-      const auto gym = cb.gradient_ref(rot.y_minus[b].h, rot.y_minus[b].eri);
-      for (std::size_t a = 0; a < k_pairs; ++a) {
-        fd_tt[a][b] = (comp(gtp, a, false) - comp(gtm, a, false)) / (2.0 * s1);
-        fd_yt[a][b] = (comp(gtp, a, true) - comp(gtm, a, true)) / (2.0 * s1);
-        fd_ty[a][b] = (comp(gyp, a, false) - comp(gym, a, false)) / (2.0 * s1);
-        fd_yy[a][b] = (comp(gyp, a, true) - comp(gym, a, true)) / (2.0 * s1);
-      }
-    }
-    // analytic sequential elements vs. FD
-    for (std::size_t a = 0; a < k_pairs; ++a) {
-      for (std::size_t b = 0; b < k_pairs; ++b) {
-        const auto [p, q] = pairs[a];
-        const auto [r, s] = pairs[b];
-        const std::complex<double> htt(cb.hess_tt(p, q, r, s));
-        const std::complex<double> hyy(cb.hess_yy(p, q, r, s));
-        // Mixed(pq,rs) = d/dy_pq of the t-gradient of pair (r,s) = FDty(rs;pq)
-        const std::complex<double> hmx(cb.hess_mixed(r, s, p, q));
-        // ... and vs. the SYMMETRIZED finite differences (true second derivative)
-        res.tt_sym = std::max(res.tt_sym,
-                              std::abs(htt.real() - 0.5 * (fd_tt[a][b] + fd_tt[b][a])));
-        res.yy_sym = std::max(res.yy_sym,
-                              std::abs(hyy.real() - 0.5 * (fd_yy[a][b] + fd_yy[b][a])));
-        res.mixed_sym = std::max(res.mixed_sym,
-                                 std::abs(hmx.real() - 0.5 * (fd_ty[a][b] + fd_yt[b][a])));
-        // ... and vs. the TRANSPOSED sequential derivative (roles of the two pairs swapped)
-        res.tt_T = std::max(res.tt_T, std::abs(htt.real() - fd_tt[b][a]));
-        res.yy_T = std::max(res.yy_T, std::abs(hyy.real() - fd_yy[b][a]));
-        res.mixed_T = std::max(res.mixed_T, std::abs(hmx.real() - fd_yt[b][a]));
-        res.tt = std::max(res.tt, std::abs(htt.real() - fd_tt[a][b]));
-        res.yy = std::max(res.yy, std::abs(hyy.real() - fd_yy[a][b]));
-        res.mixed = std::max(res.mixed, std::abs(hmx.real() - fd_ty[a][b]));
-        res.max_hess = std::max({res.max_hess, std::abs(fd_tt[a][b]), std::abs(fd_yy[a][b]),
-                                 std::abs(fd_ty[a][b]), std::abs(fd_yt[a][b])});
-        res.max_imag = std::max({res.max_imag, std::abs(htt.imag()), std::abs(hyy.imag()),
-                                 std::abs(hmx.imag())});
-      }
-    }
-    for (std::size_t a = 0; a < k_pairs; ++a) {
-      for (std::size_t b = 0; b < k_pairs; ++b) {
-        res.seq_asym = std::max({res.seq_asym, std::abs(fd_tt[a][b] - fd_tt[b][a]),
-                                 std::abs(fd_yy[a][b] - fd_yy[b][a]),
-                                 std::abs(fd_ty[a][b] - fd_yt[b][a])});
-      }
-    }
-    // joint symmetric matrix vs. symmetrized finite differences
-    const auto joint = cb.joint(pairs);
-    for (std::size_t a = 0; a < k_pairs; ++a) {
-      for (std::size_t b = 0; b < k_pairs; ++b) {
-        const double ref_tt = 0.5 * (fd_tt[a][b] + fd_tt[b][a]);
-        const double ref_yy = 0.5 * (fd_yy[a][b] + fd_yy[b][a]);
-        const double ref_ty = 0.5 * (fd_ty[a][b] + fd_yt[b][a]);  // (t_a, y_b)
-        res.joint_vs_fd = std::max({res.joint_vs_fd, std::abs(joint(a, b) - ref_tt),
-                                    std::abs(joint(k_pairs + a, k_pairs + b) - ref_yy),
-                                    std::abs(joint(a, k_pairs + b) - ref_ty)});
-      }
-    }
-    for (std::size_t i = 0; i < joint.rows(); ++i) {
-      for (std::size_t j = 0; j < joint.cols(); ++j) {
-        res.joint_asym = std::max(res.joint_asym, std::abs(joint(i, j) - joint(j, i)));
-      }
-    }
-
-    // true second derivative: 2D finite differences of the ENERGY along
-    // exp(-(x K_a + y K_b))
-    if (with_energy_2d) {
-      constexpr double s2 = 1e-3;
-      auto energy_at = [&](std::size_t a, bool ia, std::size_t b, bool ib, double x, double y) {
-        rerdmft::Matrix<T> kappa = jointGeneratorMatrix<T>(n, pairs[a].first, pairs[a].second, ia, x);
-        const auto kb = jointGeneratorMatrix<T>(n, pairs[b].first, pairs[b].second, ib, y);
-        for (std::size_t i = 0; i < n; ++i)
-          for (std::size_t j = 0; j < n; ++j) kappa(i, j) += kb(i, j);
-        const auto rt = rerdmft::rotateIntegrals(h, eri, rerdmft::spinorRotationMatrix(kappa));
-        return cb.energy(rt.h, rt.eri);
-      };
-      auto second = [&](std::size_t a, bool ia, std::size_t b, bool ib) {
-        return (energy_at(a, ia, b, ib, s2, s2) - energy_at(a, ia, b, ib, s2, -s2) -
-                energy_at(a, ia, b, ib, -s2, s2) + energy_at(a, ia, b, ib, -s2, -s2)) /
-               (4.0 * s2 * s2);
-      };
-      res.energy2d = 0.0;
-      auto record = [&](double numeric, double analytic) {
-        res.energy2d = std::max(res.energy2d, std::abs(numeric - analytic));
-        res.energy2d_scale = std::max(res.energy2d_scale, std::abs(numeric));
-        ++res.n_energy2d;
-      };
-      // mixed (t_a,y_b): all combinations when the family is cheap
-      // (`all_2d`), otherwise the diagonal, the disjoint pair and the
-      // shared-index pair only; plus tt/yy between the first pair and the
-      // shared-index (last) pair.
-      for (std::size_t a = 0; a < k_pairs; ++a) {
-        for (std::size_t b = 0; b < k_pairs; ++b) {
-          if (!all_2d && !((a == 0 && b == 0) || (a == 0 && b == 1) || (a == k_pairs - 1 && b == 0))) {
-            continue;
-          }
-          record(second(a, false, b, true), joint(a, k_pairs + b));
-        }
-      }
-      for (std::size_t a = 0; a < k_pairs; ++a) {
-        for (std::size_t b = a + 1; b < k_pairs; ++b) {
-          if (!all_2d && !(a == 0 && b == k_pairs - 1)) continue;
-          record(second(a, false, b, false), joint(a, b));
-          record(second(a, true, b, true), joint(k_pairs + a, k_pairs + b));
-        }
-      }
-    }
-    return res;
-  }
-}
-
-inline std::string formatJointCheck(const JointCheckResult& r) {
-  std::ostringstream out;
-  if (r.real_only) {
-    out << std::scientific << std::setprecision(2) << "      (real orbitals: only the t directions)\n"
-        << "      gradient dE/dt vs energy FD: " << r.grad_t << "\n"
-        << "      raw tt vs sequential FD: " << r.tt << " (vs symmetrized FD: " << r.tt_sym
-        << "; vs transposed-sequential FD: " << r.tt_T << ")\n"
-        << "      symmetrized tt matrix vs symmetrized FD: " << r.joint_vs_fd << " (|H|max "
-        << r.max_hess << ", sequential-FD asymmetry (shared-index pairs) " << r.seq_asym << ")\n";
-    if (r.energy2d >= 0.0) {
-      out << "      symmetrized tt matrix vs 2D energy FD (true d2E/dt dt, " << r.n_energy2d
-          << " elements, |d2E|max " << r.energy2d_scale << "): " << r.energy2d << "\n";
-    }
-    out << std::defaultfloat << std::setprecision(6);
-    return out.str();
-  }
-  out << std::scientific << std::setprecision(2) << "      gradient [Re g, Im g] vs energy FD: dE/dt "
-      << r.grad_t << ", dE/dy " << r.grad_y << "\n"
-      << "      raw blocks vs sequential FD [d/dkappa_rs of gradient of pair pq]: tt " << r.tt << ", yy " << r.yy << ", mixed " << r.mixed
-      << "  (vs symmetrized FD: tt " << r.tt_sym << ", yy " << r.yy_sym << ", mixed "
-      << r.mixed_sym << "; vs transposed-sequential FD: tt " << r.tt_T << ", yy " << r.yy_T
-      << ", mixed " << r.mixed_T << ")\n      joint symmetric matrix vs symmetrized FD: " << r.joint_vs_fd << " (|H|max "
-      << r.max_hess << ", sequential-FD asymmetry (shared-index pairs) " << r.seq_asym
-      << ", max|Im| " << r.max_imag << ")\n";
-  if (r.energy2d >= 0.0) {
-    out << "      joint matrix vs 2D energy FD (true d2E/dx dy, " << r.n_energy2d
-        << " elements, |d2E|max " << r.energy2d_scale << "): " << r.energy2d << "\n";
-  }
-  out << std::defaultfloat << std::setprecision(6);
-  return out.str();
-}
-
-// Complex-spinor extension of the HESSIAN_FUNCTIONAL report: the JOINT
-// real gradient vector [dE/dt; dE/dy] (jointOrbitalGradient) and joint
-// symmetric Hessian over [t; y] (jkOnlyJointHessianMatrix /
-// pnofJointHessianMatrix) -- exactly the two objects a Newton-Raphson
-// orbital step consumes -- with the eigenvalue count of the joint Hessian.
-inline std::string functionalJointHessianReport(
-    const std::string& label, const std::string& what, const rerdmft::Matrix<double>& joint,
-    const std::vector<double>& joint_gradient, std::chrono::steady_clock::time_point t_start,
-    std::chrono::steady_clock::time_point& t_checkpoint,
-    std::vector<TimingRecord>& timing_records) {
-  const auto eigenvalues = rerdmft::diagonalizeSymmetric(joint).eigenvalues;
-  logTiming(label + " joint (t,y) " + what + " Hessian diagonalized", t_start, t_checkpoint,
-            timing_records);
-  constexpr double kZeroTolerance = 1e-6;
-  std::size_t n_neg = 0, n_zero = 0, n_pos = 0;
-  for (const double e : eigenvalues) {
-    if (e < -kZeroTolerance) ++n_neg;
-    else if (e > kZeroTolerance) ++n_pos;
-    else ++n_zero;
-  }
-  double gnorm = 0.0, gmax = 0.0;
-  for (const double g : joint_gradient) {
-    gnorm += g * g;
-    gmax = std::max(gmax, std::abs(g));
-  }
-  std::ostringstream out;
-  out << "\n  JOINT (real t + imaginary y) orbital-rotation Hessian of the " << what
-      << " functional at the\n  OPTIMIZED occupations (" << joint.rows() << "x" << joint.rows()
-      << ", symmetric true second derivative; with the joint gradient the input of a\n"
-         "  Newton-Raphson orbital step):\n";
-  out << "    Eigenvalues: " << n_neg << " negative, " << n_zero << " near-zero (|lambda| <= "
-      << kZeroTolerance << "), " << n_pos << " positive; min " << std::setprecision(10)
-      << eigenvalues.front() << ", max " << eigenvalues.back() << std::setprecision(6) << "\n";
-  out << "    Joint gradient [dE/dt; dE/dy]: norm " << std::sqrt(gnorm) << ", max |component| "
-      << gmax << "\n";
-  return out.str();
+// An orbital / one-body state energy as text: fixed notation, 5 decimals at most.
+inline std::string energyText(double e) {
+  std::ostringstream text;
+  text << std::fixed << std::setprecision(5) << e;
+  return text.str();
 }
 
 // Kramers-pair structure test of complex-spinor MO integrals (Utils/KramersPairing.h): with the
@@ -1348,7 +735,7 @@ inline std::string functionalJointHessianReport(
 // and tests again when this test does not pass, so a miss is reported as NEEDS RE-PAIRING (an
 // expected step for near-degenerate clusters), not as FAIL; the test after the correction uses
 // the default and reports a genuine FAIL.
-inline bool kramersStructureTest(const std::string& label,
+inline bool kramersStructureTest(std::ostream& out, const std::string& label,
                                  const rerdmft::Matrix<std::complex<double>>& h_mo,
                                  const rerdmft::Tensor4<std::complex<double>>& eri_mo,
                                  bool repairs_if_failed = false) {
@@ -1358,7 +745,7 @@ inline bool kramersStructureTest(const std::string& label,
   const bool h_ok = h_dev <= 1e-8 * std::max(1.0, h_scale);
   const bool eri_ok = eri_dev <= 1e-8 * std::max(1.0, eri_scale);
   const char* miss_label = repairs_if_failed ? "NEEDS RE-PAIRING" : "FAIL";
-  std::cout << label << " Kramers-pair structure of the MO integrals (Theta|2k> = |2k+1>): "
+  out << label << " Kramers-pair structure of the MO integrals (Theta|2k> = |2k+1>): "
             << "max |h(P p,P q) - s_p s_q conj h(p,q)| = " << std::scientific << std::setprecision(2)
             << h_dev << " (max |h| = " << h_scale
             << "), max |<Pa Pb|Pc Pd> - s_a s_b s_c s_d conj <ab|cd>| = " << eri_dev
@@ -1372,13 +759,13 @@ inline bool kramersStructureTest(const std::string& label,
 // The one-electron half of kramersStructureTest, for runs that hold the two-electron integrals only as
 // Cholesky vectors (CHOLESKY TRUE without DEBUG): the two-electron structure test needs a dense tensor and
 // runs under DEBUG only. The same one-body test decides whether the exact re-pairing correction is applied.
-inline bool kramersStructureTestOneBody(const std::string& label,
+inline bool kramersStructureTestOneBody(std::ostream& out, const std::string& label,
                                         const rerdmft::Matrix<std::complex<double>>& h_mo,
                                         bool repairs_if_failed = false) {
   double h_scale = 0.0;
   const double h_dev = rerdmft::kramersOneBodyDeviation(h_mo, &h_scale);
   const bool h_ok = h_dev <= 1e-8 * std::max(1.0, h_scale);
-  std::cout << label << " Kramers-pair structure of the one-electron MO integrals (Theta|2k> = |2k+1>): "
+  out << label << " Kramers-pair structure of the one-electron MO integrals (Theta|2k> = |2k+1>): "
             << "max |h(P p,P q) - s_p s_q conj h(p,q)| = " << std::scientific << std::setprecision(2) << h_dev
             << " (max |h| = " << h_scale << ")" << std::defaultfloat << std::setprecision(6) << "\n  ["
             << (h_ok ? "PASS" : (repairs_if_failed ? "NEEDS RE-PAIRING" : "FAIL"))
@@ -1386,19 +773,19 @@ inline bool kramersStructureTestOneBody(const std::string& label,
   return h_ok;
 }
 
-inline void printKramersPairingReport(const std::string& label,
+inline void printKramersPairingReport(std::ostream& out, const std::string& label,
                                       const rerdmft::KramersPairingReport& pairing) {
-  std::cout << label << " Kramers pairing correction (exact re-pairing, Utils/KramersPairing.h): "
+  out << label << " Kramers pairing correction (exact re-pairing, Utils/KramersPairing.h): "
             << "max ||Theta psi_even - psi_odd|| " << std::scientific << std::setprecision(2)
             << pairing.partner_error_before << " -> " << pairing.partner_error_after;
   if (pairing.n_multi_pair_clusters > 0) {
-    std::cout << "; " << pairing.n_multi_pair_clusters
+    out << "; " << pairing.n_multi_pair_clusters
               << " near-degenerate cluster(s) of Kramers pairs (energy gaps < 1e-4 Ha, largest: "
               << pairing.largest_cluster_pairs << " pairs), max column change "
               << pairing.max_column_change << ", cluster time-reversal-invariance residual "
               << pairing.max_invariance_residual;
   }
-  std::cout << "; final exact Theta enforcement moved the columns by "
+  out << "; final exact Theta enforcement moved the columns by "
             << pairing.max_enforcement_change << std::defaultfloat << std::setprecision(6) << "\n";
 }
 
@@ -1427,720 +814,6 @@ inline rerdmft::FullOptSettings fullOptSettings(const rerdmft::Input& input) {
   return settings;
 }
 
-// Time-reversal (Kramers) check of the objects a KR-restricted orbital
-// optimization would use, complex spinors only. Spinors are numbered in
-// Kramers pairs (2k, 2k+1) with Theta|even> = |odd> and Theta|odd> = -|even>
-// (Utils/KramersSymmetry.h), i.e. partner P(i) = i^1 and sign s(i) = +1
-// (even) / -1 (odd). For a time-reversal-EVEN operator M the matrix elements
-// obey M(P(p),P(q)) = s(p) s(q) conj(M(p,q)) -- the quaternion structure
-// kappa_abbar = kappa_ab^*, kappa_abbar' = -kappa_ab'^* -- and the same holds
-// for the (anti-Hermitian) orbital gradient g_pq when the occupations are
-// equal within each Kramers pair. On the joint real parameters
-// [t_I; y_I] (kappa_pq = t + iy, pairs p>q) the induced map is a SIGNED
-// PERMUTATION R: pair (p,q) -> pair (P(p),P(q)) with z' = s(p)s(q) conj(z)
-// if P(p) > P(q), else (pair swapped) z' = -s(p)s(q) z. Time-reversal
-// symmetry of E then means R nu = nu for the joint gradient and R H R^T = H
-// for the joint Hessian. As a CONTROL the same test is repeated with the
-// signs s dropped (a wrong map), which must fail visibly.
-inline std::string kramersSymmetryReport(
-    const rerdmft::Matrix<std::complex<double>>& g, const rerdmft::Matrix<double>& joint,
-    const std::vector<double>& joint_gradient,
-    const std::vector<std::pair<std::size_t, std::size_t>>& pairs,
-    const std::vector<double>& occupations) {
-  using C = std::complex<double>;
-  const std::size_t n = g.rows();
-  std::ostringstream out;
-  out << "\n  TIME-REVERSAL (Kramers) symmetry of the gradient and joint Hessian "
-         "(pairs (2k,2k+1), Theta^2=-1):\n";
-  if (n % 2 != 0 || occupations.size() != n) {
-    out << "    skipped (odd number of spinors or occupation size mismatch)\n";
-    return out.str();
-  }
-  const auto sgn = [](std::size_t i) { return (i % 2 == 0) ? 1.0 : -1.0; };
-  const auto partner = [](std::size_t i) { return i ^ std::size_t{1}; };
-
-  double occ_dev = 0.0;
-  for (std::size_t k = 0; k + 1 < n; k += 2) {
-    occ_dev = std::max(occ_dev, std::abs(occupations[k] - occupations[k + 1]));
-  }
-  out << "    max |n_a - n_abar| over Kramers pairs: " << std::scientific << std::setprecision(2)
-      << occ_dev << "\n";
-
-  // (1) Matrix-element relation of the full anti-Hermitian gradient matrix.
-  const auto gfull = [&](std::size_t p, std::size_t q) {
-    return p >= q ? g(p, q) : -std::conj(g(q, p));
-  };
-  double g_scale = 0.0, g_dev = 0.0, g_dev_wrong = 0.0;
-  for (std::size_t p = 0; p < n; ++p) {
-    for (std::size_t q = 0; q < n; ++q) {
-      const C lhs = gfull(partner(p), partner(q));
-      const C mine = gfull(p, q);
-      g_scale = std::max(g_scale, std::abs(mine));
-      g_dev = std::max(g_dev, std::abs(lhs - sgn(p) * sgn(q) * std::conj(mine)));
-      g_dev_wrong = std::max(g_dev_wrong, std::abs(lhs - std::conj(mine)));
-    }
-  }
-  out << "    gradient matrix, g(P p,P q) = s_p s_q conj(g(p,q)): max deviation " << g_dev
-      << "  (max |g| = " << g_scale << "; control without signs: " << g_dev_wrong << ")\n";
-
-  // (2) Signed permutation R on the joint parameters.
-  const std::size_t m = pairs.size();
-  std::vector<long> index(n * n, -1);
-  for (std::size_t i = 0; i < m; ++i) index[pairs[i].first * n + pairs[i].second] = static_cast<long>(i);
-  std::vector<std::size_t> perm(2 * m);
-  std::vector<double> sign(2 * m), sign_wrong(2 * m);
-  bool involution = true, complete = true;
-  for (std::size_t i = 0; i < m; ++i) {
-    const auto [p, q] = pairs[i];
-    const std::size_t pp = partner(p), qq = partner(q);
-    const double ss = sgn(p) * sgn(q);
-    long j;
-    double a, b, aw, bw;  // t' = a t, y' = b y
-    if (pp > qq) {
-      j = index[pp * n + qq];
-      a = ss;  b = -ss;  aw = 1.0;  bw = -1.0;
-    } else {
-      j = index[qq * n + pp];
-      a = -ss;  b = -ss;  aw = -1.0;  bw = -1.0;
-    }
-    if (j < 0) { complete = false; continue; }
-    perm[i] = static_cast<std::size_t>(j);
-    perm[m + i] = m + static_cast<std::size_t>(j);
-    sign[i] = a;  sign[m + i] = b;
-    sign_wrong[i] = aw;  sign_wrong[m + i] = bw;
-  }
-  if (!complete) {
-    out << "    joint-parameter test skipped: pair list is not closed under Kramers partners\n";
-    return out.str();
-  }
-  for (std::size_t i = 0; i < 2 * m; ++i) {
-    if (perm[perm[i]] != i || sign[perm[i]] * sign[i] != 1.0) involution = false;
-  }
-  double nu_scale = 0.0, nu_dev = 0.0, nu_dev_wrong = 0.0;
-  for (std::size_t i = 0; i < 2 * m; ++i) {
-    nu_scale = std::max(nu_scale, std::abs(joint_gradient[i]));
-    nu_dev = std::max(nu_dev, std::abs(sign[i] * joint_gradient[i] - joint_gradient[perm[i]]));
-    nu_dev_wrong = std::max(nu_dev_wrong,
-                            std::abs(sign_wrong[i] * joint_gradient[i] - joint_gradient[perm[i]]));
-  }
-  double h_scale = 0.0, h_dev = 0.0, h_dev_wrong = 0.0;
-  for (std::size_t i = 0; i < 2 * m; ++i) {
-    for (std::size_t j = 0; j < 2 * m; ++j) {
-      h_scale = std::max(h_scale, std::abs(joint(i, j)));
-      h_dev = std::max(h_dev, std::abs(joint(perm[i], perm[j]) - sign[i] * sign[j] * joint(i, j)));
-      h_dev_wrong = std::max(
-          h_dev_wrong,
-          std::abs(joint(perm[i], perm[j]) - sign_wrong[i] * sign_wrong[j] * joint(i, j)));
-    }
-  }
-  out << "    R (signed permutation on [t;y]) is an involution: " << (involution ? "yes" : "NO")
-      << "\n";
-  out << "    joint gradient, R nu = nu: max deviation " << nu_dev << "  (max |nu| = " << nu_scale
-      << "; control: " << nu_dev_wrong << ")\n";
-  out << "    joint Hessian, R H R^T = H: max deviation " << h_dev << "  (max |H| = " << h_scale
-      << "; control: " << h_dev_wrong << ")\n";
-  out << std::defaultfloat << std::setprecision(6);
-  return out.str();
-}
-
-// PNOF only: curvature of the joint orbital-rotation Hessian along a symmetry-preserving direction
-// against the second finite difference of the INDEPENDENT occupation-side energy
-// (Occ_opt/PNOFs.h's pnofElectronicEnergy, the pair-symmetric shortcut; equal to the exact pair-CI
-// energy for two electrons). The e^kappa checks elsewhere differentiate the full two-RDM energy the
-// Hessian itself is built from, so they cannot see an error common to both. Direction: X2C -> the
-// Kramers-restricted orbit with the largest gradient (Utils/KramersRestriction.h), NON_REL -> the
-// spin-restricted alpha pair (plus its beta twin). `joint` is the symmetric joint Hessian over
-// [t;y] (X2C) or the symmetrized real-step Hessian over t (NON_REL), `gradient` the matching joint
-// gradient. d^2E/ds^2 along exp(-s kappa) = v^T H v at a non-stationary point.
-template <typename T>
-std::string pnofIndependentCurvatureCheck(
-    rerdmft::PnofFunctional functional, const rerdmft::Matrix<T>& h, const rerdmft::Tensor4<T>& eri,
-    const std::vector<rerdmft::PnofGeminal>& geminals, const std::vector<double>& occ,
-    bool relativistic, const std::vector<std::pair<std::size_t, std::size_t>>& pairs,
-    const rerdmft::Matrix<double>& joint, const std::vector<double>& gradient,
-    const std::vector<std::size_t>& spin_partner) {
-  const std::size_t n = h.rows();
-  std::vector<double> dir(gradient.size(), 0.0);
-  bool have = false;
-  if constexpr (!std::is_same_v<T, double>) {
-    if (n % 2 == 0) {
-      const rerdmft::KramersRestriction kr(n, pairs);
-      const auto reduced = kr.contractRepresentative(gradient);
-      std::size_t best = 0;
-      for (std::size_t j = 0; j < reduced.size(); ++j)
-        if (std::abs(reduced[j]) > std::abs(reduced[best])) best = j;
-      std::vector<double> e(kr.reducedSize(), 0.0);
-      e[best] = 1.0;
-      dir = kr.expandRepresentative(e);
-      have = true;
-    }
-  } else if (!spin_partner.empty()) {
-    std::vector<long> index(n * n, -1);
-    for (std::size_t i = 0; i < pairs.size(); ++i) index[pairs[i].first * n + pairs[i].second] = static_cast<long>(i);
-    std::size_t best = pairs.size();
-    double best_mag = 0.0;
-    for (std::size_t i = 0; i < pairs.size(); ++i) {
-      if (spin_partner[pairs[i].first] > spin_partner[pairs[i].second] && std::abs(gradient[i]) > best_mag) {
-        best = i;
-        best_mag = std::abs(gradient[i]);
-      }
-    }
-    if (best < pairs.size()) {
-      dir[best] = 1.0;
-      const long twin = index[spin_partner[pairs[best].first] * n + spin_partner[pairs[best].second]];
-      if (twin >= 0) dir[static_cast<std::size_t>(twin)] = 1.0;
-      have = true;
-    }
-  }
-  std::ostringstream out;
-  if (!have) return out.str();
-  double curvature = 0.0, first = 0.0;
-  for (std::size_t i = 0; i < dir.size(); ++i) {
-    first += gradient[i] * dir[i];
-    for (std::size_t j = 0; j < dir.size(); ++j) curvature += dir[i] * joint(i, j) * dir[j];
-  }
-  const auto energy_at = [&](double s) {
-    rerdmft::Matrix<T> kappa(n, n, T{});
-    for (std::size_t i = 0; i < pairs.size(); ++i) {
-      const auto [p, q] = pairs[i];
-      if constexpr (std::is_same_v<T, double>) {
-        kappa(p, q) = s * dir[i];
-        kappa(q, p) = -s * dir[i];
-      } else {
-        const std::complex<double> z(s * dir[i], s * dir[pairs.size() + i]);
-        kappa(p, q) = z;
-        kappa(q, p) = -std::conj(z);
-      }
-    }
-    const auto u = rerdmft::spinorRotationMatrix(kappa);
-    const auto rot = rerdmft::rotateIntegralsExact(h, eri, u);
-    const auto two_rdm = rerdmft::buildPnofTwoRdm(functional, geminals, occ, relativistic);
-    return rerdmft::pnofElectronicEnergy(functional, rot.h, rot.eri, occ, geminals, two_rdm, relativistic);
-  };
-  // Central differences at step h and h/2, Richardson-extrapolated (removes the O(h^2) term).
-  constexpr double kStep = 1e-3;
-  const double e0 = energy_at(0.0);
-  const double ep = energy_at(kStep), em = energy_at(-kStep);
-  const double ep2 = energy_at(0.5 * kStep), em2 = energy_at(-0.5 * kStep);
-  const double first_h = (ep - em) / (2.0 * kStep), first_h2 = (ep2 - em2) / kStep;
-  const double second_h = (ep + em - 2.0 * e0) / (kStep * kStep);
-  const double second_h2 = (ep2 + em2 - 2.0 * e0) / (0.25 * kStep * kStep);
-  const double fd_first = (4.0 * first_h2 - first_h) / 3.0;
-  const double fd_second = (4.0 * second_h2 - second_h) / 3.0;
-  const bool ok_first = std::abs(first - fd_first) < 1e-7 * std::max(1.0, std::abs(first));
-  const bool ok_second = std::abs(curvature - fd_second) < 1e-6 * std::max(1.0, std::abs(curvature));
-  out << "\n  Independent check of the PNOF orbital gradient and Hessian along a symmetry-preserving\n"
-         "  rotation (finite differences of Occ_opt/PNOFs.h's pnofElectronicEnergy, NOT of the full\n"
-         "  two-RDM energy the gradient/Hessian are built from):\n";
-  out << std::setprecision(8) << "    dE/ds   analytic " << first << "   independent FD " << fd_first << "   |diff| "
-      << std::scientific << std::setprecision(2) << std::abs(first - fd_first) << "\n    d2E/ds2 analytic " << std::setprecision(8)
-      << std::defaultfloat << curvature << "   independent FD " << fd_second << "   |diff| " << std::scientific
-      << std::setprecision(2) << std::abs(curvature - fd_second) << std::defaultfloat << std::setprecision(6) << "\n"
-      << "    [" << (ok_first ? "PASS" : "FAIL") << "] gradient   [" << (ok_second ? "PASS" : "FAIL") << "] Hessian\n";
-  return out.str();
-}
-
-// Validates Hessian_opt/JkOnlyFock.h's jkOnlyOrbitalGradient and
-// Hessian_opt/JkOnlyHessian.h's jkOnlyHessianElement (the rederivation of
-// doc/orbital_hessian_jk_only.pdf) for EVERY JkFunctional, at generic
-// FRACTIONAL occupations in the active space (deterministic, well inside
-// (0,1); inactive orbitals keep occupation 0) -- independent of whatever
-// occupations a run's own SQP converged to (many functionals converge
-// near-idempotent for small systems, which would make this trivial).
-//  * gradient: max|new - old| against orbitalGradient(jkOnlyFockMatrix)
-//    over all p>=q, plus new-gradient vs. a finite difference of the
-//    ENERGY (jkOnlyEnergy at rotated integrals) at the 3 test pairs;
-//  * Hessian: jkOnlyHessianElement vs. a finite difference of the OLD,
-//    independently validated gradient at rotated integrals, for every
-//    ordered combination of the 3 test pairs (and the reversed (s,r)
-//    orientation of the second pair) -- 18 quadruples, including shared-
-//    index ones.
-// The 3 test pairs are the largest-|g_pq| active-active pairs of the
-// kMbb gradient at those occupations (never symmetry-zero by
-// construction). Rotated integrals are shared by all functionals (only
-// the coupling matrices differ), 6 rotations total.
-template <typename T>
-std::string jkOnlyRotationValidationReport(const rerdmft::Matrix<T>& h,
-                                            const rerdmft::Tensor4<T>& eri,
-                                            std::size_t n_inactive_below, std::size_t n_active,
-                                            double n_electrons) {
-  using rerdmft::JkFunctional;
-  const std::size_t n_total = h.rows();
-  const auto f_l = static_cast<std::size_t>(std::lround(n_electrons));
-  constexpr double kPowerAlpha = 0.6;
-  constexpr double kStep = 1e-4;
-
-  std::vector<double> occ(n_total, 0.0);
-  for (std::size_t i = 0; i < n_active; ++i) {
-    occ[n_inactive_below + i] = 0.15 + 0.7 * std::fmod(0.6180339887498949 * (i + 1), 1.0);
-  }
-
-  const std::vector<std::pair<JkFunctional, std::string>> functionals = {
-      {JkFunctional::kSd, "SD"},         {JkFunctional::kMbb, "MBB (Muller)"},
-      {JkFunctional::kBbc2, "BBC2"},     {JkFunctional::kCa, "CA"},
-      {JkFunctional::kCga, "CGA"},       {JkFunctional::kMl, "ML"},
-      {JkFunctional::kMlsic, "MLSIC"},   {JkFunctional::kGu, "GU"},
-      {JkFunctional::kPower, "POWER(0.6)"}, {JkFunctional::kMullerAs, "MULLER_AS"}};
-
-  std::ostringstream out;
-  out << "\n  JK_only orbital-rotation gradient/Hessian validation (doc/orbital_hessian_jk_only.pdf,\n"
-         "  Hessian_opt/JkOnlyFock.h + JkOnlyHessian.h) at generic FRACTIONAL occupations, every\n"
-         "  functional; Hessian vs. finite difference of the independent (Fock-based) gradient\n"
-         "  at rotated integrals (dkappa step " << kStep << "):\n";
-
-  // Test pairs: largest |g| active-active pairs of the Muller gradient.
-  const auto hc_mbb = rerdmft::jkHartreeCoupling(JkFunctional::kMbb, occ, f_l, kPowerAlpha);
-  const auto x_mbb = rerdmft::jkExchangeCoupling(JkFunctional::kMbb, occ, f_l, kPowerAlpha);
-  const auto g_mbb = rerdmft::jkOnlyOrbitalGradient(h, eri, occ, hc_mbb, x_mbb);
-  const auto pairs = selectJointTestPairs(g_mbb, n_inactive_below, n_inactive_below + n_active);
-  if (pairs.size() < 3) return out.str();
-  out << "    test pairs (2 largest |g| + a shared-index pair with the largest driving gradient):";
-  for (const auto& pr : pairs) out << " (" << pr.first << "," << pr.second << ")";
-  out << "\n";
-
-  auto buildKappa = [&](std::size_t a, std::size_t b, double t) {
-    rerdmft::Matrix<T> kappa(n_total, n_total, T{});
-    kappa(a, b) = T(t);
-    kappa(b, a) = T(-t);
-    return kappa;
-  };
-  std::vector<rerdmft::RotatedIntegrals<T>> rot_plus, rot_minus;
-  for (const auto& pr : pairs) {
-    rot_plus.push_back(rerdmft::rotateIntegrals(
-        h, eri, rerdmft::spinorRotationMatrix(buildKappa(pr.first, pr.second, kStep))));
-    rot_minus.push_back(rerdmft::rotateIntegrals(
-        h, eri, rerdmft::spinorRotationMatrix(buildKappa(pr.first, pr.second, -kStep))));
-  }
-
-  // Complex spinors only: the imaginary-step (y) and mixed (t,y) blocks.
-  const JointRotations<T> joint_rot = buildJointRotations(h, eri, pairs, kStep);
-  if constexpr (!std::is_same_v<T, double>) {
-    out << "    (complex spinors: also the imaginary-imaginary and real-imaginary blocks, the\n"
-           "     joint gradient vector and the joint symmetric Hessian over [t; y])\n";
-  } else {
-    out << "    (real orbitals: only the t directions -- gradient and symmetrized real-real\n"
-           "     Hessian, the Newton objects for real orbitals)\n";
-  }
-
-  for (const auto& [functional, name] : functionals) {
-    const auto hc = rerdmft::jkHartreeCoupling(functional, occ, f_l, kPowerAlpha);
-    const auto xc = rerdmft::jkExchangeCoupling(functional, occ, f_l, kPowerAlpha);
-    const auto g_new = rerdmft::jkOnlyOrbitalGradient(h, eri, occ, hc, xc);
-    const auto g_old = rerdmft::orbitalGradient(rerdmft::jkOnlyFockMatrix(h, eri, occ, hc, xc));
-
-    double max_grad_diff = 0.0, max_grad = 0.0;
-    for (std::size_t p = 0; p < n_total; ++p) {
-      for (std::size_t q = 0; q <= p; ++q) {
-        max_grad_diff = std::max(max_grad_diff, std::abs(g_new(p, q) - g_old(p, q)));
-        max_grad = std::max(max_grad, std::abs(g_old(p, q)));
-      }
-    }
-
-    // Gradient vs. energy finite difference at the 3 test pairs.
-    double max_grad_fd = 0.0;
-    for (std::size_t k = 0; k < pairs.size(); ++k) {
-      const double e_plus = rerdmft::jkOnlyEnergy(rot_plus[k].h, rot_plus[k].eri, occ, hc, xc);
-      const double e_minus = rerdmft::jkOnlyEnergy(rot_minus[k].h, rot_minus[k].eri, occ, hc, xc);
-      const double fd = (e_plus - e_minus) / (2.0 * kStep);
-      max_grad_fd = std::max(
-          max_grad_fd, std::abs(std::real(g_new(pairs[k].first, pairs[k].second)) - fd));
-    }
-
-    // Hessian vs. finite difference of the old gradient, 18 quadruples.
-    std::vector<rerdmft::Matrix<T>> g_plus, g_minus;
-    for (std::size_t k = 0; k < pairs.size(); ++k) {
-      g_plus.push_back(rerdmft::orbitalGradient(
-          rerdmft::jkOnlyFockMatrix(rot_plus[k].h, rot_plus[k].eri, occ, hc, xc)));
-      g_minus.push_back(rerdmft::orbitalGradient(
-          rerdmft::jkOnlyFockMatrix(rot_minus[k].h, rot_minus[k].eri, occ, hc, xc)));
-    }
-    double max_hess_diff = 0.0, max_hess = 0.0, max_imag = 0.0;
-    std::size_t n_quad = 0;
-    for (std::size_t kb = 0; kb < pairs.size(); ++kb) {
-      for (int orient = 0; orient < 2; ++orient) {
-        const std::size_t r = orient == 0 ? pairs[kb].first : pairs[kb].second;
-        const std::size_t s = orient == 0 ? pairs[kb].second : pairs[kb].first;
-        const double sign = orient == 0 ? 1.0 : -1.0;
-        for (std::size_t ka = 0; ka < pairs.size(); ++ka) {
-          const std::size_t p = pairs[ka].first, q = pairs[ka].second;
-          const double fd =
-              sign * std::real((g_plus[kb](p, q) - g_minus[kb](p, q)) / T(2.0 * kStep));
-          const T analytic = rerdmft::jkOnlyHessianElement(h, eri, occ, hc, xc, p, q, r, s);
-          max_hess_diff = std::max(max_hess_diff, std::abs(std::real(analytic) - fd));
-          max_hess = std::max(max_hess, std::abs(fd));
-          max_imag = std::max(max_imag, std::abs(std::imag(std::complex<double>(analytic))));
-          ++n_quad;
-        }
-      }
-    }
-    out << "    " << std::left << std::setw(13) << name << std::right << std::scientific
-        << std::setprecision(2) << "gradient: |new-old|max=" << max_grad_diff
-        << " (|g|max=" << max_grad << ")  |new-energyFD|max=" << max_grad_fd
-        << "   Hessian: |analytic-FD|max=" << max_hess_diff << " (|H|max=" << max_hess
-        << ", " << n_quad << " quadruples, max|Im|=" << max_imag << ")\n"
-        << std::defaultfloat << std::setprecision(6);
-
-    {
-      JointCheckCallbacks<T> cb;
-      cb.gradient_new = [&](const rerdmft::Matrix<T>& hh, const rerdmft::Tensor4<T>& ee) {
-        return rerdmft::jkOnlyOrbitalGradient(hh, ee, occ, hc, xc);
-      };
-      cb.gradient_ref = [&](const rerdmft::Matrix<T>& hh, const rerdmft::Tensor4<T>& ee) {
-        return rerdmft::orbitalGradient(rerdmft::jkOnlyFockMatrix(hh, ee, occ, hc, xc));
-      };
-      cb.energy = [&](const rerdmft::Matrix<T>& hh, const rerdmft::Tensor4<T>& ee) {
-        return rerdmft::jkOnlyEnergy(hh, ee, occ, hc, xc);
-      };
-      cb.hess_tt = [&](std::size_t a, std::size_t b, std::size_t c, std::size_t d) {
-        return rerdmft::jkOnlyHessianElement(h, eri, occ, hc, xc, a, b, c, d);
-      };
-      if constexpr (!std::is_same_v<T, double>) {
-        cb.hess_yy = [&](std::size_t a, std::size_t b, std::size_t c, std::size_t d) {
-          return rerdmft::jkOnlyHessianElementImag(h, eri, occ, hc, xc, a, b, c, d);
-        };
-        cb.hess_mixed = [&](std::size_t a, std::size_t b, std::size_t c, std::size_t d) {
-          return rerdmft::jkOnlyHessianElementMixed(h, eri, occ, hc, xc, a, b, c, d);
-        };
-        cb.joint = [&](const std::vector<std::pair<std::size_t, std::size_t>>& pr) {
-          return rerdmft::jkOnlyJointHessianMatrix(h, eri, occ, hc, xc, pr);
-        };
-      } else {
-        cb.joint = [&](const std::vector<std::pair<std::size_t, std::size_t>>& pr) {
-          return symmetrizeReal(rerdmft::jkOnlyHessianMatrix(h, eri, occ, hc, xc, pr));
-        };
-      }
-      const bool with_2d =
-          functional == JkFunctional::kMbb || functional == JkFunctional::kMullerAs;
-      out << formatJointCheck(jointBlocksCheck<T>(h, eri, joint_rot, cb, with_2d));
-    }
-  }
-  return out.str();
-}
-
-// NON_REL only: the JK_only Hessian element that couples an orbital pair (p,q) to its
-// opposite-spin TWIN (p+n,q+n) (block spin layout), for every functional, with SPIN-SYMMETRIC
-// fractional occupations (occ[k+n] = occ[k], the physical NON_REL situation). These elements
-// are spin-independent-looking but couple through the Coulomb term only (the exchange
-// integrals across spins are exactly zero), which is where the PNOF Hessian had its X != H
-// bug. Two references, neither of which shares the analytic formula:
-//  * the mixed second derivative of jkOnlyEnergy along exp(-(a K_pq + b K_twin)) (energy only,
-//    4-point, Richardson-extrapolated) against the symmetrized analytic element;
-//  * the derivative of the Fock-based gradient at (p,q) along the twin rotation against the
-//    (unsymmetrized) analytic element.
-// Also the spin-forbidden elements (p,q) x (p+n,q) and (p,q) x (p,q+n), which must be zero.
-template <typename T>
-std::string jkOnlyTwinPairReport(const rerdmft::Matrix<T>& h, const rerdmft::Tensor4<T>& eri,
-                                 double n_electrons) {
-  using rerdmft::JkFunctional;
-  std::ostringstream out;
-  if constexpr (!std::is_same_v<T, double>) {
-    return out.str();
-  } else {
-    const std::size_t n_total = h.rows();
-    if (n_total % 2 != 0 || n_total < 4) return out.str();
-    const std::size_t n = n_total / 2;
-    const auto f_l = static_cast<std::size_t>(std::lround(n_electrons));
-    constexpr double kPowerAlpha = 0.6;
-    constexpr double kStep = 2e-3;
-    std::vector<double> occ(n_total, 0.0);
-    for (std::size_t k = 0; k < n; ++k) {
-      occ[k] = 0.15 + 0.7 * std::fmod(0.6180339887498949 * (k + 1), 1.0);
-      occ[k + n] = occ[k];
-    }
-    const std::vector<std::pair<JkFunctional, std::string>> functionals = {
-        {JkFunctional::kSd, "SD"},         {JkFunctional::kMbb, "MBB (Muller)"},
-        {JkFunctional::kBbc2, "BBC2"},     {JkFunctional::kCa, "CA"},
-        {JkFunctional::kCga, "CGA"},       {JkFunctional::kMl, "ML"},
-        {JkFunctional::kMlsic, "MLSIC"},   {JkFunctional::kGu, "GU"},
-        {JkFunctional::kPower, "POWER(0.6)"}, {JkFunctional::kMullerAs, "MULLER_AS"}};
-
-    // Two alpha-alpha pairs with the largest MBB gradient (never symmetry-zero).
-    const auto hc0 = rerdmft::jkHartreeCoupling(JkFunctional::kMbb, occ, f_l, kPowerAlpha);
-    const auto xc0 = rerdmft::jkExchangeCoupling(JkFunctional::kMbb, occ, f_l, kPowerAlpha);
-    const auto g0 = rerdmft::jkOnlyOrbitalGradient(h, eri, occ, hc0, xc0);
-    std::vector<std::pair<double, std::pair<std::size_t, std::size_t>>> ranked;
-    for (std::size_t p = 1; p < n; ++p)
-      for (std::size_t q = 0; q < p; ++q) ranked.push_back({std::abs(g0(p, q)), {p, q}});
-    std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
-    if (ranked.size() < 2) return out.str();
-    const std::size_t n_test = 2;
-
-    const auto rotate = [&](std::size_t a1, std::size_t b1, double s1, std::size_t a2, std::size_t b2,
-                            double s2) {
-      rerdmft::Matrix<T> kappa(n_total, n_total, T{});
-      kappa(a1, b1) += s1;
-      kappa(b1, a1) -= s1;
-      kappa(a2, b2) += s2;
-      kappa(b2, a2) -= s2;
-      return rerdmft::rotateIntegralsExact(h, eri, rerdmft::spinorRotationMatrix(kappa));
-    };
-
-    out << "\n  JK_only Hessian elements coupling a pair to its opposite-spin TWIN (NON_REL, block spin\n"
-           "  layout, spin-symmetric fractional occupations), every functional. Reference 1: mixed second\n"
-           "  derivative of jkOnlyEnergy along exp(-(a K_pq + b K_twin)) (energy only, Richardson, step "
-        << kStep << ");\n  reference 2: derivative of the Fock-based gradient along the twin rotation.\n";
-    for (std::size_t k = 0; k < n_test; ++k) {
-      const auto [p, q] = ranked[k].second;
-      const std::size_t pt = p + n, qt = q + n;
-      // Rotated integrals shared by all functionals.
-      // mixed[j][0..1]: E(+-x,+-x) at x = kStep and kStep/2 -> four signs each.
-      std::vector<rerdmft::RotatedIntegrals<T>> mix;  // order: (h,h),(h,-h),(-h,h),(-h,-h) at h, then h/2
-      for (double x : {kStep, 0.5 * kStep})
-        for (auto [sa, sb] : {std::pair<double, double>{1, 1}, {1, -1}, {-1, 1}, {-1, -1}})
-          mix.push_back(rotate(p, q, sa * x, pt, qt, sb * x));
-      const auto twin_plus = rotate(pt, qt, kStep, pt, qt, 0.0);
-      const auto twin_minus = rotate(pt, qt, -kStep, pt, qt, 0.0);
-      out << "    pair (" << p << "," << q << ") x twin (" << pt << "," << qt << "), |g|=" << std::scientific
-          << std::setprecision(2) << ranked[k].first << std::defaultfloat << std::setprecision(6) << "\n";
-      for (const auto& [functional, name] : functionals) {
-        const auto hc = rerdmft::jkHartreeCoupling(functional, occ, f_l, kPowerAlpha);
-        const auto xc = rerdmft::jkExchangeCoupling(functional, occ, f_l, kPowerAlpha);
-        const double a_pt = rerdmft::jkOnlyHessianElement(h, eri, occ, hc, xc, p, q, pt, qt);
-        const double a_tp = rerdmft::jkOnlyHessianElement(h, eri, occ, hc, xc, pt, qt, p, q);
-        const double sym = 0.5 * (a_pt + a_tp);
-        const auto mixed_at = [&](std::size_t off, double x) {
-          const auto e = [&](std::size_t i) { return rerdmft::jkOnlyEnergy(mix[off + i].h, mix[off + i].eri, occ, hc, xc); };
-          return (e(0) - e(1) - e(2) + e(3)) / (4.0 * x * x);
-        };
-        const double m1 = mixed_at(0, kStep), m2 = mixed_at(4, 0.5 * kStep);
-        const double fd_energy = (4.0 * m2 - m1) / 3.0;
-        const auto gp = rerdmft::orbitalGradient(rerdmft::jkOnlyFockMatrix(twin_plus.h, twin_plus.eri, occ, hc, xc));
-        const auto gm = rerdmft::orbitalGradient(rerdmft::jkOnlyFockMatrix(twin_minus.h, twin_minus.eri, occ, hc, xc));
-        const double fd_grad = std::real(gp(p, q) - gm(p, q)) / (2.0 * kStep);
-        const double forb1 = rerdmft::jkOnlyHessianElement(h, eri, occ, hc, xc, p, q, pt, q);
-        const double forb2 = rerdmft::jkOnlyHessianElement(h, eri, occ, hc, xc, p, q, p, qt);
-        const double d_energy = std::abs(sym - fd_energy), d_grad = std::abs(a_pt - fd_grad);
-        const double scale = std::max(1.0, std::abs(sym));
-        const bool ok = d_energy < 1e-6 * scale && d_grad < 1e-6 * scale && std::abs(forb1) < 1e-10 &&
-                        std::abs(forb2) < 1e-10;
-        out << "      " << std::left << std::setw(13) << name << std::right << std::scientific << std::setprecision(3)
-            << "H=" << a_pt << "  |sym-energyFD|=" << d_energy << "  |H-gradFD|=" << d_grad
-            << "  spin-forbidden max=" << std::max(std::abs(forb1), std::abs(forb2)) << "  ["
-            << (ok ? "PASS" : "FAIL") << "]" << std::defaultfloat << std::setprecision(6) << "\n";
-      }
-    }
-    return out.str();
-  }
-}
-
-// Hartree-Fock LIMIT of the JK_only machinery: MBB (Muller) at the integer occupations n = 1 for
-// the n_electrons lowest occupied spin-orbitals and 0 elsewhere IS Hartree-Fock (Dirac-Fock for
-// the relativistic paths), so its orbital gradient and Hessian must be the HF ones. The reference
-// is NOT built from any JK_only / Hessian_opt code:
-//  * E_HF = sum_{i occ} h_ii + 1/2 sum_{ij occ} (<ij|ij> - <ij|ji>) written from scratch on the
-//    exactly rotated integrals; the gradient and the (joint, symmetrized) Hessian on a set of
-//    test pairs (occupied-virtual, opposite-spin/Kramers twin, spin-forbidden, occupied-occupied,
-//    virtual-virtual) are Richardson-extrapolated finite differences of that energy;
-//  * REAL orbitals only, additionally the textbook closed form over ALL occupied-virtual pairs
-//    (spin-orbital basis), with F = h + sum_j (<pj|qj> - <pj|jq>):
-//      dE/dx_ai = -2 F_ai,   d2E/dx_ai dx_bj = 2 (d_ij F_ab - d_ab F_ij + <aj||ib> + <ab||ij>),
-//    x_ai = the kappa_ai coordinate (kappa_ai = +x, kappa_ia = -x; a virtual, i occupied).
-// The occupied-occupied / virtual-virtual rotations leave E_HF invariant, so their gradient
-// entries must vanish and every Hessian element involving one is at most of the size of the
-// residual occupied-virtual gradient (0 at exactly converged orbitals); those are reported too.
-template <typename T>
-std::string jkOnlyHartreeFockLimitReport(const rerdmft::Matrix<T>& h, const rerdmft::Tensor4<T>& eri,
-                                         std::size_t n_inactive_below, std::size_t n_active,
-                                         double n_electrons) {
-  using rerdmft::JkFunctional;
-  constexpr bool kReal = std::is_same_v<T, double>;
-  const std::size_t n_total = h.rows();
-  const auto n_el = static_cast<std::size_t>(std::lround(n_electrons));
-  std::ostringstream out;
-  if (n_el == 0 || n_el % 2 != 0) return out.str();
-  if (n_total > 64) {
-    out << "\n  JK_only Hartree-Fock-limit check skipped (" << n_total << " spin-orbitals > 64).\n";
-    return out.str();
-  }
-
-  // Occupied / virtual spin-orbitals and the test pairs (p > q).
-  std::vector<std::size_t> occupied, virt;
-  std::vector<std::pair<std::size_t, std::size_t>> pairs;
-  const auto add_pair = [&](std::size_t a, std::size_t b) {
-    if (a == b) return;
-    const std::pair<std::size_t, std::size_t> pr{std::max(a, b), std::min(a, b)};
-    if (std::find(pairs.begin(), pairs.end(), pr) == pairs.end()) pairs.push_back(pr);
-  };
-  if constexpr (kReal) {
-    const std::size_t n = n_total / 2, no = n_el / 2;
-    if (n_total % 2 != 0 || no >= n) return out.str();
-    for (std::size_t k = 0; k < n; ++k) {
-      (k < no ? occupied : virt).push_back(k);
-    }
-    for (std::size_t k = 0; k < n; ++k) {
-      (k < no ? occupied : virt).push_back(k + n);
-    }
-    add_pair(no, no - 1);                                   // LUMO-HOMO (alpha)
-    if (no >= 2 && n - no >= 2) add_pair(no + 1, 0);        // second virtual - lowest occupied
-    if (no >= 2) add_pair(no - 1, 0);                       // occupied-occupied
-    if (n - no >= 2) add_pair(no + 1, no);                  // virtual-virtual
-    add_pair(no + n, no - 1 + n);                           // beta twin of the LUMO-HOMO pair
-    add_pair(no - 1 + n, no);                               // beta HOMO - alpha LUMO (spin-forbidden)
-  } else {
-    const std::size_t base = n_inactive_below, top = n_inactive_below + n_active;
-    if (base + n_el + 1 >= top) return out.str();
-    for (std::size_t k = base; k < top; ++k) (k < base + n_el ? occupied : virt).push_back(k);
-    const std::size_t v0 = base + n_el, o_last = base + n_el - 1;
-    add_pair(v0, o_last);
-    if (n_el >= 2) add_pair(v0 + 1, base);
-    if (n_el >= 2) add_pair(o_last, base);
-    add_pair(v0 + 1, v0);
-    add_pair(v0 + 1, o_last - 1);                           // Kramers partner of the LUMO-HOMO pair
-  }
-  std::vector<double> occ(n_total, 0.0);
-  for (std::size_t i : occupied) occ[i] = 1.0;
-  const auto f_l = n_el;
-  const auto hc = rerdmft::jkHartreeCoupling(JkFunctional::kMbb, occ, f_l, 0.6);
-  const auto xc = rerdmft::jkExchangeCoupling(JkFunctional::kMbb, occ, f_l, 0.6);
-
-  const auto hf_energy = [&](const rerdmft::Matrix<T>& hh, const rerdmft::Tensor4<T>& ee) {
-    double e = 0.0;
-    for (std::size_t i : occupied) e += std::real(hh(i, i));
-    double two = 0.0;
-    for (std::size_t i : occupied)
-      for (std::size_t j : occupied) two += std::real(ee(i, j, i, j)) - std::real(ee(i, j, j, i));
-    return e + 0.5 * two;
-  };
-
-  const std::size_t n_par = kReal ? pairs.size() : 2 * pairs.size();  // [t..., y...]
-  const auto energy_at = [&](const std::vector<double>& x) {
-    rerdmft::Matrix<T> kappa(n_total, n_total, T{});
-    for (std::size_t i = 0; i < pairs.size(); ++i) {
-      const auto [p, q] = pairs[i];
-      if constexpr (kReal) {
-        kappa(p, q) = x[i];
-        kappa(q, p) = -x[i];
-      } else {
-        const std::complex<double> z(x[i], x[pairs.size() + i]);
-        kappa(p, q) = z;
-        kappa(q, p) = -std::conj(z);
-      }
-    }
-    const auto rot = rerdmft::rotateIntegralsExact(h, eri, rerdmft::spinorRotationMatrix(kappa));
-    return hf_energy(rot.h, rot.eri);
-  };
-  const auto point = [&](std::size_t a, double sa, std::size_t b, double sb) {
-    std::vector<double> x(n_par, 0.0);
-    x[a] += sa;
-    x[b] += sb;
-    return energy_at(x);
-  };
-
-  constexpr double kStep = 2e-3;
-  const double e0 = energy_at(std::vector<double>(n_par, 0.0));
-  // Richardson-extrapolated first derivative and (mixed) second derivative.
-  std::vector<double> fd_grad(n_par);
-  rerdmft::Matrix<double> fd_hess(n_par, n_par, 0.0);
-  for (std::size_t a = 0; a < n_par; ++a) {
-    const auto d1 = [&](double x) { return (point(a, x, a, 0.0) - point(a, -x, a, 0.0)) / (2.0 * x); };
-    fd_grad[a] = (4.0 * d1(0.5 * kStep) - d1(kStep)) / 3.0;
-    for (std::size_t b = a; b < n_par; ++b) {
-      const auto d2 = [&](double x) {
-        if (a == b) return (point(a, x, a, x) + point(a, -x, a, -x) - 2.0 * e0) / (4.0 * x * x);
-        return (point(a, x, b, x) - point(a, x, b, -x) - point(a, -x, b, x) + point(a, -x, b, -x)) /
-               (4.0 * x * x);
-      };
-      // (a == b): E(2x)+E(-2x)-2E0 over (2x)^2 is the diagonal second difference at step 2x.
-      fd_hess(a, b) = fd_hess(b, a) = (4.0 * d2(0.5 * kStep) - d2(kStep)) / 3.0;
-    }
-  }
-
-  const auto g_full = rerdmft::jkOnlyOrbitalGradient(h, eri, occ, hc, xc);
-  const std::vector<double> g_joint = rerdmft::jointOrbitalGradient(g_full, pairs);
-  rerdmft::Matrix<double> h_joint(n_par, n_par, 0.0);
-  if constexpr (kReal) {
-    h_joint = symmetrizeReal(rerdmft::jkOnlyHessianMatrix(h, eri, occ, hc, xc, pairs));
-  } else {
-    h_joint = rerdmft::jkOnlyJointHessianMatrix(h, eri, occ, hc, xc, pairs);
-  }
-  double d_grad = 0.0, d_hess = 0.0, max_g = 0.0, max_h = 0.0;
-  for (std::size_t a = 0; a < n_par; ++a) {
-    d_grad = std::max(d_grad, std::abs(g_joint[a] - fd_grad[a]));
-    max_g = std::max(max_g, std::abs(fd_grad[a]));
-    for (std::size_t b = 0; b < n_par; ++b) {
-      d_hess = std::max(d_hess, std::abs(h_joint(a, b) - fd_hess(a, b)));
-      max_h = std::max(max_h, std::abs(fd_hess(a, b)));
-    }
-  }
-  const double e_muller = rerdmft::jkOnlyEnergy(h, eri, occ, hc, xc);
-  out << "\n  JK_only (MBB / Muller) at the Hartree-Fock occupations n = 1 (" << n_el << " lowest occupied spin-orbitals), n = 0\n"
-         "  elsewhere, against a from-scratch Hartree-Fock reference (no JK_only / Hessian_opt code in it):\n"
-      << std::setprecision(12) << "    energy: E_HF(from scratch) = " << e0 << "  MBB = " << e_muller << "  |diff| = "
-      << std::scientific << std::setprecision(2) << std::abs(e0 - e_muller) << std::defaultfloat << std::setprecision(6) << "\n"
-      << "    finite differences of E_HF over " << pairs.size() << " pairs" << (kReal ? "" : " (t and y)") << ":";
-  for (const auto& pr : pairs) out << " (" << pr.first << "," << pr.second << ")";
-  out << std::scientific << std::setprecision(2) << "\n    gradient: |MBB - E_HF FD|max = " << d_grad << " (|g|max = " << max_g
-      << ")   Hessian: |MBB - E_HF FD|max = " << d_hess << " (|H|max = " << max_h << ")\n    ["
-      << ((d_grad < 1e-7 * std::max(1.0, max_g) && d_hess < 1e-6 * std::max(1.0, max_h)) ? "PASS" : "FAIL")
-      << "] gradient and Hessian over the test pairs\n" << std::defaultfloat << std::setprecision(6);
-
-  if constexpr (kReal) {
-    // Textbook closed form over ALL occupied-virtual pairs.
-    const auto fock = [&](std::size_t p, std::size_t q) {
-      double f = h(p, q);
-      for (std::size_t j : occupied) f += eri(p, j, q, j) - eri(p, j, j, q);
-      return f;
-    };
-    const auto anti = [&](std::size_t a, std::size_t b, std::size_t c, std::size_t d) {
-      return eri(a, b, c, d) - eri(a, b, d, c);
-    };
-    struct Ov { std::size_t a, i; };
-    std::vector<Ov> ov;
-    for (std::size_t a : virt)
-      for (std::size_t i : occupied) ov.push_back({a, i});
-    // MBB-side quantities in the x_ai coordinate: pair (p,q), p > q: kappa_pq = +t, so x_ai = t if
-    // a > i and -t if a < i (kappa_ai = -kappa_ia).
-    const auto sign_of = [](const Ov& c) { return c.a > c.i ? 1.0 : -1.0; };
-    double gd = 0.0, gmax = 0.0, hd = 0.0, hmax = 0.0, g_forbidden = 0.0, h_oovv = 0.0;
-    for (const Ov& c : ov) {
-      const std::size_t p = std::max(c.a, c.i), q = std::min(c.a, c.i);
-      const double mbb_x = sign_of(c) * std::real(g_full(p, q));
-      gd = std::max(gd, std::abs(mbb_x - (-2.0 * fock(c.a, c.i))));
-      gmax = std::max(gmax, std::abs(2.0 * fock(c.a, c.i)));
-    }
-    for (const Ov& c1 : ov) {
-      for (const Ov& c2 : ov) {
-        const std::size_t p = std::max(c1.a, c1.i), q = std::min(c1.a, c1.i);
-        const std::size_t r = std::max(c2.a, c2.i), s = std::min(c2.a, c2.i);
-        const double mbb = 0.5 * sign_of(c1) * sign_of(c2) *
-                           (std::real(rerdmft::jkOnlyHessianElement(h, eri, occ, hc, xc, p, q, r, s)) +
-                            std::real(rerdmft::jkOnlyHessianElement(h, eri, occ, hc, xc, r, s, p, q)));
-        const double ref = 2.0 * ((c1.i == c2.i ? fock(c1.a, c2.a) : 0.0) - (c1.a == c2.a ? fock(c1.i, c2.i) : 0.0) +
-                                  anti(c1.a, c2.i, c1.i, c2.a) + anti(c1.a, c2.a, c1.i, c2.i));
-        hd = std::max(hd, std::abs(mbb - ref));
-        hmax = std::max(hmax, std::abs(ref));
-      }
-    }
-    // oo and vv rotations: E_HF is invariant.
-    for (const auto& list : {occupied, virt}) {
-      for (std::size_t x = 0; x < list.size(); ++x)
-        for (std::size_t y = 0; y < x; ++y) {
-          const std::size_t p = std::max(list[x], list[y]), q = std::min(list[x], list[y]);
-          g_forbidden = std::max(g_forbidden, std::abs(std::real(g_full(p, q))));
-          for (const Ov& c : ov) {
-            const std::size_t r = std::max(c.a, c.i), s = std::min(c.a, c.i);
-            h_oovv = std::max(h_oovv, std::abs(0.5 * (std::real(rerdmft::jkOnlyHessianElement(h, eri, occ, hc, xc, p, q, r, s)) +
-                                                     std::real(rerdmft::jkOnlyHessianElement(h, eri, occ, hc, xc, r, s, p, q)))));
-          }
-        }
-    }
-    const double tol_res = 10.0 * gmax + 1e-8;
-    out << std::scientific << std::setprecision(2) << "    textbook closed form over all " << ov.size()
-        << " occupied-virtual pairs (" << ov.size() * ov.size() << " Hessian elements):\n"
-        << "      gradient dE/dx_ai = -2 F_ai: |MBB - textbook|max = " << gd << " (|2F_ai|max = " << gmax << ")\n"
-        << "      Hessian 2(d_ij F_ab - d_ab F_ij + <aj||ib> + <ab||ij>): |MBB - textbook|max = " << hd
-        << " (|H|max = " << hmax << ")\n"
-        << "      occupied-occupied / virtual-virtual (E_HF invariant): |g|max = " << g_forbidden
-        << ", |H(oo|vv, ov)|max = " << h_oovv << "  (bounded by the residual ov gradient " << gmax << ")\n    ["
-        << ((gd < 1e-8 * std::max(1.0, gmax) + 1e-9 && hd < 1e-8 * std::max(1.0, hmax) && g_forbidden < 1e-10 &&
-             h_oovv < tol_res)
-                ? "PASS"
-                : "FAIL")
-        << "] textbook Hartree-Fock gradient and Hessian\n" << std::defaultfloat << std::setprecision(6);
-  }
-  return out.str();
-}
-
 // `Eri` is the dense Tensor4<T> or Cholesky vectors (rerdmft::CholeskyEri<T>): the energy/gradient/Hessian
 // code below only needs element access, so it takes either; the DEBUG-only validation blocks that need a
 // dense tensor take a dense view (denseOf) of it.
@@ -2152,8 +825,8 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
                                    int jk_frozen_pairs, int jk_active_pairs,
                                    double temperature_kelvin, const std::string& functional_name,
                                    const std::string& occupation_init_name,
-                                   double nuclear_repulsion_energy, bool debug, int verbose,
-                                   bool full_hessian, const rerdmft::FullOptSettings& full_opt,
+                                   double nuclear_repulsion_energy, bool debug,
+                                   const rerdmft::FullOptSettings& full_opt,
                                    bool full_optimization_4c_neg,
                                    std::chrono::steady_clock::time_point t_start,
                                    std::chrono::steady_clock::time_point& t_checkpoint,
@@ -2162,7 +835,7 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
                                    const Eri* eri_full_block = nullptr,
                                    const std::vector<double>* initial_occupations = nullptr) {
   // Generic (element-access) view of the integrals, used by the production code below; the DEBUG /
-  // HESSIAN_FUNCTIONAL validation blocks that need a dense Tensor4 re-bind `eri` to a dense view of `eri_in`.
+  // validation blocks that need a dense Tensor4 re-bind `eri` to a dense view of `eri_in`.
   const Eri& eri = eri_in;
   rerdmft::progressContext() = label;  // live progress lines (stderr) are prefixed with the method
   const std::size_t n_total = h.rows();
@@ -2579,49 +1252,6 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
             << e.what() << "\n";
       }
 
-      // General (dense 2-RDM, O(n^6) per Fock build) cross-check: builds
-      // the SAME H/X-only 2-RDM ansatz as jkOnlyFockMatrix, but as an
-      // EXPLICIT dense Tensor4 (Hessian_opt/JkOnlyFock.h's
-      // jkOnlyDenseTwoRdm), fed into GeneralizedFock.h's fully general
-      // generalizedFockMatrix + OrbitalGradient.h's own orbitalGradient
-      // -- no ansatz-specific shortcut anywhere in this path. Diagnostic
-      // step for the still-open JK_only relativistic Hessian bug
-      // (project_jk_only_relativistic_hessian_gap.md): confirms whether
-      // the GRADIENT (not yet known broken, unlike the Hessian) is
-      // correct when built the expensive, assumption-free way too, for
-      // JK_only's own non-idempotent, non-Kramers-bar-uniform 2-RDM.
-      // Only run at VERBOSE > 0 (same convention as every other
-      // dense-2-RDM cross-check in this file) since O(n^6) is not cheap
-      // even at water/STO-3G's size.
-      if (verbose > 0) {
-        try {
-          const auto dense_gamma =
-              rerdmft::jkOnlyDenseTwoRdm<T>(n_total, opt_two_rdm_h, opt_two_rdm_x);
-          rerdmft::Matrix<T> d_diag(n_total, n_total, T{});
-          for (std::size_t i = 0; i < n_total; ++i) d_diag(i, i) = T(optimized_occ[i]);
-          const auto fock_general = rerdmft::generalizedFockMatrix(h, eri, d_diag, dense_gamma);
-          const auto gradient_general = rerdmft::orbitalGradient(fock_general);
-          const auto check_general =
-              rerdmft::orbitalRotationGradientCheck<T>(h, eri, gradient_general, energy_fn, p, q);
-          out << "\n  General (dense 2-RDM) e^kappa orbital-rotation gradient finite-difference "
-                 "check\n"
-                 "  (generalizedFockMatrix fed jkOnlyDenseTwoRdm's explicit dense Gamma vs.\n"
-                 "  rotated-integral energy probe, SAME orbital pair (" << p << "," << q
-              << ")):\n";
-          out << "    Analytic gradient g_pq (general):  " << std::setprecision(10)
-              << check_general.analytic << std::setprecision(6) << "\n";
-          out << "    Finite-difference dE/dkappa:           " << std::setprecision(10)
-              << check_general.finite_difference << std::setprecision(6) << "\n";
-          out << "    |difference| (expect small):       " << check_general.abs_diff << "\n";
-          out << "    |cheap - general| (expect ~0):     "
-              << std::abs(gradient(p, q) - gradient_general(p, q)) << "\n";
-        } catch (const std::exception& e) {
-          out << "\n  General (dense 2-RDM) e^kappa orbital-rotation gradient finite-difference "
-                 "check FAILED: "
-              << e.what() << "\n";
-        }
-      }
-
       if (n_active >= 4) {
         const std::size_t r = p + 1;
         const std::size_t s = q + 1;
@@ -2634,7 +1264,6 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
         // INDEPENDENT (generalized-Fock-based, jkOnlyFockMatrix) gradient
         // at rotated integrals. This test's own default quadruple can be
         // symmetry-zero for symmetric molecules -- the informative,
-        // all-functionals check is jkOnlyRotationValidationReport below.
         try {
           const auto hess_pqrs = rerdmft::jkOnlyHessianElement(h, eri, optimized_occ, opt_two_rdm_h,
                                                                  opt_two_rdm_x, p, q, r, s);
@@ -2661,550 +1290,6 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
               << e.what() << "\n";
         }
 
-        // Eq. 9 of doc/orbital_hessian.tex (GeneralizedHessian.h's own
-        // "boxed" G_pq,rs, unsimplified, no ansatz-specific shortcut of
-        // any kind), fed an EXPLICIT dense two_rdm built from JK_only's
-        // OWN H/X ansatz (Hessian_opt/JkOnlyFock.h's jkOnlyDenseTwoRdm --
-        // the SAME dense tensor the gradient's own general cross-check
-        // above already uses). Runs for BOTH T = double and T =
-        // std::complex<double> (unlike the cheap check above), gated
-        // VERBOSE > 0 like every other dense-2-RDM cross-check in this
-        // file, since O(n^2)-per-element/O(n^6)-per-tensor is not cheap.
-        // Diagnostic step for the still-open JK_only relativistic
-        // Hessian bug: since the gradient/Fock is already confirmed
-        // correct via this exact dense-2-RDM route (see the gradient
-        // cross-check above), this isolates whether Eq. 9 ITSELF (not
-        // just the cheap formula's own algebraic simplification of it)
-        // already disagrees with the numerical Hessian for JK_only's
-        // non-idempotent, non-Kramers-bar-uniform 2-RDM.
-        if (verbose > 0) {
-          try {
-            const auto dense_gamma =
-                rerdmft::jkOnlyDenseTwoRdm<T>(n_total, opt_two_rdm_h, opt_two_rdm_x);
-            rerdmft::Matrix<T> d_diag(n_total, n_total, T{});
-            for (std::size_t i = 0; i < n_total; ++i) d_diag(i, i) = T(optimized_occ[i]);
-
-            // Energy cross-check: the RAW, general contraction
-            // E = sum_pq h_pq D_qp + sum_pqrs eri(p,q,r,s) Gamma_pqrs
-            // (HartreeExchangeGradient.h's own derivation starting
-            // point, before ANY ansatz-specific simplification) fed
-            // this functional's EXPLICIT dense Gamma, vs.
-            // jkOnlyEnergy's cheap, already-in-production formula for
-            // the SAME two_rdm_h/two_rdm_x. Unlike the Hessian, this
-            // contraction does NOT involve Gamma_pqrs and Gamma_qprs
-            // separately at any point (only Gamma_pqrs itself, summed
-            // against eri(p,q,r,s) -- no dummy-index relabeling that
-            // would expose the ansatz's own antisymmetry violation), so
-            // expect EXACT agreement regardless of the antisymmetry
-            // check below.
-            {
-              T energy_dense_sum{};
-              for (std::size_t i = 0; i < n_total; ++i) {
-                for (std::size_t j = 0; j < n_total; ++j) {
-                  energy_dense_sum += h(i, j) * d_diag(j, i);
-                }
-              }
-              for (std::size_t p2 = 0; p2 < n_total; ++p2) {
-                for (std::size_t q2 = 0; q2 < n_total; ++q2) {
-                  for (std::size_t r2 = 0; r2 < n_total; ++r2) {
-                    for (std::size_t s2 = 0; s2 < n_total; ++s2) {
-                      energy_dense_sum += eri(p2, q2, r2, s2) * dense_gamma(p2, q2, r2, s2);
-                    }
-                  }
-                }
-              }
-              const double energy_dense = std::real(energy_dense_sum);
-              const double energy_cheap =
-                  rerdmft::jkOnlyEnergy(h, eri, optimized_occ, opt_two_rdm_h, opt_two_rdm_x);
-              out << "\n  Energy cross-check: dense Gamma (raw E = sum h*D + sum eri*Gamma) vs.\n"
-                     "  jkOnlyEnergy's cheap formula, SAME two_rdm_h/two_rdm_x, OPTIMIZED "
-                     "occupations:\n";
-              out << "    Electronic energy (dense Gamma):  " << std::setprecision(12)
-                  << energy_dense << std::setprecision(6) << "\n";
-              out << "    Electronic energy (jkOnlyEnergy):  " << std::setprecision(12)
-                  << energy_cheap << std::setprecision(6) << "\n";
-              out << "    |difference| (expect ~0):          " << std::abs(energy_dense - energy_cheap)
-                  << "\n";
-            }
-
-            // Direct antisymmetry check on THIS functional's own dense
-            // Gamma (Gamma_pqrs = -Gamma_qprs is required of any GENUINE
-            // fermionic 2-RDM, Gamma_pqrs=(1/2)<a+_p a+_q a_s a_r>, an
-            // operator identity a+_p a+_q = -a+_q a+_p -- NOT something
-            // any particular functional gets to choose). At (r,s)=(p,q):
-            // Gamma(p,q,p,q) = (1/2)*H_pq (only the H-delta term fires,
-            // since p!=q makes the X-delta term's own delta_ps zero);
-            // Gamma(q,p,p,q) = -(1/2)*X_pq (only the X-delta term fires
-            // this time) -- so antisymmetry (Gamma(p,q,p,q) =
-            // -Gamma(q,p,p,q)) reduces EXACTLY to requiring H_pq=X_pq,
-            // which is false for ANY K-functional whose exchange differs
-            // from Hartree (i.e. every one of them except plain HF/DHF,
-            // by definition of what "exchange approximation" means).
-            out << "\n  Antisymmetry check on this functional's OWN dense Gamma "
-                   "(Gamma_pqrs = -Gamma_qprs required for ANY genuine fermionic 2-RDM):\n";
-            out << "    Gamma(" << p << "," << q << "," << p << "," << q
-                << ") =  " << std::setprecision(10) << dense_gamma(p, q, p, q)
-                << std::setprecision(6) << "\n";
-            out << "   -Gamma(" << q << "," << p << "," << p << "," << q
-                << ") = " << std::setprecision(10) << -dense_gamma(q, p, p, q)
-                << std::setprecision(6) << "\n";
-            out << "    |difference| (expect EXACTLY 0 for a true 2-RDM): "
-                << std::abs(dense_gamma(p, q, p, q) - (-dense_gamma(q, p, p, q))) << "\n";
-            out << "    (two_rdm_h(" << p << "," << q << ")=" << opt_two_rdm_h(p, q)
-                << ", two_rdm_x(" << p << "," << q << ")=" << opt_two_rdm_x(p, q)
-                << " -- antisymmetry holds iff these are equal, i.e. iff exchange==Hartree)\n";
-
-            const auto fock_general = rerdmft::generalizedFockMatrix(h, eri, d_diag, dense_gamma);
-            const auto hess_general = rerdmft::generalizedOrbitalHessianElement(
-                h, eri, d_diag, dense_gamma, fock_general, p, q, r, s);
-            const rerdmft::RdmftGradientFn<T> gradient_fn_general =
-                [&](const rerdmft::Matrix<T>& h_rot, const rerdmft::Tensor4<T>& eri_rot) {
-                  return rerdmft::orbitalGradient(
-                      rerdmft::generalizedFockMatrix(h_rot, eri_rot, d_diag, dense_gamma));
-                };
-            const auto hess_check_general = rerdmft::orbitalRotationHessianCheck<T>(
-                h, eri, hess_general, gradient_fn_general, p, q, r, s);
-            out << "\n  General (dense 2-RDM, Eq. 9 literal) e^kappa orbital-rotation Hessian "
-                   "finite-difference check\n"
-                   "  (generalizedOrbitalHessianElement fed jkOnlyDenseTwoRdm's explicit dense\n"
-                   "  Gamma vs. d(gradient)/dkappa of the rotated-integral gradient, SAME pairs ("
-                << p << "," << q << ") x (" << r << "," << s << ")):\n";
-            out << "    Analytic Hessian Hess_pq,rs (general):  " << std::setprecision(10)
-                << hess_check_general.analytic << std::setprecision(6) << "\n";
-            out << "    Finite-difference d(g_pq)/dkappa:           " << std::setprecision(10)
-                << hess_check_general.finite_difference << std::setprecision(6) << "\n";
-            out << "    |difference| (expect small):            " << hess_check_general.abs_diff
-                << "\n";
-          } catch (const std::exception& e) {
-            out << "\n  General (dense 2-RDM, Eq. 9 literal) e^kappa orbital-rotation Hessian "
-                   "finite-difference check FAILED: "
-                << e.what() << "\n";
-          }
-
-          // HF/SD PROBE: the SAME occupations this Muller/JK_only run
-          // just optimized (genuinely fractional, per the user's own
-          // point -- Muller's SQP result is NOT idempotent), but with
-          // JkFunctional::kSd's own H=X=n_p*n_q coupling instead of this
-          // run's actual FUNCTIONAL. kSd's ansatz is antisymmetric
-          // EVERYWHERE, for ANY occupations, idempotent or not (unlike
-          // Muller/GU/etc where H!=X breaks antisymmetry): substituting
-          // H=X into Gamma_qprs=(1/2)[H_qp delta_qr delta_ps - X_qp
-          // delta_qs delta_pr] gives EXACTLY -Gamma_pqrs (verified
-          // below, not just asserted). Isolates whether ANTISYMMETRY
-          // alone -- not idempotency, which this test deliberately does
-          // NOT have -- is what the boxed Hessian formula (Eq. 9)
-          // actually needs: same fractional occupations as the broken
-          // Muller test above, same (p,q) quadruple used for the
-          // antisymmetry check, only the H-vs-X relationship changes.
-          try {
-            const auto two_rdm_h_sd =
-                rerdmft::jkHartreeCoupling(rerdmft::JkFunctional::kSd, optimized_occ, f_l);
-            const auto two_rdm_x_sd =
-                rerdmft::jkExchangeCoupling(rerdmft::JkFunctional::kSd, optimized_occ, f_l);
-            const auto dense_gamma_sd =
-                rerdmft::jkOnlyDenseTwoRdm<T>(n_total, two_rdm_h_sd, two_rdm_x_sd);
-            rerdmft::Matrix<T> d_diag_sd(n_total, n_total, T{});
-            for (std::size_t i = 0; i < n_total; ++i) d_diag_sd(i, i) = T(optimized_occ[i]);
-            const std::size_t r1 = q;
-            const std::size_t s1 = p;
-
-            out << "\n  HF/SD PROBE (Muller-optimized FRACTIONAL occupations, but "
-                   "two_rdm_x==two_rdm_h exactly -- antisymmetric everywhere):\n";
-            out << "    Antisymmetry re-check: Gamma(" << p << "," << q << "," << p << "," << q
-                << ")=" << std::setprecision(10) << dense_gamma_sd(p, q, p, q)
-                << "  -Gamma(" << q << "," << p << "," << p << "," << q
-                << ")=" << -dense_gamma_sd(q, p, p, q) << std::setprecision(6)
-                << "  |diff| (expect EXACTLY 0)="
-                << std::abs(dense_gamma_sd(p, q, p, q) - (-dense_gamma_sd(q, p, p, q))) << "\n";
-
-            const auto fock_sd = rerdmft::generalizedFockMatrix(h, eri, d_diag_sd, dense_gamma_sd);
-            const auto hess_sd = rerdmft::generalizedOrbitalHessianElement(
-                h, eri, d_diag_sd, dense_gamma_sd, fock_sd, p, q, r1, s1);
-            const rerdmft::RdmftGradientFn<T> gradient_fn_sd =
-                [&](const rerdmft::Matrix<T>& h_rot, const rerdmft::Tensor4<T>& eri_rot) {
-                  return rerdmft::orbitalGradient(
-                      rerdmft::generalizedFockMatrix(h_rot, eri_rot, d_diag_sd, dense_gamma_sd));
-                };
-            const auto hess_check_sd = rerdmft::orbitalRotationHessianCheck<T>(
-                h, eri, hess_sd, gradient_fn_sd, p, q, r1, s1);
-            out << "    Eq. 9 (general) at pairs (" << p << "," << q << ") x (" << r1 << ","
-                << s1 << "):  analytic=" << std::setprecision(10) << hess_check_sd.analytic
-                << "  finite-diff=" << hess_check_sd.finite_difference
-                << "  |diff|=" << hess_check_sd.abs_diff << std::setprecision(6) << "\n";
-          } catch (const std::exception& e) {
-            out << "\n  HF/SD PROBE FAILED: " << e.what() << "\n";
-          }
-
-          // Divide-and-conquer step: repeat the EXACT same Eq. 9 cross-
-          // check above but with EVERY two-electron integral set to
-          // exactly 0 first, isolating the ONE-BODY contribution alone
-          // -- delta_qr F_sp + delta_sp F*_rq - h_sp D_rq - h_qr D_ps
-          // (all six two-electron sums vanish identically, and F itself
-          // reduces to F_pq = sum_r h_rp D_rq, since
-          // generalizedFockMatrix's own two-electron term is fed a
-          // dense_gamma contracted against an identically-zero eri).
-          // Uses a SEPARATE, SHARED-INDEX quadruple (r1=q, s1=p instead
-          // of r=p+1, s=q+1) rather than the disjoint (p,q,r,s) used
-          // above: with all four indices distinct, EVERY delta in the
-          // one-body formula is 0, making the test trivially 0=0 --
-          // uninformative. r1=q, s1=p makes THREE of the four terms
-          // survive (delta_qr -> F_sp=F_pp; delta_sp -> F*_rq=F*_qq;
-          // -h_qr D_ps -> -h_qq D_pp), and -h_sp D_rq -> -h_pp D_qq is
-          // generically nonzero too since occupations[p] != occupations
-          // [q] at this genuinely-nonzero-gradient pair (occ[q] near its
-          // saturated upper bound, occ[p] fractional) -- picking s1=q+2
-          // instead (an arbitrary distinct index) first gave an
-          // uninformative exact-0 result for a DIFFERENT reason: that
-          // index happened to ALSO be occupation-saturated, so
-          // D(s1,s1)-D(q,q) vanished by coincidence, not because Eq. 9
-          // is correct.
-          // Rotates h DIRECTLY (U^dagger h U, the same formula
-          // IntegralRotation.h's rotateIntegrals uses internally)
-          // instead of going through orbitalRotationHessianCheck/
-          // rotateIntegrals: an exactly-zero eri has Cholesky rank 0,
-          // and choleskyReconstructEri deliberately refuses an empty
-          // vector list (a genuine, if narrow, gap in that utility for
-          // this legitimate edge case) -- easier to sidestep here than
-          // to change shared Cholesky infrastructure for a one-off
-          // diagnostic. eri stays IDENTICALLY zero at every rotation
-          // (trivially exact: a zero tensor rotated by any unitary is
-          // still zero), so it is never actually transformed.
-          try {
-            const std::size_t r1 = q;
-            const std::size_t s1 = p;
-            const rerdmft::Tensor4<T> eri_zero(n_total, n_total, n_total, n_total, T{});
-            const auto dense_gamma =
-                rerdmft::jkOnlyDenseTwoRdm<T>(n_total, opt_two_rdm_h, opt_two_rdm_x);
-            rerdmft::Matrix<T> d_diag(n_total, n_total, T{});
-            for (std::size_t i = 0; i < n_total; ++i) d_diag(i, i) = T(optimized_occ[i]);
-            const auto fock_1e = rerdmft::generalizedFockMatrix(h, eri_zero, d_diag, dense_gamma);
-            const auto hess_1e = rerdmft::generalizedOrbitalHessianElement(
-                h, eri_zero, d_diag, dense_gamma, fock_1e, p, q, r1, s1);
-
-            auto rotateHOnly = [&](double t) {
-              rerdmft::Matrix<T> kappa(n_total, n_total, T{});
-              kappa(r1, s1) = T(t);
-              kappa(s1, r1) = T(-t);
-              const auto u = rerdmft::spinorRotationMatrix(kappa);
-              rerdmft::Matrix<T> uh(n_total, n_total, T{});
-              for (std::size_t a = 0; a < n_total; ++a) {
-                for (std::size_t j = 0; j < n_total; ++j) {
-                  T sum{};
-                  for (std::size_t b = 0; b < n_total; ++b) sum += h(a, b) * u(b, j);
-                  uh(a, j) = sum;
-                }
-              }
-              rerdmft::Matrix<T> h_rot(n_total, n_total, T{});
-              for (std::size_t p2 = 0; p2 < n_total; ++p2) {
-                for (std::size_t j = 0; j < n_total; ++j) {
-                  T sum{};
-                  for (std::size_t a = 0; a < n_total; ++a) sum += conjugateScalar(u(a, p2)) * uh(a, j);
-                  h_rot(p2, j) = sum;
-                }
-              }
-              return h_rot;
-            };
-            auto gradientElementAt = [&](double t) {
-              const auto grad = rerdmft::orbitalGradient(
-                  rerdmft::generalizedFockMatrix(rotateHOnly(t), eri_zero, d_diag, dense_gamma));
-              return (p >= q) ? grad(p, q) : -conjugateScalar(grad(q, p));
-            };
-            constexpr double kStep = 1e-4;
-            const T g_plus = gradientElementAt(kStep);
-            const T g_minus = gradientElementAt(-kStep);
-            const double finite_difference =
-                std::real((g_plus - g_minus) / T(2.0 * kStep));
-            const double analytic_1e = std::real(hess_1e);
-            out << "\n  ONE-BODY-ONLY (all two-electron integrals zeroed) Eq. 9 e^kappa "
-                   "orbital-rotation Hessian finite-difference check\n"
-                   "  (generalizedOrbitalHessianElement fed the SAME dense Gamma but eri==0, "
-                   "pairs ("
-                << p << "," << q << ") x (" << r1 << "," << s1 << "), r1=q (shared-index, "
-                << "chosen so the one-body deltas don't all vanish trivially)):\n";
-            out << "    Analytic Hessian Hess_pq,rs (1e- only):  " << std::setprecision(10)
-                << analytic_1e << std::setprecision(6) << "\n";
-            out << "    Finite-difference d(g_pq)/dkappa:            " << std::setprecision(10)
-                << finite_difference << std::setprecision(6) << "\n";
-            out << "    |difference| (expect small):             "
-                << std::abs(analytic_1e - finite_difference) << "\n";
-          } catch (const std::exception& e) {
-            out << "\n  ONE-BODY-ONLY (all two-electron integrals zeroed) Eq. 9 e^kappa "
-                   "orbital-rotation Hessian finite-difference check FAILED: "
-                << e.what() << "\n";
-          }
-
-          // The complementary ablation: doc/orbital_hessian.tex's Eq. 8
-          // is the raw TWO-ELECTRON contribution G^(2)_pq,rs (before its
-          // own delta_rq/delta_sp terms combine with Eq. 7's one-electron
-          // G^(1)_pq,rs into F_sp/F*_rq -- see the tex's "Full Hessian,
-          // Fock-matrix form" section). Isolate it here the mirror-image
-          // way: zero every ONE-electron integral (h=0) instead, keeping
-          // the real eri. Reuses the SAME shared-index quadruple
-          // (r1=q, s1=p) as the one-body test above, at the SAME
-          // genuinely-fractional-occupation (p,q), so the two results
-          // can be added and checked against a THIRD, independent
-          // evaluation of the FULL (h and eri both real) Eq. 9 at this
-          // exact quadruple -- G_pq,rs = G^(1)_pq,rs + G^(2)_pq,rs is an
-          // EXACT algebraic identity (Eq. 9's own derivation, not merely
-          // approximate), so this is a genuine internal consistency
-          // check on top of each piece's own finite-difference probe.
-          // No Cholesky edge case here (eri is the real, full-rank
-          // tensor) -- orbitalRotationHessianCheck/rotateIntegrals work
-          // unmodified.
-          try {
-            const std::size_t r1 = q;
-            const std::size_t s1 = p;
-            const rerdmft::Matrix<T> h_zero(n_total, n_total, T{});
-            const auto dense_gamma =
-                rerdmft::jkOnlyDenseTwoRdm<T>(n_total, opt_two_rdm_h, opt_two_rdm_x);
-            rerdmft::Matrix<T> d_diag(n_total, n_total, T{});
-            for (std::size_t i = 0; i < n_total; ++i) d_diag(i, i) = T(optimized_occ[i]);
-
-            const auto fock_2e = rerdmft::generalizedFockMatrix(h_zero, eri, d_diag, dense_gamma);
-            const auto hess_2e = rerdmft::generalizedOrbitalHessianElement(
-                h_zero, eri, d_diag, dense_gamma, fock_2e, p, q, r1, s1);
-            const rerdmft::RdmftGradientFn<T> gradient_fn_2e =
-                [&](const rerdmft::Matrix<T>& h_rot, const rerdmft::Tensor4<T>& eri_rot) {
-                  return rerdmft::orbitalGradient(
-                      rerdmft::generalizedFockMatrix(h_rot, eri_rot, d_diag, dense_gamma));
-                };
-            const auto hess_check_2e = rerdmft::orbitalRotationHessianCheck<T>(
-                h_zero, eri, hess_2e, gradient_fn_2e, p, q, r1, s1);
-
-            const auto fock_1e_only =
-                rerdmft::generalizedFockMatrix(h, rerdmft::Tensor4<T>(n_total, n_total, n_total,
-                                                                        n_total, T{}),
-                                                d_diag, dense_gamma);
-            const auto hess_1e_only = rerdmft::generalizedOrbitalHessianElement(
-                h, rerdmft::Tensor4<T>(n_total, n_total, n_total, n_total, T{}), d_diag,
-                dense_gamma, fock_1e_only, p, q, r1, s1);
-            const auto fock_full = rerdmft::generalizedFockMatrix(h, eri, d_diag, dense_gamma);
-            const auto hess_full = rerdmft::generalizedOrbitalHessianElement(
-                h, eri, d_diag, dense_gamma, fock_full, p, q, r1, s1);
-
-            out << "\n  TWO-BODY-ONLY (all one-electron integrals zeroed) Eq. 9 e^kappa "
-                   "orbital-rotation Hessian finite-difference check\n"
-                   "  (generalizedOrbitalHessianElement fed the SAME dense Gamma but h==0, "
-                   "SAME pairs ("
-                << p << "," << q << ") x (" << r1 << "," << s1 << ")):\n";
-            out << "    Analytic Hessian Hess_pq,rs (2e- only):  " << std::setprecision(10)
-                << hess_check_2e.analytic << std::setprecision(6) << "\n";
-            out << "    Finite-difference d(g_pq)/dkappa:            " << std::setprecision(10)
-                << hess_check_2e.finite_difference << std::setprecision(6) << "\n";
-            out << "    |difference| (expect small):             " << hess_check_2e.abs_diff
-                << "\n";
-            out << "    Additive consistency check at this SAME quadruple (exact algebraic\n"
-                   "    identity, G_pq,rs = G^(1)_pq,rs + G^(2)_pq,rs, independent of any\n"
-                   "    finite difference):\n";
-            out << "      1e-only (h!=0,eri=0):   " << std::setprecision(10)
-                << std::real(hess_1e_only) << std::setprecision(6) << "\n";
-            out << "      2e-only (h=0,eri!=0):   " << std::setprecision(10)
-                << std::real(hess_2e) << std::setprecision(6) << "\n";
-            out << "      sum (1e-only + 2e-only): " << std::setprecision(10)
-                << std::real(hess_1e_only) + std::real(hess_2e) << std::setprecision(6) << "\n";
-            out << "      full (h!=0,eri!=0):      " << std::setprecision(10) << std::real(hess_full)
-                << std::setprecision(6) << "\n";
-            out << "      |sum - full| (expect ~0): "
-                << std::abs(std::real(hess_1e_only) + std::real(hess_2e) - std::real(hess_full))
-                << "\n";
-          } catch (const std::exception& e) {
-            out << "\n  TWO-BODY-ONLY (all one-electron integrals zeroed) Eq. 9 e^kappa "
-                   "orbital-rotation Hessian finite-difference check FAILED: "
-                << e.what() << "\n";
-          }
-
-          // Self-interaction hypothesis probe: repeat the ONE-BODY-ONLY
-          // and TWO-BODY-ONLY ablations above but with (a) the GU
-          // functional's own exchange formula (Occ_opt/JK_only.h's
-          // kGu: two_rdm_x(p,p)=n_p*n_p EXACTLY, i==j special-cased, so
-          // Gamma_pppp=(1/2)(H_pp-X_pp)=0 identically -- genuinely
-          // self-interaction-FREE at the diagonal, unlike Muller's own
-          // kMbb, which has no i==j branch at all and gives
-          // Gamma_pppp=(1/2)(n_p^2-n_p) != 0 for any fractional n_p) and
-          // (b) SYNTHETIC, deliberately fractional occupations at (p,q)
-          // (0.7/0.3, well-separated from both 0/1 and from each other)
-          // instead of whatever this run's actual FUNCTIONAL converged
-          // to -- GU itself converges close to idempotent (0/~1) for
-          // water/STO-3G, which would make this an uninformative,
-          // near-HF/DHF test otherwise. Isolates the ansatz-antisymmetry
-          // hypothesis (does the boxed formula's derivation implicitly
-          // require Gamma_pppp=0, i.e. a genuinely N-representable/
-          // antisymmetric Gamma) from any other property of a
-          // specific molecule's converged occupations.
-          try {
-            std::vector<double> occ_test = optimized_occ;
-            occ_test[p] = 0.7;
-            occ_test[q] = 0.3;
-            const auto two_rdm_h_gu =
-                rerdmft::jkHartreeCoupling(rerdmft::JkFunctional::kGu, occ_test, f_l);
-            const auto two_rdm_x_gu =
-                rerdmft::jkExchangeCoupling(rerdmft::JkFunctional::kGu, occ_test, f_l);
-            const auto dense_gamma_gu =
-                rerdmft::jkOnlyDenseTwoRdm<T>(n_total, two_rdm_h_gu, two_rdm_x_gu);
-            rerdmft::Matrix<T> d_diag_gu(n_total, n_total, T{});
-            for (std::size_t i = 0; i < n_total; ++i) d_diag_gu(i, i) = T(occ_test[i]);
-            const std::size_t r1 = q;
-            const std::size_t s1 = p;
-
-            const rerdmft::Tensor4<T> eri_zero(n_total, n_total, n_total, n_total, T{});
-            const auto fock_1e_gu =
-                rerdmft::generalizedFockMatrix(h, eri_zero, d_diag_gu, dense_gamma_gu);
-            const auto hess_1e_gu = rerdmft::generalizedOrbitalHessianElement(
-                h, eri_zero, d_diag_gu, dense_gamma_gu, fock_1e_gu, p, q, r1, s1);
-            auto rotateHOnlyGu = [&](double t) {
-              rerdmft::Matrix<T> kappa(n_total, n_total, T{});
-              kappa(r1, s1) = T(t);
-              kappa(s1, r1) = T(-t);
-              const auto u = rerdmft::spinorRotationMatrix(kappa);
-              rerdmft::Matrix<T> uh(n_total, n_total, T{});
-              for (std::size_t a = 0; a < n_total; ++a) {
-                for (std::size_t j = 0; j < n_total; ++j) {
-                  T sum{};
-                  for (std::size_t b = 0; b < n_total; ++b) sum += h(a, b) * u(b, j);
-                  uh(a, j) = sum;
-                }
-              }
-              rerdmft::Matrix<T> h_rot(n_total, n_total, T{});
-              for (std::size_t p2 = 0; p2 < n_total; ++p2) {
-                for (std::size_t j = 0; j < n_total; ++j) {
-                  T sum{};
-                  for (std::size_t a = 0; a < n_total; ++a) sum += conjugateScalar(u(a, p2)) * uh(a, j);
-                  h_rot(p2, j) = sum;
-                }
-              }
-              return h_rot;
-            };
-            auto gradientElementAtGu1e = [&](double t) {
-              const auto grad = rerdmft::orbitalGradient(rerdmft::generalizedFockMatrix(
-                  rotateHOnlyGu(t), eri_zero, d_diag_gu, dense_gamma_gu));
-              return (p >= q) ? grad(p, q) : -conjugateScalar(grad(q, p));
-            };
-            constexpr double kStepGu = 1e-4;
-            const T g1_plus = gradientElementAtGu1e(kStepGu);
-            const T g1_minus = gradientElementAtGu1e(-kStepGu);
-            const double fd_1e_gu = std::real((g1_plus - g1_minus) / T(2.0 * kStepGu));
-            const double analytic_1e_gu = std::real(hess_1e_gu);
-
-            const rerdmft::Matrix<T> h_zero(n_total, n_total, T{});
-            const auto fock_2e_gu =
-                rerdmft::generalizedFockMatrix(h_zero, eri, d_diag_gu, dense_gamma_gu);
-            const auto hess_2e_gu = rerdmft::generalizedOrbitalHessianElement(
-                h_zero, eri, d_diag_gu, dense_gamma_gu, fock_2e_gu, p, q, r1, s1);
-            const rerdmft::RdmftGradientFn<T> gradient_fn_2e_gu =
-                [&](const rerdmft::Matrix<T>& h_rot, const rerdmft::Tensor4<T>& eri_rot) {
-                  return rerdmft::orbitalGradient(
-                      rerdmft::generalizedFockMatrix(h_rot, eri_rot, d_diag_gu, dense_gamma_gu));
-                };
-            const auto hess_check_2e_gu = rerdmft::orbitalRotationHessianCheck<T>(
-                h_zero, eri, hess_2e_gu, gradient_fn_2e_gu, p, q, r1, s1);
-
-            out << "\n  SELF-INTERACTION-FREE PROBE (GU functional, synthetic occ[" << p
-                << "]=0.7/occ[" << q << "]=0.3, Gamma_pppp==0 exactly) at pairs (" << p << "," << q
-                << ") x (" << r1 << "," << s1 << "):\n";
-            out << "    One-body-only:  analytic=" << std::setprecision(10) << analytic_1e_gu
-                << "  finite-diff=" << fd_1e_gu << "  |diff|="
-                << std::abs(analytic_1e_gu - fd_1e_gu) << std::setprecision(6) << "\n";
-            out << "    Two-body-only:  analytic=" << std::setprecision(10)
-                << hess_check_2e_gu.analytic << "  finite-diff=" << hess_check_2e_gu.finite_difference
-                << "  |diff|=" << hess_check_2e_gu.abs_diff << std::setprecision(6) << "\n";
-          } catch (const std::exception& e) {
-            out << "\n  SELF-INTERACTION-FREE PROBE (GU) FAILED: " << e.what() << "\n";
-          }
-
-          // MULLER_AS validation: same synthetic, deliberately fractional
-          // occupations (0.7/0.3) as the two probes above, but now with
-          // JkFunctional::kMullerAs's OWN ansatz -- two_rdm_h ==
-          // two_rdm_x == g(n_p,n_q) EXACTLY (jkHartreeFunction and
-          // jkExchangeFunction literally call the SAME mullerAsValue for
-          // this functional), so it is antisymmetric by the SAME
-          // algebra as the HF/SD probe, while still being a genuinely
-          // different (non-SD) functional. Confirms the newly-added
-          // functional's Hessian is correct at fractional occupations,
-          // completing what the SQP optimization above could not show
-          // directly (MULLER_AS itself converges close to idempotent
-          // for water/STO-3G, same as GU).
-          try {
-            std::vector<double> occ_test = optimized_occ;
-            occ_test[p] = 0.7;
-            occ_test[q] = 0.3;
-            const auto two_rdm_h_mas =
-                rerdmft::jkHartreeCoupling(rerdmft::JkFunctional::kMullerAs, occ_test, f_l);
-            const auto two_rdm_x_mas =
-                rerdmft::jkExchangeCoupling(rerdmft::JkFunctional::kMullerAs, occ_test, f_l);
-            const auto dense_gamma_mas =
-                rerdmft::jkOnlyDenseTwoRdm<T>(n_total, two_rdm_h_mas, two_rdm_x_mas);
-            rerdmft::Matrix<T> d_diag_mas(n_total, n_total, T{});
-            for (std::size_t i = 0; i < n_total; ++i) d_diag_mas(i, i) = T(occ_test[i]);
-            const std::size_t r1 = q;
-            const std::size_t s1 = p;
-
-            out << "\n  MULLER_AS PROBE (synthetic occ[" << p << "]=0.7/occ[" << q
-                << "]=0.3, two_rdm_x==two_rdm_h==g(n_p,n_q) exactly):\n";
-            out << "    Antisymmetry check: Gamma(" << p << "," << q << "," << p << "," << q
-                << ")=" << std::setprecision(10) << dense_gamma_mas(p, q, p, q) << "  -Gamma(" << q
-                << "," << p << "," << p << "," << q << ")=" << -dense_gamma_mas(q, p, p, q)
-                << std::setprecision(6) << "  |diff| (expect EXACTLY 0)="
-                << std::abs(dense_gamma_mas(p, q, p, q) - (-dense_gamma_mas(q, p, p, q))) << "\n";
-
-            const auto fock_mas =
-                rerdmft::generalizedFockMatrix(h, eri, d_diag_mas, dense_gamma_mas);
-            const auto hess_mas = rerdmft::generalizedOrbitalHessianElement(
-                h, eri, d_diag_mas, dense_gamma_mas, fock_mas, p, q, r1, s1);
-            const rerdmft::RdmftGradientFn<T> gradient_fn_mas =
-                [&](const rerdmft::Matrix<T>& h_rot, const rerdmft::Tensor4<T>& eri_rot) {
-                  return rerdmft::orbitalGradient(
-                      rerdmft::generalizedFockMatrix(h_rot, eri_rot, d_diag_mas, dense_gamma_mas));
-                };
-            const auto hess_check_mas = rerdmft::orbitalRotationHessianCheck<T>(
-                h, eri, hess_mas, gradient_fn_mas, p, q, r1, s1);
-            out << "    Eq. 9 (general) at pairs (" << p << "," << q << ") x (" << r1 << ","
-                << s1 << "):  analytic=" << std::setprecision(10) << hess_check_mas.analytic
-                << "  finite-diff=" << hess_check_mas.finite_difference
-                << "  |diff|=" << hess_check_mas.abs_diff << std::setprecision(6) << "\n";
-          } catch (const std::exception& e) {
-            out << "\n  MULLER_AS PROBE FAILED: " << e.what() << "\n";
-          }
-        }
-      }
-      if (n_active >= 4) {
-        out << jkOnlyRotationValidationReport<T>(h, eri, n_inactive_below, n_active, n_electrons);
-        out << jkOnlyTwinPairReport<T>(h, eri, n_electrons);
-        out << jkOnlyHartreeFockLimitReport<T>(h, eri, n_inactive_below, n_active, n_electrons);
-      }
-    }
-
-    // HESSIAN_FUNCTIONAL: full orbital-rotation Hessian at the optimized
-    // occupations, diagonalized (see functionalFullHessianReport).
-    if (full_hessian) {
-    const auto& eri = rerdmft::denseOf(eri_in);  // dense view (a temporary for Cholesky vectors): DEBUG-only block
-      try {
-        const auto occ_opt = embed(sqp_result.x);
-        const auto hc_opt = rerdmft::jkHartreeCoupling(functional, occ_opt, f_l);
-        const auto xc_opt = rerdmft::jkExchangeCoupling(functional, occ_opt, f_l);
-        const auto pair_indices = rerdmft::hessianPairIndices(n_total);
-        const auto hess_full =
-            rerdmft::jkOnlyHessianMatrix(h, eri, occ_opt, hc_opt, xc_opt, pair_indices);
-        const auto g_opt = rerdmft::jkOnlyOrbitalGradient(h, eri, occ_opt, hc_opt, xc_opt);
-        double max_g = 0.0;
-        for (std::size_t p = 0; p < n_total; ++p) {
-          for (std::size_t q = 0; q <= p; ++q) max_g = std::max(max_g, std::abs(g_opt(p, q)));
-        }
-        out << functionalFullHessianReport<T>(label, "JK-only (" + functional_name + ")",
-                                               hess_full, max_g, t_start, t_checkpoint,
-                                               timing_records);
-        if constexpr (!std::is_same_v<T, double>) {
-          const auto joint_hess =
-              rerdmft::jkOnlyJointHessianMatrix(h, eri, occ_opt, hc_opt, xc_opt, pair_indices);
-          out << functionalJointHessianReport(label, "JK-only (" + functional_name + ")",
-                                               joint_hess,
-                                               rerdmft::jointOrbitalGradient(g_opt, pair_indices),
-                                               t_start, t_checkpoint, timing_records);
-          out << kramersSymmetryReport(g_opt, joint_hess,
-                                        rerdmft::jointOrbitalGradient(g_opt, pair_indices),
-                                        pair_indices, occ_opt);
-        }
-      } catch (const std::exception& e) {
-        out << "\n  Full orbital-rotation Hessian FAILED: " << e.what() << "\n";
       }
     }
 
@@ -3290,96 +1375,6 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
   return out.str();
 }
 
-// PNOF counterpart of the joint-block validation above (complex spinors
-// only): tt/yy/mixed blocks, the joint gradient vector and the joint
-// symmetric Hessian of Hessian_opt/PnofHessian.h (L1/L2 pair terms
-// included) against finite differences, at (a) generic FRACTIONAL
-// frontier-geminal occupations (deterministic, inside (0,1)) for a strong
-// signal and (b) the run's own OPTIMIZED occupations. The test pairs are
-// the two largest-|g| active pairs at (a) plus the largest one sharing an
-// orbital index with the first; the 2D energy check (true second
-// derivative) is done for (a) only, to bound the number of integral
-// rotations.
-template <typename T>
-std::string pnofJointBlocksReport(rerdmft::PnofFunctional functional,
-                                   const rerdmft::Matrix<T>& h, const rerdmft::Tensor4<T>& eri,
-                                   const std::vector<rerdmft::PnofGeminal>& geminals,
-                                   std::size_t n_core, std::size_t n_inactive_below,
-                                   std::size_t n_active, bool relativistic,
-                                   const std::vector<double>& optimized_occ) {
-  std::ostringstream out;
-  {
-    const std::size_t n_total = h.rows();
-    std::vector<double> synth(n_total, 0.0);
-    for (std::size_t a = 0; a < n_core; ++a) synth[geminals[a].i] = synth[geminals[a].ibar] = 1.0;
-    for (std::size_t a = n_core; a < geminals.size(); ++a) {
-      const double n = 0.15 + 0.7 * std::fmod(0.6180339887498949 * (a - n_core + 1), 1.0);
-      synth[geminals[a].i] = synth[geminals[a].ibar] = n;
-    }
-    const auto pair_of = rerdmft::buildPnofPairOf(geminals, n_total);
-
-    const auto g_synth = rerdmft::orbitalGradient(
-        rerdmft::pnofFockMatrix(functional, h, eri, geminals, synth, relativistic));
-    const auto pairs = selectJointTestPairs(g_synth, n_inactive_below, n_inactive_below + n_active);
-    if (pairs.size() < 3) return out.str();
-
-    out << "\n  PNOF orbital-rotation blocks (real-real tt, imaginary-imaginary yy, real-imaginary\n"
-           "  mixed), joint gradient vector [dE/dt; dE/dy] and joint symmetric Hessian over [t; y]\n"
-           "  (Hessian_opt/PnofHessian.h, L1/L2 included) vs. finite differences (dkappa step 1e-4);\n"
-           "  test pairs:";
-    for (const auto& pr : pairs) out << " (" << pr.first << "," << pr.second << ")";
-    out << "\n";
-
-    const auto rot = buildJointRotations(h, eri, pairs, 1e-4);
-    const std::vector<std::pair<std::string, const std::vector<double>*>> sets = {
-        {"generic fractional occupations", &synth}, {"optimized occupations", &optimized_occ}};
-    bool first = true;
-    for (const auto& [name, occ_ptr] : sets) {
-      const auto& occ = *occ_ptr;
-      const auto full = rerdmft::buildPnofFullTwoRdm(functional, geminals, occ, n_total, relativistic);
-      const auto fock0 = rerdmft::pnofFockMatrix(functional, h, eri, geminals, occ, relativistic);
-      JointCheckCallbacks<T> cb;
-      auto grad = [&](const rerdmft::Matrix<T>& hh, const rerdmft::Tensor4<T>& ee) {
-        return rerdmft::orbitalGradient(
-            rerdmft::pnofFockMatrix(functional, hh, ee, geminals, occ, relativistic));
-      };
-      cb.gradient_new = grad;
-      cb.gradient_ref = grad;
-      cb.energy = [&](const rerdmft::Matrix<T>& hh, const rerdmft::Tensor4<T>& ee) {
-        return rerdmft::hartreeExchangeEnergy(hh, ee, occ, full.two_rdm_h, full.two_rdm_x, pair_of,
-                                               full.two_rdm_l1, full.two_rdm_l2);
-      };
-      cb.hess_tt = [&](std::size_t a, std::size_t b, std::size_t c, std::size_t d) {
-        return rerdmft::pnofHessianElement(functional, h, eri, geminals, occ, relativistic, fock0,
-                                            a, b, c, d);
-      };
-      if constexpr (!std::is_same_v<T, double>) {
-        cb.hess_yy = [&](std::size_t a, std::size_t b, std::size_t c, std::size_t d) {
-          return rerdmft::pnofHessianElementImag(functional, h, eri, geminals, occ, relativistic,
-                                                  fock0, a, b, c, d);
-        };
-        cb.hess_mixed = [&](std::size_t a, std::size_t b, std::size_t c, std::size_t d) {
-          return rerdmft::pnofHessianElementMixed(functional, h, eri, geminals, occ, relativistic,
-                                                   fock0, a, b, c, d);
-        };
-        cb.joint = [&](const std::vector<std::pair<std::size_t, std::size_t>>& pr) {
-          return rerdmft::pnofJointHessianMatrix(functional, h, eri, geminals, occ, relativistic,
-                                                  fock0, pr);
-        };
-      } else {
-        cb.joint = [&](const std::vector<std::pair<std::size_t, std::size_t>>& pr) {
-          return symmetrizeReal(rerdmft::pnofHessianMatrix(functional, h, eri, geminals, occ,
-                                                            relativistic, fock0, pr));
-        };
-      }
-      out << "    " << name << ":\n"
-          << formatJointCheck(jointBlocksCheck<T>(h, eri, rot, cb, /*with_energy_2d=*/first, /*all_2d=*/false));
-      first = false;
-    }
-    return out.str();
-  }
-}
-
 // PNOF5/PNOF7/PNOF7s/GNOF occupation-number optimization (Occ_opt/PNOFs.h +
 // Occ_opt/Orb_subspaces.h + Utils/SQP.h), at FIXED orbitals/integrals --
 // the PNOF counterpart of buildFunctionalReport above (JK_only-only).
@@ -3411,7 +1406,7 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
                                        const std::string& functional_name,
                                        double nuclear_repulsion_energy, int pnof_subspaces,
                                        int pnof_coupling, bool relativistic, bool sqp_pnof_occ,
-                                       bool debug, int verbose, bool full_hessian,
+                                       bool debug,
                                        const rerdmft::FullOptSettings& full_opt,
                                        bool full_optimization_4c_neg,
                                        std::chrono::steady_clock::time_point t_start,
@@ -3420,7 +1415,7 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
                                        rerdmft::RestartCapture* restart = nullptr,
                                        const Eri* eri_full_block = nullptr,
                                        const std::vector<double>* initial_occupations = nullptr) {
-  // See buildFunctionalReport: generic view here, dense re-binding in the DEBUG / HESSIAN_FUNCTIONAL blocks.
+  // See buildFunctionalReport: generic view here, dense re-binding in the DEBUG blocks.
   const Eri& eri = eri_in;
   rerdmft::progressContext() = label;  // live progress lines (stderr) are prefixed with the method
   constexpr double kOccupationEpsilon = 1e-6;
@@ -3915,63 +1910,6 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
     }
   }
 
-  {
-    if (debug && verbose > 0 && n_active >= 4) {
-    const auto& eri = rerdmft::denseOf(eri_in);  // dense view: DEBUG-only block
-      try {
-        out << pnofJointBlocksReport<T>(functional, h, eri, geminals, n_core, n_inactive_below,
-                                         n_active, relativistic, optimized_occ);
-      } catch (const std::exception& e) {
-        out << "\n  PNOF joint-block validation FAILED: " << e.what() << "\n";
-      }
-    }
-  }
-
-  // HESSIAN_FUNCTIONAL: full orbital-rotation Hessian at the optimized
-  // occupations, diagonalized (see functionalFullHessianReport).
-  if (full_hessian) {
-  const auto& eri = rerdmft::denseOf(eri_in);  // dense view (a temporary for Cholesky vectors): DEBUG-only block
-    try {
-      const auto fock_full = rerdmft::pnofFockMatrix(functional, h, eri, geminals, optimized_occ,
-                                                       relativistic);
-      const auto pair_indices = rerdmft::hessianPairIndices(n_total);
-      const auto hess_full = rerdmft::pnofHessianMatrix(functional, h, eri, geminals,
-                                                          optimized_occ, relativistic, fock_full,
-                                                          pair_indices);
-      const auto g_full = rerdmft::orbitalGradient(fock_full);
-      double max_g = 0.0;
-      for (std::size_t p = 0; p < n_total; ++p) {
-        for (std::size_t q = 0; q <= p; ++q) max_g = std::max(max_g, std::abs(g_full(p, q)));
-      }
-      out << functionalFullHessianReport<T>(label, "PNOF (" + functional_name + ")", hess_full,
-                                             max_g, t_start, t_checkpoint, timing_records);
-      if constexpr (std::is_same_v<T, double>) {
-        if (label == "NON_REL") {
-          out << pnofIndependentCurvatureCheck<T>(
-              functional, h, eri, geminals, optimized_occ, relativistic, pair_indices,
-              symmetrizeReal(hess_full), rerdmft::jointOrbitalGradient(g_full, pair_indices),
-              blockSpinPartner(n_total));
-        }
-      }
-      if constexpr (!std::is_same_v<T, double>) {
-        const auto joint_hess = rerdmft::pnofJointHessianMatrix(
-            functional, h, eri, geminals, optimized_occ, relativistic, fock_full, pair_indices);
-        out << functionalJointHessianReport(label, "PNOF (" + functional_name + ")", joint_hess,
-                                             rerdmft::jointOrbitalGradient(g_full, pair_indices),
-                                             t_start, t_checkpoint, timing_records);
-        out << kramersSymmetryReport(g_full, joint_hess,
-                                      rerdmft::jointOrbitalGradient(g_full, pair_indices),
-                                      pair_indices, optimized_occ);
-        out << pnofIndependentCurvatureCheck<T>(functional, h, eri, geminals, optimized_occ,
-                                                relativistic, pair_indices, joint_hess,
-                                                rerdmft::jointOrbitalGradient(g_full, pair_indices),
-                                                {});
-      }
-    } catch (const std::exception& e) {
-      out << "\n  Full orbital-rotation Hessian FAILED: " << e.what() << "\n";
-    }
-  }
-
   // FULL_OPTIMIZATION: validate ADAM/Kramers restriction, then macro-iterate ADAM/NEO orbital
   // rotations + occupation re-optimization. For C4_DHF, n_inactive_below (the negative-energy
   // branch's own size, 0 for NON_REL/X2C) is passed as n_negative: every orbital-rotation pair
@@ -4124,7 +2062,7 @@ inline rerdmft::Matrix<std::complex<double>> blockDiagTwice(const rerdmft::Matri
 //     and the convention C_new = C_old U, h' = U^dagger h U.
 // `T` is the scalar type of `h_mo` (double for NON_REL, complex for X2C).
 template <typename T>
-void writeRestartFile(const rerdmft::Input& input, const std::string& method,
+void writeRestartFile(std::ostream& out, const rerdmft::Input& input, const std::string& method,
                       const rerdmft::RestartCapture& capture,
                       const rerdmft::Matrix<std::complex<double>>& c_scf,
                       const rerdmft::Matrix<std::complex<double>>& h_ao,
@@ -4133,7 +2071,7 @@ void writeRestartFile(const rerdmft::Input& input, const std::string& method,
                       double nuclear_repulsion_energy) {
   const std::string base = "RESTART";  // files: RESTART.NON_REL, RESTART.X2C_HF, RESTART.4C, RESTART.4C_NEG
   if (!capture.valid) {
-    std::cout << "\nRESTART file (" << method << "): not written -- no RDMFT result was produced.\n";
+    out << "\nRESTART file (" << method << "): not written -- no RDMFT result was produced.\n";
     return;
   }
   const std::string path = base + "." + method;
@@ -4201,7 +2139,7 @@ void writeRestartFile(const rerdmft::Input& input, const std::string& method,
     std::ifstream size_probe(path, std::ios::binary | std::ios::ate);
     const auto bytes = static_cast<long long>(size_probe.tellg());
 
-    std::cout << "\nRESTART file (" << method << "): " << path << " (" << bytes << " bytes, binary, format version "
+    out << "\nRESTART file (" << method << "): " << path << " (" << bytes << " bytes, binary, format version "
               << rerdmft::kRestartVersion << ")\n"
               << "  contents: " << (capture.kind == "GAMMAS" ? std::to_string(data.gammas.size()) + " PNOF gamma angles ("
                                           + std::to_string(data.pnof_subspaces) + " subspace(s) x " +
@@ -4219,7 +2157,7 @@ void writeRestartFile(const rerdmft::Input& input, const std::string& method,
                        e << std::setprecision(10) << data.total_energy << " Hartree";
                        return e.str();
                      }() + "\n";
-    std::cout << "  read back: " << (same ? "[PASS] identical to what was written" : "[FAIL] differs from what was written")
+    out << "  read back: " << (same ? "[PASS] identical to what was written" : "[FAIL] differs from what was written")
               << "\n  C^dagger S C = 1: max deviation " << std::scientific << std::setprecision(2) << ortho_dev
               << "  " << (ortho_dev < 1e-8 ? "[PASS]" : "[FAIL]")
               << "\n  C^dagger h_AO C vs U^dagger h_MO U: max deviation " << h_dev << " (max |h| = " << h_scale << ")  "
@@ -4249,12 +2187,12 @@ void writeRestartFile(const rerdmft::Input& input, const std::string& method,
       std::sort(in_file.begin(), in_file.end());
       double dev = 0.0;
       for (std::size_t i = 0; i < expected.size(); ++i) dev = std::max(dev, std::abs(expected[i] - in_file[i]));
-      std::cout << "  gamma angles regenerate the occupation numbers: max deviation " << std::scientific
+      out << "  gamma angles regenerate the occupation numbers: max deviation " << std::scientific
                 << std::setprecision(2) << dev << "  " << (dev < 1e-8 ? "[PASS]" : "[FAIL]") << std::defaultfloat
                 << std::setprecision(6) << "\n";
     }
   } catch (const std::exception& e) {
-    std::cout << "\nRESTART file (" << method << "): FAILED: " << e.what() << "\n";
+    out << "\nRESTART file (" << method << "): FAILED: " << e.what() << "\n";
   }
 }
 
@@ -4429,9 +2367,6 @@ int main(int argc, char** argv) {
   bool nonrel_rdmft_gradient_computed = false;
   bool x2c_rdmft_gradient_computed = false;
   rerdmft::NonRelHartreeFockResult nonrel_hf_result;
-  bool nonrel_gradient_computed = false;
-  double nonrel_gradient_norm = 0.0;
-  double nonrel_gradient_max_abs = 0.0;
   double nonrel_gradient_efficient_norm = 0.0;
   double nonrel_gradient_efficient_max_abs = 0.0;
   double nonrel_gradient_rdmft_norm = 0.0;
@@ -4444,31 +2379,27 @@ int main(int argc, char** argv) {
   std::string nonrel_hessian_report;
   std::string nonrel_full_hessian_report;
   std::string nonrel_functional_report;
-  bool dhf_gradient_computed = false;
-  double dhf_gradient_norm = 0.0;
-  double dhf_gradient_max_abs = 0.0;
+  // Text produced while a method runs (Kramers tests, pairing reports, READ_RESTART messages, RESTART-file lines) is kept
+  // per method and printed at the place it belongs in the report below, not at the top of the output.
+  std::ostringstream nonrel_structure_log, nonrel_restart_log, x2c_structure_log, x2c_restart_log, c4_pre_log,
+      c4_structure_log, c4_restart_log;
   double dhf_gradient_efficient_norm = 0.0;
   double dhf_gradient_efficient_max_abs = 0.0;
   double dhf_gradient_rdmft_norm = 0.0;
   double dhf_gradient_rdmft_max_abs = 0.0;
   std::string dhf_finite_diff_report;
   std::string dhf_hessian_report;
-  std::string dhf_mixed_hessian_report;
   std::string dhf_full_hessian_report;
   std::string dhf_functional_report;
   // X2C-HF's own analogues of the dhf_* gradient/Hessian test suite
   // above -- see the (long) comment right before the X2C-HF MO
   // transform in the main try block for how these are all populated.
-  bool x2c_gradient_computed = false;
-  double x2c_gradient_norm = 0.0;
-  double x2c_gradient_max_abs = 0.0;
   double x2c_gradient_efficient_norm = 0.0;
   double x2c_gradient_efficient_max_abs = 0.0;
   double x2c_gradient_rdmft_norm = 0.0;
   double x2c_gradient_rdmft_max_abs = 0.0;
   std::string x2c_finite_diff_report;
   std::string x2c_hessian_report;
-  std::string x2c_mixed_hessian_report;
   std::string x2c_full_hessian_report;
   std::string x2c_functional_report;
   rerdmft::Matrix<std::complex<double>> c_dhf;
@@ -4595,11 +2526,11 @@ int main(int argc, char** argv) {
       const auto restartFingerprint = rerdmft::basisFingerprint(large_basis.functions());
       // JK_only windows must agree with the file's; a difference is reported (the occupations are still checked against the
       // window of this run when the functional stage starts, and refused if a frozen/deep-virtual position is not exactly 1/0).
-      const auto noteWindow = [&](const rerdmft::RestartOrbitals& ro) {
+      const auto noteWindow = [&](std::ostream& out, const rerdmft::RestartOrbitals& ro) {
         if (ro.data.kind != "OCCUPATIONS" || isPnofFunctionalName(input.functional())) return;
         if (ro.data.jk_frozen_pairs != input.jk_frozen_pairs() ||
             (input.jk_active_pairs() >= 0 && ro.data.jk_active_pairs != input.jk_active_pairs())) {
-          std::cout << "    Note: the restart file's JK_only window (" << ro.data.jk_frozen_pairs << " frozen / " << ro.data.jk_active_pairs
+          out << "    Note: the restart file's JK_only window (" << ro.data.jk_frozen_pairs << " frozen / " << ro.data.jk_active_pairs
                     << " active pair(s)) differs from this run's (" << input.jk_frozen_pairs() << " / "
                     << (input.jk_active_pairs() >= 0 ? std::to_string(input.jk_active_pairs()) : std::string("all the rest")) << ").\n";
         }
@@ -4616,8 +2547,8 @@ int main(int argc, char** argv) {
         prepareNonRelEri("NON_REL");
         const std::size_t n = s_large.rows();
         const auto ro = rerdmft::readRestartOrbitals("RESTART.NON_REL", "NON_REL", input.n_electrons(), 2 * n, 2 * n,
-                                                     /*expected_complex=*/false, blockDiagTwice(s_large), std::cout);
-        noteWindow(ro);
+                                                     /*expected_complex=*/false, blockDiagTwice(s_large), nonrel_structure_log);
+        noteWindow(nonrel_structure_log, ro);
         rerdmft::Matrix<double> c_spatial(n, n);
         double off_block = 0.0, spin_dev = 0.0;
         for (std::size_t i = 0; i < n; ++i)
@@ -4626,7 +2557,7 @@ int main(int argc, char** argv) {
             off_block = std::max({off_block, std::abs(ro.c(i, n + j)), std::abs(ro.c(n + i, j))});
             spin_dev = std::max(spin_dev, std::abs(ro.c(n + i, n + j) - ro.c(i, j)));
           }
-        std::cout << std::scientific << std::setprecision(2) << "    spin structure of the orbitals: max |alpha-beta block| = " << off_block
+        nonrel_structure_log << std::scientific << std::setprecision(2) << "    spin structure of the orbitals: max |alpha-beta block| = " << off_block
                   << ", max |C_beta - C_alpha| = " << spin_dev << std::defaultfloat << std::setprecision(6) << "\n";
         if (off_block > 1e-8 || spin_dev > 1e-8) {
           throw std::runtime_error("READ_RESTART: the NON_REL restart orbitals are not spin-restricted (alpha and beta differ)");
@@ -4647,17 +2578,17 @@ int main(int argc, char** argv) {
             return buildPnofFunctionalReport(
                 "NON_REL", h_spin, eri_any, 2 * n, 0, input.n_electrons(), input.functional(), restart_nuclear_repulsion,
                 input.pnof_subspaces(), input.pnof_coupling(), /*relativistic=*/false, input.sqp_pnof_occ(), input.debug(),
-                input.verbose(), input.hessian_functional(), fullOptSettings(input), input.full_optimization_4c_neg(),
+                fullOptSettings(input), input.full_optimization_4c_neg(),
                 t_start, t_checkpoint, timing_records, &nonrel_restart, &eri_any, &ro.data.occupations);
           }
           return buildFunctionalReport(
               "NON_REL", h_spin, eri_any, dummyEnergies(2 * n), 0, input.n_electrons(), input.jk_frozen_pairs(),
               input.jk_active_pairs(), input.temperature(), input.functional(), input.occupation_init(),
-              restart_nuclear_repulsion, input.debug(), input.verbose(), input.hessian_functional(), fullOptSettings(input),
+              restart_nuclear_repulsion, input.debug(), fullOptSettings(input),
               input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &nonrel_restart, &eri_any, &ro.data.occupations);
         };
         nonrel_functional_report = input.cholesky() ? nonrel_functional(eri_spin_chol) : nonrel_functional(eri_spin_sym);
-        writeRestartFile<double>(input, "NON_REL", nonrel_restart, blockDiagTwice(c_spatial), blockDiagTwice(h_core_nonrel),
+        writeRestartFile<double>(nonrel_restart_log, input, "NON_REL", nonrel_restart, blockDiagTwice(c_spatial), blockDiagTwice(h_core_nonrel),
                                  blockDiagTwice(s_large), h_spin, restartFingerprint, restart_nuclear_repulsion);
       }
 
@@ -4666,15 +2597,15 @@ int main(int argc, char** argv) {
         const std::size_t dim = 2 * x_large.rows();
         const auto s_x2c = rerdmft::extractLargeComponentBlock(s_full, dim);
         const auto ro = rerdmft::readRestartOrbitals("RESTART.X2C_HF", "X2C_HF", input.n_electrons(), dim, dim,
-                                                     /*expected_complex=*/true, s_x2c, std::cout);
-        noteWindow(ro);
+                                                     /*expected_complex=*/true, s_x2c, x2c_structure_log);
+        noteWindow(x2c_structure_log, ro);
         // Kramers pairing after the Loewdin step: the pairs must be exact (Theta|2k> = |2k+1>) for the coupled-pair
         // quantities of the functionals; every pair is its own cluster (the columns are not eigenvectors any more).
         rerdmft::KramersPairingReport pairing;
         const auto c_x2c = rerdmft::fixKramersPairingLarge(ro.c, pseudoKramersEnergies(dim), s_large, 1e-4, &pairing);
-        printKramersPairingReport("X2C-HF (READ_RESTART)", pairing);
+        printKramersPairingReport(x2c_structure_log, "X2C-HF (READ_RESTART)", pairing);
         const auto h_x2c_mo = rerdmft::x2cMoOneElectronTransform(x2c_hamiltonian.h_x2c, c_x2c);
-        kramersStructureTestOneBody("X2C-HF (READ_RESTART)", h_x2c_mo, /*repairs_if_failed=*/false);
+        kramersStructureTestOneBody(x2c_structure_log, "X2C-HF (READ_RESTART)", h_x2c_mo, /*repairs_if_failed=*/false);
         rerdmft::CholeskyEri<std::complex<double>> x2c_mo_chol;
         rerdmft::SymmetricEri<std::complex<double>> x2c_mo_sym;
         if (input.cholesky()) {
@@ -4689,17 +2620,17 @@ int main(int argc, char** argv) {
             return buildPnofFunctionalReport(
                 "X2C_HF", h_x2c_mo, eri_any, dim, 0, input.n_electrons(), input.functional(), restart_nuclear_repulsion,
                 input.pnof_subspaces(), input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
-                input.verbose(), input.hessian_functional(), fullOptSettings(input), input.full_optimization_4c_neg(),
+                fullOptSettings(input), input.full_optimization_4c_neg(),
                 t_start, t_checkpoint, timing_records, &x2c_restart, &eri_any, &ro.data.occupations);
           }
           return buildFunctionalReport(
               "X2C_HF", h_x2c_mo, eri_any, dummyEnergies(dim), 0, input.n_electrons(), input.jk_frozen_pairs(),
               input.jk_active_pairs(), input.temperature(), input.functional(), input.occupation_init(),
-              restart_nuclear_repulsion, input.debug(), input.verbose(), input.hessian_functional(), fullOptSettings(input),
+              restart_nuclear_repulsion, input.debug(), fullOptSettings(input),
               input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &x2c_restart, &eri_any, &ro.data.occupations);
         };
         x2c_functional_report = input.cholesky() ? x2c_functional(x2c_mo_chol) : x2c_functional(x2c_mo_sym);
-        writeRestartFile<std::complex<double>>(input, "X2C_HF", x2c_restart, c_x2c, x2c_hamiltonian.h_x2c, s_x2c, h_x2c_mo,
+        writeRestartFile<std::complex<double>>(x2c_restart_log, input, "X2C_HF", x2c_restart, c_x2c, x2c_hamiltonian.h_x2c, s_x2c, h_x2c_mo,
                                                restartFingerprint, restart_nuclear_repulsion);
       }
 
@@ -4717,8 +2648,8 @@ int main(int argc, char** argv) {
           logTiming("Two-electron integrals built (C4_DHF, READ_RESTART)", t_start, t_checkpoint, timing_records);
         }
         const auto ro = rerdmft::readRestartOrbitals("RESTART.4C", "4C", input.n_electrons(), dim, dim,
-                                                     /*expected_complex=*/true, s_full, std::cout);
-        noteWindow(ro);
+                                                     /*expected_complex=*/true, s_full, c4_structure_log);
+        noteWindow(c4_structure_log, ro);
         // Coefficients in the orthonormal H_RKB_ortho basis: U = X^-1 C = X^dagger S C.
         auto u_ortho = rerdmft::dagger(x_full) * (s_full * ro.c);
         std::vector<double> kramers_energies = pseudoKramersEnergies(dim);
@@ -4765,7 +2696,7 @@ int main(int argc, char** argv) {
           for (std::size_t j = 0; j < n_neg_space; ++j) kramers_energies[j] = eig_restart.eigenvalues[j];
           for (std::size_t j = n_neg_space; j < dim; ++j)
             kramers_energies[j] = eig_restart.eigenvalues[n_neg_space - 1] + 1000.0 * static_cast<double>((j - n_neg_space) / 2 + 1);
-          std::cout << std::scientific << std::setprecision(2)
+          c4_structure_log << std::scientific << std::setprecision(2)
                     << "    positive-energy space re-established at this geometry (one Fock build from the restart density, no SCF): "
                        "max negative-energy admixture in the read positive spinors = "
                     << max_admixture << std::defaultfloat << std::setprecision(6) << "\n";
@@ -4773,10 +2704,10 @@ int main(int argc, char** argv) {
         rerdmft::KramersPairingReport pairing;
         u_ortho = rerdmft::fixKramersPairing(u_ortho, kramers_energies, rkb_coefficients, x_full, s_large, s_small_ukb, 1e-4,
                                              &pairing);
-        printKramersPairingReport("C4_DHF (READ_RESTART)", pairing);
+        printKramersPairingReport(c4_structure_log, "C4_DHF (READ_RESTART)", pairing);
         const auto c_dhf_restart = x_full * u_ortho;
         const auto h_mo_restart = rerdmft::rkbMoOneElectronTransform(h_rkb, c_dhf_restart);
-        kramersStructureTestOneBody("C4_DHF (READ_RESTART)", h_mo_restart, /*repairs_if_failed=*/false);
+        kramersStructureTestOneBody(c4_structure_log, "C4_DHF (READ_RESTART)", h_mo_restart, /*repairs_if_failed=*/false);
         rerdmft::SymmetricEri<std::complex<double>> c4_mo_sym_r;
         rerdmft::CholeskyEri<std::complex<double>> c4_mo_chol_r, c4_mo_full_chol_r;
         if (input.cholesky()) {
@@ -4795,20 +2726,19 @@ int main(int argc, char** argv) {
             return buildPnofFunctionalReport(
                 "C4_DHF", h_mo_restart, eri_any, dim - n_negative_r, n_negative_r, input.n_electrons(), input.functional(),
                 restart_nuclear_repulsion, input.pnof_subspaces(), input.pnof_coupling(), /*relativistic=*/true,
-                input.sqp_pnof_occ(), input.debug(), input.verbose(), input.hessian_functional(), fullOptSettings(input),
+                input.sqp_pnof_occ(), input.debug(), fullOptSettings(input),
                 input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &c4_restart, eri_full,
                 &ro.data.occupations);
           }
           return buildFunctionalReport(
               "C4_DHF", h_mo_restart, eri_any, dummyEnergies(dim - n_negative_r), n_negative_r, input.n_electrons(),
               input.jk_frozen_pairs(), input.jk_active_pairs(), input.temperature(), input.functional(),
-              input.occupation_init(), restart_nuclear_repulsion, input.debug(), input.verbose(),
-              input.hessian_functional(), fullOptSettings(input), input.full_optimization_4c_neg(), t_start, t_checkpoint,
+              input.occupation_init(), restart_nuclear_repulsion, input.debug(), fullOptSettings(input), input.full_optimization_4c_neg(), t_start, t_checkpoint,
               timing_records, &c4_restart, eri_full, &ro.data.occupations);
         };
         dhf_functional_report = input.cholesky() ? dhf_functional_r(c4_mo_chol_r, &c4_mo_full_chol_r)
                                                  : dhf_functional_r(c4_mo_sym_r, &c4_mo_sym_r);
-        writeRestartFile<std::complex<double>>(input, "4C", c4_restart, c_dhf_restart, h_rkb, s_full, h_mo_restart,
+        writeRestartFile<std::complex<double>>(c4_restart_log, input, "4C", c4_restart, c_dhf_restart, h_rkb, s_full, h_mo_restart,
                                                restartFingerprint, restart_nuclear_repulsion);
       }
     }
@@ -4846,11 +2776,11 @@ int main(int argc, char** argv) {
       // CHOLESKY TRUE: the MO-basis spin-orbital integrals are the AO vectors transformed to the MO basis --
       // no dense tensor. A dense tensor (exact transform of the packed AO integrals) is built only where it is
       // needed: without CHOLESKY (unchanged), and under DEBUG (dense-vs-Cholesky checks, dense validation
-      // suites); with CHOLESKY TRUE and HESSIAN_NON_REL only, it is expanded from the vectors.
+      // suites); with CHOLESKY TRUE and HESSIAN_MEAN_FIELD only, it is expanded from the vectors.
       // The integrals as elements (a unique-element store, Utils/SymmetricEri.h -- never a dense n^4 array): without
-      // CHOLESKY always, with CHOLESKY TRUE only under DEBUG (the exact reference) or for HESSIAN_NON_REL. A DENSE
-      // Tensor4 exists only for the DEBUG validation suites and the HESSIAN_NON_REL diagnostic.
-      const bool nonrel_dense = input.debug() || input.hessian_non_rel();
+      // CHOLESKY always, with CHOLESKY TRUE only under DEBUG (the exact reference) or for HESSIAN_MEAN_FIELD. A DENSE
+      // Tensor4 exists only for the DEBUG validation suites and the HESSIAN_MEAN_FIELD diagnostic.
+      const bool nonrel_dense = input.debug() || input.hessian_mean_field();
       rerdmft::CholeskyEri<double> eri_spin_chol;
       if (input.cholesky()) {
         eri_spin_chol = rerdmft::aoCholeskyToMoSpinOrbital(ao_cholesky, nonrel_hf_result.c_matrix);
@@ -4864,7 +2794,7 @@ int main(int argc, char** argv) {
       if (!input.cholesky() || input.debug()) {
         eri_spin_sym = rerdmft::closedShellSpinOrbitalTwoElectron(
             rerdmft::moTwoElectronSymmetric(nonrel_eri, nonrel_hf_result.c_matrix), n_spatial);
-      } else if (input.hessian_non_rel()) {
+      } else if (input.hessian_mean_field()) {
         eri_spin_sym = rerdmft::symmetricFromCholesky(eri_spin_chol);
       }
       rerdmft::Tensor4<double> eri_spin;
@@ -4908,7 +2838,7 @@ int main(int argc, char** argv) {
         hf_occ_spin[n_spatial + static_cast<std::size_t>(p)] = 1.0;
       }
       const auto hx_test = occupationOuterProduct(hf_occ_spin);
-      // A test involving the two-electron integrals: DEBUG (or HESSIAN_NON_REL, which needs the dense tensor anyway).
+      // A test involving the two-electron integrals: DEBUG (or HESSIAN_MEAN_FIELD, which needs the dense tensor anyway).
       rerdmft::Matrix<double> fock_rdmft, gradient_rdmft;
       if (nonrel_dense) {
         fock_rdmft = rerdmft::hartreeExchangeFockMatrix(h_spin, eri_spin, hf_occ_spin, hx_test, hx_test);
@@ -4925,35 +2855,12 @@ int main(int argc, char** argv) {
       // occupations) path. Kept only for validation -- not needed for
       // an actual RDMFT run.
       if (input.debug()) {
-        // The O(n^5) dense-2-RDM path is noticeably more expensive than
-        // everything else DEBUG does, so it only runs at VERBOSE > 0 (see
-        // Input.h) -- gradient_spin/d_spin/two_rdm_spin/fock_spin stay
-        // default-constructed (empty) and nonrel_gradient_computed stays
-        // false otherwise, which already correctly gates the "General
-        // (dense 2-RDM, O(n^5))" summary lines below via the existing
-        // `if (nonrel_gradient_computed)` (fock_spin/d_spin/two_rdm_spin
-        // are ALSO needed later for the analogous Hessian check).
-        rerdmft::Matrix<double> gradient_spin;
-        rerdmft::Matrix<double> d_spin;
-        rerdmft::Tensor4<double> two_rdm_spin;
-        rerdmft::Matrix<double> fock_spin;
-        if (input.verbose() > 0) {
-          d_spin = rerdmft::closedShellSpinOrbitalDensity(n_spatial, n_occ_spatial);
-          two_rdm_spin = rerdmft::singleDeterminantTwoRdm(d_spin);
-
-          fock_spin = rerdmft::generalizedFockMatrix(h_spin, eri_spin, d_spin, two_rdm_spin);
-          gradient_spin = rerdmft::orbitalGradient(fock_spin);
-          logTiming("NON_REL orbital gradient complete", t_start, t_checkpoint, timing_records);
-          gradientNormAndMax(gradient_spin, nonrel_gradient_norm, nonrel_gradient_max_abs);
-          nonrel_gradient_computed = true;
-        }
-
         // Efficient alternative (see NonRelOrbitalGradient.h): the
         // single-determinant 2-RDM has only Hartree/exchange/(would-be)
         // opposite-spin-exchange terms, so the same gradient can be
         // built from the ordinary (O(n^4)) Fock matrix instead of a
-        // dense 2-RDM contraction. Cross-checked against the general
-        // path above; should agree to numerical precision.
+        // dense 2-RDM contraction. Cross-checked against the RDMFT-ansatz
+        // gradient above; should agree to numerical precision.
         const auto gradient_efficient = rerdmft::nonRelOrbitalGradientEfficient(
             h_core_nonrel, nonrel_eri, nonrel_hf_result.c_matrix, input.n_electrons());
         gradientNormAndMax(gradient_efficient, nonrel_gradient_efficient_norm,
@@ -4981,17 +2888,12 @@ int main(int argc, char** argv) {
           nonrel_finite_diff_report = finiteDifferenceCheckReport(
               "NON_REL", h_spin, eri_spin, hf_occ_spin, lumo, homo_minus_1,
               nonrel_hf_result.nuclear_repulsion_energy, gradient_rdmft,
-              nonrel_gradient_computed ? &gradient_spin : nullptr, gradient_efficient);
+              gradient_efficient);
         }
 
-        // Analogous OFF-DIAGONAL Hessian finite-difference check: the
-        // cheap Hessian_opt/HartreeExchangeHessian.h path ALWAYS runs
-        // under DEBUG TRUE (uses fock_rdmft, already available
-        // unconditionally); the fully general, expensive
-        // Hessian_opt/GeneralizedHessian.h path additionally runs only
-        // when the O(n^5) dense-2-RDM gradient path above did (VERBOSE
-        // > 0, needs fock_spin/d_spin/two_rdm_spin), exactly mirroring
-        // the gradient's own cheap-always/general-VERBOSE-only split.
+        // Analogous OFF-DIAGONAL Hessian finite-difference check with the
+        // cheap Hessian_opt/HartreeExchangeHessian.h path (uses
+        // fock_rdmft, runs under DEBUG TRUE).
         // Needs a THIRD distinct occupied index, so (p,q)=
         // (lumo,homo_minus_1) and (r,s)=(lumo,0) are genuinely
         // different pairs sharing the same virtual (lumo). Deliberately
@@ -5013,20 +2915,10 @@ int main(int argc, char** argv) {
           logTiming("NON_REL cheap (HartreeExchangeHessian, O(n) per element) Hessian "
                     "element complete",
                     t_start, t_checkpoint, timing_records);
-          double analytic_hess_general = 0.0;
-          if (nonrel_gradient_computed) {
-            analytic_hess_general = rerdmft::generalizedOrbitalHessianElement(
-                h_spin, eri_spin, d_spin, two_rdm_spin, fock_spin, lumo, homo_minus_1, lumo,
-                second_occ);
-            logTiming("NON_REL general (GeneralizedHessian, O(n^2) per element) Hessian "
-                      "element complete",
-                      t_start, t_checkpoint, timing_records);
-          }
           nonrel_hessian_report = hessianFiniteDifferenceReport(
               "NON_REL", h_spin, eri_spin, hf_occ_spin, lumo, homo_minus_1, lumo, second_occ,
               nonrel_hf_result.nuclear_repulsion_energy, analytic_hess_cheap,
-              nonrel_gradient_computed ? &analytic_hess_general : nullptr,
-              static_cast<const double*>(nullptr), static_cast<const double*>(nullptr));
+              static_cast<const double*>(nullptr));
         }
       }
 
@@ -5034,10 +2926,10 @@ int main(int argc, char** argv) {
       // independent real-step pairs p>q over the full spin-orbital
       // space -- Hessian_opt/HartreeExchangeHessian.h), diagonalized to
       // confirm the converged HF solution is a genuine MINIMUM (every
-      // eigenvalue >= 0). Gated by its own HESSIAN_NON_REL keyword
+      // eigenvalue >= 0). Gated by its own HESSIAN_MEAN_FIELD keyword
       // (Input.h), independent of DEBUG -- it is its own opt-in
       // diagnostic, not a DEBUG cross-check.
-      if (input.hessian_non_rel()) {
+      if (input.hessian_mean_field()) {
         nonrel_full_hessian_report =
             buildFullHessianReport("NON_REL", h_spin, eri_spin, hf_occ_spin, hx_test, fock_rdmft,
                                     t_start, t_checkpoint, timing_records);
@@ -5071,7 +2963,7 @@ int main(int argc, char** argv) {
                 "NON_REL", h_spin, eri_any, 2 * n_spatial, 0, input.n_electrons(),
                 input.functional(), nonrel_hf_result.nuclear_repulsion_energy,
                 input.pnof_subspaces(), input.pnof_coupling(), /*relativistic=*/false,
-                input.sqp_pnof_occ(), input.debug(), input.verbose(), input.hessian_functional(), fullOptSettings(input),
+                input.sqp_pnof_occ(), input.debug(), fullOptSettings(input),
                 input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records,
                 &nonrel_restart);
           }
@@ -5079,8 +2971,7 @@ int main(int argc, char** argv) {
               "NON_REL", h_spin, eri_any, nonrel_orbital_energies_spin, 0, input.n_electrons(),
               input.jk_frozen_pairs(), input.jk_active_pairs(),
               input.temperature(), input.functional(), input.occupation_init(),
-              nonrel_hf_result.nuclear_repulsion_energy, input.debug(), input.verbose(),
-              input.hessian_functional(), fullOptSettings(input), input.full_optimization_4c_neg(),
+              nonrel_hf_result.nuclear_repulsion_energy, input.debug(), fullOptSettings(input), input.full_optimization_4c_neg(),
               t_start, t_checkpoint, timing_records,
               &nonrel_restart);
         };
@@ -5096,7 +2987,7 @@ int main(int argc, char** argv) {
             }
           return out;
         };
-        writeRestartFile<double>(input, "NON_REL", nonrel_restart, blockDiagTwice(nonrel_hf_result.c_matrix),
+        writeRestartFile<double>(nonrel_restart_log, input, "NON_REL", nonrel_restart, blockDiagTwice(nonrel_hf_result.c_matrix),
                                  blockDiagTwice(h_core_nonrel), blockDiagTwice(s_large), h_spin,
                                  rerdmft::basisFingerprint(large_basis.functions()),
                                  nonrel_hf_result.nuclear_repulsion_energy);
@@ -5127,7 +3018,7 @@ int main(int argc, char** argv) {
       // The X2C SCF Fock matrices come from the packed SPATIAL AO integrals (or the AO Cholesky vectors with CHOLESKY
       // TRUE) using the closed-shell spin structure -- the dense (2 n_large)^4 spin-orbital tensor is not needed. It
       // is built only under DEBUG, for the efficient-gradient cross-check.
-      const bool x2c_dense = input.debug() || input.hessian_x2c();  // dense Tensor4s: DEBUG suites / HESSIAN_X2C
+      const bool x2c_dense = input.debug() || input.hessian_mean_field();  // dense Tensor4s: DEBUG suites / HESSIAN_MEAN_FIELD
       rerdmft::Tensor4<double> eri_x2c_spin;
       if (input.debug()) {
         rerdmft::Matrix<double> identity_large(n_large, n_large, 0.0);
@@ -5183,7 +3074,7 @@ int main(int argc, char** argv) {
       // comment above), just in the smaller 2*nLarge-dimensional
       // X2C-HF space (no negative-energy branch at all).
       rerdmft::Matrix<std::complex<double>> h_x2c_mo;
-      rerdmft::Tensor4<std::complex<double>> eri_x2c_mo;                // dense: DEBUG / HESSIAN_X2C only
+      rerdmft::Tensor4<std::complex<double>> eri_x2c_mo;                // dense: DEBUG / HESSIAN_MEAN_FIELD only
       rerdmft::SymmetricEri<std::complex<double>> x2c_mo_sym;           // unique elements (no CHOLESKY, or DEBUG)
       rerdmft::CholeskyEri<std::complex<double>> x2c_mo_chol;           // CHOLESKY TRUE: MO-basis vectors
       const auto transformX2cToMo = [&]() {
@@ -5191,7 +3082,7 @@ int main(int argc, char** argv) {
         if (input.cholesky()) x2c_mo_chol = rerdmft::aoCholeskyToMoSpinor(ao_cholesky, x2c_hf_result.c_matrix);
         if (!input.cholesky() || input.debug()) {
           x2c_mo_sym = rerdmft::x2cMoTwoElectronSymmetric(nonrel_eri, x2c_hf_result.c_matrix);
-        } else if (input.hessian_x2c()) {
+        } else if (input.hessian_mean_field()) {
           x2c_mo_sym = rerdmft::symmetricFromCholesky(x2c_mo_chol);
         }
         if (x2c_dense) eri_x2c_mo = rerdmft::denseOf(x2c_mo_sym);
@@ -5200,8 +3091,8 @@ int main(int argc, char** argv) {
       // The Kramers-structure test of the integrals: full (one- and two-electron) where a dense tensor exists,
       // one-electron only for a vectors-only run (the two-electron part is a DEBUG test).
       const auto x2cKramersTest = [&](const std::string& label, bool repairs_if_failed) {
-        return x2c_dense ? kramersStructureTest(label, h_x2c_mo, eri_x2c_mo, repairs_if_failed)
-                         : kramersStructureTestOneBody(label, h_x2c_mo, repairs_if_failed);
+        return x2c_dense ? kramersStructureTest(x2c_structure_log, label, h_x2c_mo, eri_x2c_mo, repairs_if_failed)
+                         : kramersStructureTestOneBody(x2c_structure_log, label, h_x2c_mo, repairs_if_failed);
       };
 
       // Kramers-pair test of the MO integrals; ONLY IF IT FAILS (consecutive eigenvector
@@ -5214,7 +3105,7 @@ int main(int argc, char** argv) {
         rerdmft::KramersPairingReport pairing;
         x2c_hf_result.c_matrix = rerdmft::fixKramersPairingLarge(
             x2c_hf_result.c_matrix, x2c_hf_result.orbital_energies, s_large, 1e-4, &pairing);
-        printKramersPairingReport("X2C-HF", pairing);
+        printKramersPairingReport(x2c_structure_log, "X2C-HF", pairing);
         transformX2cToMo();
         x2cKramersTest("X2C-HF (after the correction)", /*repairs_if_failed=*/false);
       };
@@ -5237,7 +3128,7 @@ int main(int argc, char** argv) {
       std::vector<double> x2c_hf_occupations(x2c_dim, 0.0);
       for (int p = 0; p < input.n_electrons(); ++p) x2c_hf_occupations[static_cast<std::size_t>(p)] = 1.0;
       const auto hx_test_x2c = occupationOuterProduct(x2c_hf_occupations);
-      // A test of the two-electron integrals: DEBUG (or HESSIAN_X2C, which needs the dense tensor anyway).
+      // A test of the two-electron integrals: DEBUG (or HESSIAN_MEAN_FIELD, which needs the dense tensor anyway).
       rerdmft::Matrix<std::complex<double>> fock_rdmft_x2c, gradient_rdmft_x2c;
       if (x2c_dense) {
         fock_rdmft_x2c = rerdmft::hartreeExchangeFockMatrix(
@@ -5259,26 +3150,6 @@ int main(int argc, char** argv) {
         logTiming("X2C-HF efficient orbital gradient complete", t_start, t_checkpoint,
                   timing_records);
 
-        rerdmft::Matrix<std::complex<double>> gradient_mo_x2c;
-        rerdmft::Matrix<std::complex<double>> d_mo_x2c;
-        rerdmft::Tensor4<std::complex<double>> two_rdm_mo_x2c;
-        rerdmft::Matrix<std::complex<double>> fock_mo_x2c;
-        if (input.verbose() > 0) {
-          d_mo_x2c = rerdmft::Matrix<std::complex<double>>(x2c_dim, x2c_dim,
-                                                             std::complex<double>(0.0, 0.0));
-          for (int p = 0; p < input.n_electrons(); ++p) {
-            d_mo_x2c(static_cast<std::size_t>(p), static_cast<std::size_t>(p)) =
-                std::complex<double>(1.0, 0.0);
-          }
-          two_rdm_mo_x2c = rerdmft::singleDeterminantTwoRdm(d_mo_x2c);
-
-          fock_mo_x2c = rerdmft::generalizedFockMatrix(h_x2c_mo, eri_x2c_mo, d_mo_x2c, two_rdm_mo_x2c);
-          gradient_mo_x2c = rerdmft::orbitalGradient(fock_mo_x2c);
-          logTiming("X2C-HF orbital gradient complete", t_start, t_checkpoint, timing_records);
-          gradientNormAndMax(gradient_mo_x2c, x2c_gradient_norm, x2c_gradient_max_abs);
-          x2c_gradient_computed = true;
-        }
-
         // Numerical (finite-difference) gradient/Hessian test: rotates
         // the HOMO/LUMO pair (no negative-energy offset -- lumo =
         // n_electrons, homo = n_electrons-1) by a small kappa and
@@ -5290,7 +3161,7 @@ int main(int argc, char** argv) {
           x2c_finite_diff_report = finiteDifferenceCheckReport(
               "X2C_HF", h_x2c_mo, eri_x2c_mo, x2c_hf_occupations, x2c_lumo, x2c_homo,
               x2c_hf_result.nuclear_repulsion_energy, gradient_rdmft_x2c,
-              x2c_gradient_computed ? &gradient_mo_x2c : nullptr, gradient_efficient_x2c);
+              gradient_efficient_x2c);
         }
 
         // Analogous OFF-DIAGONAL Hessian finite-difference check,
@@ -5305,15 +3176,6 @@ int main(int argc, char** argv) {
           logTiming("X2C-HF cheap (HartreeExchangeHessian, O(n) per element) Hessian "
                     "element complete",
                     t_start, t_checkpoint, timing_records);
-          std::complex<double> analytic_hess_general_x2c(0.0, 0.0);
-          if (x2c_gradient_computed) {
-            analytic_hess_general_x2c = rerdmft::generalizedOrbitalHessianElement(
-                h_x2c_mo, eri_x2c_mo, d_mo_x2c, two_rdm_mo_x2c, fock_mo_x2c, x2c_lumo, x2c_homo,
-                x2c_lumo, x2c_homo_minus_1);
-            logTiming("X2C-HF general (GeneralizedHessian, O(n^2) per element) Hessian "
-                      "element complete",
-                      t_start, t_checkpoint, timing_records);
-          }
 
           const std::complex<double> analytic_hess_imag_cheap_x2c =
               rerdmft::hartreeExchangeHessianElementImag(h_x2c_mo, eri_x2c_mo, x2c_hf_occupations,
@@ -5323,43 +3185,10 @@ int main(int argc, char** argv) {
           logTiming("X2C-HF cheap (HartreeExchangeHessian, O(n) per element) imaginary-"
                     "direction Hessian element complete",
                     t_start, t_checkpoint, timing_records);
-          std::complex<double> analytic_hess_imag_general_x2c(0.0, 0.0);
-          if (x2c_gradient_computed) {
-            analytic_hess_imag_general_x2c = rerdmft::generalizedOrbitalHessianElementImag(
-                h_x2c_mo, eri_x2c_mo, d_mo_x2c, two_rdm_mo_x2c, fock_mo_x2c, x2c_lumo, x2c_homo,
-                x2c_lumo, x2c_homo_minus_1);
-            logTiming("X2C-HF general (GeneralizedHessian, O(n^2) per element) imaginary-"
-                      "direction Hessian element complete",
-                      t_start, t_checkpoint, timing_records);
-          }
-
           x2c_hessian_report = hessianFiniteDifferenceReport(
               "X2C_HF", h_x2c_mo, eri_x2c_mo, x2c_hf_occupations, x2c_lumo, x2c_homo, x2c_lumo,
               x2c_homo_minus_1, x2c_hf_result.nuclear_repulsion_energy, analytic_hess_cheap_x2c,
-              x2c_gradient_computed ? &analytic_hess_general_x2c : nullptr,
-              &analytic_hess_imag_cheap_x2c,
-              x2c_gradient_computed ? &analytic_hess_imag_general_x2c : nullptr);
-
-          // MIXED real/imaginary Hessian block, gated by VERBOSE > 1,
-          // exactly mirroring DHF's own.
-          if (input.verbose() > 1) {
-            const std::complex<double> analytic_mixed_x2c = rerdmft::hartreeExchangeHessianElementMixed(
-                h_x2c_mo, eri_x2c_mo, x2c_hf_occupations, hx_test_x2c, hx_test_x2c, fock_rdmft_x2c,
-                x2c_lumo, x2c_homo, x2c_lumo, x2c_homo_minus_1);
-            const std::complex<double> analytic_mixed_swapped_x2c =
-                rerdmft::hartreeExchangeHessianElementMixed(h_x2c_mo, eri_x2c_mo,
-                                                             x2c_hf_occupations, hx_test_x2c,
-                                                             hx_test_x2c, fock_rdmft_x2c,
-                                                             x2c_lumo, x2c_homo_minus_1, x2c_lumo,
-                                                             x2c_homo);
-            logTiming("X2C-HF cheap (HartreeExchangeHessian, O(n) per element) mixed-"
-                      "direction Hessian element complete",
-                      t_start, t_checkpoint, timing_records);
-            x2c_mixed_hessian_report = mixedHessianFiniteDifferenceReport(
-                "X2C_HF", h_x2c_mo, eri_x2c_mo, x2c_hf_occupations, x2c_lumo, x2c_homo, x2c_lumo,
-                x2c_homo_minus_1, x2c_hf_result.nuclear_repulsion_energy, analytic_mixed_x2c,
-                analytic_mixed_swapped_x2c);
-          }
+              &analytic_hess_imag_cheap_x2c);
         }
       }
 
@@ -5370,9 +3199,9 @@ int main(int argc, char** argv) {
       // UNLIKE C4_DHF's saddle point, since X2C's own decoupling
       // already eliminated the negative-energy branch entirely, so
       // there is no downhill rotation direction left to admit. Gated
-      // by its own HESSIAN_X2C keyword (Input.h), independent of
-      // DEBUG -- mirroring HESSIAN_NON_REL/HESSIAN_4C exactly.
-      if (input.hessian_x2c()) {
+      // by its own HESSIAN_MEAN_FIELD keyword (Input.h), independent of
+      // DEBUG -- mirroring HESSIAN_MEAN_FIELD/HESSIAN_MEAN_FIELD exactly.
+      if (input.hessian_mean_field()) {
         x2c_full_hessian_report = buildFullHessianReport(
             "X2C_HF", h_x2c_mo, eri_x2c_mo, x2c_hf_occupations, hx_test_x2c, fock_rdmft_x2c,
             t_start, t_checkpoint, timing_records, /*expected_n_negative=*/0);
@@ -5395,7 +3224,7 @@ int main(int argc, char** argv) {
                 "X2C_HF", h_x2c_mo, eri_any, h_x2c_mo.rows(), 0, input.n_electrons(),
                 input.functional(), x2c_hf_result.nuclear_repulsion_energy, input.pnof_subspaces(),
                 input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
-                input.verbose(), input.hessian_functional(), fullOptSettings(input),
+                fullOptSettings(input),
                 input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records,
                 &x2c_restart);
           }
@@ -5404,7 +3233,7 @@ int main(int argc, char** argv) {
               input.n_electrons(), input.jk_frozen_pairs(), input.jk_active_pairs(),
               input.temperature(), input.functional(),
               input.occupation_init(), x2c_hf_result.nuclear_repulsion_energy, input.debug(),
-              input.verbose(), input.hessian_functional(), fullOptSettings(input),
+              fullOptSettings(input),
               input.full_optimization_4c_neg(), t_start, t_checkpoint,
               timing_records, &x2c_restart);
         };
@@ -5412,7 +3241,7 @@ int main(int argc, char** argv) {
         // RESTART file: the (Kramers-fixed) X2C-HF spinor coefficients times the FULL_OPTIMIZATION
         // rotation, in the Large-component spin-orbital AO basis.
         writeRestartFile<std::complex<double>>(
-            input, "X2C_HF", x2c_restart, x2c_hf_result.c_matrix, x2c_hamiltonian.h_x2c,
+            x2c_restart_log, input, "X2C_HF", x2c_restart, x2c_hf_result.c_matrix, x2c_hamiltonian.h_x2c,
             rerdmft::extractLargeComponentBlock(s_full, x2c_hf_result.c_matrix.rows()), h_x2c_mo,
             rerdmft::basisFingerprint(large_basis.functions()), x2c_hf_result.nuclear_repulsion_energy);
       }
@@ -5464,7 +3293,7 @@ int main(int argc, char** argv) {
         // must pass the same test -- this validates that layout on the actual data.
         double h_scale = 0.0;
         const double h_dev = rerdmft::kramersRkbAoDeviation(h_rkb, &h_scale);
-        std::cout << "h_RKB time-reversal symmetry (one-body operator, [Large-alpha, Large-beta, "
+        c4_pre_log << "h_RKB time-reversal symmetry (one-body operator, [Large-alpha, Large-beta, "
                      "Small-alpha, Small-beta] RKB AO basis): max |M(P a,P b) - s_a s_b conj M(a,b)| = "
                   << std::scientific << std::setprecision(2) << h_dev << " (max |h_RKB| = " << h_scale
                   << ")" << std::defaultfloat << std::setprecision(6) << "\n  ["
@@ -5508,9 +3337,9 @@ int main(int argc, char** argv) {
       dhf_result.c_dhf = x_full * dhf_result.fock_ortho_eigenvectors;
       rerdmft::Matrix<std::complex<double>> h_mo;
       // MO integrals as a unique-element store (no CHOLESKY, or DEBUG as the exact reference, or expanded from the
-      // vectors for HESSIAN_4C) and/or Cholesky vectors (CHOLESKY TRUE); a DENSE Tensor4 only for the DEBUG suites
-      // and HESSIAN_4C (see the NON_REL/X2C comments).
-      const bool c4_dense = input.debug() || input.hessian_4c();
+      // vectors for HESSIAN_MEAN_FIELD) and/or Cholesky vectors (CHOLESKY TRUE); a DENSE Tensor4 only for the DEBUG suites
+      // and HESSIAN_MEAN_FIELD (see the NON_REL/X2C comments).
+      const bool c4_dense = input.debug() || input.hessian_mean_field();
       rerdmft::Tensor4<std::complex<double>> eri_mo;
       rerdmft::SymmetricEri<std::complex<double>> c4_mo_sym;
       rerdmft::CholeskyEri<std::complex<double>> c4_mo_chol;
@@ -5522,15 +3351,15 @@ int main(int argc, char** argv) {
         }
         if (!input.cholesky() || input.debug()) {
           c4_mo_sym = rerdmft::rkbMoTwoElectronSymmetric(c4_spinor_eri, dhf_result.c_dhf);
-        } else if (input.hessian_4c()) {
+        } else if (input.hessian_mean_field()) {
           c4_mo_sym = rerdmft::symmetricFromCholesky(c4_mo_chol);
         }
         if (c4_dense) eri_mo = rerdmft::denseOf(c4_mo_sym);
       };
       transformToMo();
       const auto c4KramersTest = [&](const std::string& label, bool repairs_if_failed) {
-        return c4_dense ? kramersStructureTest(label, h_mo, eri_mo, repairs_if_failed)
-                        : kramersStructureTestOneBody(label, h_mo, repairs_if_failed);
+        return c4_dense ? kramersStructureTest(c4_structure_log, label, h_mo, eri_mo, repairs_if_failed)
+                        : kramersStructureTestOneBody(c4_structure_log, label, h_mo, repairs_if_failed);
       };
 
       if (input.cholesky() && input.debug()) {
@@ -5576,7 +3405,7 @@ int main(int argc, char** argv) {
         dhf_result.fock_ortho_eigenvectors = rerdmft::fixKramersPairing(
             dhf_result.fock_ortho_eigenvectors, dhf_result.orbital_energies, rkb_coefficients,
             x_full, s_large, s_small_ukb, 1e-4, &pairing);
-        printKramersPairingReport("C4_DHF", pairing);
+        printKramersPairingReport(c4_structure_log, "C4_DHF", pairing);
         dhf_result.c_dhf = x_full * dhf_result.fock_ortho_eigenvectors;
         transformToMo();
         c4KramersTest("C4_DHF (after the correction)", /*repairs_if_failed=*/false);
@@ -5606,7 +3435,7 @@ int main(int argc, char** argv) {
       std::vector<double> dhf_occupations(rkb_dim, 0.0);
       for (std::size_t p = 0; p < rkb_dim; ++p) dhf_occupations[p] = d_occ_check(p, p).real();
       const auto hx_test = occupationOuterProduct(dhf_occupations);
-      // A test of the two-electron integrals: DEBUG (or HESSIAN_4C, which needs the dense tensor anyway).
+      // A test of the two-electron integrals: DEBUG (or HESSIAN_MEAN_FIELD, which needs the dense tensor anyway).
       rerdmft::Matrix<std::complex<double>> fock_rdmft, gradient_rdmft;
       if (c4_dense) {
         fock_rdmft = rerdmft::hartreeExchangeFockMatrix(h_mo, eri_mo, dhf_occupations, hx_test, hx_test);
@@ -5617,11 +3446,10 @@ int main(int argc, char** argv) {
                   timing_records);
       }
 
-      // DEBUG-only cross-checks against the RDMFT-ansatz path above:
+      // DEBUG-only cross-check against the RDMFT-ansatz path above:
       // the DHF-specific efficient (O(n^4), hardcoded to idempotent
-      // occupations -- RkbOrbitalGradient.h) path, and Hessian_opt's
-      // general (dense 2-RDM, O(n^5) contraction) path. Neither is
-      // needed for an actual RDMFT run.
+      // occupations -- RkbOrbitalGradient.h) path. Not needed for an
+      // actual RDMFT run.
       if (input.debug()) {
         const auto gradient_efficient = rerdmft::dhfOrbitalGradientEfficient(
             h_rkb, c4_spinor_eri, dhf_result.c_dhf, input.n_electrons());
@@ -5629,29 +3457,6 @@ int main(int argc, char** argv) {
                             dhf_gradient_efficient_max_abs);
         logTiming("C4_DHF efficient orbital gradient complete", t_start, t_checkpoint,
                   timing_records);
-
-        // The O(n^5) dense-2-RDM path is noticeably more expensive than
-        // everything else DEBUG does, so it only runs at VERBOSE > 0 (see
-        // Input.h) -- gradient_mo/d_mo/two_rdm_mo/fock_mo stay
-        // default-constructed (empty) and dhf_gradient_computed stays
-        // false otherwise, which already correctly gates the "General
-        // (dense 2-RDM, O(n^5))" summary lines below via the existing
-        // `if (dhf_gradient_computed)` (fock_mo/d_mo/two_rdm_mo are ALSO
-        // needed later for the analogous Hessian check).
-        rerdmft::Matrix<std::complex<double>> gradient_mo;
-        rerdmft::Matrix<std::complex<double>> d_mo;
-        rerdmft::Tensor4<std::complex<double>> two_rdm_mo;
-        rerdmft::Matrix<std::complex<double>> fock_mo;
-        if (input.verbose() > 0) {
-          d_mo = rerdmft::occupiedPositiveEnergyDensity(rkb_dim, input.n_electrons());
-          two_rdm_mo = rerdmft::singleDeterminantTwoRdm(d_mo);
-
-          fock_mo = rerdmft::generalizedFockMatrix(h_mo, eri_mo, d_mo, two_rdm_mo);
-          gradient_mo = rerdmft::orbitalGradient(fock_mo);
-          logTiming("C4_DHF orbital gradient complete", t_start, t_checkpoint, timing_records);
-          gradientNormAndMax(gradient_mo, dhf_gradient_norm, dhf_gradient_max_abs);
-          dhf_gradient_computed = true;
-        }
 
         // Numerical (finite-difference) gradient/Hessian test: rotates
         // the HOMO/LUMO positive-energy spinor pair by a small kappa via
@@ -5665,18 +3470,12 @@ int main(int argc, char** argv) {
           dhf_finite_diff_report = finiteDifferenceCheckReport(
               "C4_DHF", h_mo, eri_mo, dhf_occupations, lumo, homo,
               dhf_result.nuclear_repulsion_energy, gradient_rdmft,
-              dhf_gradient_computed ? &gradient_mo : nullptr, gradient_efficient);
+              gradient_efficient);
         }
 
-        // Analogous OFF-DIAGONAL Hessian finite-difference check: the
-        // cheap Hessian_opt/HartreeExchangeHessian.h path ALWAYS runs
-        // under DEBUG TRUE (uses fock_rdmft, already available
-        // unconditionally); the fully general, expensive
-        // Hessian_opt/GeneralizedHessian.h path additionally runs only
-        // when the O(n^5) dense-2-RDM gradient path above did (VERBOSE
-        // > 0, needs fock_mo/d_mo/two_rdm_mo) -- exactly mirroring the
-        // NON_REL Hessian check and the gradient's own cheap-always/
-        // general-VERBOSE-only split. (p,q)=(lumo,homo) and
+        // Analogous OFF-DIAGONAL Hessian finite-difference check with the
+        // cheap Hessian_opt/HartreeExchangeHessian.h path (uses
+        // fock_rdmft, runs under DEBUG TRUE). (p,q)=(lumo,homo) and
         // (r,s)=(lumo,homo-1) are genuinely different pairs sharing the
         // same virtual (lumo); needs at least 2 electrons so homo-1
         // stays within the positive-energy occupied block.
@@ -5688,14 +3487,6 @@ int main(int argc, char** argv) {
           logTiming("C4_DHF cheap (HartreeExchangeHessian, O(n) per element) Hessian "
                     "element complete",
                     t_start, t_checkpoint, timing_records);
-          std::complex<double> analytic_hess_general(0.0, 0.0);
-          if (dhf_gradient_computed) {
-            analytic_hess_general = rerdmft::generalizedOrbitalHessianElement(
-                h_mo, eri_mo, d_mo, two_rdm_mo, fock_mo, lumo, homo, lumo, homo_minus_1);
-            logTiming("C4_DHF general (GeneralizedHessian, O(n^2) per element) Hessian "
-                      "element complete",
-                      t_start, t_checkpoint, timing_records);
-          }
 
           const std::complex<double> analytic_hess_imag_cheap =
               rerdmft::hartreeExchangeHessianElementImag(h_mo, eri_mo, dhf_occupations, hx_test,
@@ -5704,43 +3495,10 @@ int main(int argc, char** argv) {
           logTiming("C4_DHF cheap (HartreeExchangeHessian, O(n) per element) imaginary-"
                     "direction Hessian element complete",
                     t_start, t_checkpoint, timing_records);
-          std::complex<double> analytic_hess_imag_general(0.0, 0.0);
-          if (dhf_gradient_computed) {
-            analytic_hess_imag_general = rerdmft::generalizedOrbitalHessianElementImag(
-                h_mo, eri_mo, d_mo, two_rdm_mo, fock_mo, lumo, homo, lumo, homo_minus_1);
-            logTiming("C4_DHF general (GeneralizedHessian, O(n^2) per element) imaginary-"
-                      "direction Hessian element complete",
-                      t_start, t_checkpoint, timing_records);
-          }
-
           dhf_hessian_report = hessianFiniteDifferenceReport(
               "C4_DHF", h_mo, eri_mo, dhf_occupations, lumo, homo, lumo, homo_minus_1,
               dhf_result.nuclear_repulsion_energy, analytic_hess_cheap,
-              dhf_gradient_computed ? &analytic_hess_general : nullptr, &analytic_hess_imag_cheap,
-              dhf_gradient_computed ? &analytic_hess_imag_general : nullptr);
-
-          // MIXED real/imaginary Hessian block (Hessian_opt/
-          // HartreeExchangeHessian.h's hartreeExchangeHessianElementMixed)
-          // -- gated by VERBOSE > 1 (not just DEBUG, and a strictly
-          // higher bar than the O(n^5) dense-2-RDM cross-check's own
-          // VERBOSE > 0), since it is a newly-derived, less commonly
-          // needed check on top of everything else DEBUG already does.
-          if (input.verbose() > 1) {
-            const std::complex<double> analytic_mixed =
-                rerdmft::hartreeExchangeHessianElementMixed(h_mo, eri_mo, dhf_occupations, hx_test,
-                                                             hx_test, fock_rdmft, lumo, homo, lumo,
-                                                             homo_minus_1);
-            const std::complex<double> analytic_mixed_swapped =
-                rerdmft::hartreeExchangeHessianElementMixed(h_mo, eri_mo, dhf_occupations, hx_test,
-                                                             hx_test, fock_rdmft, lumo,
-                                                             homo_minus_1, lumo, homo);
-            logTiming("C4_DHF cheap (HartreeExchangeHessian, O(n) per element) mixed-"
-                      "direction Hessian element complete",
-                      t_start, t_checkpoint, timing_records);
-            dhf_mixed_hessian_report = mixedHessianFiniteDifferenceReport(
-                "C4_DHF", h_mo, eri_mo, dhf_occupations, lumo, homo, lumo, homo_minus_1,
-                dhf_result.nuclear_repulsion_energy, analytic_mixed, analytic_mixed_swapped);
-          }
+              &analytic_hess_imag_cheap);
         }
       }
 
@@ -5751,10 +3509,10 @@ int main(int argc, char** argv) {
       // the converged DHF solution is a SADDLE POINT (some negative
       // eigenvalues expected, from rotations mixing occupied
       // positive-energy orbitals into the negative-energy branch)
-      // rather than a genuine minimum. Gated by its own HESSIAN_4C
+      // rather than a genuine minimum. Gated by its own HESSIAN_MEAN_FIELD
       // keyword (Input.h), independent of DEBUG -- it is its own
       // opt-in diagnostic, not a DEBUG cross-check.
-      if (input.hessian_4c()) {
+      if (input.hessian_mean_field()) {
         const long long expected_n_negative =
             static_cast<long long>(rkb_dim / 2) * static_cast<long long>(input.n_electrons());
         dhf_full_hessian_report = buildFullHessianReport(
@@ -5786,7 +3544,7 @@ int main(int argc, char** argv) {
                 "C4_DHF", h_mo, eri_any, h_mo.rows() - n_negative, n_negative, input.n_electrons(),
                 input.functional(), dhf_result.nuclear_repulsion_energy, input.pnof_subspaces(),
                 input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
-                input.verbose(), input.hessian_functional(), fullOptSettings(input),
+                fullOptSettings(input),
                 input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &c4_restart, eri_full);
           }
           return buildFunctionalReport(
@@ -5794,7 +3552,7 @@ int main(int argc, char** argv) {
               input.n_electrons(), input.jk_frozen_pairs(), input.jk_active_pairs(),
               input.temperature(), input.functional(),
               input.occupation_init(), dhf_result.nuclear_repulsion_energy, input.debug(),
-              input.verbose(), input.hessian_functional(), fullOptSettings(input),
+              fullOptSettings(input),
               input.full_optimization_4c_neg(), t_start, t_checkpoint,
               timing_records, &c4_restart, eri_full);
         };
@@ -5812,7 +3570,7 @@ int main(int argc, char** argv) {
         }
         // RESTART files: RESTART.4C (the positive-energy-only minimization); coefficients in the RKB spinor basis.
         const auto restart_fingerprint = rerdmft::basisFingerprint(large_basis.functions());
-        writeRestartFile<std::complex<double>>(input, "4C", c4_restart, dhf_result.c_dhf, h_rkb, s_full, h_mo,
+        writeRestartFile<std::complex<double>>(c4_restart_log, input, "4C", c4_restart, dhf_result.c_dhf, h_rkb, s_full, h_mo,
                                                restart_fingerprint, dhf_result.nuclear_repulsion_energy);
       }
     }
@@ -5836,7 +3594,9 @@ int main(int argc, char** argv) {
     }
     input.print(std::cout);
     std::cout << std::fixed << std::setprecision(6);
-    std::cout << nonrel_functional_report << x2c_functional_report << dhf_functional_report;
+    std::cout << nonrel_structure_log.str() << nonrel_functional_report << nonrel_restart_log.str();
+    std::cout << x2c_structure_log.str() << x2c_functional_report << x2c_restart_log.str();
+    std::cout << c4_structure_log.str() << dhf_functional_report << c4_restart_log.str();
     printTimings(timing_records);
     printFarewell();
     return 0;
@@ -6067,8 +3827,8 @@ int main(int argc, char** argv) {
     const auto& positive_energy_eigenvalues = h_positive_energy_eig.eigenvalues;
     double max_positive_energy_kramers_splitting = 0.0;
     for (std::size_t i = 0; i + 1 < positive_energy_eigenvalues.size(); i += 2) {
-      std::cout << "  " << std::setw(6) << i << std::setw(20) << positive_energy_eigenvalues[i]
-                 << std::setw(10) << (i + 1) << std::setw(20) << positive_energy_eigenvalues[i + 1]
+      std::cout << "  " << std::setw(6) << i << std::setw(20) << energyText(positive_energy_eigenvalues[i])
+                 << std::setw(10) << (i + 1) << std::setw(20) << energyText(positive_energy_eigenvalues[i + 1])
                  << "\n";
       max_positive_energy_kramers_splitting = std::max(
           max_positive_energy_kramers_splitting,
@@ -6081,7 +3841,7 @@ int main(int argc, char** argv) {
   if (input.non_relativistic()) {
     std::cout << "\nNonrelativistic (Schrodinger) core Hamiltonian eigenvalues:\n";
     for (std::size_t i = 0; i < h_core_nonrel_eig.eigenvalues.size(); ++i) {
-      std::cout << "  " << std::setw(6) << i << std::setw(20) << h_core_nonrel_eig.eigenvalues[i]
+      std::cout << "  " << std::setw(6) << i << std::setw(20) << energyText(h_core_nonrel_eig.eigenvalues[i])
                  << "\n";
     }
 
@@ -6098,16 +3858,17 @@ int main(int argc, char** argv) {
     std::cout << "\nNonrelativistic (restricted, closed-shell) Hartree-Fock SCF (NON_REL, "
                << scfAccelerationLabel(input) << "):\n";
     for (const auto& it : nonrel_hf_result.history) {
-      std::cout << "  Iteration " << std::setw(3) << it.iteration << "  E = " << std::setw(16)
-                 << std::setprecision(10) << it.energy << std::setprecision(6);
+      std::cout << "  Iteration " << std::setw(3) << it.iteration << "  E = " << std::setw(16) << std::fixed
+                 << std::setprecision(9) << it.energy;
       if (it.iteration > 1) {
         std::cout << "  dE = " << it.energy_change << "  dP = " << it.density_change;
       }
+      std::cout << std::defaultfloat << std::setprecision(6);
       std::cout << "\n";
       if (input.debug()) {
         std::cout << "    Orbital energies:\n";
         for (std::size_t i = 0; i < it.orbital_energies.size(); ++i) {
-          std::cout << "      " << std::setw(6) << i << std::setw(20) << it.orbital_energies[i]
+          std::cout << "      " << std::setw(6) << i << std::setw(20) << energyText(it.orbital_energies[i])
                      << "\n";
         }
       }
@@ -6124,7 +3885,7 @@ int main(int argc, char** argv) {
     std::cout << "  " << std::setw(6) << "index" << std::setw(20) << "E" << "\n";
     const auto& nonrel_oe = nonrel_hf_result.orbital_energies;
     for (std::size_t i = 0; i < nonrel_oe.size(); ++i) {
-      std::cout << "  " << std::setw(6) << i << std::setw(20) << nonrel_oe[i] << "\n";
+      std::cout << "  " << std::setw(6) << i << std::setw(20) << energyText(nonrel_oe[i]) << "\n";
     }
 
     std::cout << "\nHessian_opt cross-check (Dyall Eq. 8.30/8.32 generalized Fock/gradient, MO\n"
@@ -6147,20 +3908,10 @@ int main(int argc, char** argv) {
       std::cout << "  HF-specific efficient (O(n^4)) gradient max |g_pq|:                "
                  << std::setprecision(10) << nonrel_gradient_efficient_max_abs
                  << std::setprecision(6) << "\n";
-      // General (dense 2-RDM, O(n^5)) path only runs at VERBOSE > 0 (see
-      // Input.h) -- nonrel_gradient_computed reflects that.
-      if (nonrel_gradient_computed) {
-        std::cout << "  General (dense 2-RDM, O(n^5)) gradient norm (expect ~0):           "
-                   << std::setprecision(10) << nonrel_gradient_norm << std::setprecision(6)
-                   << "\n";
-        std::cout << "  General (dense 2-RDM, O(n^5)) gradient max |g_pq|:                 "
-                   << std::setprecision(10) << nonrel_gradient_max_abs << std::setprecision(6)
-                   << "\n";
-      }
       std::cout << nonrel_finite_diff_report;
       std::cout << nonrel_hessian_report;
     }
-    // Printed unconditionally (empty when HESSIAN_NON_REL is off) --
+    // Printed unconditionally (empty when HESSIAN_MEAN_FIELD is off) --
     // gated by its own keyword, not DEBUG (see Input.h).
     std::cout << nonrel_full_hessian_report;
     // RDMFT (fractional-occupation functional evaluation + SQP
@@ -6169,6 +3920,7 @@ int main(int argc, char** argv) {
     // this section accordingly (moved here from right after "Total
     // ... energy" per explicit user feedback).
     std::cout << nonrel_functional_report;
+    std::cout << nonrel_restart_log.str();
   }
 
   // X2C_REPORT: printed between NON_RELATIVISTIC's and C4_SPINOR's own
@@ -6185,8 +3937,8 @@ int main(int argc, char** argv) {
     const auto& eigenvalues = h_rkb_ortho_eig.eigenvalues;
     double max_kramers_splitting = 0.0;
     for (std::size_t i = 0; i + 1 < eigenvalues.size(); i += 2) {
-      std::cout << "  " << std::setw(6) << i << std::setw(20) << eigenvalues[i] << std::setw(10)
-                 << (i + 1) << std::setw(20) << eigenvalues[i + 1] << "\n";
+      std::cout << "  " << std::setw(6) << i << std::setw(20) << energyText(eigenvalues[i]) << std::setw(10)
+                 << (i + 1) << std::setw(20) << energyText(eigenvalues[i + 1]) << "\n";
       max_kramers_splitting =
           std::max(max_kramers_splitting, std::abs(eigenvalues[i] - eigenvalues[i + 1]));
     }
@@ -6225,8 +3977,8 @@ int main(int argc, char** argv) {
                << "index" << std::setw(20) << "E (odd)" << "\n";
     double max_x2c_kramers_splitting = 0.0;
     for (std::size_t i = 0; i + 1 < x2c_eig.eigenvalues.size(); i += 2) {
-      std::cout << "  " << std::setw(6) << i << std::setw(20) << x2c_eig.eigenvalues[i]
-                 << std::setw(10) << (i + 1) << std::setw(20) << x2c_eig.eigenvalues[i + 1]
+      std::cout << "  " << std::setw(6) << i << std::setw(20) << energyText(x2c_eig.eigenvalues[i])
+                 << std::setw(10) << (i + 1) << std::setw(20) << energyText(x2c_eig.eigenvalues[i + 1])
                  << "\n";
       max_x2c_kramers_splitting = std::max(
           max_x2c_kramers_splitting, std::abs(x2c_eig.eigenvalues[i] - x2c_eig.eigenvalues[i + 1]));
@@ -6276,8 +4028,8 @@ int main(int argc, char** argv) {
                << "index" << std::setw(20) << "E (odd)" << "\n";
     double max_x2c_approx_kramers_splitting = 0.0;
     for (std::size_t i = 0; i + 1 < x2c_eig_approx.eigenvalues.size(); i += 2) {
-      std::cout << "  " << std::setw(6) << i << std::setw(20) << x2c_eig_approx.eigenvalues[i]
-                 << std::setw(10) << (i + 1) << std::setw(20) << x2c_eig_approx.eigenvalues[i + 1]
+      std::cout << "  " << std::setw(6) << i << std::setw(20) << energyText(x2c_eig_approx.eigenvalues[i])
+                 << std::setw(10) << (i + 1) << std::setw(20) << energyText(x2c_eig_approx.eigenvalues[i + 1])
                  << "\n";
       max_x2c_approx_kramers_splitting =
           std::max(max_x2c_approx_kramers_splitting,
@@ -6288,22 +4040,25 @@ int main(int argc, char** argv) {
     std::cout << "Max |E_X2C_approx - E_DHF(positive-energy branch)| (expect small but NOT ~0): "
                << max_x2c_approx_deviation << "\n";
 
+    // The AO Cholesky decomposition is reported with the first method that uses it (NON_REL prints it in its own section).
+    if (!input.non_relativistic()) std::cout << ao_cholesky_report;
     std::cout << "\nApproximate X2C-HF SCF (X2C_DHF/X2C_HF.h -- FIXED one-electron h_x2c, no\n"
                  "picture-change correction, ordinary non-relativistic two-electron integrals,\n"
                  "Fock matrix orthogonalized with only the large-component overlap X_Large at\n"
                  "every iteration; "
                << scfAccelerationLabel(input) << "):\n";
     for (const auto& it : x2c_hf_result.history) {
-      std::cout << "  Iteration " << std::setw(3) << it.iteration << "  E = " << std::setw(16)
-                 << std::setprecision(10) << it.energy << std::setprecision(6);
+      std::cout << "  Iteration " << std::setw(3) << it.iteration << "  E = " << std::setw(16) << std::fixed
+                 << std::setprecision(9) << it.energy;
       if (it.iteration > 1) {
         std::cout << "  dE = " << it.energy_change << "  dP = " << it.density_change;
       }
+      std::cout << std::defaultfloat << std::setprecision(6);
       std::cout << "\n";
       if (input.debug()) {
         std::cout << "    Orbital energies:\n";
         for (std::size_t i = 0; i < it.orbital_energies.size(); ++i) {
-          std::cout << "      " << std::setw(6) << i << std::setw(20) << it.orbital_energies[i]
+          std::cout << "      " << std::setw(6) << i << std::setw(20) << energyText(it.orbital_energies[i])
                      << "\n";
         }
       }
@@ -6329,8 +4084,8 @@ int main(int argc, char** argv) {
     double max_x2c_hf_kramers_splitting = 0.0;
     const auto& x2c_hf_oe = x2c_hf_result.orbital_energies;
     for (std::size_t i = 0; i + 1 < x2c_hf_oe.size(); i += 2) {
-      std::cout << "  " << std::setw(6) << i << std::setw(20) << x2c_hf_oe[i] << std::setw(10)
-                 << (i + 1) << std::setw(20) << x2c_hf_oe[i + 1] << "\n";
+      std::cout << "  " << std::setw(6) << i << std::setw(20) << energyText(x2c_hf_oe[i]) << std::setw(10)
+                 << (i + 1) << std::setw(20) << energyText(x2c_hf_oe[i + 1]) << "\n";
       max_x2c_hf_kramers_splitting =
           std::max(max_x2c_hf_kramers_splitting, std::abs(x2c_hf_oe[i] - x2c_hf_oe[i + 1]));
     }
@@ -6367,6 +4122,7 @@ int main(int argc, char** argv) {
                  << max_x2c_hf_coefficient_residual << "\n";
     }
 
+    std::cout << x2c_structure_log.str();
     std::cout << "\nHessian_opt cross-check (Dyall Eq. 8.30/8.32 generalized Fock/gradient,\n"
                  "X2C-HF spinor MO basis, natural-spinor RDMFT ansatz -- tested here with\n"
                  "X2C-HF occupations):\n";
@@ -6388,20 +4144,10 @@ int main(int argc, char** argv) {
       std::cout << "  X2C-HF-specific efficient (O(n^4)) gradient max |g_pq|:            "
                  << std::setprecision(10) << x2c_gradient_efficient_max_abs
                  << std::setprecision(6) << "\n";
-      // General (dense 2-RDM, O(n^5)) path only runs at VERBOSE > 0 (see
-      // Input.h) -- x2c_gradient_computed reflects that.
-      if (x2c_gradient_computed) {
-        std::cout << "  General (dense 2-RDM, O(n^5)) gradient norm (expect ~0):           "
-                   << std::setprecision(10) << x2c_gradient_norm << std::setprecision(6) << "\n";
-        std::cout << "  General (dense 2-RDM, O(n^5)) gradient max |g_pq|:                 "
-                   << std::setprecision(10) << x2c_gradient_max_abs << std::setprecision(6)
-                   << "\n";
-      }
       std::cout << x2c_finite_diff_report;
       std::cout << x2c_hessian_report;
-      std::cout << x2c_mixed_hessian_report;
     }
-    // Printed unconditionally (empty when HESSIAN_X2C is off) -- gated
+    // Printed unconditionally (empty when HESSIAN_MEAN_FIELD is off) -- gated
     // by its own keyword, not DEBUG (see Input.h). Unlike C4_DHF's own
     // full-Hessian report (expected to show a SADDLE POINT), this one
     // is expected to show a genuine MINIMUM: no negative-energy branch
@@ -6413,6 +4159,7 @@ int main(int argc, char** argv) {
     // and its own gradient/Hessian diagnostics -- printed last within
     // this section accordingly, matching NON_REL/C4_DHF's own placement.
     std::cout << x2c_functional_report;
+    std::cout << x2c_restart_log.str();
   }
 
   if (input.c4_spinor()) {
@@ -6462,21 +4209,23 @@ int main(int argc, char** argv) {
       std::cout << "  Max |F - F^dagger| (Hermiticity check): " << max_herm_err << "\n";
     }
 
+    std::cout << c4_pre_log.str();
     std::cout << "\n4-component Dirac-Hartree-Fock SCF (" << scfAccelerationLabel(input) << "):\n";
     for (const auto& it : dhf_result.history) {
-      std::cout << "  Iteration " << std::setw(3) << it.iteration << "  E = " << std::setw(16)
-                 << std::setprecision(10) << it.energy << std::setprecision(6);
+      std::cout << "  Iteration " << std::setw(3) << it.iteration << "  E = " << std::setw(16) << std::fixed
+                 << std::setprecision(9) << it.energy;
       if (it.iteration > 1) {
         std::cout << "  dE = " << it.energy_change << "  dP = " << it.density_change;
       }
+      std::cout << std::defaultfloat << std::setprecision(6);
       std::cout << "\n";
       if (input.debug()) {
         std::cout << "    One-body (Fock_ortho) state energies (Kramers pairs, even/odd side by "
                      "side):\n";
         const auto& oe = it.orbital_energies;
         for (std::size_t i = 0; i + 1 < oe.size(); i += 2) {
-          std::cout << "      " << std::setw(6) << i << std::setw(20) << oe[i] << std::setw(10)
-                     << (i + 1) << std::setw(20) << oe[i + 1] << "\n";
+          std::cout << "      " << std::setw(6) << i << std::setw(20) << energyText(oe[i]) << std::setw(10)
+                     << (i + 1) << std::setw(20) << energyText(oe[i + 1]) << "\n";
         }
       }
     }
@@ -6500,8 +4249,8 @@ int main(int argc, char** argv) {
     double max_fock_kramers_splitting = 0.0;
     const auto& final_oe = dhf_result.orbital_energies;
     for (std::size_t i = 0; i + 1 < final_oe.size(); i += 2) {
-      std::cout << "  " << std::setw(6) << i << std::setw(20) << final_oe[i] << std::setw(10)
-                 << (i + 1) << std::setw(20) << final_oe[i + 1] << "\n";
+      std::cout << "  " << std::setw(6) << i << std::setw(20) << energyText(final_oe[i]) << std::setw(10)
+                 << (i + 1) << std::setw(20) << energyText(final_oe[i + 1]) << "\n";
       max_fock_kramers_splitting =
           std::max(max_fock_kramers_splitting, std::abs(final_oe[i] - final_oe[i + 1]));
     }
@@ -6513,6 +4262,7 @@ int main(int argc, char** argv) {
                  "1-|<odd|Theta even>_S| (expect ~0): "
                << fock_kramers_partner_deviation << "\n";
 
+    std::cout << c4_structure_log.str();
     std::cout << "\nHessian_opt cross-check (Dyall Eq. 8.30/8.32 generalized Fock/gradient, DHF\n"
                  "spinor MO basis, natural-spinor RDMFT ansatz -- tested here with DHF\n"
                  "occupations):\n";
@@ -6534,20 +4284,10 @@ int main(int argc, char** argv) {
       std::cout << "  DHF-specific efficient (O(n^4)) gradient max |g_pq|:               "
                  << std::setprecision(10) << dhf_gradient_efficient_max_abs
                  << std::setprecision(6) << "\n";
-      // General (dense 2-RDM, O(n^5)) path only runs at VERBOSE > 0 (see
-      // Input.h) -- dhf_gradient_computed reflects that.
-      if (dhf_gradient_computed) {
-        std::cout << "  General (dense 2-RDM, O(n^5)) gradient norm (expect ~0):           "
-                   << std::setprecision(10) << dhf_gradient_norm << std::setprecision(6) << "\n";
-        std::cout << "  General (dense 2-RDM, O(n^5)) gradient max |g_pq|:                 "
-                   << std::setprecision(10) << dhf_gradient_max_abs << std::setprecision(6)
-                   << "\n";
-      }
       std::cout << dhf_finite_diff_report;
       std::cout << dhf_hessian_report;
-      std::cout << dhf_mixed_hessian_report;
     }
-    // Printed unconditionally (empty when HESSIAN_4C is off) -- gated
+    // Printed unconditionally (empty when HESSIAN_MEAN_FIELD is off) -- gated
     // by its own keyword, not DEBUG (see Input.h).
     std::cout << dhf_full_hessian_report;
     // RDMFT (fractional-occupation functional evaluation + SQP
@@ -6556,6 +4296,7 @@ int main(int argc, char** argv) {
     // this section accordingly (moved here from right after "Total
     // ... energy" per explicit user feedback).
     std::cout << dhf_functional_report;
+    std::cout << c4_restart_log.str();
   }
 
   printTimings(timing_records);

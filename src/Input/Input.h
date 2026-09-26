@@ -32,26 +32,6 @@ class Input {
   // input file. When true, the program prints detailed basis and matrix
   // diagnostics; otherwise it only prints a concise summary.
   bool debug() const { return debug_; }
-  // Optional; defaults to 0 when the VERBOSE keyword is absent. Only
-  // meaningful alongside DEBUG TRUE: controls which of DEBUG's own
-  // cross-checks run, from cheapest to most expensive, so a routine DEBUG
-  // run does not always pay for the priciest ones. At the default
-  // verbose == 0, the O(n^5) dense-2-RDM cross-check against
-  // Hessian_opt/GeneralizedFock.h's fully general generalizedFockMatrix
-  // (both the aggregate gradient-norm summary and the element-wise
-  // comparison in the finite-difference report) is SKIPPED; at
-  // verbose > 0 it runs. Every other DEBUG cross-check (the O(n^4)
-  // "efficient" gradient, the finite-difference test itself) is cheap and
-  // always runs whenever DEBUG is on, regardless of this setting.
-  // At verbose > 1 (C4_SPINOR only), an additional, less commonly
-  // needed check ALSO runs: the MIXED real/imaginary orbital-rotation
-  // Hessian block (Hessian_opt/HartreeExchangeHessian.h's
-  // hartreeExchangeHessianElementMixed) is validated against a genuine
-  // mixed-direction (real step on one pair, imaginary step on another)
-  // 2D finite difference -- a strictly higher bar than the dense-2-RDM
-  // check's own verbose > 0, since it is newer and not needed for a
-  // routine DHF DEBUG run.
-  int verbose() const { return verbose_; }
   // Optional; defaults to the standard CODATA value (PhysicalConstants.h)
   // when the SPEED_OF_LIGHT keyword is absent. Overriding it (e.g. to a
   // very large number) lets you probe the nonrelativistic limit
@@ -95,10 +75,8 @@ class Input {
   //      the SAME Hessian_opt gradient/Hessian test suite as C4_SPINOR
   //      does for DHF (RDMFT-ansatz gradient always on; under DEBUG,
   //      the X2C-HF-specific efficient gradient
-  //      (X2C_DHF/X2C_OrbitalGradient.h), the general dense-2-RDM cross-
-  //      check at VERBOSE > 0, a finite-difference gradient/Hessian
-  //      check, and the mixed real/imaginary Hessian block at
-  //      VERBOSE > 1) -- see hessian_x2c() below for the corresponding
+  //      (X2C_DHF/X2C_OrbitalGradient.h), a finite-difference
+  //      gradient/Hessian check) -- see hessian_mean_field() below for the corresponding
   //      full-Hessian-diagonalization diagnostic.
   // This whole report/SCF is printed between the NON_RELATIVISTIC and
   // C4_SPINOR (4-component DHF) final reports, regardless of whether
@@ -114,45 +92,15 @@ class Input {
   // C4_SPINOR is on); this keyword only gates running/printing the
   // above. Independent of C4_SPINOR.
   bool x2c() const { return x2c_; }
-  // Optional; defaults to false when the HESSIAN_NON_REL keyword is
-  // absent. When true, builds the FULL cheap (Hartree/exchange-ansatz,
-  // Hessian_opt/HartreeExchangeHessian.h) orbital-rotation Hessian over
-  // the whole spin-orbital space for the converged NON_REL solution and
-  // diagonalizes it, reporting whether it is a genuine minimum (no
-  // negative eigenvalues). Independent of DEBUG/VERBOSE -- its own
-  // opt-in diagnostic, since the full Hessian/diagonalization cost is
-  // O(n^5)/O(n^6) and not needed for a routine DEBUG run.
-  bool hessian_non_rel() const { return hessian_non_rel_; }
-  // Optional; defaults to false when the HESSIAN_4C keyword is absent.
-  // Same as hessian_non_rel(), but for the converged C4_DHF solution --
-  // the Hessian spans the FULL RKB spinor space (including the
-  // negative-energy branch), expected to show negative eigenvalues
-  // (a saddle point) rather than a minimum.
-  bool hessian_4c() const { return hessian_4c_; }
-  // Optional; defaults to false when the HESSIAN_X2C keyword is
-  // absent. Same as hessian_non_rel()/hessian_4c(), but for the
-  // converged X2C-HF solution (X2C_DHF/X2C_HF.h) -- the Hessian spans
-  // the FULL X2C-HF spinor space (2*nLarge, no negative-energy branch
-  // at all, unlike C4_DHF: X2C's own decoupling already eliminated
-  // it), so this is expected to show a genuine MINIMUM (no negative
-  // eigenvalues), same as hessian_non_rel(), NOT a saddle point.
-  bool hessian_x2c() const { return hessian_x2c_; }
-  // Optional; defaults to false when the HESSIAN_FUNCTIONAL keyword is
-  // absent. Only meaningful together with FUNCTIONAL (JK-only or PNOF,
-  // Occ_opt/): after the occupation-number optimization at fixed
-  // orbitals, builds the FULL real-step orbital-rotation Hessian of
-  // THAT functional (Hessian_opt/JkOnlyHessian.h's jkOnlyHessianMatrix
-  // for JK-only, PnofHessian.h's pnofHessianMatrix for PNOF) at the
-  // optimized occupations, symmetrizes it, diagonalizes it, and reports
-  // the number of negative/near-zero/positive eigenvalues -- the
-  // fractional-occupation analogue of hessian_non_rel()/hessian_x2c()/
-  // hessian_4c(), applied to whichever SCF paths (NON_REL, X2C,
-  // C4_DHF) run the FUNCTIONAL step. The point is stationary w.r.t. the
-  // occupations only (orbitals stay the converged HF/DHF ones), so the
-  // report also prints the orbital gradient norm and the Hessian's
-  // asymmetry. Expensive (O(n^5) build + O(n^6) diagonalization), hence
-  // its own opt-in keyword.
-  bool hessian_functional() const { return hessian_functional_; }
+  // Optional; defaults to false when the HESSIAN_MEAN_FIELD keyword is absent. When true, for every method that is
+  // on (NON_RELATIVISTIC, X2C, C4_SPINOR) the FULL cheap (Hartree/exchange-ansatz,
+  // Hessian_opt/HartreeExchangeHessian.h) real-step orbital-rotation Hessian of the converged HF/DHF solution
+  // (integer occupations) is built over the whole spin-orbital/spinor space and fully diagonalized, reporting whether
+  // it is a genuine minimum (NON_REL, X2C: no negative eigenvalues expected) or a saddle point (C4_DHF: the
+  // negative-energy branch is included, negative eigenvalues expected). Independent of DEBUG -- its own opt-in
+  // diagnostic, since the dense Hessian and its diagonalization cost O(n^5)/O(n^6) and need the dense two-electron
+  // tensor.
+  bool hessian_mean_field() const { return hessian_mean_field_; }
   // Optional; defaults to 0.4 when the MIXING keyword is absent. Linear
   // density-matrix mixing weight for the C4_DHF SCF loop (C4_DHF/C4_DHF.h):
   // the density fed into the next iteration's Fock build is
@@ -377,15 +325,11 @@ class Input {
   std::string basis_file_;
   std::vector<Atom> geometry_;
   bool debug_ = false;
-  int verbose_ = 0;
   double speed_of_light_ = kSpeedOfLight;
   bool non_relativistic_ = false;
   bool c4_spinor_ = false;
   bool x2c_ = false;
-  bool hessian_non_rel_ = false;
-  bool hessian_4c_ = false;
-  bool hessian_x2c_ = false;
-  bool hessian_functional_ = false;
+  bool hessian_mean_field_ = false;
   double mixing_ = 0.4;
   bool diis_ = true;
   int diis_size_ = 5;

@@ -73,6 +73,9 @@ struct FullOptSettings {
   // of steps per macro-iteration would itself be a sign of trouble.
   OrbitalOptimizer orbital_optimizer = OrbitalOptimizer::kAdam;
   int neo_max_iterations = 100;
+  // Largest |h| entry of the UNTRIMMED integrals (set by the no-pair trimming entry points; 0 = unknown): the roundoff of the
+  // orbital-gradient sums scales with it, so the time-reversal symmetry checks allow ~1000 eps times it.
+  double roundoff_scale = 0.0;
   // C4_SPINOR min-max stage (FULL_OPTIMIZATION_4C_NEG): when saddle.n_negative > 0 the loop is the
   // genuine relativistic min-max problem (Talman 1986; Saue, ChemPhysChem 12, 3077 (2011)) instead of
   // a minimization. The caller passes the FULL integrals (negative block included, entry point
@@ -162,6 +165,11 @@ struct RdmftModel {
       hessian_diagonal;
   std::function<std::vector<double>(const Matrix<T>&, const Tensor4<T>&, const std::vector<double>&)>
       hessian_diagonal_dense;
+  // The DENSE, symmetrized joint orbital-rotation Hessian matrix over the same pair list as `hessian_vector` (size n_pairs
+  // for real T, 2*n_pairs -- [t; y] -- for complex T), built element by element from the dense two-electron tensor
+  // (Hessian_opt's jkOnlyHessianMatrix / jkOnlyJointHessianMatrix / pnofHessianMatrix / pnofJointHessianMatrix). Used only
+  // by the DEBUG saddle-type check of the min-max stage, which diagonalizes it exactly.
+  std::function<Matrix<double>(const Matrix<T>&, const Tensor4<T>&, const std::vector<double>&)> hessian_matrix;
 };
 
 // JK_only functionals (Occ_opt/JK_only.h): SQP over the active occupations

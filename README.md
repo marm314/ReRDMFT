@@ -93,12 +93,8 @@ anywhere on a line) are comments.
 | `GEOMETRY` ... `END` | block | *required* | Molecular geometry as `<symbol> <x> <y> <z>` lines, one atom per line, coordinates in Angstrom (converted to Bohr internally). |
 | `NON_RELATIVISTIC` | bool | `FALSE` | Run the standard nonrelativistic Hartree-Fock SCF (`NON_REL`). |
 | `C4_SPINOR` | bool | `FALSE` | Run the 4-component Dirac-Hartree-Fock SCF (`C4_DHF`), building the RKB two-electron Coulomb tensor. Opt-in since both time and memory cost scale steeply with basis size. Both this SCF and the `X2C` one are Kramers-restricted for an even `NELEC`: every iteration's density is projected onto its time-reversal-even part (spin-orbit mixing of the spinors is kept; only the magnetization is removed), so they cannot drift into a lower-energy Kramers-broken solution at unstable geometries (e.g. stretched LiH with `CHOLESKY TRUE`). The output reports the largest element removed (~0 when the iteration stayed symmetric by itself). |
-| `DEBUG` | bool | `FALSE` | Print detailed basis/matrix diagnostics, plus internal cross-checks (efficient-vs-general gradient/Hessian formulas, finite-difference gradient/Hessian tests) for whichever of `NON_RELATIVISTIC`/`C4_SPINOR` is on. Every test that needs the two-electron integrals as a DENSE tensor (the RDMFT-ansatz gradient test, the Kramers/spin structure tests of the integrals, exact-vs-Cholesky rotation, the Hessian-diagonal finite difference, dense-vs-Cholesky comparisons of the Fock matrix and MO integrals) runs only with `DEBUG TRUE`; the dense tensors are built for it on demand. |
-| `VERBOSE` | int (>= 0) | `0` | Only with `DEBUG TRUE`. `0` skips the extra dense-2-RDM cross-check; `>0` runs it; `>1` (`C4_SPINOR` only) also checks the mixed real/imaginary Hessian block against a finite difference. |
-| `HESSIAN_NON_REL` | bool | `FALSE` | Build and diagonalize the full orbital-rotation Hessian of the converged `NON_REL` solution, reporting whether it is a genuine minimum. O(n^5)/O(n^6), opt-in. |
-| `HESSIAN_4C` | bool | `FALSE` | Same as `HESSIAN_NON_REL` for the converged `C4_DHF` solution; negative eigenvalues (a saddle) are physically expected there (negative-energy branch included). |
-| `HESSIAN_X2C` | bool | `FALSE` | Same as `HESSIAN_NON_REL` for the converged approximate X2C-HF solution; a genuine minimum is physically expected (no negative-energy branch). |
-| `HESSIAN_FUNCTIONAL` | bool | `FALSE` | Only with `FUNCTIONAL`: after occupation optimization, build and diagonalize the full orbital-rotation Hessian of that functional at the optimized occupations (fixed orbitals), reporting eigenvalue counts and the orbital gradient. For complex spinors also builds the joint real+imaginary (`t`,`y`) Hessian/gradient. Examples: `examples/water_muller_hessian.inp`, `examples/lih_gnof_hessian.inp`. |
+| `DEBUG` | bool | `FALSE` | Print detailed basis/matrix diagnostics, plus internal cross-checks (efficient-vs-RDMFT-ansatz gradient formulas, finite-difference gradient/Hessian tests) for whichever of `NON_RELATIVISTIC`/`C4_SPINOR` is on. Every test that needs the two-electron integrals as a DENSE tensor (the RDMFT-ansatz gradient test, the Kramers/spin structure tests of the integrals, exact-vs-Cholesky rotation, the Hessian-diagonal finite difference, dense-vs-Cholesky comparisons of the Fock matrix and MO integrals) runs only with `DEBUG TRUE`; the dense tensors are built for it on demand. |
+| `HESSIAN_MEAN_FIELD` | bool | `FALSE` | For every method that is on (`NON_RELATIVISTIC`, `X2C`, `C4_SPINOR`), build the full dense real-step orbital-rotation Hessian of the converged HF/DHF solution (integer occupations, Hartree/exchange formulas) and diagonalize it completely, reporting the numbers of negative, near-zero and positive eigenvalues: a genuine minimum is expected for `NON_REL` and `X2C`, a saddle for `C4_SPINOR` (negative-energy branch included). O(n^5)/O(n^6), needs the dense two-electron tensor, opt-in. |
 | `SPEED_OF_LIGHT` | double (> 0) | CODATA value | Override the speed of light (atomic units): larger probes the nonrelativistic limit, smaller exaggerates relativistic effects. |
 | `MIXING` | double, in `(0, 1]` | `0.4` | Linear density-mixing weight for the SCF loops, used only with `DIIS FALSE`. |
 | `DIIS` | bool | `TRUE` | Use Pulay DIIS (`Utils/DIIS.h`, commutator error `F P S - S P F`) instead of linear density mixing in all three SCF loops. Typically 5-10x fewer iterations. Converges to *a* stationary point, not always the one mixing finds -- stretched LiH (`examples/lih_X2C_gnof_full_optimization_dissociated.inp`) sets `DIIS FALSE` for that reason. |
@@ -120,7 +116,7 @@ anywhere on a line) are comments.
 | `MAX_MACRO_ITERATIONS` | int | `1000` | Maximum number of macro-iterations of `FULL_OPTIMIZATION`. |
 | `MACRO_ENERGY_TOLERANCE` | float | `1e-9` | Energy convergence threshold of the macro-iteration loop. |
 | `ORBITAL_GRADIENT_TOLERANCE` | float | `1e-5` | ADAM's/NEO's orbital-gradient convergence threshold (max gradient entry). |
-| `ORBITAL_OPTIMIZER` | string | `ADAM` | Which method drives `FULL_OPTIMIZATION`'s orbital-rotation step. `ADAM`: DoNOF's own first-order optimizer (`Utils/ADAM.h`). `NEO`: `Utils/NEO.h`'s matrix-free, second-order Newton method targeting the ground state, using a row-based Hessian-vector product (no dense Hessian formed); also works with `CHOLESKY TRUE` and `C4_SPINOR`. Converges in far fewer macro-iterations than ADAM and usually matches its energy to 1e-6-1e-9. On some PNOF/GNOF NON_REL systems NEO can land on a different stationary point; a post-loop Hessian check detects this and automatically escapes a detected saddle (perturb along the negative-curvature eigenvector, retry up to 3 times), but a residual gap to a genuine alternate minimum is reported rather than silently fixed -- compare against `ADAM` as a routine cross-check. Templates: `examples/*_neo_full_optimization.inp`. |
+| `ORBITAL_OPTIMIZER` | string | `ADAM` | Which method drives `FULL_OPTIMIZATION`'s orbital-rotation step. `ADAM`: DoNOF's own first-order optimizer (`Utils/ADAM.h`). `NEO`: `Utils/NEO.h`'s matrix-free, second-order Newton method targeting the ground state, using a row-based Hessian-vector product (no dense Hessian formed); also works with `CHOLESKY TRUE` and `C4_SPINOR`. Converges in far fewer macro-iterations than ADAM and usually matches its energy to 1e-6-1e-9. On some PNOF/GNOF NON_REL systems NEO can land on a different stationary point; a post-loop Hessian check (lowest 3 eigenvalues, Davidson) detects a saddle and automatically escapes it (perturb along the negative-curvature eigenvector, retry up to 3 times), but a residual gap to a genuine alternate minimum is reported rather than silently fixed -- compare against `ADAM` as a routine cross-check. With `DEBUG TRUE` the orbital-rotation Hessian is additionally diagonalized densely at the end (for either optimizer) and its negative eigenvalues are counted. Templates: `examples/*_neo_full_optimization.inp`. |
 | `READ_RESTART` | bool | `FALSE` | Requires a `FUNCTIONAL`. `TRUE` skips the HF/DHF SCF of every requested method (`NON_RELATIVISTIC`, `X2C`, `C4_SPINOR`) and starts the functional calculation from `RESTART.NON_REL` / `RESTART.X2C_HF` / `RESTART.4C` of an earlier run, possibly at another geometry (potential-energy scans) -- see *Restarting from a previous run* below. |
 | `FULL_OPTIMIZATION_4C_NEG` | bool | `FALSE` | Only meaningful for `C4_SPINOR` + `FULL_OPTIMIZATION` (any `FUNCTIONAL`, `CHOLESKY` TRUE or FALSE). After the positive-energy-only optimization has converged, runs the genuine **min-max** stage: orbital rotations now include the positive <-> negative-energy pairs, driven by NEO to a saddle point (whatever `ORBITAL_OPTIMIZER` says), alternating with a full re-minimization of the occupation numbers -- see below. Skipped, with a message, if the first stage did not converge. |
 | `X2C` | bool | `FALSE` | Print the one-electron X2C decoupling report and run the approximate X2C-HF SCF (see below), between the `NON_RELATIVISTIC` and `C4_SPINOR` reports. Independent of `C4_SPINOR` (the RKB Hamiltonian it needs is always built). With `DEBUG`, adds extra cross-checks. |
@@ -195,10 +191,9 @@ below); the underlying computation itself is unaffected by `DEBUG`.
    (`X2C_DHF/X2C_MoTransform.h`), and the SAME `Hessian_opt` test suite
    `C4_SPINOR` runs for DHF is run here too: the RDMFT-ansatz gradient
    (always on); under `DEBUG`, the X2C-HF-specific efficient gradient
-   (`X2C_DHF/X2C_OrbitalGradient.h`), the general dense-2-RDM
-   cross-check at `VERBOSE > 0`, a finite-difference gradient/Hessian
-   check, and the mixed real/imaginary Hessian block at `VERBOSE > 1`;
-   and, under `HESSIAN_X2C`, the full orbital-rotation Hessian
+   (`X2C_DHF/X2C_OrbitalGradient.h`) and a finite-difference gradient/Hessian
+   check;
+   and, under `HESSIAN_MEAN_FIELD`, the full orbital-rotation Hessian
    diagonalization. Unlike `C4_DHF`'s saddle point, X2C-HF's converged
    solution is a genuine **minimum** (no negative eigenvalues) -- X2C's
    own decoupling already eliminated the negative-energy branch, so
@@ -210,11 +205,9 @@ below); the underlying computation itself is unaffected by `DEBUG`.
    machine precision at both.
 
 See `examples/water_X2C.inp` for a plain worked example (now including
-`HESSIAN_X2C TRUE`), or `examples/water_X2C_debug.inp` for the same run
+`HESSIAN_MEAN_FIELD TRUE`), or `examples/water_X2C_debug.inp` for the same run
 with `DEBUG TRUE` (all the extra cross-checks described above, plus
-`HESSIAN_4C`/`HESSIAN_X2C`); `examples/water_debug_verbose2.inp` also
-exercises X2C-HF's own mixed-Hessian check (`VERBOSE 2`) alongside
-`C4_DHF`'s.
+`HESSIAN_MEAN_FIELD`).
 
 ## RDMFT functional evaluation
 
@@ -344,7 +337,7 @@ too: the negative-energy spinors stay bit-for-bit unchanged throughout the whole
 orthonormality with the (untouched) negative branch is preserved exactly. This turns C4_SPINOR's
 own orbital optimization into an ordinary minimization, same as `NON_REL`/`X2C` -- `NEO`'s default
 `target_order = 0` is then the physically correct target, confirmed by its own post-loop Hessian
-check (`[PASS] the point is a genuine minimum`). The positive-energy branch is itself
+check (`[PASS] the point is a genuine minimum`); `DEBUG TRUE` adds the dense Hessian diagonalization. The positive-energy branch is itself
 Kramers-paired the same way X2C's spinors are, so it is Kramers-restricted here too.
 
 `CHOLESKY TRUE` for C4_SPINOR: the RKB integrals come from one Cholesky decomposition of the real AO
@@ -380,10 +373,11 @@ spinor <-> negative-energy spinor), i.e. a saddle point.
 * *Occupation step.* The occupation numbers are fully re-minimized at the new orbitals (the negative-energy
   branch stays at zero occupation), macro-iterated like the first stage.
 * *Checks.* The integrals rotated to the starting point must reproduce the first stage's energy. Verifying
-  the type of the saddle runs only under `DEBUG TRUE` (it needs many Hessian products, which is very slow
-  with Cholesky vectors for CO/cc-pVDZ-size systems): a block-wise test (minimum over the positive-energy
-  rotations, maximum over the occupied electron-positron ones) followed by the count of all negative
-  eigenvalues (about as many Hessian products as the order of the saddle).
+  the type of the saddle runs only under `DEBUG TRUE`: the dense joint Hessian is built at the converged
+  point from the dense two-electron tensor, contracted to the Kramers-reduced space, diagonalized exactly
+  and its negative eigenvalues are counted (LiH/6-31G: 176 for GNOF, 484 for MULLER; CO/6-31G: 720, about
+  2 minutes for the diagonalization step). It needs the dense tensor, so it is memory-bound for larger
+  bases (CO/cc-pVDZ would need ~4 GB for the tensor alone).
 
 For light systems the second stage moves the energy by ~1e-10 Hartree (the electron-positron gradient at the
 no-pair minimum is tiny); it is a check that the no-pair minimum really is the min-max point and it is exact

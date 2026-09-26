@@ -3,7 +3,7 @@
 # FULL_OPTIMIZATION with the second-order NEO orbital optimizer and CHOLESKY TRUE: the AO integrals are decomposed
 # once into Cholesky vectors and nothing of size n^4 is ever stored (see README.md, CHOLESKY).
 # X2C path (complex spinors, Kramers-restricted rotations). Measured: ~2.3 min, ~140 MB peak, converges in 7
-# macro-iterations to -113.0844731 Ha (a genuine minimum). Follow the run with `tail -f
+# macro-iterations to -113.0844731 Ha. Follow the run with `tail -f
 # co_ccpvdz_x2c_gnof_neo_cholesky.live`.
 NELEC 14
 BASIS co-cc-pvdz.gbs

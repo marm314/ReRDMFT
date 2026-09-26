@@ -40,9 +40,7 @@ struct RotatedIntegrals {
 // O(Nchol*n^4) to reconstruct -- cheaper than a naive direct 4-leg
 // transform, though still the dominant cost here) -- affordable for the
 // small-to-moderate active spaces this project's own finite-difference
-// checks already run on (see main.cpp's existing VERBOSE-gated O(n^5)
-// dense-2-RDM gradient path for the established precedent of what this
-// project already considers an acceptable, occasionally-run cost).
+// checks already run on.
 template <typename T>
 RotatedIntegrals<T> rotateIntegrals(const Matrix<T>& h, const Tensor4<T>& eri, const Matrix<T>& u);
 

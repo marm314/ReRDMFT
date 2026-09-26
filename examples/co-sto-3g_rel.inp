@@ -5,14 +5,14 @@
 # co-cc-pvtz.inp gives nLarge=70, nSmall=224 -- a (4*70)^4 ~= 6e9-entry
 # tensor (~98 GB), far too large to materialize, whereas STO-3G keeps
 # nLarge and nSmall in the tens, not hundreds.
-# HESSIAN_NON_REL/HESSIAN_4C build and diagonalize the FULL cheap
+# HESSIAN_MEAN_FIELD builds and diagonalizes the FULL cheap
 # orbital-rotation Hessian (see water_debug.inp) to confirm NON_REL is
 # a genuine minimum and C4_DHF a saddle point -- independent of
-# DEBUG/VERBOSE.
+# DEBUG.
 NELEC 14
 BASIS co-sto-3g.gbs
 C4_SPINOR TRUE
-HESSIAN_4C TRUE
+HESSIAN_MEAN_FIELD TRUE
 
 GEOMETRY
 C   0.000000   0.000000   0.000000

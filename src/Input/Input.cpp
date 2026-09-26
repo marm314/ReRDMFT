@@ -127,26 +127,14 @@ void Input::read(const std::string& filename) {
       has_basis_file = true;
     } else if (keyword == "DEBUG") {
       debug_ = parseBool(iss, line_number, keyword);
-    } else if (keyword == "VERBOSE") {
-      verbose_ = parseInt(iss, line_number, keyword);
-      if (!(verbose_ >= 0)) {
-        throw std::runtime_error("line " + std::to_string(line_number) +
-                                  ": VERBOSE must be non-negative");
-      }
     } else if (keyword == "NON_RELATIVISTIC") {
       non_relativistic_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "C4_SPINOR") {
       c4_spinor_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "X2C") {
       x2c_ = parseBool(iss, line_number, keyword);
-    } else if (keyword == "HESSIAN_NON_REL") {
-      hessian_non_rel_ = parseBool(iss, line_number, keyword);
-    } else if (keyword == "HESSIAN_4C") {
-      hessian_4c_ = parseBool(iss, line_number, keyword);
-    } else if (keyword == "HESSIAN_X2C") {
-      hessian_x2c_ = parseBool(iss, line_number, keyword);
-    } else if (keyword == "HESSIAN_FUNCTIONAL") {
-      hessian_functional_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "HESSIAN_MEAN_FIELD") {
+      hessian_mean_field_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "MIXING") {
       mixing_ = parseDouble(iss, line_number, keyword);
       if (!(mixing_ > 0.0 && mixing_ <= 1.0)) {
@@ -348,14 +336,10 @@ void Input::print(std::ostream& out) const {
   line("NELEC") << n_electrons_ << "\n";
   line("BASIS") << basis_file_ << "\n";
   line("DEBUG") << flag(debug_) << "\n";
-  line("VERBOSE") << verbose_ << "\n";
   line("NON_RELATIVISTIC") << flag(non_relativistic_) << "\n";
   line("C4_SPINOR") << flag(c4_spinor_) << "\n";
   line("X2C") << flag(x2c_) << "\n";
-  line("HESSIAN_NON_REL") << flag(hessian_non_rel_) << "\n";
-  line("HESSIAN_4C") << flag(hessian_4c_) << "\n";
-  line("HESSIAN_X2C") << flag(hessian_x2c_) << "\n";
-  line("HESSIAN_FUNCTIONAL") << flag(hessian_functional_) << "\n";
+  line("HESSIAN_MEAN_FIELD") << flag(hessian_mean_field_) << "\n";
   line("MIXING") << mixing_ << "\n";
   line("DIIS") << flag(diis_) << "\n";
   line("DIIS_SIZE") << diis_size_ << "\n";

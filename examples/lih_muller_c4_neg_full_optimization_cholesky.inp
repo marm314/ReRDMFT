@@ -3,7 +3,9 @@
 # positive-energy-only minimization (here with ADAM), then the min-max stage (NEO, saddle point of the order set
 # by the occupied positive-energy spinors -- 484 Kramers-reduced electron-positron parameters here). The stage
 # needs the negative-energy block of the MO Cholesky vectors, which the first stage drops; they are built
-# separately only when FULL_OPTIMIZATION_4C_NEG is TRUE.
+# separately only when FULL_OPTIMIZATION_4C_NEG is TRUE. Measured: ~7-17 s. Add DEBUG TRUE to also get the
+# dense-diagonalization count of the negative Hessian eigenvalues (484 expected, "[PASS] the point is a saddle of order
+# 484"); with DEBUG the run takes ~26 s (dense tensors and the other DEBUG checks).
 NELEC 4
 BASIS lih-6-31g.gbs
 C4_SPINOR TRUE

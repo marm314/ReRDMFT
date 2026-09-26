@@ -7,8 +7,8 @@
 # along the rest), alternating with the full re-minimization of the occupation numbers. The stage needs the
 # negative-energy block of the MO Cholesky vectors too, built separately. Measured: ~8 min in total (~4 min for the
 # first stage, ~2 min for the min-max stage, 2 macro-iterations), the min-max stage moves the energy by 1.5e-9 Ha.
-# The check of the saddle type (block-wise test + count of the negative Hessian eigenvalues) runs only with
-# DEBUG TRUE and is very slow at this size with Cholesky vectors (finite-difference Hessian products).
+# The check of the saddle type (dense diagonalization of the Hessian and count of its negative eigenvalues)
+# runs only with DEBUG TRUE; at this size it would need the dense two-electron tensor (~4 GB) and was not run.
 # Follow the run with `tail -f co_ccpvdz_c4_gnof_neg_neo_cholesky.live`.
 NELEC 14
 BASIS co-cc-pvdz.gbs

@@ -10,7 +10,7 @@
 # turns C4_DHF's own orbital optimization into an ordinary MINIMIZATION, same as NON_REL/X2C
 # (watch for "rotations excluded from the N negative-energy (Dirac sea) spinors" in the log, and
 # the final "[PASS] the point is a genuine minimum" from NEO's own post-loop Hessian check on
-# lih_gnof_c4_neo_full_optimization.inp). C4_DHF's positive-energy branch is itself Kramers-paired
+# lih_gnof_c4_neo_full_optimization.inp, or from the DEBUG TRUE dense Hessian check). C4_DHF's positive-energy branch is itself Kramers-paired
 # the same way X2C's spinors are, so it is Kramers-restricted here too.
 NELEC 4
 BASIS lih-6-31g.gbs

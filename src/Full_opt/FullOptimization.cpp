@@ -19,6 +19,7 @@
 #include "KramersPairing.h"
 #include "KramersRestriction.h"
 #include "LBFGS.h"
+#include "LinearAlgebra.h"
 #include "OccupationEnergy.h"
 #include "OrbitalGradient.h"
 #include "PnofFock.h"
@@ -319,6 +320,42 @@ std::vector<double> pnofHessianVectorImpl(PnofFunctional functional,
   }
 }
 
+
+// Dense symmetrized joint Hessian matrix of a JK_only functional (see RdmftModel::hessian_matrix).
+template <typename T>
+Matrix<double> jkOnlyHessianMatrixImpl(JkFunctional functional, std::size_t f_l, const std::vector<Pair>& pair_indices,
+                                       const Matrix<T>& h, const Tensor4<T>& eri, const std::vector<double>& occ) {
+  const auto hc = jkHartreeCoupling(functional, occ, f_l);
+  const auto xc = jkExchangeCoupling(functional, occ, f_l);
+  Matrix<double> m;
+  if constexpr (std::is_same_v<T, double>) {
+    m = jkOnlyHessianMatrix(h, eri, occ, hc, xc, pair_indices);
+  } else {
+    m = jkOnlyJointHessianMatrix(h, eri, occ, hc, xc, pair_indices);
+  }
+  Matrix<double> sym(m.rows(), m.cols());
+  for (std::size_t i = 0; i < m.rows(); ++i)
+    for (std::size_t j = 0; j < m.cols(); ++j) sym(i, j) = 0.5 * (m(i, j) + m(j, i));
+  return sym;
+}
+
+template <typename T>
+Matrix<double> pnofHessianMatrixImpl(PnofFunctional functional, const std::vector<PnofGeminal>& geminals, bool relativistic,
+                                     const std::vector<Pair>& pair_indices, const Matrix<T>& h, const Tensor4<T>& eri,
+                                     const std::vector<double>& occ) {
+  const auto fock = pnofFockMatrix(functional, h, eri, geminals, occ, relativistic);
+  Matrix<double> m;
+  if constexpr (std::is_same_v<T, double>) {
+    m = pnofHessianMatrix(functional, h, eri, geminals, occ, relativistic, fock, pair_indices);
+  } else {
+    m = pnofJointHessianMatrix(functional, h, eri, geminals, occ, relativistic, fock, pair_indices);
+  }
+  Matrix<double> sym(m.rows(), m.cols());
+  for (std::size_t i = 0; i < m.rows(); ++i)
+    for (std::size_t j = 0; j < m.cols(); ++j) sym(i, j) = 0.5 * (m(i, j) + m(j, i));
+  return sym;
+}
+
 }  // namespace
 
 // =====================================================================
@@ -422,6 +459,9 @@ RdmftModel<T, Eri> makeJkOnlyModel(JkFunctional functional, std::size_t f_l, dou
     };
     model.hessian_diagonal_dense = [=](const Matrix<T>& h, const Tensor4<T>& eri, const std::vector<double>& occ) {
       return jkOnlyHessianDiagonalImpl(functional, f_l, pair_indices, h, eri, occ);
+    };
+    model.hessian_matrix = [=](const Matrix<T>& h, const Tensor4<T>& eri, const std::vector<double>& occ) {
+      return jkOnlyHessianMatrixImpl(functional, f_l, pair_indices, h, eri, occ);
     };
   }
   // Kramers/spin pairs within the active window -- SAME convention and SAME reasoning as
@@ -564,6 +604,9 @@ RdmftModel<T, Eri> makePnofModel(PnofFunctional functional, std::vector<PnofGemi
     model.hessian_diagonal_dense = [=](const Matrix<T>& h, const Tensor4<T>& eri, const std::vector<double>& occ) {
       return pnofHessianDiagonalImpl(functional, geminals, cachedTwoRdm(occ), pair_of, relativistic, pair_indices,
                                      h, eri, occ);
+    };
+    model.hessian_matrix = [=](const Matrix<T>& h, const Tensor4<T>& eri, const std::vector<double>& occ) {
+      return pnofHessianMatrixImpl(functional, geminals, relativistic, pair_indices, h, eri, occ);
     };
   }
   model.symmetric_shortcut_energy = [=](const Matrix<T>& h, const Eri& eri,
@@ -936,6 +979,19 @@ std::vector<std::pair<std::size_t, std::size_t>> spinOrbits(
   return orbits;
 }
 
+// Q^T H Q for the spin-restricted sector (see SpinRestrictedNeoProblem): Q's columns are (e_alpha + e_beta)/sqrt(2) per
+// tied pair, H the dense real Hessian over the full pair list.
+Matrix<double> contractSpinRestricted(const Matrix<double>& hessian, const std::vector<std::pair<std::size_t, std::size_t>>& orbits) {
+  const std::size_t m = orbits.size();
+  Matrix<double> out(m, m, 0.0);
+  for (std::size_t k = 0; k < m; ++k)
+    for (std::size_t l = 0; l < m; ++l) {
+      out(k, l) = 0.5 * (hessian(orbits[k].first, orbits[l].first) + hessian(orbits[k].first, orbits[l].second) +
+                         hessian(orbits[k].second, orbits[l].first) + hessian(orbits[k].second, orbits[l].second));
+    }
+  return out;
+}
+
 // NEO in the spin-restricted (Sz-conserving) sector for NON_REL, the T=double analogue of
 // Utils/KramersRestriction.h's KramersNeoProblem: an ISOMETRIC embedding Q (Q^T Q = 1) tying each
 // pure-alpha pair to its pure-beta twin with EQUAL weight 1/sqrt(2) (no signs -- unlike Kramers
@@ -1027,7 +1083,8 @@ Matrix<T> generatorMatrix(std::size_t n, std::size_t p, std::size_t q, double t,
 template <typename T, typename Eri>
 bool runChecks(const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ,
                const RdmftModel<T, Eri>& model, bool kramers, const std::vector<std::size_t>& spin_partner,
-               std::ostream& log, std::size_t n_negative = 0, bool check_hessian_diagonal = false, bool debug = false) {
+               std::ostream& log, std::size_t n_negative = 0, bool check_hessian_diagonal = false, bool debug = false,
+               double roundoff_scale = 0.0) {
   const std::size_t n = h.rows();
   const auto pairs = lowerPairs(n, n_negative);
   bool ok = true;
@@ -1274,7 +1331,13 @@ bool runChecks(const Matrix<T>& h, const Eri& eri, const std::vector<double>& oc
         verdict(occ_dev < 1e-6, "occupation numbers equal within every Kramers pair");
         const double asym = kr.asymmetry(joint_gradient);
         log << "    gradient time-reversal asymmetry max |nu - R nu| = " << asym << " (max |nu| = " << g_max << ")\n";
-        verdict(asym <= 1e-6 * std::max(g_max, 1e-10) + 1e-12,
+        // The gradient sums involve h/eri entries of the whole basis (for C4_DHF the negative-energy branch, ~1e4 Hartree, also
+        // when it is trimmed away from this run): roundoff reaches ~1e-13 relative to that scale even though the physical
+        // asymmetry is zero (see the final test below).
+        double h_top = roundoff_scale;
+        for (std::size_t p = 0; p < n; ++p)
+          for (std::size_t q = 0; q < n; ++q) h_top = std::max(h_top, std::abs(std::complex<double>(h(p, q))));
+        verdict(asym <= 1e-6 * std::max(g_max, 1e-10) + 1e-12 + 1000.0 * std::numeric_limits<double>::epsilon() * h_top,
                 "orbital gradient is time-reversal symmetric (R nu = nu)");
         // Probe rotation from a random-looking reduced step: exp(-kappa) must commute with time reversal.
         std::vector<double> probe(kr.reducedSize());
@@ -1389,7 +1452,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
   log << "  a) Validation of the ADAM / Kramers-restriction machinery on this system:\n";
   result.checks_passed =
       runChecks<T, Eri>(h, eri, occupations, model, kramers_restricted, spin_partner, log, n_negative,
-                        /*check_hessian_diagonal=*/want_neo, settings.debug);
+                        /*check_hessian_diagonal=*/want_neo, settings.debug, settings.roundoff_scale);
   if (!result.checks_passed) {
     log << "  A validation check FAILED -- the macro-iteration loop is NOT run.\n";
     return result;
@@ -1462,7 +1525,6 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
   // occupation lies below the threshold but is not negligible still curve downward by -O(4 c^2 n_i), so the
   // end-of-run check accepts anything between the count at `occupied_threshold` and the count at 1e-10.
   std::size_t saddle_order = 0, saddle_order_max = 0;
-  std::vector<char> mask_ep_occupied, mask_rest;  // saddle mode: occupied electron-positron / all other parameters
   if (saddle) {
     const std::size_t nn = settings.saddle.n_negative;
     const auto countMixed = [&](double threshold, std::size_t& n_occupied, std::size_t& n_pairs) {
@@ -1498,9 +1560,6 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
     const auto electronPositron = [&](std::size_t pair) {
       return std::min(prs[pair].first, prs[pair].second) < nn && std::max(prs[pair].first, prs[pair].second) >= nn;
     };
-    const auto occupiedElectronPositron = [&](std::size_t pair) {
-      return electronPositron(pair) && occupations[std::max(prs[pair].first, prs[pair].second)] > settings.saddle.occupied_threshold;
-    };
     // Mask over the parameters NEO sees (Kramers-reduced [t_orbits; y_orbits] or the full joint layout).
     const auto buildMask = [&](const auto& predicate) {
       std::vector<char> mask;
@@ -1517,8 +1576,6 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
       return mask;
     };
     neo_options.step.sector = buildMask(electronPositron);
-    mask_ep_occupied = buildMask(occupiedElectronPositron);
-    mask_rest = buildMask([&](std::size_t pair) { return !electronPositron(pair); });
   }
   neo_options.gradient_tolerance = settings.gradient_tolerance;
   neo_options.max_iterations = settings.neo_max_iterations;  // fixed budget -- see its own comment.
@@ -1667,54 +1724,17 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
     for (const auto& [p, q] : problem.pairs()) g_max = std::max(g_max, std::abs(std::complex<double>(g_final(p, q))));
     result.gradient_max = g_max;
 
-    if (!use_neo) break;  // ADAM has no Hessian to check and nothing to escape.
-    if (saddle && !settings.debug) {
-      // Verifying the type of the saddle costs many Hessian products (finite-difference gradients on the Cholesky vectors);
-      // it runs on request only.
-      log << "    Hessian check of the saddle type not run (DEBUG TRUE runs it: block-wise minimum/maximum test and the count of negative eigenvalues).\n";
-      break;
-    }
-
+    // NEO, ordinary minimization: is the point really a minimum? If the lowest Hessian eigenvalues show a saddle, escape
+    // along the negative-curvature eigenvector and re-optimize (see the comment before `withReduced`). The min-max stage
+    // (`saddle`) is a saddle by design; its type is verified only under DEBUG TRUE (dense diagonalization below).
+    bool escaping = false;
+    if (!saddle && use_neo) {
     progress("FULL_OPTIMIZATION (NEO): post-loop Hessian check (minimum vs saddle)");
     neo_problem->setOccupations(occ);
     NeoEigenOptions eig_options;
-    if (saddle) eig_options.residual_tolerance = 1e-4;  // ~176 roots at curvatures up to -1e5: the count needs no more
     constexpr std::size_t kRoots = 3;
-    bool escaping = false;
     withReduced([&](NeoProblem<double>& reduced) {
-      if (saddle) {
-        // The electron-positron block (curvature ~ -4 c^2 n_i) is separated by ~1e4-1e5 from everything else, so the Hessian
-        // index is verified block-wise: the lowest eigenvalue of H restricted to the non-electron-positron parameters must
-        // not be negative (a minimum there) and the highest one of H restricted to the occupied electron-positron
-        // parameters must be negative (a maximum there). Counting all `saddle_order` negative eigenvalues instead is
-        // O(saddle_order) Hessian products (also run, after this one, under DEBUG TRUE).
-        const std::size_t dim = reduced.dimension();
-        constexpr double kLift = 1e8;  // pushes the complement of the block above its spectrum
-        const auto blockExtreme = [&](const std::vector<char>& mask, double sign) {
-          const auto op = [&](const std::vector<double>& v) {
-            std::vector<double> masked(dim, 0.0);
-            for (std::size_t i = 0; i < dim; ++i) masked[i] = mask[i] ? v[i] : 0.0;
-            std::vector<double> hv = reduced.hessianVector(masked);
-            for (std::size_t i = 0; i < dim; ++i) hv[i] = mask[i] ? sign * hv[i] : kLift * v[i];
-            return hv;
-          };
-          NeoEigenOptions block_options = eig_options;
-          block_options.residual_tolerance = 1e-2;
-          block_options.max_iterations = 100;
-          const NeoEigenResult<double> e = neoLowestHessianEigenpairs<double>(dim, op, 1, {}, block_options);
-          return std::make_pair(sign * e.eigenvalues.front(), e.converged);
-        };
-        const auto [pp_min, pp_ok] = blockExtreme(mask_rest, +1.0);
-        const auto [ep_max, ep_ok] = blockExtreme(mask_ep_occupied, -1.0);
-        log << "    Hessian check, block-wise: lowest eigenvalue of the Hessian over the positive-positive (non-electron-positron) rotations "
-            << std::scientific << std::setprecision(3) << pp_min << ", highest over the " << saddle_order
-            << " occupied electron-positron ones " << ep_max << std::defaultfloat << std::setprecision(6)
-            << (pp_ok && ep_ok ? "" : "  (Davidson NOT converged)") << "\n";
-        const bool ok = pp_min > -1e-6 && ep_max < -1e-6;
-        log << "    [" << (ok ? "PASS" : "FAIL") << "] the point is a minimum over the positive-energy rotations and a maximum over the "
-            << saddle_order << " occupied electron-positron ones, i.e. a saddle of order " << saddle_order << "\n";
-      }
-      const std::size_t n_roots = std::min<std::size_t>(saddle ? saddle_order_max + 1 : kRoots, reduced.dimension());
+      const std::size_t n_roots = std::min<std::size_t>(kRoots, reduced.dimension());
       const NeoEigenResult<double> eig = neoLowestHessianEigenpairs<double>(
           reduced.dimension(), [&](const std::vector<double>& v) { return reduced.hessianVector(v); }, n_roots, {},
           eig_options);
@@ -1725,12 +1745,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
           << " orbital-rotation Hessian at this point):";
       for (double e : eig.eigenvalues) log << " " << std::scientific << std::setprecision(3) << e;
       log << std::defaultfloat << std::setprecision(6) << (eig.converged ? "" : "  (Davidson NOT converged)") << "\n";
-      if (saddle) {
-        const std::size_t found = static_cast<std::size_t>(n_negative);
-        log << "    [" << (found >= saddle_order && found <= saddle_order_max ? "PASS" : "FAIL") << "] the point is a saddle of order "
-            << saddle_order << (saddle_order_max > saddle_order ? "-" + std::to_string(saddle_order_max) : std::string())
-            << " (found " << n_negative << " negative eigenvalue(s) among the lowest " << eig.eigenvalues.size() << ")\n";
-      } else if (n_negative > 0 && !eig.eigenvectors.empty() && escape_attempt < kMaxSaddleEscapeAttempts) {
+      if (n_negative > 0 && !eig.eigenvectors.empty() && escape_attempt < kMaxSaddleEscapeAttempts) {
         const auto& v = eig.eigenvectors.front();  // most negative eigenvalue: eigenvalues is ascending
         constexpr double kEscapeStep = 0.3;
         std::vector<double> step_plus(v.size()), step_minus(v.size());
@@ -1753,6 +1768,46 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
             << "] the point is a genuine minimum (0 negative eigenvalues)\n";
       }
     });
+    }
+    // DEBUG TRUE: dense diagonalization of the orbital-rotation Hessian at the converged point (any orbital optimizer) --
+    // exact count of the negative eigenvalues, for the minimum and for the saddle (min-max) stage alike.
+    if (settings.debug && !escaping) {
+      progress("FULL_OPTIMIZATION: dense Hessian diagonalization (type of the solution)");
+      if (!model.hessian_matrix) {
+        log << "    Hessian check of the type of the solution not available: the model has no dense Hessian matrix.\n";
+      } else {
+        const auto& eri_dense = denseOf(problem.eri());
+        Matrix<double> hessian = model.hessian_matrix(problem.h(), eri_dense, occ);
+        const char* space = "unrestricted";
+        if (kr) {
+          hessian = kr->contractMatrix(hessian);
+          space = "Kramers-restricted";
+        } else if (!spin_orbits.empty()) {
+          hessian = contractSpinRestricted(hessian, spin_orbits);
+          space = "spin-restricted";
+        }
+        const SymmetricEigenResult dense_eig = diagonalizeSymmetric(hessian);
+        const auto& w = dense_eig.eigenvalues;
+        const std::size_t n_neg = static_cast<std::size_t>(std::count_if(w.begin(), w.end(), [](double e) { return e < -1e-6; }));
+        const std::size_t n_zero = static_cast<std::size_t>(
+            std::count_if(w.begin(), w.end(), [](double e) { return std::abs(e) <= 1e-6; }));
+        log << "    Hessian check (dense diagonalization of the " << space << " " << hessian.rows() << " x " << hessian.rows()
+            << " orbital-rotation Hessian): " << n_neg << " negative eigenvalue(s) (< -1e-6), " << n_zero
+            << " zero (|e| <= 1e-6), " << (w.size() - n_neg - n_zero) << " positive; lowest " << std::scientific
+            << std::setprecision(3) << w.front() << ", highest negative " << (n_neg > 0 ? w[n_neg - 1] : 0.0)
+            << ", lowest non-negative " << (n_neg < w.size() ? w[n_neg] : 0.0) << std::defaultfloat << std::setprecision(6)
+            << "\n";
+        if (saddle) {
+          log << "    [" << (n_neg >= saddle_order && n_neg <= saddle_order_max ? "PASS" : "FAIL") << "] the point is a saddle of order "
+              << saddle_order << (saddle_order_max > saddle_order ? "-" + std::to_string(saddle_order_max) : std::string())
+              << " (found " << n_neg << " negative eigenvalue(s))\n";
+        } else {
+          log << "    [" << (n_neg == 0 ? "PASS" : "FAIL") << "] the point is a genuine minimum (0 negative eigenvalues)\n";
+        }
+      }
+    } else if (saddle) {
+      log << "    Type of the saddle not checked (DEBUG TRUE: dense diagonalization of the Hessian and count of its negative eigenvalues).\n";
+    }
     if (!escaping) break;
     e_elec = model.energy(problem.h(), problem.eri(), occ);
     e_old = e_elec;
@@ -1821,8 +1876,8 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
       // above the un-scaled 1e-12 floor). X2C's own h_scale is chemical-size, so this term stays
       // well below 1e-12 there and does not loosen that check.
       final_verdict(nu_dev <= 1e-6 * std::max(nu_scale, 1e-10) + 1e-12 +
-                                  100.0 * std::numeric_limits<double>::epsilon() *
-                                      std::max(h_scale, eri_scale),
+                                  1000.0 * std::numeric_limits<double>::epsilon() *
+                                      std::max({h_scale, eri_scale, settings.roundoff_scale}),
                     "final orbital gradient is time-reversal symmetric");
     } else {
       log << "    (Kramers pairing test not applicable: no Kramers restriction requested)\n";
@@ -2014,6 +2069,15 @@ namespace {
 // rotation and gradient (RKB dimension n) about 4-8x more expensive than the positive-energy problem (n/2) that is
 // actually solved. The macro loop therefore runs on the positive-energy block alone and the result is embedded back.
 // ---------------------------------------------------------------------
+// The trimmed (no-pair) runs never see the negative-energy branch, whose ~1e4 Hartree entries set the roundoff of the
+// gradient sums (see the time-reversal checks): carry the untrimmed scale in the settings.
+template <typename T>
+FullOptSettings withRoundoffScale(FullOptSettings s, const Matrix<T>& h) {
+  for (std::size_t p = 0; p < h.rows(); ++p)
+    for (std::size_t q = 0; q < h.cols(); ++q) s.roundoff_scale = std::max(s.roundoff_scale, std::abs(std::complex<double>(h(p, q))));
+  return s;
+}
+
 template <typename T>
 Matrix<T> positiveBlock(const Matrix<T>& h, std::size_t off) {
   const std::size_t m = h.rows() - off;
@@ -2079,7 +2143,7 @@ FullOptResult runFullOptimizationJk(const Matrix<T>& h, const CholeskyEri<T>& er
         runFullOptimizationJk<T>(positiveBlock(h, n_negative), positiveBlock(eri, n_negative),
                                  std::vector<double>(occupations.begin() + static_cast<std::ptrdiff_t>(n_negative), occupations.end()),
                                  state, functional, f_l, n_electrons, n_total - n_negative, n_frozen,
-                                 n_inactive_below - n_negative, n_active, two_columns, settings, kramers_restricted,
+                                 n_inactive_below - n_negative, n_active, two_columns, withRoundoffScale(settings, h), kramers_restricted,
                                  nuclear_repulsion_energy, log, spin_partner, 0),
         n_negative, n_total);
   }
@@ -2112,7 +2176,7 @@ FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const CholeskyEri<T>& 
         runFullOptimizationPnof<T>(positiveBlock(h, n_negative), positiveBlock(eri, n_negative),
                                    std::vector<double>(occupations.begin() + static_cast<std::ptrdiff_t>(n_negative), occupations.end()),
                                    state, functional, shifted, n_core, pnof_subspaces, pnof_coupling, relativistic,
-                                   sqp_occupations, n_total - n_negative, settings, kramers_restricted,
+                                   sqp_occupations, n_total - n_negative, withRoundoffScale(settings, h), kramers_restricted,
                                    nuclear_repulsion_energy, log, spin_partner, 0),
         n_negative, n_total);
   }
@@ -2140,7 +2204,7 @@ FullOptResult runFullOptimizationJk(const Matrix<T>& h, const SymmetricEri<T>& e
         runFullOptimizationJk<T>(positiveBlock(h, n_negative), positiveBlock(eri, n_negative),
                                  std::vector<double>(occupations.begin() + static_cast<std::ptrdiff_t>(n_negative), occupations.end()),
                                  state, functional, f_l, n_electrons, n_total - n_negative, n_frozen,
-                                 n_inactive_below - n_negative, n_active, two_columns, settings, kramers_restricted,
+                                 n_inactive_below - n_negative, n_active, two_columns, withRoundoffScale(settings, h), kramers_restricted,
                                  nuclear_repulsion_energy, log, spin_partner, 0),
         n_negative, n_total);
   }
@@ -2173,7 +2237,7 @@ FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const SymmetricEri<T>&
         runFullOptimizationPnof<T>(positiveBlock(h, n_negative), positiveBlock(eri, n_negative),
                                    std::vector<double>(occupations.begin() + static_cast<std::ptrdiff_t>(n_negative), occupations.end()),
                                    state, functional, shifted, n_core, pnof_subspaces, pnof_coupling, relativistic,
-                                   sqp_occupations, n_total - n_negative, settings, kramers_restricted,
+                                   sqp_occupations, n_total - n_negative, withRoundoffScale(settings, h), kramers_restricted,
                                    nuclear_repulsion_energy, log, spin_partner, 0),
         n_negative, n_total);
   }

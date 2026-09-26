@@ -5,7 +5,7 @@
 # C4_SPINOR path (4-component Dirac-Hartree-Fock, RKB basis of 112 spinors, no-pair orbital rotations on the 56
 # positive-energy spinors only). The RKB integrals come from ONE Cholesky decomposition of the real AO
 # {Large-Large} u {Small-Small} Coulomb matrix (1409 vectors, ~50 s of the setup). Measured: ~4 min, ~0.9 GB
-# peak, converges in 8 macro-iterations to -113.0044414 Ha (a genuine minimum). Follow the run with
+# peak, converges in 8 macro-iterations to -113.0044414 Ha. Follow the run with
 # `tail -f co_ccpvdz_c4_gnof_neo_cholesky.live`.
 NELEC 14
 BASIS co-cc-pvdz.gbs
