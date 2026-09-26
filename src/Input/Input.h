@@ -185,11 +185,6 @@ class Input {
   // at least one iteration) as soon as EITHER the density change or the
   // energy change falls below its own tolerance. Must be positive.
   double density_tolerance() const { return density_tolerance_; }
-  // Optional; defaults to "RESTART" when RESTART_FILE is absent. Base name of the binary restart
-  // files (Utils/Restart.h) written at the end of a NON_REL / X2C / C4_SPINOR RDMFT run with a FUNCTIONAL:
-  // "<base>.NON_REL", "<base>.X2C_HF", "<base>.4C" (positive-energy-only minimization) and
-  // "<base>.4C_NEG" (FULL_OPTIMIZATION_4C_NEG min-max stage). The word NONE disables the files.
-  const std::string& restart_file() const { return restart_file_; }
   // Optional; defaults to FALSE when the CHOLESKY keyword is absent --
   // the original direct 4-leg transform is the default everywhere. When
   // TRUE, every two-electron integral basis TRANSFORMATION in this
@@ -392,7 +387,6 @@ class Input {
   double density_tolerance_ = 1e-6;
   bool cholesky_ = false;
   double cholesky_threshold_ = 1e-10;
-  std::string restart_file_ = "RESTART";
   std::string functional_ = "SD";
   bool has_functional_ = false;
   double temperature_ = 1000.0;

@@ -119,6 +119,8 @@ void writeRestart(const std::string& path, const RestartData& data) {
   put<std::int64_t>(out, data.pnof_subspaces);
   put<std::int64_t>(out, data.pnof_coupling);
   put<std::int64_t>(out, data.n_core);
+  put<std::int64_t>(out, data.jk_frozen_pairs);
+  put<std::int64_t>(out, data.jk_active_pairs);
   put<double>(out, data.total_energy);
   put<std::uint8_t>(out, data.orbitals_optimized ? 1 : 0);
   put<std::uint8_t>(out, data.converged ? 1 : 0);
@@ -157,6 +159,8 @@ RestartData readRestart(const std::string& path) {
   d.pnof_subspaces = get<std::int64_t>(in);
   d.pnof_coupling = get<std::int64_t>(in);
   d.n_core = get<std::int64_t>(in);
+  d.jk_frozen_pairs = get<std::int64_t>(in);
+  d.jk_active_pairs = get<std::int64_t>(in);
   d.total_energy = get<double>(in);
   d.orbitals_optimized = get<std::uint8_t>(in) != 0;
   d.converged = get<std::uint8_t>(in) != 0;

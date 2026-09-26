@@ -3217,6 +3217,8 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
             if (restart_neg != nullptr && saddle_result.checks_passed) {
               restart_neg->valid = true;
               restart_neg->kind = "OCCUPATIONS";
+              restart_neg->jk_frozen_pairs = static_cast<std::int64_t>(n_frozen / 2);
+              restart_neg->jk_active_pairs = static_cast<std::int64_t>(n_active_window / 2);
               restart_neg->occupations = saddle_result.occupations;
               restart_neg->electronic_energy = saddle_result.electronic_energy;
               restart_neg->converged = saddle_result.converged;
@@ -3241,6 +3243,8 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
     if (restart != nullptr) {
       restart->valid = true;
       restart->kind = "OCCUPATIONS";
+      restart->jk_frozen_pairs = static_cast<std::int64_t>(n_frozen / 2);
+      restart->jk_active_pairs = static_cast<std::int64_t>(n_active_window / 2);
       restart->occupations = embed(sqp_result.x);
       restart->electronic_energy = sqp_result.objective_value;
       restart->converged = sqp_result.converged;
@@ -4070,8 +4074,7 @@ void writeRestartFile(const rerdmft::Input& input, const std::string& method,
                       const rerdmft::Matrix<std::complex<double>>& s_ao,
                       const rerdmft::Matrix<T>& h_mo, std::uint64_t basis_fingerprint,
                       double nuclear_repulsion_energy) {
-  const std::string base = input.restart_file();
-  if (base == "NONE" || base == "none") return;
+  const std::string base = "RESTART";  // files: RESTART.NON_REL, RESTART.X2C_HF, RESTART.4C, RESTART.4C_NEG
   if (!capture.valid) {
     std::cout << "\nRESTART file (" << method << "): not written -- no RDMFT result was produced.\n";
     return;
@@ -4089,7 +4092,8 @@ void writeRestartFile(const rerdmft::Input& input, const std::string& method,
       data.pnof_subspaces = input.pnof_subspaces();
       data.pnof_coupling = input.pnof_coupling();
       data.n_core = capture.n_core;
-    }
+    }    data.jk_frozen_pairs = capture.jk_frozen_pairs;
+    data.jk_active_pairs = capture.jk_active_pairs;
     data.total_energy = capture.electronic_energy + nuclear_repulsion_energy;
     data.orbitals_optimized = capture.orbitals_optimized;
     data.converged = capture.converged;
@@ -4108,7 +4112,9 @@ void writeRestartFile(const rerdmft::Input& input, const std::string& method,
     const auto back = rerdmft::readRestart(path);
     const bool same = back.method == data.method && back.functional == data.functional &&
                       back.kind == data.kind && back.basis_fingerprint == data.basis_fingerprint &&
-                      back.n_electrons == data.n_electrons && back.total_energy == data.total_energy &&
+                      back.n_electrons == data.n_electrons &&
+                      back.jk_frozen_pairs == data.jk_frozen_pairs && back.jk_active_pairs == data.jk_active_pairs &&
+                      back.total_energy == data.total_energy &&
                       back.occupations == data.occupations && back.gammas == data.gammas &&
                       back.rows == data.rows && back.cols == data.cols &&
                       back.coefficients == data.coefficients;
@@ -4144,6 +4150,9 @@ void writeRestartFile(const rerdmft::Input& input, const std::string& method,
                                           + std::to_string(data.pnof_subspaces) + " subspace(s) x " +
                                           std::to_string(data.pnof_coupling - 1) + ") and "
                                                              : std::string("")) +
+                     (capture.kind == "OCCUPATIONS" ? "JK_only window: " + std::to_string(data.jk_frozen_pairs) + " frozen pair(s), " +
+                                          std::to_string(data.jk_active_pairs) + " active pair(s); "
+                                                                       : std::string("")) +
                      std::to_string(data.occupations.size()) + " occupation numbers, MO coefficients " +
                      std::to_string(data.rows) + " x " + std::to_string(data.cols) +
                      (data.complex_coefficients ? " (complex)" : " (real)") + ", " +

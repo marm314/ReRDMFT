@@ -63,7 +63,8 @@ bool sameData(const RestartData& a, const RestartData& b) {
   return a.method == b.method && a.functional == b.functional && a.kind == b.kind &&
          a.basis_fingerprint == b.basis_fingerprint && a.n_electrons == b.n_electrons &&
          a.pnof_subspaces == b.pnof_subspaces && a.pnof_coupling == b.pnof_coupling &&
-         a.n_core == b.n_core && a.total_energy == b.total_energy &&
+         a.n_core == b.n_core && a.jk_frozen_pairs == b.jk_frozen_pairs && a.jk_active_pairs == b.jk_active_pairs &&
+         a.total_energy == b.total_energy &&
          a.orbitals_optimized == b.orbitals_optimized && a.converged == b.converged &&
          a.occupations == b.occupations && a.gammas == b.gammas &&
          a.complex_coefficients == b.complex_coefficients && a.rows == b.rows && a.cols == b.cols &&
@@ -101,6 +102,8 @@ int main() {
     d.kind = "OCCUPATIONS";
     d.gammas.clear();
     d.pnof_subspaces = d.pnof_coupling = d.n_core = 0;
+    d.jk_frozen_pairs = 1;
+    d.jk_active_pairs = 4;
     writeRestart(path, d);
     check(sameData(d, readRestart(path)), "OCCUPATIONS file round trip");
   }

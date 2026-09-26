@@ -187,11 +187,6 @@ void Input::read(const std::string& filename) {
         throw std::runtime_error("line " + std::to_string(line_number) +
                                   ": CHOLESKY_THRESHOLD must be positive");
       }
-    } else if (keyword == "RESTART_FILE") {
-      if (!(iss >> restart_file_)) {
-        throw std::runtime_error("line " + std::to_string(line_number) +
-                                  ": expected a file name (or NONE) after RESTART_FILE");
-      }
     } else if (keyword == "FUNCTIONAL") {
       std::string token;
       if (!(iss >> token)) {
@@ -367,7 +362,6 @@ void Input::print(std::ostream& out) const {
   line("DENSITY_TOLERANCE") << density_tolerance_ << "\n";
   line("CHOLESKY") << flag(cholesky_) << "\n";
   line("CHOLESKY_THRESHOLD") << cholesky_threshold_ << "\n";
-  line("RESTART_FILE") << restart_file_ << "\n";
   line("FUNCTIONAL") << functional_ << (has_functional_ ? "" : " (default; not set in input)")
                       << "\n";
   line("TEMPERATURE") << temperature_ << "\n";

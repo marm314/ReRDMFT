@@ -27,6 +27,9 @@ namespace rerdmft {
 //   uint64    basis fingerprint (BasisFingerprint.h's basisFingerprint of the Large AO basis)
 //   int64     n_electrons
 //   int64     pnof_subspaces, pnof_coupling, n_core   (PNOF; 0 for JK_only)
+//   int64     jk_frozen_pairs, jk_active_pairs        (JK_only: the RESOLVED occupation window -- pairs pinned at
+//                                                      occupation 1, and pairs in the fractional-occupation window
+//                                                      above them, JK_ACTIVE_PAIRS absent = all the rest; 0 for PNOF)
 //   double    final total energy (Hartree, nuclear repulsion included)
 //   uint8     orbitals_optimized (1: FULL_OPTIMIZATION rotated the orbitals away from the SCF ones)
 //   uint8     converged          (1: the optimization that produced the file reported convergence)
@@ -60,6 +63,8 @@ struct RestartData {
   std::int64_t pnof_subspaces = 0;
   std::int64_t pnof_coupling = 0;
   std::int64_t n_core = 0;
+  std::int64_t jk_frozen_pairs = 0;  // JK_only: resolved window, see the file layout
+  std::int64_t jk_active_pairs = 0;
   double total_energy = 0.0;
   bool orbitals_optimized = false;
   bool converged = false;
@@ -85,13 +90,15 @@ struct RestartCapture {
   std::vector<double> occupations;   // full occupation vector
   std::vector<double> gammas;        // PNOF
   std::int64_t n_core = 0;           // PNOF: number of frozen core geminals
+  std::int64_t jk_frozen_pairs = 0;  // JK_only: resolved JK_FROZEN_PAIRS / active window (pairs)
+  std::int64_t jk_active_pairs = 0;
   double electronic_energy = 0.0;    // final electronic energy (no nuclear repulsion)
   bool orbitals_optimized = false;
   bool converged = false;
   Matrix<std::complex<double>> total_rotation;  // FULL_OPTIMIZATION rotation; empty = identity
 };
 
-constexpr std::uint32_t kRestartVersion = 1;
+constexpr std::uint32_t kRestartVersion = 2;
 
 // Writes `data` to `path` (overwriting). Throws std::runtime_error if the file cannot be
 // written or the data are inconsistent (empty/mismatched sizes, unknown kind).
