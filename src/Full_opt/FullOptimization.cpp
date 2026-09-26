@@ -21,6 +21,7 @@
 #include "OccupationEnergy.h"
 #include "OrbitalGradient.h"
 #include "PnofFock.h"
+#include "Progress.h"
 #include "PnofHessian.h"
 #include "SQP.h"
 #include "SpinorRotation.h"
@@ -1356,6 +1357,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
            "  evaluated on demand, and no dense n^4 tensor is kept anywhere in the loop (the checks that\n"
            "  need one run only under DEBUG TRUE).\n";
   }
+  progress("FULL_OPTIMIZATION: start-up validation checks");
   log << "  a) Validation of the ADAM / Kramers-restriction machinery on this system:\n";
   result.checks_passed =
       runChecks<T, Eri>(h, eri, occupations, model, kramers_restricted, spin_partner, log, n_negative,
@@ -1367,6 +1369,8 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
   log << "  All validation checks passed.\n";
 
   log << "  b) Macro-iteration loop:\n";
+  ProgressLine() << "FULL_OPTIMIZATION (" << (settings.orbital_optimizer == OrbitalOptimizer::kNeo ? "NEO" : "ADAM")
+                 << "): macro-iteration loop starting";
   RotationProblem<T, Eri> problem(model, h, eri, spin_partner, n_negative);
   AdamOptions adam_options;
   adam_options.gradient_tolerance = settings.gradient_tolerance;
@@ -1421,6 +1425,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
   // CO/cc-pVDZ (GNOF, NON_REL) the residual stagnated near 2e-5 for hundreds of Hessian products).
   // Tolerance = min(residual_tolerance, 0.1*|g|), so it still tightens as the gradient falls.
   neo_options.step.residual_tolerance = 1e-3;
+  neo_options.progress = true;  // one live line per Newton step (Utils/Progress.h)
   neo_options.step.target_order = 0;  // ground state (a minimum) only -- no saddle-point search here.
   neo_options.gradient_tolerance = settings.gradient_tolerance;
   neo_options.max_iterations = settings.neo_max_iterations;  // fixed budget -- see its own comment.
@@ -1536,6 +1541,11 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
           << (orbital_restart_requested ? "  restart" : "") << (gradient_converged ? "  gradient-converged" : "")
           << (occ_result.converged ? "" : "  occupations-not-converged")
           << std::defaultfloat << std::setprecision(6) << "\n";
+      ProgressLine() << "FULL_OPTIMIZATION macro-iteration " << iter << ": E(total) = " << std::fixed << std::setprecision(10)
+                     << e_elec + nuclear_repulsion_energy << std::scientific << std::setprecision(2) << "  dE = " << d_e
+                     << "  max|g| = " << max_gradient << "  (" << (use_neo ? "NEO steps " : "ADAM steps ") << orbital_iterations
+                     << (gradient_converged ? ", gradient converged" : "") << (occ_result.converged ? "" : ", occupations not converged")
+                     << ")";
       if (std::abs(d_e) < settings.energy_tolerance && !(use_neo ? false : adam.restartRequested())) {
         result.converged = true;
         break;
@@ -1561,6 +1571,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h, const Eri& eri,
 
     if (!use_neo) break;  // ADAM has no Hessian to check and nothing to escape.
 
+    progress("FULL_OPTIMIZATION (NEO): post-loop Hessian check (minimum vs saddle)");
     neo_problem->setOccupations(occ);
     NeoEigenOptions eig_options;
     constexpr std::size_t kRoots = 3;
@@ -1853,6 +1864,61 @@ FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const Tensor4<T>& eri,
                                              spin_partner, n_negative);
 }
 
+namespace {
+
+// ---------------------------------------------------------------------
+// No-pair (C4_DHF) trim: the negative-energy branch never takes part in the orbital optimization (its occupations
+// are exactly 0 and every pair touching it is excluded from the rotations), yet it makes every integral array,
+// rotation and gradient (RKB dimension n) about 4-8x more expensive than the positive-energy problem (n/2) that is
+// actually solved. The macro loop therefore runs on the positive-energy block alone and the result is embedded back.
+// ---------------------------------------------------------------------
+template <typename T>
+Matrix<T> positiveBlock(const Matrix<T>& h, std::size_t off) {
+  const std::size_t m = h.rows() - off;
+  Matrix<T> out(m, m);
+  for (std::size_t p = 0; p < m; ++p)
+    for (std::size_t q = 0; q < m; ++q) out(p, q) = h(p + off, q + off);
+  return out;
+}
+template <typename T>
+Tensor4<T> positiveBlock(const Tensor4<T>& e, std::size_t off) {
+  const std::size_t m = e.dim0() - off;
+  Tensor4<T> out(m, m, m, m);
+  for (std::size_t a = 0; a < m; ++a)
+    for (std::size_t b = 0; b < m; ++b)
+      for (std::size_t c = 0; c < m; ++c)
+        for (std::size_t d = 0; d < m; ++d) out(a, b, c, d) = e(a + off, b + off, c + off, d + off);
+  return out;
+}
+template <typename T>
+SymmetricEri<T> positiveBlock(const SymmetricEri<T>& e, std::size_t off) {
+  const std::size_t m = e.dim0() - off;
+  SymmetricEri<T> out(m);
+  for (std::size_t a = 0; a < m; ++a)
+    for (std::size_t c = a; c < m; ++c)
+      for (std::size_t b = 0; b < m; ++b)
+        for (std::size_t d = 0; d < m; ++d) out.set(a, b, c, d, e(a + off, b + off, c + off, d + off));
+  return out;
+}
+template <typename T>
+CholeskyEri<T> positiveBlock(const CholeskyEri<T>& e, std::size_t off) { return e.restricted(off); }
+
+FullOptResult embedTrimmedResult(FullOptResult r, std::size_t off, std::size_t n_full) {
+  std::vector<double> occ(off, 0.0);
+  occ.insert(occ.end(), r.occupations.begin(), r.occupations.end());
+  r.occupations = std::move(occ);
+  if (r.total_rotation.rows() > 0) {
+    Matrix<std::complex<double>> u(n_full, n_full, std::complex<double>(0.0, 0.0));
+    for (std::size_t i = 0; i < off; ++i) u(i, i) = 1.0;
+    for (std::size_t p = 0; p < r.total_rotation.rows(); ++p)
+      for (std::size_t q = 0; q < r.total_rotation.cols(); ++q) u(off + p, off + q) = r.total_rotation(p, q);
+    r.total_rotation = std::move(u);
+  }
+  return r;
+}
+
+}  // namespace
+
 template <typename T>
 FullOptResult runFullOptimizationJk(const Matrix<T>& h, const CholeskyEri<T>& eri,
                                     const std::vector<double>& occupations,
@@ -1864,6 +1930,17 @@ FullOptResult runFullOptimizationJk(const Matrix<T>& h, const CholeskyEri<T>& er
                                     bool kramers_restricted, double nuclear_repulsion_energy,
                                     std::ostream& log, const std::vector<std::size_t>& spin_partner,
                                     std::size_t n_negative) {
+  if (n_negative > 0) {
+    log << "\n  No-pair treatment: the " << n_negative << " negative-energy indices take no part in the optimization, so the loop runs on the\n"
+           "  positive-energy block alone (" << n_total - n_negative << " spinors) and the result is embedded back.\n";
+    return embedTrimmedResult(
+        runFullOptimizationJk<T>(positiveBlock(h, n_negative), positiveBlock(eri, n_negative),
+                                 std::vector<double>(occupations.begin() + static_cast<std::ptrdiff_t>(n_negative), occupations.end()),
+                                 state, functional, f_l, n_electrons, n_total - n_negative, n_frozen,
+                                 n_inactive_below - n_negative, n_active, two_columns, settings, kramers_restricted,
+                                 nuclear_repulsion_energy, log, spin_partner, 0),
+        n_negative, n_total);
+  }
   const auto model = makeJkOnlyModel<T, CholeskyEri<T>>(functional, f_l, n_electrons, n_total, n_frozen,
                                                         n_inactive_below, n_active, two_columns, n_negative);
   return runFullOptimization<T, CholeskyEri<T>>(h, eri, occupations, state, model, settings, kramers_restricted,
@@ -1880,6 +1957,23 @@ FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const CholeskyEri<T>& 
                                       const FullOptSettings& settings, bool kramers_restricted,
                                       double nuclear_repulsion_energy, std::ostream& log,
                                       const std::vector<std::size_t>& spin_partner, std::size_t n_negative) {
+  if (n_negative > 0) {
+    log << "\n  No-pair treatment: the " << n_negative << " negative-energy indices take no part in the optimization, so the loop runs on the\n"
+           "  positive-energy block alone (" << n_total - n_negative << " spinors) and the result is embedded back.\n";
+    std::vector<PnofGeminal> shifted = geminals;
+    for (PnofGeminal& g : shifted) {
+      if (g.i < n_negative || g.ibar < n_negative) throw std::runtime_error("FULL_OPTIMIZATION: a geminal touches the negative-energy branch");
+      g.i -= n_negative;
+      g.ibar -= n_negative;
+    }
+    return embedTrimmedResult(
+        runFullOptimizationPnof<T>(positiveBlock(h, n_negative), positiveBlock(eri, n_negative),
+                                   std::vector<double>(occupations.begin() + static_cast<std::ptrdiff_t>(n_negative), occupations.end()),
+                                   state, functional, shifted, n_core, pnof_subspaces, pnof_coupling, relativistic,
+                                   sqp_occupations, n_total - n_negative, settings, kramers_restricted,
+                                   nuclear_repulsion_energy, log, spin_partner, 0),
+        n_negative, n_total);
+  }
   const auto model = makePnofModel<T, CholeskyEri<T>>(functional, geminals, n_core, pnof_subspaces, pnof_coupling,
                                                       relativistic, sqp_occupations, n_total, n_negative);
   return runFullOptimization<T, CholeskyEri<T>>(h, eri, occupations, state, model, settings, kramers_restricted,
@@ -1897,6 +1991,17 @@ FullOptResult runFullOptimizationJk(const Matrix<T>& h, const SymmetricEri<T>& e
                                     bool kramers_restricted, double nuclear_repulsion_energy,
                                     std::ostream& log, const std::vector<std::size_t>& spin_partner,
                                     std::size_t n_negative) {
+  if (n_negative > 0) {
+    log << "\n  No-pair treatment: the " << n_negative << " negative-energy indices take no part in the optimization, so the loop runs on the\n"
+           "  positive-energy block alone (" << n_total - n_negative << " spinors) and the result is embedded back.\n";
+    return embedTrimmedResult(
+        runFullOptimizationJk<T>(positiveBlock(h, n_negative), positiveBlock(eri, n_negative),
+                                 std::vector<double>(occupations.begin() + static_cast<std::ptrdiff_t>(n_negative), occupations.end()),
+                                 state, functional, f_l, n_electrons, n_total - n_negative, n_frozen,
+                                 n_inactive_below - n_negative, n_active, two_columns, settings, kramers_restricted,
+                                 nuclear_repulsion_energy, log, spin_partner, 0),
+        n_negative, n_total);
+  }
   const auto model = makeJkOnlyModel<T, SymmetricEri<T>>(functional, f_l, n_electrons, n_total, n_frozen,
                                                         n_inactive_below, n_active, two_columns, n_negative);
   return runFullOptimization<T, SymmetricEri<T>>(h, eri, occupations, state, model, settings, kramers_restricted,
@@ -1913,6 +2018,23 @@ FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const SymmetricEri<T>&
                                       const FullOptSettings& settings, bool kramers_restricted,
                                       double nuclear_repulsion_energy, std::ostream& log,
                                       const std::vector<std::size_t>& spin_partner, std::size_t n_negative) {
+  if (n_negative > 0) {
+    log << "\n  No-pair treatment: the " << n_negative << " negative-energy indices take no part in the optimization, so the loop runs on the\n"
+           "  positive-energy block alone (" << n_total - n_negative << " spinors) and the result is embedded back.\n";
+    std::vector<PnofGeminal> shifted = geminals;
+    for (PnofGeminal& g : shifted) {
+      if (g.i < n_negative || g.ibar < n_negative) throw std::runtime_error("FULL_OPTIMIZATION: a geminal touches the negative-energy branch");
+      g.i -= n_negative;
+      g.ibar -= n_negative;
+    }
+    return embedTrimmedResult(
+        runFullOptimizationPnof<T>(positiveBlock(h, n_negative), positiveBlock(eri, n_negative),
+                                   std::vector<double>(occupations.begin() + static_cast<std::ptrdiff_t>(n_negative), occupations.end()),
+                                   state, functional, shifted, n_core, pnof_subspaces, pnof_coupling, relativistic,
+                                   sqp_occupations, n_total - n_negative, settings, kramers_restricted,
+                                   nuclear_repulsion_energy, log, spin_partner, 0),
+        n_negative, n_total);
+  }
   const auto model = makePnofModel<T, SymmetricEri<T>>(functional, geminals, n_core, pnof_subspaces, pnof_coupling,
                                                       relativistic, sqp_occupations, n_total, n_negative);
   return runFullOptimization<T, SymmetricEri<T>>(h, eri, occupations, state, model, settings, kramers_restricted,

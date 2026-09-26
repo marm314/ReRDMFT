@@ -187,13 +187,6 @@ void Input::read(const std::string& filename) {
         throw std::runtime_error("line " + std::to_string(line_number) +
                                   ": CHOLESKY_THRESHOLD must be positive");
       }
-    } else if (keyword == "CACHE_INTEGRALS") {
-      cache_integrals_ = parseBool(iss, line_number, keyword);
-    } else if (keyword == "CACHE_DIR") {
-      if (!(iss >> cache_dir_)) {
-        throw std::runtime_error("line " + std::to_string(line_number) +
-                                  ": expected a directory path after CACHE_DIR");
-      }
     } else if (keyword == "RESTART_FILE") {
       if (!(iss >> restart_file_)) {
         throw std::runtime_error("line " + std::to_string(line_number) +
@@ -374,8 +367,6 @@ void Input::print(std::ostream& out) const {
   line("DENSITY_TOLERANCE") << density_tolerance_ << "\n";
   line("CHOLESKY") << flag(cholesky_) << "\n";
   line("CHOLESKY_THRESHOLD") << cholesky_threshold_ << "\n";
-  line("CACHE_INTEGRALS") << flag(cache_integrals_) << "\n";
-  line("CACHE_DIR") << cache_dir_ << "\n";
   line("RESTART_FILE") << restart_file_ << "\n";
   line("FUNCTIONAL") << functional_ << (has_functional_ ? "" : " (default; not set in input)")
                       << "\n";

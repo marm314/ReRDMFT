@@ -277,6 +277,7 @@ struct NeoOptions {
   bool verify_index = false;
   double verify_tolerance = 1e-6;
   bool verbose = false;  // one line per macro-iteration on std::cout
+  bool progress = false; // one live line per Newton step on stderr (Utils/Progress.h)
 };
 
 struct NeoIteration {

@@ -1,5 +1,6 @@
 #include "CholeskyEri.h"
 
+#include <algorithm>
 #include <stdexcept>
 
 #include "Cholesky_Decomposition.h"
@@ -43,6 +44,20 @@ CholeskyEri<T> CholeskyEri<T>::fromVectors(const std::vector<Matrix<T>>& vectors
     for (std::size_t x = 0; x < out.n_; ++x)
       for (std::size_t y = 0; y < out.n_; ++y) out.w_[(x * out.n_ + y) * out.nchol_ + l] = v(x, y);
   }
+  return out;
+}
+
+template <typename T>
+CholeskyEri<T> CholeskyEri<T>::restricted(std::size_t offset) const {
+  if (offset > n_) throw std::runtime_error("CholeskyEri::restricted: offset exceeds the dimension");
+  CholeskyEri out;
+  out.n_ = n_ - offset;
+  out.nchol_ = nchol_;
+  out.w_.assign(out.n_ * out.n_ * nchol_, T{});
+  for (std::size_t x = 0; x < out.n_; ++x)
+    for (std::size_t y = 0; y < out.n_; ++y)
+      std::copy(&w_[((x + offset) * n_ + (y + offset)) * nchol_], &w_[((x + offset) * n_ + (y + offset)) * nchol_] + nchol_,
+                &out.w_[(x * out.n_ + y) * nchol_]);
   return out;
 }
 

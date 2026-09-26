@@ -24,7 +24,7 @@ namespace rerdmft {
 //   string    method            ("NON_REL" | "X2C_HF")           string = uint64 length + bytes
 //   string    functional        (the FUNCTIONAL keyword, upper case)
 //   string    kind              ("OCCUPATIONS" | "GAMMAS")
-//   uint64    basis fingerprint (IntegralCache.h's basisFingerprint of the Large AO basis)
+//   uint64    basis fingerprint (BasisFingerprint.h's basisFingerprint of the Large AO basis)
 //   int64     n_electrons
 //   int64     pnof_subspaces, pnof_coupling, n_core   (PNOF; 0 for JK_only)
 //   double    final total energy (Hartree, nuclear repulsion included)

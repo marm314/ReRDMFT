@@ -75,8 +75,7 @@ Matrix<double> nonRelFockMatrix(const Matrix<double>& h_core, const PackedTwoEle
 // (Large,Large|Large,Large) two-electron repulsion tensor `eri` (built by
 // the caller -- ElectronRepulsion.h's twoElectronIntegralsPacked, real,
 // no restricted-kinetic-balance small component involved at all, storing
-// only the unique values -- typically via main.cpp, which can then also
-// cache it to disk; see IntegralCache.h). Starting from
+// only the unique values -- typically via main.cpp). Starting from
 // `initial_density` (typically the core-Hamiltonian-guess density built
 // from H_core's own eigenvectors in main.cpp), mirrors C4_DHF.h's
 // runDiracHartreeFockScf exactly (same linear-mixing and OR-combined

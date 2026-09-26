@@ -3,6 +3,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <cstdio>
 #include <fstream>
 #include <ctime>
 #include <iomanip>
@@ -29,7 +30,7 @@
 #include "JkOnlyFock.h"
 #include "JkOnlyHessian.h"
 #include "Input.h"
-#include "IntegralCache.h"
+#include "BasisFingerprint.h"
 #include "Integrals.h"
 #include "JK_only.h"
 #include "KramersPairing.h"
@@ -49,6 +50,7 @@
 #include "OrbitalGradient.h"
 #include "OrbitalRotationFiniteDifference.h"
 #include "PNOFs.h"
+#include "Progress.h"
 #include "PnofFock.h"
 #include "PnofHessian.h"
 #include "RkbDensityMatrix.h"
@@ -108,6 +110,7 @@ void logTiming(const std::string& label, std::chrono::steady_clock::time_point s
                 std::vector<TimingRecord>& records) {
   const auto now_steady = std::chrono::steady_clock::now();
   const auto now_wall = std::chrono::system_clock::now();
+  // (the checkpoint is also reported live -- see Utils/Progress.h)
   const std::time_t now_time_t = std::chrono::system_clock::to_time_t(now_wall);
   std::ostringstream timestamp;
   timestamp << std::put_time(std::localtime(&now_time_t), "%Y-%m-%d %H:%M:%S");
@@ -117,6 +120,11 @@ void logTiming(const std::string& label, std::chrono::steady_clock::time_point s
   record.phase_seconds = std::chrono::duration<double>(now_steady - since).count();
   record.total_seconds = std::chrono::duration<double>(now_steady - start).count();
   records.push_back(record);
+  {
+    std::ostringstream phase;
+    phase << std::fixed << std::setprecision(2) << label << "  (+" << record.phase_seconds << " s)";
+    rerdmft::progress(phase.str());
+  }
   since = now_steady;
 }
 
@@ -2152,6 +2160,7 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
   // Generic (element-access) view of the integrals, used by the production code below; the DEBUG /
   // HESSIAN_FUNCTIONAL validation blocks that need a dense Tensor4 re-bind `eri` to a dense view of `eri_in`.
   const Eri& eri = eri_in;
+  rerdmft::progressContext() = label;  // live progress lines (stderr) are prefixed with the method
   const std::size_t n_total = h.rows();
   constexpr double kOccupationEpsilon = 1e-6;
 
@@ -3345,6 +3354,7 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
                                        rerdmft::RestartCapture* restart = nullptr) {
   // See buildFunctionalReport: generic view here, dense re-binding in the DEBUG / HESSIAN_FUNCTIONAL blocks.
   const Eri& eri = eri_in;
+  rerdmft::progressContext() = label;  // live progress lines (stderr) are prefixed with the method
   constexpr double kOccupationEpsilon = 1e-6;
   const std::size_t n_total = h.rows();
   const auto functional = rerdmft::parsePnofFunctional(functional_name);
@@ -3933,59 +3943,19 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
   return out.str();
 }
 
-// Builds NON_REL's (Large,Large|Large,Large) two-electron tensor, or --
-// when input.cache_integrals() is set -- loads it from (and, on a miss,
-// saves it to) a disk cache keyed by the Large basis alone. See
-// IntegralCache.h: this tensor does not depend on SPEED_OF_LIGHT, so runs
-// that only differ in that setting (e.g. the water-c*.inp series) share
-// one cache entry.
-rerdmft::PackedTwoElectronTensor buildOrLoadNonRelEri(
-    const rerdmft::Input& input, const std::vector<rerdmft::BasisFunction>& large_basis) {
-  const std::uint64_t fingerprint = rerdmft::basisFingerprint(large_basis);
-  if (input.cache_integrals()) {
-    const std::string path =
-        input.cache_dir() + "/nonrel_eri_" + rerdmft::fingerprintToHex(fingerprint) + ".bin";
-    rerdmft::PackedTwoElectronTensor cached;
-    if (rerdmft::loadPackedTwoElectronTensor(path, fingerprint, large_basis.size(), cached)) {
-      std::cout << "NON_REL two-electron integrals: loaded from disk cache (" << path << ")\n";
-      return cached;
-    }
-    rerdmft::PackedTwoElectronTensor built = rerdmft::twoElectronIntegralsPacked(large_basis);
-    rerdmft::savePackedTwoElectronTensor(path, fingerprint, built);
-    std::cout << "NON_REL two-electron integrals: wrote disk cache (" << path << ")\n";
-    return built;
-  }
+// NON_REL's (Large,Large|Large,Large) two-electron tensor (8-fold packed).
+rerdmft::PackedTwoElectronTensor buildNonRelEri(const std::vector<rerdmft::BasisFunction>& large_basis) {
   return rerdmft::twoElectronIntegralsPacked(large_basis);
 }
 
-// Same idea as buildOrLoadNonRelEri, for C4_DHF's RKB spinor two-electron
-// tensor. Its fingerprint combines the Large and Small basis fingerprints
-// (rkbCoefficients, and hence this tensor, is a pure function of the two
-// bases -- see IntegralCache.h -- so, again, SPEED_OF_LIGHT does not
-// enter the cache key).
-rerdmft::RkbTwoElectronTensor buildOrLoadC4SpinorEri(
+// C4_DHF's RKB spinor two-electron tensor (unique elements, Utils/SymmetricEri.h); `use_cholesky` selects the
+// Cholesky route for its dominant (Small,Small|Small,Small) piece.
+rerdmft::RkbTwoElectronTensor buildC4SpinorEri(
     const rerdmft::Input& input, const std::vector<rerdmft::BasisFunction>& large_basis,
     const std::vector<rerdmft::BasisFunction>& small_basis,
     const rerdmft::Matrix<std::complex<double>>& rkb_coefficients, bool use_cholesky) {
-  const std::size_t dim = 4 * large_basis.size();
-  const std::uint64_t fingerprint = rerdmft::combineFingerprints(
-      rerdmft::basisFingerprint(large_basis), rerdmft::basisFingerprint(small_basis));
-  if (input.cache_integrals()) {
-    const std::string path =
-        input.cache_dir() + "/c4_eri_" + rerdmft::fingerprintToHex(fingerprint) + ".bin";
-    rerdmft::RkbTwoElectronTensor cached;
-    if (rerdmft::loadRkbTwoElectronTensor(path, fingerprint, dim, cached)) {
-      std::cout << "C4_DHF two-electron integrals: loaded from disk cache (" << path << ")\n";
-      return cached;
-    }
-    rerdmft::RkbTwoElectronTensor built = rerdmft::rkbTwoElectronIntegrals(
-        large_basis, small_basis, rkb_coefficients, use_cholesky, input.cholesky_threshold());
-    rerdmft::saveRkbTwoElectronTensor(path, fingerprint, built);
-    std::cout << "C4_DHF two-electron integrals: wrote disk cache (" << path << ")\n";
-    return built;
-  }
-  return rerdmft::rkbTwoElectronIntegrals(large_basis, small_basis, rkb_coefficients,
-                                           use_cholesky, input.cholesky_threshold());
+  return rerdmft::rkbTwoElectronIntegrals(large_basis, small_basis, rkb_coefficients, use_cholesky,
+                                           input.cholesky_threshold());
 }
 
 // How the SCF loops were accelerated, for their headers.
@@ -4247,6 +4217,10 @@ void printFarewell() {
 }  // namespace
 
 int main(int argc, char** argv) {
+  // Line-buffered stdout (whatever is printed while working shows up at once, also when redirected to a file), and
+  // the anchor of the live progress clock (Utils/Progress.h; progress lines go to the file name.live).
+  std::setvbuf(stdout, nullptr, _IOLBF, 0);
+  rerdmft::progressStart();
   printWelcomeBanner();
   std::cout << "Git commit: " << RERDMFT_GIT_SHA << "\n\n";
 
@@ -4254,6 +4228,20 @@ int main(int argc, char** argv) {
     std::cerr << "Usage: " << argv[0] << " <input file>\n";
     printFarewell();
     return 1;
+  }
+
+  {
+    // Live progress file: `<input path without extension>.live`, next to the input file (truncated every run).
+    std::string live_path = argv[1];
+    const std::size_t dot = live_path.find_last_of('.');
+    const std::size_t slash = live_path.find_last_of("/\\");
+    if (dot != std::string::npos && (slash == std::string::npos || dot > slash)) live_path.erase(dot);
+    live_path += ".live";
+    if (rerdmft::progressOpen(live_path)) {
+      std::cout << "Live progress (follow with `tail -f`): " << live_path << "\n\n";
+    } else {
+      std::cout << "Note: cannot write the live progress file " << live_path << " (no live progress this run)\n\n";
+    }
   }
 
   rerdmft::Input input;
@@ -4425,7 +4413,7 @@ int main(int argc, char** argv) {
     // vectors (checked and, if needed, retried with a smaller batch -- Utils/Cholesky_Decomposition.h) and the
     // packed tensor is released unless DEBUG will compare against it.
     const auto prepareNonRelEri = [&](const std::string& what) {
-      nonrel_eri = buildOrLoadNonRelEri(input, large_basis.functions());
+      nonrel_eri = buildNonRelEri(large_basis.functions());
       nonrel_eri_dim = nonrel_eri.dim();
       nonrel_eri_stored = nonrel_eri.storedCount();
       logTiming("Two-electron integrals built (" + what + ")", t_start, t_checkpoint, timing_records);
@@ -5076,13 +5064,13 @@ int main(int argc, char** argv) {
         rkb_cholesky_report = report.str();
         logTiming("Two-electron integrals built (C4_DHF, Cholesky vectors)", t_start, t_checkpoint, timing_records);
         if (input.debug()) {
-          c4_spinor_eri = buildOrLoadC4SpinorEri(input, large_basis.functions(), small_basis.functions(),
+          c4_spinor_eri = buildC4SpinorEri(input, large_basis.functions(), small_basis.functions(),
                                                   rkb_coefficients, /*use_cholesky=*/false);
           c4_eri_available = true;
           c4_eri_stored = c4_spinor_eri.storedCount();
         }
       } else {
-        c4_spinor_eri = buildOrLoadC4SpinorEri(input, large_basis.functions(), small_basis.functions(),
+        c4_spinor_eri = buildC4SpinorEri(input, large_basis.functions(), small_basis.functions(),
                                                 rkb_coefficients, /*use_cholesky=*/false);
         c4_eri_available = true;
         c4_eri_stored = c4_spinor_eri.storedCount();

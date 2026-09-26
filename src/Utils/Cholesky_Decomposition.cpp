@@ -1,12 +1,14 @@
 #include "Cholesky_Decomposition.h"
 
 #include "ElectronRepulsion.h"
+#include "Progress.h"
 
 #include <cblas.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <numeric>
@@ -447,6 +449,10 @@ FlatVectors<T> decomposeFlat(const PairMatrixSource<T>& src, double threshold, s
       built[jstar] = true;
       ++built_count;
       ++nchol_so_far;
+      if (n2 >= 2000 && nchol_so_far % 200 == 0) {
+        ProgressLine() << "  Cholesky decomposition (pair dimension " << n2 << "): " << nchol_so_far
+                       << " vectors, largest residual diagonal " << std::scientific << std::setprecision(2) << current_max;
+      }
       for (std::size_t j = 0; j < batch_size; ++j) {
         if (!built[j]) qdiag[j] = diag[candidates[j]];
       }

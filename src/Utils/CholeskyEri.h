@@ -58,6 +58,9 @@ class CholeskyEri {
   // The integrals in the rotated basis C_new = C U (U unitary, n x n): V' = U^T V conj(U).
   CholeskyEri rotated(const Matrix<T>& u) const;
 
+  // The vectors restricted to the index block [offset, n): V'_L(x,y) = V_L(x+offset, y+offset).
+  CholeskyEri restricted(std::size_t offset) const;
+
   // The dense tensor, O(Nchol n^4) time and O(n^4) memory -- for tests and one-off checks only.
   Tensor4<T> toDense() const;
 

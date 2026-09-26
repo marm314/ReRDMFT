@@ -48,24 +48,9 @@ class PackedTwoElectronTensor {
   explicit PackedTwoElectronTensor(std::size_t n)
       : n_(n), pairs_(n * (n + 1) / 2), data_(pairs_ * (pairs_ + 1) / 2, 0.0) {}
 
-  // Trusted constructor for IntegralCache.h: takes already-packed raw
-  // data (e.g. read back from an on-disk cache file) as-is. Throws if
-  // its size does not match what dimension `n` implies, so a corrupt or
-  // mismatched cache file cannot silently lead to out-of-bounds reads
-  // via operator().
-  PackedTwoElectronTensor(std::size_t n, std::vector<double> data)
-      : n_(n), pairs_(n * (n + 1) / 2), data_(std::move(data)) {
-    if (data_.size() != pairs_ * (pairs_ + 1) / 2) {
-      throw std::runtime_error(
-          "PackedTwoElectronTensor: cached data size does not match dimension");
-    }
-  }
-
   std::size_t dim() const { return n_; }
   // Real values actually stored -- about 1/8th of the dense N^4 count.
   std::size_t storedCount() const { return data_.size(); }
-  // Raw packed storage, for IntegralCache.h to write/read directly.
-  const std::vector<double>& rawData() const { return data_; }
 
   double operator()(std::size_t p, std::size_t q, std::size_t r, std::size_t s) const {
     return data_[triangularIndex(pairIndex(p, q), pairIndex(r, s))];

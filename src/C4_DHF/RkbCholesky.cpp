@@ -7,6 +7,7 @@
 #include <stdexcept>
 
 #include "BlasThreads.h"
+#include "Progress.h"
 #include "ElectronRepulsion.h"
 #include "LinearAlgebra.h"
 #include "RkbTwoElectron.h"
@@ -76,12 +77,16 @@ RkbCholesky RkbCholesky::build(const std::vector<BasisFunction>& large_basis,
   {
     // The three real AO tensors (transient: released as soon as the decomposition is done): (LL|LL) and (SS|SS)
     // 8-fold packed, the (LL|SS) cross block dense (nl^2 x ns^2).
+    progress("RKB Cholesky: real AO integrals (LL|LL), (LL|SS), (SS|SS)");
     const PackedTwoElectronTensor ll_ll = twoElectronIntegralsPacked(large_basis);
     const Tensor4<double> ll_ss = twoElectronIntegralsCross(large_basis, small_basis);
     const PackedTwoElectronTensor ss_ss = twoElectronIntegralsPacked(small_basis);
+    ProgressLine() << "RKB Cholesky: AO integrals done; decomposing the {LL} u {SS} pair matrix (dimension "
+                   << large_basis.size() * large_basis.size() + small_basis.size() * small_basis.size() << ")";
     const UnionCoulombPairs pairs(ll_ll, ll_ss, ss_ss);
     flat = choleskyDecomposePairsChecked<double>(pairs, threshold, report);
   }
+  ProgressLine() << "RKB Cholesky: " << flat.count << " vectors; projecting them into the RKB basis";
   RkbCholesky out;
   out.n_large = nl;
   out.large.resize(flat.count);

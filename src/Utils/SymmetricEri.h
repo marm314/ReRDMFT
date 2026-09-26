@@ -3,7 +3,6 @@
 
 #include <complex>
 #include <cstddef>
-#include <stdexcept>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -45,15 +44,6 @@ class SymmetricEri {
   explicit SymmetricEri(std::size_t n)
       : n_(n), n_classes_(n * (n + 1) / 2), data_(n_classes_ * (n_classes_ + 1) / 2 * (kComplex ? 2 : 1), T{}) {}
 
-  // Trusted constructor for a cache file: takes already-packed data as-is; throws if its size does not match
-  // what dimension `n` implies, so a corrupt or mismatched file cannot lead to out-of-bounds reads.
-  SymmetricEri(std::size_t n, std::vector<T> data)
-      : n_(n), n_classes_(n * (n + 1) / 2), data_(std::move(data)) {
-    if (data_.size() != n_classes_ * (n_classes_ + 1) / 2 * (kComplex ? 2 : 1)) {
-      throw std::runtime_error("SymmetricEri: cached data size does not match dimension");
-    }
-  }
-
   std::size_t dim0() const { return n_; }
   std::size_t dim1() const { return n_; }
   std::size_t dim2() const { return n_; }
@@ -81,8 +71,6 @@ class SymmetricEri {
   // Numbers actually stored, and what a dense tensor of the same dimension would hold.
   std::size_t storedCount() const { return data_.size(); }
   static std::size_t denseCount(std::size_t n) { return n * n * n * n; }
-  // Raw storage (for a cache file).
-  const std::vector<T>& rawData() const { return data_; }
 
  private:
   struct Loc {

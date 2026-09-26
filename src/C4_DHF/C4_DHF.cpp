@@ -1,5 +1,7 @@
 #include "C4_DHF.h"
+#include "Progress.h"
 
+#include <iomanip>
 #include <cstddef>
 
 #include "DIIS.h"
@@ -91,6 +93,9 @@ DiracHartreeFockResult dhfScfImpl(
     const double density_change = maxAbsDifference(p_new, p_current);
     const double energy_change = std::abs(energy - previous_energy);
 
+    ProgressLine() << "C4_DHF SCF iteration " << iteration << ": E(elec) = " << std::setprecision(10) << energy
+                   << std::setprecision(3) << (iteration > 1 ? "  dE = " : "") << (iteration > 1 ? energy_change : 0.0)
+                   << (iteration > 1 ? "  dP = " : "") << (iteration > 1 ? density_change : 0.0);
     result.iterations = iteration;
     result.electronic_energy = energy;
     result.orbital_energies = eig.eigenvalues;

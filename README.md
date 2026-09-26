@@ -70,6 +70,15 @@ See `examples/*.inp` for sample input files (basis sets, geometries,
 and the `C4_SPINOR` / `NON_RELATIVISTIC` flags controlling which SCF
 path(s) run).
 
+### Live progress
+
+The result report is printed at the end of the run, so a long calculation would otherwise show nothing while it
+works. While it runs, `./rerdmft examples/name.inp` writes a live log to `examples/name.live` (next to the input
+file, truncated at the start of every run, flushed after every line): each phase with its time, every SCF
+iteration, the Cholesky decomposition (every 200 vectors), every NEO Newton step (energy, gradient, trust radius,
+number of Hessian products) and every `FULL_OPTIMIZATION` macro-iteration, prefixed with the elapsed wall time and
+the method (`NON_REL`, `X2C_HF`, `C4_DHF`). Follow it with `tail -f examples/name.live`.
+
 ## Input file keywords
 
 Keywords are case-insensitive, one per line, optionally followed by
@@ -99,8 +108,6 @@ anywhere on a line) are comments.
 | `DENSITY_TOLERANCE` | double (> 0) | `1e-6` | `C4_DHF` SCF density-change convergence threshold. |
 | `CHOLESKY` | bool | `FALSE` | Hold the two-electron integrals as Cholesky vectors and never build an n^4 object. The real AO Coulomb matrix is decomposed ONCE (`Utils/Cholesky_Decomposition.h`: NON_REL/X2C decompose the AO integrals, C4_SPINOR the combined {Large-Large} u {Small-Small} pair matrix, `C4_DHF/RkbCholesky.h`); the SCF Fock matrices, the MO-basis integrals (`Utils/AoCholesky.h`) and `FULL_OPTIMIZATION` all work on those vectors, and the AO integrals are not used again (they are rebuilt only under `DEBUG`, for the dense-vs-Cholesky checks). Every decomposition is verified against the integrals and retried with a smaller pivot batch if it misses `100*CHOLESKY_THRESHOLD + 1e-9`. With `ORBITAL_OPTIMIZER NEO` the Hessian-vector product is a finite difference of the gradient on the rotated vectors, O(N_chol n^3) with no dense cache. Without `CHOLESKY` the integrals are held as unique-element stores (`Utils/SymmetricEri.h`: about n^4/8 real or n^4/4 complex numbers, the rest rebuilt by symmetry) and transformed in slabs, never as a dense n^4 tensor. |
 | `CHOLESKY_THRESHOLD` | double (> 0) | `1e-10` | Residual-diagonal cutoff for the decomposition; looser = fewer vectors (faster, less accurate), tighter = more (slower, more exact). Only with `CHOLESKY TRUE`. |
-| `CACHE_INTEGRALS` | bool | `FALSE` | Cache the two-electron integral tensors to disk and reuse them on a later run with matching geometry+basis (see below). |
-| `CACHE_DIR` | string | `.rerdmft_cache` | Directory (created if missing) used by `CACHE_INTEGRALS`. |
 | `RESTART_FILE` | string | `RESTART` | Base name of the binary restart files written after a `NON_RELATIVISTIC`/`X2C` run with a `FUNCTIONAL` (see *Restart file* below). `NONE` disables them; `C4_SPINOR` writes none. |
 | `FUNCTIONAL` | string | *(none)* | Selects the density matrix functional to evaluate on the converged orbitals: a JK-only functional (`Occ_opt/JK_only.h`) -- `SD`, `MBB`/`MULLER`, `BBC2`, `CA`, `CGA`, `ML`, `MLSIC`, `GU`, `POWER` -- or a Piris natural orbital functional (`Occ_opt/PNOFs.h`) -- `PNOF5`, `PNOF7`, `PNOF7S`, `GNOF`. Unset: the whole RDMFT evaluation step below is skipped. |
 | `OCCUPATION_INIT` | string | `PROPORTIONAL` | Initial fractional occupations for a JK-only `FUNCTIONAL`. `PROPORTIONAL`: aufbau redistributed into an interior box. `FERMI_DIRAC`: smeared at `TEMPERATURE`. (PNOF functionals build their own guess.) |
@@ -358,27 +365,6 @@ than excluding it from the search entirely -- is not implemented yet; setting
 `FULL_OPTIMIZATION_4C_NEG TRUE` prints a warning saying so rather than silently running the
 positive-energy-only version with no comment.
 
-## Two-electron integral disk cache
-
-The (expensive, O(N^4)) two-electron integral tensors depend only on the
-molecular geometry and basis set -- NOT on `SPEED_OF_LIGHT` -- so runs
-that share a geometry+basis but scan over the speed of light (e.g. a
-`water-c1000.inp` / `water-c100000.inp` series)
-would otherwise recompute bit-identical integrals every time. Setting
-
-```
-CACHE_INTEGRALS TRUE
-```
-
-in an input file caches each built tensor to disk (under `CACHE_DIR`,
-default `.rerdmft_cache`, created automatically) keyed by a hash of the
-actual basis functions, and reuses it on a later run with a matching
-key instead of rebuilding via libcint. It is off by default, since it
-writes files to disk; a cache from a different build of the code is
-detected via an embedded format version and never reused. Files under
-the cache directory are a same-machine binary format, not meant to be
-inspected or shared.
-
 ## Restart file
 
 At the end of a `NON_RELATIVISTIC` and/or `X2C` run with a `FUNCTIONAL`,
@@ -403,7 +389,7 @@ Contents:
   `2 n_AO x 2 n_MO`, ordered `[alpha, beta]`. `X2C`: the Kramers-fixed
   spinors, complex, `2 n_Large x 2 n_Large`. Column `j` is MO `j` and has
   occupation `occupations[j]`;
-- the Large-basis fingerprint (`Utils/IntegralCache.h`), the number of
+- the Large-basis fingerprint (`Utils/BasisFingerprint.h`), the number of
   electrons, the PNOF subspace/coupling/core counts, the final total
   energy and flags telling whether the orbitals come from
   `FULL_OPTIMIZATION` and whether the optimization converged.

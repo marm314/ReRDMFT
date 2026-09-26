@@ -2,5 +2,5 @@ build/
 rerdmft
 Makefile.local
 src/GitVersion.h
-.rerdmft_cache/
 RESTART.*
+*.live
