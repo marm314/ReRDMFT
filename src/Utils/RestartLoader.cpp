@@ -50,7 +50,8 @@ Matrix<std::complex<double>> lowdinOrthonormalize(const Matrix<std::complex<doub
 
 RestartOrbitals readRestartOrbitals(const std::string& path, const std::string& method, long long n_electrons,
                                     std::size_t expected_rows, std::size_t expected_cols, bool expected_complex,
-                                    const Matrix<std::complex<double>>& s_ao, std::ostream& log, double tolerance) {
+                                    const Matrix<std::complex<double>>& s_ao, std::ostream& log, double tolerance,
+                                    std::size_t block_size) {
   RestartOrbitals out;
   out.data = readRestart(path);
   const RestartData& d = out.data;
@@ -77,6 +78,53 @@ RestartOrbitals readRestartOrbitals(const std::string& path, const std::string& 
                              " occupation numbers for " + std::to_string(expected_cols) + " orbitals");
   }
   const Matrix<std::complex<double>> c_read = d.coefficientsComplex();
+
+  if (block_size > 0) {
+    if (expected_rows % block_size != 0 || expected_cols % block_size != 0 ||
+        expected_rows / block_size != expected_cols / block_size) {
+      throw std::runtime_error("readRestartOrbitals: block_size does not evenly tile the " +
+                               std::to_string(expected_rows) + " x " + std::to_string(expected_cols) +
+                               " coefficient matrix");
+    }
+    const std::size_t k = expected_rows / block_size;
+    Matrix<std::complex<double>> s_block(block_size, block_size), c_block(block_size, block_size);
+    for (std::size_t i = 0; i < block_size; ++i)
+      for (std::size_t j = 0; j < block_size; ++j) {
+        s_block(i, j) = s_ao(i, j);
+        c_block(i, j) = c_read(i, j);
+      }
+    const auto s_check_block = dagger(c_block) * (s_block * c_block);
+    out.overlap_deviation_read = maxDeviationFromIdentity(s_check_block);
+    Matrix<std::complex<double>> c_block_final = c_block;
+    if (out.overlap_deviation_read > tolerance) {
+      double dev_after_block = 0.0;
+      c_block_final = lowdinOrthonormalize(c_block, s_block, nullptr, &dev_after_block, &out.min_overlap_eigenvalue);
+      out.lowdin_applied = true;
+      out.overlap_deviation_final = dev_after_block;
+    } else {
+      out.overlap_deviation_final = out.overlap_deviation_read;
+    }
+    out.c = Matrix<std::complex<double>>(expected_rows, expected_cols, std::complex<double>(0.0, 0.0));
+    for (std::size_t t = 0; t < k; ++t)
+      for (std::size_t i = 0; i < block_size; ++i)
+        for (std::size_t j = 0; j < block_size; ++j) out.c(t * block_size + i, t * block_size + j) = c_block_final(i, j);
+    log << std::scientific << std::setprecision(2);
+    log << "  READ_RESTART (" << method << "): " << path << ": " << d.functional << " (" << d.kind << "), "
+        << d.occupations.size() << " orbitals, " << (d.orbitals_optimized ? "FULL_OPTIMIZATION" : "SCF")
+        << " orbitals, energy written " << std::fixed << std::setprecision(10) << d.total_energy << std::scientific
+        << std::setprecision(2) << " Hartree" << (d.converged ? "" : " (that run had not converged)") << "\n";
+    log << "    S_check = C_read^dagger S C_read (leading " << block_size << " x " << block_size << " block, tiled "
+        << k << "x): max |S_check - 1| = " << out.overlap_deviation_read << "  ";
+    if (out.lowdin_applied) {
+      log << "-> Loewdin orthonormalization of that block alone (S_check eigenvalues down to " << out.min_overlap_eigenvalue
+          << "): max |C^dagger S C - 1| = " << out.overlap_deviation_final << "\n";
+    } else {
+      log << "(orthonormal already, kept as read)\n";
+    }
+    log << std::defaultfloat << std::setprecision(6);
+    return out;
+  }
+
   double dev_after = 0.0;
   const auto s_check = dagger(c_read) * (s_ao * c_read);
   out.overlap_deviation_read = maxDeviationFromIdentity(s_check);

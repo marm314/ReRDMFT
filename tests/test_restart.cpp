@@ -161,6 +161,54 @@ int main() {
     check(!ro2.lowdin_applied, "orthonormal coefficients are kept as read");
   }
 
+  std::cout << "block_size tiled Loewdin (NON_REL spin duplication)\n";
+  {
+    // A spatial block n x n and its overlap; the coefficient matrix and s_ao are k=2 IDENTICAL tiled copies
+    // (NON_REL's blockdiag(C_spatial, C_spatial)), but with a LARGE S_check deviation (mimicking a big geometry
+    // step), the failure mode this test guards against: Loewdin-ing the full tiled matrix directly can leave the
+    // two copies differing well above roundoff, even though they started out bit-identical.
+    const std::size_t n = 4, k = 2, big = n * k;
+    Matrix<C> bs(n, n);
+    for (std::size_t i = 0; i < n; ++i)
+      for (std::size_t j = 0; j < n; ++j) bs(i, j) = C(rng.next() - 0.5, rng.next() - 0.5) * 1.5 + (i == j ? 1.0 : 0.0);
+    const Matrix<C> s_spatial = dagger(bs) * bs;  // Hermitian positive definite, far from the identity metric
+    Matrix<C> c_spatial(n, n);
+    for (std::size_t i = 0; i < n; ++i)
+      for (std::size_t j = 0; j < n; ++j) c_spatial(i, j) = (i == j) ? C(1.0, 0.0) : C(0.0, 0.0);
+    Matrix<C> s_big(big, big), c_big(big, big);
+    for (std::size_t t = 0; t < k; ++t)
+      for (std::size_t i = 0; i < n; ++i)
+        for (std::size_t j = 0; j < n; ++j) {
+          s_big(t * n + i, t * n + j) = s_spatial(i, j);
+          c_big(t * n + i, t * n + j) = c_spatial(i, j);
+        }
+    RestartData d = sample(true, rng);
+    d.method = "NON_REL";
+    d.n_electrons = 4;
+    d.kind = "OCCUPATIONS";
+    d.gammas.clear();
+    d.pnof_subspaces = d.pnof_coupling = d.n_core = 0;
+    d.occupations.assign(big, 0.5);
+    d.setCoefficients(c_big);
+    writeRestart(path, d);
+    std::ostringstream log;
+    const RestartOrbitals ro =
+        readRestartOrbitals(path, "NON_REL", 4, big, big, true, s_big, log, /*tolerance=*/1e-10, /*block_size=*/n);
+    check(ro.lowdin_applied, "block_size path applies Loewdin to the leading block when S_check deviates");
+    double max_cross_copy = 0.0;
+    for (std::size_t i = 0; i < n; ++i)
+      for (std::size_t j = 0; j < n; ++j) max_cross_copy = std::max(max_cross_copy, std::abs(ro.c(n + i, n + j) - ro.c(i, j)));
+    check(max_cross_copy == 0.0, "block_size tiling keeps the two copies EXACTLY identical (max diff " +
+                                    std::to_string(max_cross_copy) + ")");
+    double max_off_block = 0.0;
+    for (std::size_t i = 0; i < n; ++i)
+      for (std::size_t j = 0; j < n; ++j)
+        max_off_block = std::max(max_off_block, std::max(std::abs(ro.c(i, n + j)), std::abs(ro.c(n + i, j))));
+    check(max_off_block == 0.0, "block_size tiling leaves off-diagonal blocks zero");
+    check(throws([&] { readRestartOrbitals(path, "NON_REL", 4, big, big, true, s_big, log, 1e-10, 3); }),
+          "a block_size that does not evenly tile the matrix is refused");
+  }
+
   std::cout << "Rejection of bad input\n";
   {
     RestartData d = sample(false, rng);

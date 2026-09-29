@@ -2550,19 +2550,30 @@ int main(int argc, char** argv) {
         prepareNonRelEri("NON_REL");
         const std::size_t n = s_large.rows();
         const auto ro = rerdmft::readRestartOrbitals("RESTART.NON_REL", "NON_REL", input.n_electrons(), 2 * n, 2 * n,
-                                                     /*expected_complex=*/false, blockDiagTwice(s_large), nonrel_structure_log);
+                                                     /*expected_complex=*/false, blockDiagTwice(s_large), nonrel_structure_log,
+                                                     /*tolerance=*/1e-10, /*block_size=*/n);
         noteWindow(nonrel_structure_log, ro);
+        // Spin-restriction sanity check on the RAW file (before any Loewdin correction for the current geometry):
+        // this is the reliable signal (see readRestartOrbitals's own comment on `block_size` -- Loewdin-ing the
+        // full 2n x 2n matrix directly, rather than the leading n x n block alone, can itself introduce a
+        // roundoff-level alpha/beta mismatch for a big enough geometry step, which is why this checks the RAW data
+        // rather than the (here, tiled-Loewdin, already-correct) `ro.c`). A genuinely broken/open-shell file would
+        // show a mismatch many orders of magnitude above ordinary roundoff (~1e-13-1e-10 seen on this project's own
+        // FULL_OPTIMIZATION runs), not something in between -- 1e-6 leaves a comfortable margin either way.
         rerdmft::Matrix<double> c_spatial(n, n);
-        double off_block = 0.0, spin_dev = 0.0;
+        double off_block_raw = 0.0, spin_dev_raw = 0.0;
+        const auto c_raw = ro.data.coefficientsComplex();
         for (std::size_t i = 0; i < n; ++i)
           for (std::size_t j = 0; j < n; ++j) {
             c_spatial(i, j) = ro.c(i, j).real();
-            off_block = std::max({off_block, std::abs(ro.c(i, n + j)), std::abs(ro.c(n + i, j))});
-            spin_dev = std::max(spin_dev, std::abs(ro.c(n + i, n + j) - ro.c(i, j)));
+            off_block_raw = std::max({off_block_raw, std::abs(c_raw(i, n + j)), std::abs(c_raw(n + i, j))});
+            spin_dev_raw = std::max(spin_dev_raw, std::abs(c_raw(n + i, n + j) - c_raw(i, j)));
           }
-        nonrel_structure_log << std::scientific << std::setprecision(2) << "    spin structure of the orbitals: max |alpha-beta block| = " << off_block
-                  << ", max |C_beta - C_alpha| = " << spin_dev << std::defaultfloat << std::setprecision(6) << "\n";
-        if (off_block > 1e-8 || spin_dev > 1e-8) {
+        nonrel_structure_log << std::scientific << std::setprecision(2)
+                  << "    spin structure of the restart file: max |alpha-beta block| = " << off_block_raw
+                  << ", max |C_beta - C_alpha| = " << spin_dev_raw << std::defaultfloat << std::setprecision(6) << "\n";
+        constexpr double kSpinRestrictionTolerance = 1e-6;
+        if (off_block_raw > kSpinRestrictionTolerance || spin_dev_raw > kSpinRestrictionTolerance) {
           throw std::runtime_error("READ_RESTART: the NON_REL restart orbitals are not spin-restricted (alpha and beta differ)");
         }
         const auto h_mo_nr = rerdmft::moOneElectronTransform(h_core_nonrel, c_spatial);
@@ -3578,6 +3589,12 @@ int main(int argc, char** argv) {
       }
     }
   } catch (const std::exception& e) {
+    // Whatever per-method diagnostics were already computed and buffered before the failure (e.g. READ_RESTART's
+    // own S_check/Kramers-pairing/spin-structure lines, which is where the EXACT numbers behind a validation
+    // error like "not spin-restricted" live) would otherwise be silently lost -- print them first, so the
+    // failure is actually diagnosable instead of a bare one-line message.
+    std::cout << nonrel_structure_log.str() << x2c_structure_log.str() << c4_pre_log.str() << c4_structure_log.str()
+              << nonrel_restart_log.str() << x2c_restart_log.str() << c4_restart_log.str();
     std::cerr << "Error: " << e.what() << "\n";
     printTimings(timing_records);
     printFarewell();

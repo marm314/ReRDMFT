@@ -38,10 +38,23 @@ Matrix<std::complex<double>> lowdinOrthonormalize(const Matrix<std::complex<doub
 // coefficients in `s_ao` (the AO metric in the file's own representation: NON_REL blockdiag(S, S), X2C
 // blockdiag(S, S) over [alpha; beta], 4C the RKB overlap) when the deviation exceeds `tolerance`. Prints what it
 // found and did to `log`. Throws std::runtime_error on any inconsistency. NON_REL passes `n_electrons` of the run.
+//
+// `block_size` (0 = off, the default): set when the coefficient matrix and `s_ao` are BOTH `k` identical copies of
+// a smaller `block_size` x `block_size` block, tiled block-diagonally (k = expected_rows / block_size) -- NON_REL's
+// blockdiag(C_spatial, C_spatial) spin-orbital duplication, k = 2. Only the LEADING block is Loewdin-orthonormalized
+// (against the leading block of `s_ao`) and the result is tiled `k` times to rebuild the full matrix, instead of
+// orthonormalizing the full tiled matrix directly: the dense eigensolver has no reason to treat two mathematically
+// IDENTICAL copies bit-identically, so a large enough correction (a big geometry step) can leave them differing at
+// a level that no longer looks like roundoff -- confirmed directly on an 8-atom NON_REL restart across a 10% bond
+// stretch (S_check deviated by ~3.65; the full-matrix path left the two copies differing by ~1.4e-8, comfortably
+// above a "still spin-restricted" tolerance, vs. ~1e-11 for the raw file itself and for the tiled-block path).
+// Does NOT itself check that the file's OTHER copies/off-diagonal blocks actually match the leading one -- that is
+// the caller's job (on the RAW, pre-Loewdin data, where genuine roundoff is easy to tell apart from a genuinely
+// broken/non-tiled file).
 RestartOrbitals readRestartOrbitals(const std::string& path, const std::string& method, long long n_electrons,
                                     std::size_t expected_rows, std::size_t expected_cols, bool expected_complex,
                                     const Matrix<std::complex<double>>& s_ao, std::ostream& log,
-                                    double tolerance = 1e-10);
+                                    double tolerance = 1e-10, std::size_t block_size = 0);
 
 }  // namespace rerdmft
 
