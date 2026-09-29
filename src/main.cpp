@@ -2074,16 +2074,25 @@ inline rerdmft::Matrix<double> nonrelSpatialRotation(const rerdmft::RestartCaptu
 // orbital order the RDMFT calculation just used: `c_base` (the SCF/restart spatial coefficients)
 // rotated by `capture`'s own FULL_OPTIMIZATION state, exactly as writeRestartFile below attaches
 // the same rotation to build RESTART.NON_REL's own coefficients. No-op unless FCIDUMP TRUE.
+// `eri_ao`/`ao_cholesky`: with CHOLESKY TRUE the packed AO tensor is released once the Cholesky
+// vectors are built (see prepareNonRelEri above) and `eri_ao` is empty -- the two-electron
+// integrals are then built from `ao_cholesky` instead (Utils/Fcidump.h's writeFcidump is
+// templated on the Eri type, so either path hands it the same physics-notation interface).
 void writeNonRelFcidump(const rerdmft::Input& input, const rerdmft::Matrix<double>& c_base,
                         const rerdmft::Matrix<double>& h_core_nonrel,
-                        const rerdmft::PackedTwoElectronTensor& eri_ao, const rerdmft::RestartCapture& capture,
-                        double nuclear_repulsion_energy, std::ostream& log) {
+                        const rerdmft::PackedTwoElectronTensor& eri_ao, const rerdmft::AoCholesky& ao_cholesky,
+                        const rerdmft::RestartCapture& capture, double nuclear_repulsion_energy, std::ostream& log) {
   if (!input.fcidump()) return;
   const std::size_t n = h_core_nonrel.rows();
   const auto c_final = c_base * nonrelSpatialRotation(capture, n);
   const auto h_mo = rerdmft::moOneElectronTransform(h_core_nonrel, c_final);
-  const auto eri_mo = rerdmft::moTwoElectronSymmetric(eri_ao, c_final);
-  rerdmft::writeFcidump("FCIDUMP", n, input.n_electrons(), /*ms2=*/0, h_mo, eri_mo, nuclear_repulsion_energy);
+  if (input.cholesky()) {
+    const auto eri_mo = rerdmft::aoCholeskyToMoSpinOrbital(ao_cholesky, c_final);
+    rerdmft::writeFcidump("FCIDUMP", n, input.n_electrons(), /*ms2=*/0, h_mo, eri_mo, nuclear_repulsion_energy);
+  } else {
+    const auto eri_mo = rerdmft::moTwoElectronSymmetric(eri_ao, c_final);
+    rerdmft::writeFcidump("FCIDUMP", n, input.n_electrons(), /*ms2=*/0, h_mo, eri_mo, nuclear_repulsion_energy);
+  }
   log << "\nFCIDUMP written (NON_REL, spin-up channel, same MO order as used/optimized in the RDMFT): FCIDUMP\n";
 }
 
@@ -2638,8 +2647,8 @@ int main(int argc, char** argv) {
         nonrel_functional_report = input.cholesky() ? nonrel_functional(eri_spin_chol) : nonrel_functional(eri_spin_sym);
         writeRestartFile<double>(nonrel_restart_log, input, "NON_REL", nonrel_restart, blockDiagTwice(c_spatial), blockDiagTwice(h_core_nonrel),
                                  blockDiagTwice(s_large), h_spin, restartFingerprint, restart_nuclear_repulsion);
-        writeNonRelFcidump(input, c_spatial, h_core_nonrel, nonrel_eri, nonrel_restart, restart_nuclear_repulsion,
-                           nonrel_restart_log);
+        writeNonRelFcidump(input, c_spatial, h_core_nonrel, nonrel_eri, ao_cholesky, nonrel_restart,
+                           restart_nuclear_repulsion, nonrel_restart_log);
       }
 
       if (input.x2c()) {
@@ -3041,7 +3050,7 @@ int main(int argc, char** argv) {
                                  blockDiagTwice(h_core_nonrel), blockDiagTwice(s_large), h_spin,
                                  rerdmft::basisFingerprint(large_basis.functions()),
                                  nonrel_hf_result.nuclear_repulsion_energy);
-        writeNonRelFcidump(input, nonrel_hf_result.c_matrix, h_core_nonrel, nonrel_eri, nonrel_restart,
+        writeNonRelFcidump(input, nonrel_hf_result.c_matrix, h_core_nonrel, nonrel_eri, ao_cholesky, nonrel_restart,
                            nonrel_hf_result.nuclear_repulsion_energy, nonrel_restart_log);
       }
     }
