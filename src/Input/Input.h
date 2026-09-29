@@ -301,10 +301,12 @@ class Input {
   double orbital_gradient_tolerance() const { return orbital_gradient_tolerance_; }
   // Optional; defaults to "ADAM" when ORBITAL_OPTIMIZER is absent. Which method drives the
   // orbital-rotation step of the FULL_OPTIMIZATION macro loop: "ADAM" (DoNOF's first-order
-  // optimizer) or "NEO" (Utils/NEO.h's matrix-free, second-order trust-region Newton method,
-  // Full_opt/FullOptimization.h's own FullOptSettings::OrbitalOptimizer). NEO needs the dense
-  // two-electron integrals and falls back to ADAM (with a printed note) when CHOLESKY TRUE has
-  // decomposed them into vectors instead.
+  // optimizer), "NEO" (Utils/NEO.h's matrix-free, second-order trust-region Newton method), or
+  // "ADAM_NEO" (Full_opt/FullOptimization.h's own FullOptSettings::OrbitalOptimizer::kAdamNeo):
+  // ADAM while the previous macro-iteration's |dE| is still above ADAM_NEO_SWITCH_TOLERANCE,
+  // NEO once it drops below that, switching back to ADAM whenever it grows above it again --
+  // re-decided every macro-iteration, works with CHOLESKY TRUE or FALSE (same NEO machinery
+  // either way, including the CHOLESKY TRUE dense-tensor-per-Newton-step cache).
   const std::string& orbital_optimizer() const { return orbital_optimizer_; }
   // Optional; defaults to 100 when NEO_MAX_ITERATIONS is absent. Only meaningful with
   // ORBITAL_OPTIMIZER NEO: the hard cap on Newton steps ONE macro-iteration's orbital-rotation
@@ -314,6 +316,11 @@ class Input {
   // back). Lower it only to bound run time on a system you already expect to be slow to converge;
   // raising it is safe and just changes how long a pathological macro-iteration is allowed to run.
   int neo_max_iterations() const { return neo_max_iterations_; }
+  // Optional; defaults to 1e-4 Hartree when ADAM_NEO_SWITCH_TOLERANCE is absent. Only meaningful with
+  // ORBITAL_OPTIMIZER ADAM_NEO: the |dE| threshold between macro-iterations that switches the driver from ADAM
+  // to NEO (once |dE| falls to or below this) and back to ADAM (once it rises above it again) -- see
+  // ORBITAL_OPTIMIZER's own comment and Full_opt/FullOptimization.h's OrbitalOptimizer::kAdamNeo.
+  double adam_neo_switch_tolerance() const { return adam_neo_switch_tolerance_; }
   // Optional; defaults to FALSE. Only meaningful for C4_SPINOR + FULL_OPTIMIZATION: once the
   // positive-energy-only optimization has converged, runs the genuine min-max saddle-point stage
   // (Talman 1986; Saue, ChemPhysChem 12, 3077 (2011)): rotations that also mix the occupied
@@ -362,6 +369,7 @@ class Input {
   double orbital_gradient_tolerance_ = 1e-5;
   std::string orbital_optimizer_ = "ADAM";
   int neo_max_iterations_ = 100;
+  double adam_neo_switch_tolerance_ = 1e-4;
   bool full_optimization_4c_neg_ = false;
 };
 

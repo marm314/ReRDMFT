@@ -1401,7 +1401,8 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
   result.occupations = occupations;
   // Min-max stage (FullOptSettings::saddle): NEO with a saddle target, integrals rotated to the no-pair minimum first.
   const bool saddle = settings.saddle.n_negative > 0;
-  const bool want_neo = saddle || settings.orbital_optimizer == OrbitalOptimizer::kNeo;
+  const bool want_neo = saddle || settings.orbital_optimizer == OrbitalOptimizer::kNeo ||
+                        settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo;
   if (saddle && !model.hessian_vector) {
     throw std::runtime_error("FULL_OPTIMIZATION_4C_NEG: the model has no Hessian-vector callback (NEO is required)");
   }
@@ -1422,8 +1423,14 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
   }
   const Matrix<T>& h = h_start ? *h_start : h_in;
   const Eri& eri = eri_start ? *eri_start : eri_in;
+  std::string driver_phrase = want_neo ? "NEO" : "ADAM";
+  if (settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo && !saddle) {
+    std::ostringstream tol_str;
+    tol_str << std::scientific << std::setprecision(1) << settings.adam_neo_switch_tolerance;
+    driver_phrase = "ADAM, switching to NEO whenever |dE| <= " + tol_str.str() + " Ha and back whenever it grows again";
+  }
   log << "\n  FULL orbital + occupation optimization ("
-      << (want_neo ? "NEO" : "ADAM")
+      << driver_phrase
       << " orbital rotations at fixed occupations, then\n"
          "  occupation re-optimization at the new orbitals, macro-iterated to convergence; energy tolerance "
       << settings.energy_tolerance << ", orbital-gradient tolerance " << settings.gradient_tolerance << ", at most "
@@ -1482,11 +1489,14 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
   // see RdmftModel's own note) AND ORBITAL_OPTIMIZER NEO; falls back to ADAM (with a printed
   // note) if hessian_vector is somehow unset (defensive -- every model built by makeJkOnlyModel/
   // makePnofModel sets it).
-  bool use_neo = false;
+  // `neo_available`: was neo_problem successfully built (capability), NOT which optimizer actually drives any
+  // given macro-iteration -- for ORBITAL_OPTIMIZER ADAM_NEO that choice is re-made every iteration (see `run_neo`
+  // inside the macro loop below), from the previous iteration's own |dE|.
+  bool neo_available = false;
   std::unique_ptr<NeoOrbitalProblem<T, Eri>> neo_problem;
   if (want_neo && model.hessian_vector) {
     neo_problem = std::make_unique<NeoOrbitalProblem<T, Eri>>(model, problem);
-    use_neo = true;
+    neo_available = true;
     if constexpr (kIsCholesky<Eri>) {
       if (settings.debug) {
         // DEBUG: the matrix-free (finite-difference) Hessian-vector product used with Cholesky vectors
@@ -1507,8 +1517,9 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
       }
     }
   }
-  if (want_neo && !use_neo) {
-    log << "    ORBITAL_OPTIMIZER NEO requested but the model has no Hessian-vector callback: using ADAM.\n";
+  if (want_neo && !neo_available) {
+    log << "    ORBITAL_OPTIMIZER " << (settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo ? "ADAM_NEO" : "NEO")
+        << " requested but the model has no Hessian-vector callback: using ADAM.\n";
   }
   NeoOptions neo_options;
   // Inexact Newton: the Davidson solve for each step only needs a residual of ~0.1*|g| (the
@@ -1591,8 +1602,12 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
     log << "    (rotating to the no-pair minimum's orbitals reproduces its energy to " << std::scientific << std::setprecision(2)
         << std::abs(settings.saddle.start_energy - e_elec) << std::defaultfloat << std::setprecision(6) << " Ha)\n";
   }
-  log << (use_neo ? "    iter      total energy (Ha)          dE        max|grad|  NEO steps    trust radius\n"
-                  : "    iter      total energy (Ha)          dE        max|grad|  ADAM steps  learning rate\n");
+  if (settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo && !saddle) {
+    log << "    iter      total energy (Ha)          dE        max|grad|  driver  steps    radius/lr\n";
+  } else {
+    log << (neo_available ? "    iter      total energy (Ha)          dE        max|grad|  NEO steps    trust radius\n"
+                          : "    iter      total energy (Ha)          dE        max|grad|  ADAM steps  learning rate\n");
+  }
 
   // NEO only, when target_order = 0 (ground state) was requested: is the point the macro loop
   // stopped at actually a MINIMUM of the orbital-rotation energy, within the same symmetry-
@@ -1628,13 +1643,83 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
   double g_max = 0.0;
   for (int escape_attempt = 0;; ++escape_attempt) {
     result.converged = false;
+    // ORBITAL_OPTIMIZER ADAM_NEO: which optimizer drove the previous macro-iteration and what |dE| it produced --
+    // reset at the top of every escape attempt, so a perturbed restart always starts on ADAM again (iter == 1
+    // below), exactly like a fresh run does.
+    std::optional<bool> prev_run_neo;
+    double last_dE = 0.0;
     for (iter = 1; iter <= settings.max_macro_iterations; ++iter) {
       problem.setOccupations(occ);
+      // The actual driver for THIS macro-iteration: NEO always for the min-max stage and plain ORBITAL_OPTIMIZER
+      // NEO; for ADAM_NEO, re-decided every iteration from the PREVIOUS iteration's |dE| (iter == 1 has none yet,
+      // so it always starts on ADAM -- see the user-facing description above).
+      const bool run_neo = neo_available &&
+          (saddle || settings.orbital_optimizer == OrbitalOptimizer::kNeo ||
+           (settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo && iter > 1 &&
+            std::abs(last_dE) <= settings.adam_neo_switch_tolerance));
+      // Watch out: ADAM and NEO reach the Kramers-/spin-restricted subspace through DIFFERENT parametrizations
+      // (KramersAdamProblem's "representative" embedding vs. KramersNeoProblem's "isometric" one, and similarly
+      // for SpinRestrictedNeoProblem vs. ADAM's own per-pair averaging) -- both are exact BY CONSTRUCTION given a
+      // Kramers-/spin-paired starting point (see Utils/KramersRestriction.h), and both act on the SAME shared
+      // `problem` state (no copy, no conversion, so there is nothing to desynchronize), but ADAM_NEO is the first
+      // place this project hands the SAME integrals back and forth between the two, so verify it on the actual
+      // data at every handoff rather than trusting the construction alone.
+      if (settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo && !saddle && prev_run_neo && *prev_run_neo != run_neo &&
+          (kr || !spin_partner.empty())) {
+        double dev = 0.0, scale = 0.0;
+        if constexpr (!std::is_same_v<T, double>) {
+          if (kr) {
+            dev = timeReversalDeviation(problem.h());
+            for (std::size_t p = 0; p < problem.h().rows(); ++p)
+              for (std::size_t q = 0; q < problem.h().cols(); ++q)
+                scale = std::max(scale, std::abs(std::complex<double>(problem.h()(p, q))));
+          }
+        } else if (!spin_partner.empty()) {
+          const std::size_t n_so = problem.h().rows();
+          for (std::size_t p = 0; p < n_so; ++p)
+            for (std::size_t q = 0; q < n_so; ++q) {
+              scale = std::max(scale, std::abs(problem.h()(p, q)));
+              dev = std::max(dev, std::abs(problem.h()(spin_partner[p], spin_partner[q]) - problem.h()(p, q)));
+            }
+        }
+        log << "    switching orbital optimizer: " << (*prev_run_neo ? "NEO -> ADAM" : "ADAM -> NEO") << " (|dE| = "
+            << std::scientific << std::setprecision(2) << last_dE << (run_neo ? " <= " : " > ") << "tolerance "
+            << settings.adam_neo_switch_tolerance << std::defaultfloat << std::setprecision(6) << "); "
+            << (kr ? "Kramers" : "spin") << " deviation of the integrals being handed off: " << std::scientific
+            << std::setprecision(2) << dev << " (max |h| = " << scale << ")" << std::defaultfloat
+            << std::setprecision(6) << "\n";
+        if (settings.debug) {  // two-electron part: DEBUG only (needs the dense tensor)
+          double eri_dev = 0.0, eri_scale = 0.0;
+          if constexpr (!std::is_same_v<T, double>) {
+            if (kr) {
+              const auto dev2 = twoBodyTimeReversalDeviation(denseOf(problem.eri()));
+              eri_dev = dev2.first;
+              eri_scale = dev2.second;
+            }
+          } else {
+            const auto& eri_final = denseOf(problem.eri());
+            const std::size_t n_so = problem.h().rows();
+            for (std::size_t a = 0; a < n_so; ++a)
+              for (std::size_t b = 0; b < n_so; ++b)
+                for (std::size_t c = 0; c < n_so; ++c)
+                  for (std::size_t d = 0; d < n_so; ++d) {
+                    eri_scale = std::max(eri_scale, std::abs(eri_final(a, b, c, d)));
+                    eri_dev = std::max(eri_dev,
+                                       std::abs(eri_final(spin_partner[a], spin_partner[b], spin_partner[c], spin_partner[d]) -
+                                                eri_final(a, b, c, d)));
+                  }
+          }
+          log << "    [DEBUG] two-electron integrals being handed off: max deviation " << std::scientific
+              << std::setprecision(2) << eri_dev << " (max |eri| = " << eri_scale << ")" << std::defaultfloat
+              << std::setprecision(6) << "\n";
+        }
+      }
+      prev_run_neo = run_neo;
       double max_gradient = 0.0;
       int orbital_iterations = 0;
       bool gradient_converged = false, orbital_restart_requested = false;
       double log_extra = 0.0;  // ADAM's learning rate, or NEO's final trust radius.
-      if (use_neo) {
+      if (run_neo) {
         neo_problem->setOccupations(occ);
         NeoResult nr;
         if constexpr (!std::is_same_v<T, double>) {
@@ -1690,17 +1775,22 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
       const double d_e = e_elec - e_old;
       log << "    " << std::setw(4) << iter << "  " << std::fixed << std::setprecision(10) << std::setw(20)
           << e_elec + nuclear_repulsion_energy << "  " << std::scientific << std::setprecision(2) << std::setw(10)
-          << d_e << "  " << std::setw(10) << max_gradient << "  " << std::defaultfloat << std::setw(6)
-          << orbital_iterations << "      " << std::scientific << std::setprecision(2) << log_extra
-          << (orbital_restart_requested ? "  restart" : "") << (gradient_converged ? "  gradient-converged" : "")
+          << d_e << "  " << std::setw(10) << max_gradient << "  ";
+      if (settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo && !saddle) {
+        log << std::setw(4) << (run_neo ? "NEO" : "ADAM") << "  ";
+      }
+      log << std::defaultfloat << std::setw(6) << orbital_iterations << "      " << std::scientific
+          << std::setprecision(2) << log_extra << (orbital_restart_requested ? "  restart" : "")
+          << (gradient_converged ? "  gradient-converged" : "")
           << (occ_result.converged ? "" : "  occupations-not-converged")
           << std::defaultfloat << std::setprecision(6) << "\n";
       ProgressLine() << "FULL_OPTIMIZATION macro-iteration " << iter << ": E(total) = " << std::fixed << std::setprecision(10)
                      << e_elec + nuclear_repulsion_energy << std::scientific << std::setprecision(2) << "  dE = " << d_e
-                     << "  max|g| = " << max_gradient << "  (" << (use_neo ? "NEO steps " : "ADAM steps ") << orbital_iterations
+                     << "  max|g| = " << max_gradient << "  (" << (run_neo ? "NEO steps " : "ADAM steps ") << orbital_iterations
                      << (gradient_converged ? ", gradient converged" : "") << (occ_result.converged ? "" : ", occupations not converged")
                      << ")";
-      if (std::abs(d_e) < settings.energy_tolerance && !(use_neo ? false : adam.restartRequested())) {
+      last_dE = d_e;
+      if (std::abs(d_e) < settings.energy_tolerance && !(run_neo ? false : adam.restartRequested())) {
         result.converged = true;
         break;
       }
@@ -1724,11 +1814,15 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
     for (const auto& [p, q] : problem.pairs()) g_max = std::max(g_max, std::abs(std::complex<double>(g_final(p, q))));
     result.gradient_max = g_max;
 
-    // NEO, ordinary minimization: is the point really a minimum? If the lowest Hessian eigenvalues show a saddle, escape
-    // along the negative-curvature eigenvector and re-optimize (see the comment before `withReduced`). The min-max stage
-    // (`saddle`) is a saddle by design; its type is verified only under DEBUG TRUE (dense diagonalization below).
+    // Is the point really a minimum? If the lowest Hessian eigenvalues show a saddle, escape along the
+    // negative-curvature eigenvector and re-optimize (see the comment before `withReduced`). Gated on NEO
+    // CAPABILITY (`neo_available`), not on which optimizer drove the LAST macro-iteration: `neo_problem` reads
+    // whatever state `problem` is in through a shared reference, so this check is equally valid whether that
+    // state was reached by ADAM or NEO -- relevant for ADAM_NEO, where either could have run last. The min-max
+    // stage (`saddle`) is a saddle by design; its type is verified only under DEBUG TRUE (dense diagonalization
+    // below).
     bool escaping = false;
-    if (!saddle && use_neo) {
+    if (!saddle && neo_available) {
     progress("FULL_OPTIMIZATION (NEO): post-loop Hessian check (minimum vs saddle)");
     neo_problem->setOccupations(occ);
     NeoEigenOptions eig_options;

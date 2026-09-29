@@ -274,15 +274,21 @@ void Input::read(const std::string& filename) {
                                   ": expected ADAM or NEO after ORBITAL_OPTIMIZER");
       }
       orbital_optimizer_ = toUpper(token);
-      if (orbital_optimizer_ != "ADAM" && orbital_optimizer_ != "NEO") {
+      if (orbital_optimizer_ != "ADAM" && orbital_optimizer_ != "NEO" && orbital_optimizer_ != "ADAM_NEO") {
         throw std::runtime_error("line " + std::to_string(line_number) +
-                                  ": ORBITAL_OPTIMIZER must be ADAM or NEO");
+                                  ": ORBITAL_OPTIMIZER must be ADAM, NEO or ADAM_NEO");
       }
     } else if (keyword == "NEO_MAX_ITERATIONS") {
       neo_max_iterations_ = parseInt(iss, line_number, keyword);
       if (!(neo_max_iterations_ > 0)) {
         throw std::runtime_error("line " + std::to_string(line_number) +
                                   ": NEO_MAX_ITERATIONS must be positive");
+      }
+    } else if (keyword == "ADAM_NEO_SWITCH_TOLERANCE") {
+      adam_neo_switch_tolerance_ = parseDouble(iss, line_number, keyword);
+      if (!(adam_neo_switch_tolerance_ > 0.0)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": ADAM_NEO_SWITCH_TOLERANCE must be positive");
       }
     } else if (keyword == "FULL_OPTIMIZATION_4C_NEG") {
       full_optimization_4c_neg_ = parseBool(iss, line_number, keyword);
@@ -372,6 +378,7 @@ void Input::print(std::ostream& out) const {
   line("ORBITAL_GRADIENT_TOLERANCE") << orbital_gradient_tolerance_ << "\n";
   line("ORBITAL_OPTIMIZER") << orbital_optimizer_ << "\n";
   line("NEO_MAX_ITERATIONS") << neo_max_iterations_ << "\n";
+  line("ADAM_NEO_SWITCH_TOLERANCE") << adam_neo_switch_tolerance_ << "\n";
   line("FULL_OPTIMIZATION_4C_NEG") << flag(full_optimization_4c_neg_) << "\n";
   line("SPEED_OF_LIGHT") << speed_of_light_ << "\n";
 

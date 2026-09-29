@@ -1,0 +1,33 @@
+# Example ReRDMFT input file: LiH, 6-31G, GNOF, FULL_OPTIMIZATION TRUE with ORBITAL_OPTIMIZER
+# ADAM_NEO -- the hybrid counterpart of lih_gnof_c4_full_optimization.inp (ADAM) and
+# lih_gnof_c4_neo_full_optimization.inp (NEO), same system, same functional, including C4_SPINOR.
+# Every macro-iteration re-decides its driver from the PREVIOUS iteration's own |dE|: ADAM while
+# |dE| > ADAM_NEO_SWITCH_TOLERANCE (default 1e-4 Ha), NEO once it drops to or below that, and back
+# to ADAM whenever it grows above it again -- iteration 1 always starts on ADAM, since there is no
+# previous |dE| yet. Watch the "driver" column of the iteration table switch back and forth (this
+# system switches several times per method), and the "switching orbital optimizer: ..." log lines
+# each time it does: DEBUG TRUE (set here) makes those lines also print the Kramers-pair deviation
+# (X2C, C4_SPINOR) or spin deviation (NON_REL) of the integrals at the exact moment they are handed
+# from one optimizer's parametrization to the other's -- ADAM and NEO reach the same
+# Kramers-/spin-restricted subspace through different parametrizations (see
+# Utils/KramersRestriction.h), and this is the first place in the project that hands the SAME
+# integrals back and forth between them within a single run, so it is checked directly on the data
+# at every handoff rather than only trusted from the construction. All three methods converge to
+# the same energies as the ADAM-only and NEO-only files (to ~1e-9 Hartree), and the final
+# "Final test: all checks PASSED" confirms Kramers/spin pairing survived every switch.
+NELEC 4
+BASIS lih-6-31g.gbs
+NON_RELATIVISTIC TRUE
+X2C TRUE
+C4_SPINOR TRUE
+FUNCTIONAL GNOF
+PNOF_SUBSPACES 2
+PNOF_COUPLING 2
+FULL_OPTIMIZATION TRUE
+ORBITAL_OPTIMIZER ADAM_NEO
+DEBUG TRUE
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.594900
+END

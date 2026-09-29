@@ -37,8 +37,12 @@ namespace rerdmft {
 // with the EXACT O(n^5) leg transform (`rotateIntegralsExact`) -- no
 // AO-basis re-transformation is ever needed.
 
-// Which method drives the orbital-rotation step of the macro loop (ORBITAL_OPTIMIZER keyword).
-enum class OrbitalOptimizer { kAdam, kNeo };
+// Which method drives the orbital-rotation step of the macro loop (ORBITAL_OPTIMIZER keyword). kAdamNeo: start
+// each macro-iteration with ADAM while the previous one's |dE| is still large, switch to NEO once it drops below
+// ADAM_NEO_SWITCH_TOLERANCE, and switch back to ADAM whenever it grows above that again -- re-decided fresh every
+// macro-iteration from the immediately preceding one's own |dE| (see FullOptSettings::adam_neo_switch_tolerance
+// and runFullOptimization's own `run_neo`).
+enum class OrbitalOptimizer { kAdam, kNeo, kAdamNeo };
 
 struct FullOptSettings {
   bool enabled = false;
@@ -75,6 +79,9 @@ struct FullOptSettings {
   // truncated-descent failure mode described above; see its own comment.
   OrbitalOptimizer orbital_optimizer = OrbitalOptimizer::kAdam;
   int neo_max_iterations = 100;
+  // ORBITAL_OPTIMIZER ADAM_NEO only: the |dE| threshold (Hartree) that switches the driver -- see
+  // OrbitalOptimizer's own comment. User-settable via the ADAM_NEO_SWITCH_TOLERANCE keyword (Input.h).
+  double adam_neo_switch_tolerance = 1e-4;
   // Largest |h| entry of the UNTRIMMED integrals (set by the no-pair trimming entry points; 0 = unknown): the roundoff of the
   // orbital-gradient sums scales with it, so the time-reversal symmetry checks allow ~1000 eps times it.
   double roundoff_scale = 0.0;

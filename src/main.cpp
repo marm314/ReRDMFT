@@ -809,9 +809,11 @@ inline rerdmft::FullOptSettings fullOptSettings(const rerdmft::Input& input) {
   settings.cholesky = input.cholesky();
   settings.cholesky_threshold = input.cholesky_threshold();
   settings.debug = input.debug();
-  settings.orbital_optimizer = input.orbital_optimizer() == "NEO" ? rerdmft::OrbitalOptimizer::kNeo
-                                                                  : rerdmft::OrbitalOptimizer::kAdam;
+  settings.orbital_optimizer = input.orbital_optimizer() == "NEO"      ? rerdmft::OrbitalOptimizer::kNeo
+                              : input.orbital_optimizer() == "ADAM_NEO" ? rerdmft::OrbitalOptimizer::kAdamNeo
+                                                                       : rerdmft::OrbitalOptimizer::kAdam;
   settings.neo_max_iterations = input.neo_max_iterations();
+  settings.adam_neo_switch_tolerance = input.adam_neo_switch_tolerance();
   return settings;
 }
 
