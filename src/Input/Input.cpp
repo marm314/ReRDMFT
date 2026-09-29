@@ -290,6 +290,8 @@ void Input::read(const std::string& filename) {
         throw std::runtime_error("line " + std::to_string(line_number) +
                                   ": ADAM_NEO_SWITCH_TOLERANCE must be positive");
       }
+    } else if (keyword == "CHECK_HESS_NEO") {
+      check_hess_neo_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "FULL_OPTIMIZATION_4C_NEG") {
       full_optimization_4c_neg_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "SPEED_OF_LIGHT") {
@@ -379,6 +381,7 @@ void Input::print(std::ostream& out) const {
   line("ORBITAL_OPTIMIZER") << orbital_optimizer_ << "\n";
   line("NEO_MAX_ITERATIONS") << neo_max_iterations_ << "\n";
   line("ADAM_NEO_SWITCH_TOLERANCE") << adam_neo_switch_tolerance_ << "\n";
+  line("CHECK_HESS_NEO") << flag(check_hess_neo_) << "\n";
   line("FULL_OPTIMIZATION_4C_NEG") << flag(full_optimization_4c_neg_) << "\n";
   line("SPEED_OF_LIGHT") << speed_of_light_ << "\n";
 

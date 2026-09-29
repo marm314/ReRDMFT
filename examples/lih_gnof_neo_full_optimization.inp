@@ -5,8 +5,11 @@
 # PNOF/GNOF systems are where NEO's Newton trajectory has been observed (by comparison with the
 # ADAM run) to occasionally converge to a DIFFERENT, nearby stationary point than ADAM's -- a
 # genuine alternate solution of the coupled orbital+occupation problem, not a numerical error nor
-# something a NEO iteration-budget setting fixes (both were checked). Compare against
-# lih_gnof_full_optimization.inp's own converged energy as a routine cross-check.
+# something a NEO iteration-budget setting fixes (both were checked). CHECK_HESS_NEO TRUE is what
+# catches this on the NON_REL branch below: without it, NEO's gradient-only stopping rule keeps a
+# shallow saddle as "converged", ~2.4e-4 Hartree above the true minimum; with it, the post-loop
+# Hessian check detects and escapes it, matching lih_gnof_full_optimization.inp's own ADAM energy.
+# Still worth keeping that file as a routine cross-check.
 NELEC 4
 BASIS lih-6-31g.gbs
 NON_RELATIVISTIC TRUE
@@ -16,6 +19,7 @@ PNOF_SUBSPACES 2
 PNOF_COUPLING 2
 FULL_OPTIMIZATION TRUE
 ORBITAL_OPTIMIZER NEO
+CHECK_HESS_NEO TRUE
 
 GEOMETRY
 Li  0.000000   0.000000   0.000000

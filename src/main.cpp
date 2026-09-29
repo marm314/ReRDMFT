@@ -814,6 +814,7 @@ inline rerdmft::FullOptSettings fullOptSettings(const rerdmft::Input& input) {
                                                                        : rerdmft::OrbitalOptimizer::kAdam;
   settings.neo_max_iterations = input.neo_max_iterations();
   settings.adam_neo_switch_tolerance = input.adam_neo_switch_tolerance();
+  settings.check_hess_neo = input.check_hess_neo();
   return settings;
 }
 

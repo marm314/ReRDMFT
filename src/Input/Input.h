@@ -321,6 +321,16 @@ class Input {
   // to NEO (once |dE| falls to or below this) and back to ADAM (once it rises above it again) -- see
   // ORBITAL_OPTIMIZER's own comment and Full_opt/FullOptimization.h's OrbitalOptimizer::kAdamNeo.
   double adam_neo_switch_tolerance() const { return adam_neo_switch_tolerance_; }
+  // Optional; defaults to FALSE. Only meaningful with ORBITAL_OPTIMIZER NEO or ADAM_NEO: when
+  // true, after each macro-iteration loop converges (or hits MAX_MACRO_ITERATIONS) with NEO having
+  // run last, performs a matrix-free block Davidson diagonalization (Utils/NEO.h's
+  // neoLowestHessianEigenpairs) of the lowest 3 orbital-rotation Hessian eigenvalues at that point
+  // to confirm it is a genuine minimum (0 negative eigenvalues), and automatically escapes along the
+  // most negative eigenvector and re-optimizes if it is instead a saddle (up to 3 attempts). This
+  // costs extra Hessian-vector products on top of the Newton steps already taken, so it defaults to
+  // off; turn it on when you specifically want that verification (it is unrelated to DEBUG TRUE's
+  // own dense diagonalization check, which is exact but only affordable for small systems).
+  bool check_hess_neo() const { return check_hess_neo_; }
   // Optional; defaults to FALSE. Only meaningful for C4_SPINOR + FULL_OPTIMIZATION: once the
   // positive-energy-only optimization has converged, runs the genuine min-max saddle-point stage
   // (Talman 1986; Saue, ChemPhysChem 12, 3077 (2011)): rotations that also mix the occupied
@@ -370,6 +380,7 @@ class Input {
   std::string orbital_optimizer_ = "ADAM";
   int neo_max_iterations_ = 100;
   double adam_neo_switch_tolerance_ = 1e-4;
+  bool check_hess_neo_ = false;
   bool full_optimization_4c_neg_ = false;
 };
 

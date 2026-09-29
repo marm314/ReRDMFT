@@ -82,6 +82,11 @@ struct FullOptSettings {
   // ORBITAL_OPTIMIZER ADAM_NEO only: the |dE| threshold (Hartree) that switches the driver -- see
   // OrbitalOptimizer's own comment. User-settable via the ADAM_NEO_SWITCH_TOLERANCE keyword (Input.h).
   double adam_neo_switch_tolerance = 1e-4;
+  // Post-loop Davidson Hessian check (minimum vs. saddle) after a macro-iteration loop that ended on
+  // NEO, plus the automatic saddle-escape it drives -- see the check's own comment at its call site.
+  // User-settable via the CHECK_HESS_NEO keyword (Input.h); off by default, since it costs extra
+  // Hessian-vector products beyond the Newton steps already taken.
+  bool check_hess_neo = false;
   // Largest |h| entry of the UNTRIMMED integrals (set by the no-pair trimming entry points; 0 = unknown): the roundoff of the
   // orbital-gradient sums scales with it, so the time-reversal symmetry checks allow ~1000 eps times it.
   double roundoff_scale = 0.0;

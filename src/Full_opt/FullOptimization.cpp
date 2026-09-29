@@ -1820,9 +1820,11 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
     // whatever state `problem` is in through a shared reference, so this check is equally valid whether that
     // state was reached by ADAM or NEO -- relevant for ADAM_NEO, where either could have run last. The min-max
     // stage (`saddle`) is a saddle by design; its type is verified only under DEBUG TRUE (dense diagonalization
-    // below).
+    // below). Also gated on CHECK_HESS_NEO (settings.check_hess_neo, default off): this Davidson diagonalization
+    // (Utils/NEO.h's neoLowestHessianEigenpairs) and the escape it can trigger cost extra Hessian-vector products
+    // on top of the Newton steps already taken, so they only run when explicitly requested.
     bool escaping = false;
-    if (!saddle && neo_available) {
+    if (!saddle && neo_available && settings.check_hess_neo) {
     progress("FULL_OPTIMIZATION (NEO): post-loop Hessian check (minimum vs saddle)");
     neo_problem->setOccupations(occ);
     NeoEigenOptions eig_options;
