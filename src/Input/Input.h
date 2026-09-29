@@ -20,7 +20,8 @@ struct Atom {
 
 // Parses the ReRDMFT input file and stores the run parameters: number of
 // electrons, gaussian basis set file name, and molecular geometry. The
-// input file's geometry is in Angstrom; it is converted to Bohr on read.
+// input file's geometry is in Angstrom by default (UNIT_LENGTH); it is
+// converted to Bohr on read.
 class Input {
  public:
   void read(const std::string& filename);
@@ -28,6 +29,12 @@ class Input {
   int n_electrons() const { return n_electrons_; }
   const std::string& basis_file() const { return basis_file_; }
   const std::vector<Atom>& geometry() const { return geometry_; }
+  // Optional; defaults to "ANGS" when UNIT_LENGTH is absent. Which units the GEOMETRY block's
+  // coordinates are given in: "ANGS" (Angstrom, converted to Bohr on read via the CODATA Bohr
+  // radius) or "BOHR"/"AU" (already atomic units, no conversion). Applied after the whole input
+  // file is parsed, so UNIT_LENGTH may appear before or after GEOMETRY. geometry() is always in
+  // Bohr regardless of this setting.
+  const std::string& unit_length() const { return unit_length_; }
   // Optional; defaults to false when the DEBUG keyword is absent from the
   // input file. When true, the program prints detailed basis and matrix
   // diagnostics; otherwise it only prints a concise summary.
@@ -348,6 +355,7 @@ class Input {
  private:
   int n_electrons_ = 0;
   std::string basis_file_;
+  std::string unit_length_ = "ANGS";
   std::vector<Atom> geometry_;
   bool debug_ = false;
   double speed_of_light_ = kSpeedOfLight;

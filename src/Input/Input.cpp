@@ -15,10 +15,11 @@ namespace rerdmft {
 namespace {
 
 // CODATA Bohr radius: 1 Bohr = 0.52917721067 Angstrom. Geometries in the
-// input file are given in Angstrom (the common convention for a readable
-// input format) but integral evaluation requires atomic units, so atomic
-// coordinates are converted to Bohr immediately after parsing and are
-// stored (and used everywhere else in the program) in Bohr.
+// input file are given in Angstrom by default (the common convention for a
+// readable input format; UNIT_LENGTH BOHR or AU opts out of this) but
+// integral evaluation requires atomic units, so atomic coordinates are
+// converted to Bohr once the whole file has been parsed and are stored (and
+// used everywhere else in the program) in Bohr.
 constexpr double kAngstromToBohr = 1.0 / 0.52917721067;
 
 // Parses a boolean value token, accepting an optional '=' before it (with
@@ -125,6 +126,17 @@ void Input::read(const std::string& filename) {
                                   ": expected a file name after BASIS");
       }
       has_basis_file = true;
+    } else if (keyword == "UNIT_LENGTH") {
+      std::string token;
+      if (!(iss >> token)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": expected ANGS, BOHR or AU after UNIT_LENGTH");
+      }
+      unit_length_ = toUpper(token);
+      if (unit_length_ != "ANGS" && unit_length_ != "BOHR" && unit_length_ != "AU") {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": UNIT_LENGTH must be ANGS, BOHR or AU");
+      }
     } else if (keyword == "DEBUG") {
       debug_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "NON_RELATIVISTIC") {
@@ -315,9 +327,6 @@ void Input::read(const std::string& filename) {
               "line " + std::to_string(line_number) +
               ": expected '<symbol> <x> <y> <z>' in GEOMETRY block");
         }
-        atom.x *= kAngstromToBohr;
-        atom.y *= kAngstromToBohr;
-        atom.z *= kAngstromToBohr;
         geometry_.push_back(atom);
       }
     } else {
@@ -335,6 +344,15 @@ void Input::read(const std::string& filename) {
   if (geometry_.empty()) {
     throw std::runtime_error("missing or empty GEOMETRY block");
   }
+  // Applied here, after the whole file is parsed, so UNIT_LENGTH may appear before or after
+  // GEOMETRY: "BOHR"/"AU" coordinates are already atomic units, no conversion needed.
+  if (unit_length_ == "ANGS") {
+    for (Atom& atom : geometry_) {
+      atom.x *= kAngstromToBohr;
+      atom.y *= kAngstromToBohr;
+      atom.z *= kAngstromToBohr;
+    }
+  }
 }
 
 void Input::print(std::ostream& out) const {
@@ -349,6 +367,7 @@ void Input::print(std::ostream& out) const {
   out << "Input variables (current status):\n";
   line("NELEC") << n_electrons_ << "\n";
   line("BASIS") << basis_file_ << "\n";
+  line("UNIT_LENGTH") << unit_length_ << "\n";
   line("DEBUG") << flag(debug_) << "\n";
   line("NON_RELATIVISTIC") << flag(non_relativistic_) << "\n";
   line("C4_SPINOR") << flag(c4_spinor_) << "\n";
