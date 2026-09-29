@@ -3,4 +3,5 @@ rerdmft
 Makefile.local
 src/GitVersion.h
 RESTART.*
+FCIDUMP
 *.live

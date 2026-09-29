@@ -19,6 +19,7 @@
 #include "C4_DHF.h"
 #include "ClosedShellSpinOrbitals.h"
 #include "DiracKinetic.h"
+#include "Fcidump.h"
 #include "FermiDirac.h"
 #include "FullOptimization.h"
 #include "GeneralizedFock.h"
@@ -2054,6 +2055,38 @@ inline rerdmft::Matrix<std::complex<double>> blockDiagTwice(const rerdmft::Matri
   return out;
 }
 
+// FCIDUMP keyword (NON_RELATIVISTIC only): the real n x n spatial rotation FULL_OPTIMIZATION
+// applied is the top-left block of the spin-orbital rotation `capture.total_rotation` --
+// identical to the bottom-right block, since NON_REL's FULL_OPTIMIZATION always ties alpha and
+// beta together (spin restriction); an empty `total_rotation` means no rotation ran, identity.
+inline rerdmft::Matrix<double> nonrelSpatialRotation(const rerdmft::RestartCapture& capture, std::size_t n) {
+  rerdmft::Matrix<double> u(n, n, 0.0);
+  if (capture.total_rotation.rows() == 0) {
+    for (std::size_t i = 0; i < n; ++i) u(i, i) = 1.0;
+  } else {
+    for (std::size_t i = 0; i < n; ++i)
+      for (std::size_t j = 0; j < n; ++j) u(i, j) = capture.total_rotation(i, j).real();
+  }
+  return u;
+}
+
+// Writes the FCIDUMP file (Utils/Fcidump.h) of the spin-up channel's MO integrals, in the same
+// orbital order the RDMFT calculation just used: `c_base` (the SCF/restart spatial coefficients)
+// rotated by `capture`'s own FULL_OPTIMIZATION state, exactly as writeRestartFile below attaches
+// the same rotation to build RESTART.NON_REL's own coefficients. No-op unless FCIDUMP TRUE.
+void writeNonRelFcidump(const rerdmft::Input& input, const rerdmft::Matrix<double>& c_base,
+                        const rerdmft::Matrix<double>& h_core_nonrel,
+                        const rerdmft::PackedTwoElectronTensor& eri_ao, const rerdmft::RestartCapture& capture,
+                        double nuclear_repulsion_energy, std::ostream& log) {
+  if (!input.fcidump()) return;
+  const std::size_t n = h_core_nonrel.rows();
+  const auto c_final = c_base * nonrelSpatialRotation(capture, n);
+  const auto h_mo = rerdmft::moOneElectronTransform(h_core_nonrel, c_final);
+  const auto eri_mo = rerdmft::moTwoElectronSymmetric(eri_ao, c_final);
+  rerdmft::writeFcidump("FCIDUMP", n, input.n_electrons(), /*ms2=*/0, h_mo, eri_mo, nuclear_repulsion_energy);
+  log << "\nFCIDUMP written (NON_REL, spin-up channel, same MO order as used/optimized in the RDMFT): FCIDUMP\n";
+}
+
 // Writes the binary RESTART file (Utils/Restart.h) of one method ("NON_REL" | "X2C_HF") from the
 // state the functional report captured, attaches the final MO coefficients
 //   C = C_scf * U_total   (C_scf: SCF coefficients in the AO SPIN-ORBITAL basis, U_total: the
@@ -2605,6 +2638,8 @@ int main(int argc, char** argv) {
         nonrel_functional_report = input.cholesky() ? nonrel_functional(eri_spin_chol) : nonrel_functional(eri_spin_sym);
         writeRestartFile<double>(nonrel_restart_log, input, "NON_REL", nonrel_restart, blockDiagTwice(c_spatial), blockDiagTwice(h_core_nonrel),
                                  blockDiagTwice(s_large), h_spin, restartFingerprint, restart_nuclear_repulsion);
+        writeNonRelFcidump(input, c_spatial, h_core_nonrel, nonrel_eri, nonrel_restart, restart_nuclear_repulsion,
+                           nonrel_restart_log);
       }
 
       if (input.x2c()) {
@@ -3006,6 +3041,8 @@ int main(int argc, char** argv) {
                                  blockDiagTwice(h_core_nonrel), blockDiagTwice(s_large), h_spin,
                                  rerdmft::basisFingerprint(large_basis.functions()),
                                  nonrel_hf_result.nuclear_repulsion_energy);
+        writeNonRelFcidump(input, nonrel_hf_result.c_matrix, h_core_nonrel, nonrel_eri, nonrel_restart,
+                           nonrel_hf_result.nuclear_repulsion_energy, nonrel_restart_log);
       }
     }
 

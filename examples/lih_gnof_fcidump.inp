@@ -1,0 +1,23 @@
+# Example ReRDMFT input file: LiH, 6-31G, GNOF, FULL_OPTIMIZATION TRUE, with FCIDUMP TRUE --
+# writes an FCIDUMP file (Utils/Fcidump.h, the MOLPRO/PySCF convention: "&FCI ... &END" header,
+# then one integral per line "VALUE I J K L") of the spin-up channel's one- and two-electron MO
+# integrals, in the SAME orbital order FULL_OPTIMIZATION's own rotation left them in -- for
+# handing off to an external CI/DMRG/FCI code. NON_RELATIVISTIC only (the only case currently
+# supported); requires FUNCTIONAL. Sanity check: summing FCIDUMP's own integrals over the two
+# doubly-occupied spatial MOs with the closed-shell RHF energy formula reproduces the SCF-only
+# (no FULL_OPTIMIZATION) energy exactly; with FULL_OPTIMIZATION on, the one-electron diagonal
+# elements differ from the SCF-only run's own FCIDUMP (confirming the rotation is applied before
+# writing, not the raw canonical HF orbitals).
+NELEC 4
+BASIS lih-6-31g.gbs
+NON_RELATIVISTIC TRUE
+FUNCTIONAL GNOF
+PNOF_SUBSPACES 2
+PNOF_COUPLING 2
+FULL_OPTIMIZATION TRUE
+FCIDUMP TRUE
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.594900
+END

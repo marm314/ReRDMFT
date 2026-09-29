@@ -108,6 +108,14 @@ class Input {
   // diagnostic, since the dense Hessian and its diagonalization cost O(n^5)/O(n^6) and need the dense two-electron
   // tensor.
   bool hessian_mean_field() const { return hessian_mean_field_; }
+  // Optional; defaults to false when the FCIDUMP keyword is absent. Only meaningful for
+  // NON_RELATIVISTIC (the only case currently supported): when true, after that method's RDMFT
+  // functional evaluation (occupation optimization, and FULL_OPTIMIZATION's orbital rotation if
+  // that ran too), writes an FCIDUMP file (Utils/Fcidump.h) of the one- and two-electron MO
+  // integrals in the spin-up channel, in the SAME orbital order the RDMFT calculation itself used
+  // (spin-restricted, so spin-down is identical) -- for handing off to an external CI/DMRG/FCI
+  // code. Requires FUNCTIONAL (there is otherwise no RDMFT orbital order to speak of).
+  bool fcidump() const { return fcidump_; }
   // Optional; defaults to 0.4 when the MIXING keyword is absent. Linear
   // density-matrix mixing weight for the C4_DHF SCF loop (C4_DHF/C4_DHF.h):
   // the density fed into the next iteration's Fock build is
@@ -363,6 +371,7 @@ class Input {
   bool c4_spinor_ = false;
   bool x2c_ = false;
   bool hessian_mean_field_ = false;
+  bool fcidump_ = false;
   double mixing_ = 0.4;
   bool diis_ = true;
   int diis_size_ = 5;

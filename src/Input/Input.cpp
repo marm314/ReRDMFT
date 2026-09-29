@@ -147,6 +147,8 @@ void Input::read(const std::string& filename) {
       x2c_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "HESSIAN_MEAN_FIELD") {
       hessian_mean_field_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "FCIDUMP") {
+      fcidump_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "MIXING") {
       mixing_ = parseDouble(iss, line_number, keyword);
       if (!(mixing_ > 0.0 && mixing_ <= 1.0)) {
@@ -344,6 +346,12 @@ void Input::read(const std::string& filename) {
   if (geometry_.empty()) {
     throw std::runtime_error("missing or empty GEOMETRY block");
   }
+  if (fcidump_ && !non_relativistic_) {
+    throw std::runtime_error("FCIDUMP TRUE requires NON_RELATIVISTIC TRUE (the only case currently supported)");
+  }
+  if (fcidump_ && !has_functional_) {
+    throw std::runtime_error("FCIDUMP TRUE requires FUNCTIONAL (there is otherwise no RDMFT orbital order to write)");
+  }
   // Applied here, after the whole file is parsed, so UNIT_LENGTH may appear before or after
   // GEOMETRY: "BOHR"/"AU" coordinates are already atomic units, no conversion needed.
   if (unit_length_ == "ANGS") {
@@ -373,6 +381,7 @@ void Input::print(std::ostream& out) const {
   line("C4_SPINOR") << flag(c4_spinor_) << "\n";
   line("X2C") << flag(x2c_) << "\n";
   line("HESSIAN_MEAN_FIELD") << flag(hessian_mean_field_) << "\n";
+  line("FCIDUMP") << flag(fcidump_) << "\n";
   line("MIXING") << mixing_ << "\n";
   line("DIIS") << flag(diis_) << "\n";
   line("DIIS_SIZE") << diis_size_ << "\n";
