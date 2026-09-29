@@ -306,6 +306,14 @@ class Input {
   // two-electron integrals and falls back to ADAM (with a printed note) when CHOLESKY TRUE has
   // decomposed them into vectors instead.
   const std::string& orbital_optimizer() const { return orbital_optimizer_; }
+  // Optional; defaults to 100 when NEO_MAX_ITERATIONS is absent. Only meaningful with
+  // ORBITAL_OPTIMIZER NEO: the hard cap on Newton steps ONE macro-iteration's orbital-rotation
+  // descent may take (Full_opt/FullOptimization.h's own FullOptSettings::neo_max_iterations --
+  // see its comment for why this is a fixed generous budget, not an ADAM-style growing one, and
+  // why cutting it short can lock the whole macro loop into a worse final answer with no way
+  // back). Lower it only to bound run time on a system you already expect to be slow to converge;
+  // raising it is safe and just changes how long a pathological macro-iteration is allowed to run.
+  int neo_max_iterations() const { return neo_max_iterations_; }
   // Optional; defaults to FALSE. Only meaningful for C4_SPINOR + FULL_OPTIMIZATION: once the
   // positive-energy-only optimization has converged, runs the genuine min-max saddle-point stage
   // (Talman 1986; Saue, ChemPhysChem 12, 3077 (2011)): rotations that also mix the occupied
@@ -353,6 +361,7 @@ class Input {
   double macro_energy_tolerance_ = 1e-9;
   double orbital_gradient_tolerance_ = 1e-5;
   std::string orbital_optimizer_ = "ADAM";
+  int neo_max_iterations_ = 100;
   bool full_optimization_4c_neg_ = false;
 };
 

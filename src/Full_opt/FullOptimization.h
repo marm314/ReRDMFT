@@ -70,7 +70,9 @@ struct FullOptSettings {
   // ADAM's own many small, cheap steps never have this failure mode, since a partial ADAM step is
   // still along the true (not budget-cut) direction. A single generous `neo_max_iterations` avoids
   // it: NEO is a quadratically convergent Newton method, so genuinely needing more than a few tens
-  // of steps per macro-iteration would itself be a sign of trouble.
+  // of steps per macro-iteration would itself be a sign of trouble. User-settable via the
+  // NEO_MAX_ITERATIONS keyword (Input.h) -- lowering it below the default risks exactly the
+  // truncated-descent failure mode described above; see its own comment.
   OrbitalOptimizer orbital_optimizer = OrbitalOptimizer::kAdam;
   int neo_max_iterations = 100;
   // Largest |h| entry of the UNTRIMMED integrals (set by the no-pair trimming entry points; 0 = unknown): the roundoff of the

@@ -278,6 +278,12 @@ void Input::read(const std::string& filename) {
         throw std::runtime_error("line " + std::to_string(line_number) +
                                   ": ORBITAL_OPTIMIZER must be ADAM or NEO");
       }
+    } else if (keyword == "NEO_MAX_ITERATIONS") {
+      neo_max_iterations_ = parseInt(iss, line_number, keyword);
+      if (!(neo_max_iterations_ > 0)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": NEO_MAX_ITERATIONS must be positive");
+      }
     } else if (keyword == "FULL_OPTIMIZATION_4C_NEG") {
       full_optimization_4c_neg_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "SPEED_OF_LIGHT") {
@@ -365,6 +371,7 @@ void Input::print(std::ostream& out) const {
   line("MACRO_ENERGY_TOLERANCE") << macro_energy_tolerance_ << "\n";
   line("ORBITAL_GRADIENT_TOLERANCE") << orbital_gradient_tolerance_ << "\n";
   line("ORBITAL_OPTIMIZER") << orbital_optimizer_ << "\n";
+  line("NEO_MAX_ITERATIONS") << neo_max_iterations_ << "\n";
   line("FULL_OPTIMIZATION_4C_NEG") << flag(full_optimization_4c_neg_) << "\n";
   line("SPEED_OF_LIGHT") << speed_of_light_ << "\n";
 

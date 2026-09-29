@@ -811,6 +811,7 @@ inline rerdmft::FullOptSettings fullOptSettings(const rerdmft::Input& input) {
   settings.debug = input.debug();
   settings.orbital_optimizer = input.orbital_optimizer() == "NEO" ? rerdmft::OrbitalOptimizer::kNeo
                                                                   : rerdmft::OrbitalOptimizer::kAdam;
+  settings.neo_max_iterations = input.neo_max_iterations();
   return settings;
 }
 
