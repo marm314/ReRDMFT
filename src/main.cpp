@@ -816,6 +816,7 @@ inline rerdmft::FullOptSettings fullOptSettings(const rerdmft::Input& input) {
   settings.neo_max_iterations = input.neo_max_iterations();
   settings.adam_neo_switch_tolerance = input.adam_neo_switch_tolerance();
   settings.check_hess_neo = input.check_hess_neo();
+  settings.fixed_occupancies = input.fixed_occupancies();
   return settings;
 }
 

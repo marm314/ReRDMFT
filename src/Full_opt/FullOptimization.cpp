@@ -1761,13 +1761,20 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
       }
 
       RdmftOccupationResult occ_result;
-      try {
-        occ_result = model.optimize_occupations(problem.h(), problem.eri(), occ_state);
-      } catch (const std::exception& e) {
-        log << "    occupation re-optimization FAILED (" << e.what() << ") -- stopping.\n";
-        break;
+      if (settings.fixed_occupancies) {
+        // FIXED_OCCUPANCIES TRUE: occupations stay exactly at the pre-loop optimization's result
+        // (or RESTART/READ_RESTART's) -- this macro-iteration only re-optimized the orbitals above.
+        occ_result.occupations = occ;
+        occ_result.converged = true;
+      } else {
+        try {
+          occ_result = model.optimize_occupations(problem.h(), problem.eri(), occ_state);
+        } catch (const std::exception& e) {
+          log << "    occupation re-optimization FAILED (" << e.what() << ") -- stopping.\n";
+          break;
+        }
+        if (!occ_result.converged) ++n_occ_unconverged;
       }
-      if (!occ_result.converged) ++n_occ_unconverged;
       occ = occ_result.occupations;
       // Same energy definition as the orbital stage (see makePnofModel: the
       // optimizer's own value can differ for a non-symmetric eri).
@@ -1782,12 +1789,15 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
       log << std::defaultfloat << std::setw(6) << orbital_iterations << "      " << std::scientific
           << std::setprecision(2) << log_extra << (orbital_restart_requested ? "  restart" : "")
           << (gradient_converged ? "  gradient-converged" : "")
-          << (occ_result.converged ? "" : "  occupations-not-converged")
+          << (settings.fixed_occupancies ? "  occupations-fixed"
+                                          : (occ_result.converged ? "" : "  occupations-not-converged"))
           << std::defaultfloat << std::setprecision(6) << "\n";
       ProgressLine() << "FULL_OPTIMIZATION macro-iteration " << iter << ": E(total) = " << std::fixed << std::setprecision(10)
                      << e_elec + nuclear_repulsion_energy << std::scientific << std::setprecision(2) << "  dE = " << d_e
                      << "  max|g| = " << max_gradient << "  (" << (run_neo ? "NEO steps " : "ADAM steps ") << orbital_iterations
-                     << (gradient_converged ? ", gradient converged" : "") << (occ_result.converged ? "" : ", occupations not converged")
+                     << (gradient_converged ? ", gradient converged" : "")
+                     << (settings.fixed_occupancies ? ", occupations fixed"
+                                                     : (occ_result.converged ? "" : ", occupations not converged"))
                      << ")";
       last_dE = d_e;
       if (std::abs(d_e) < settings.energy_tolerance && !(run_neo ? false : adam.restartRequested())) {

@@ -87,6 +87,11 @@ struct FullOptSettings {
   // User-settable via the CHECK_HESS_NEO keyword (Input.h); off by default, since it costs extra
   // Hessian-vector products beyond the Newton steps already taken.
   bool check_hess_neo = false;
+  // User-settable via the FIXED_OCCUPANCIES keyword (Input.h); off by default. When true, the
+  // macro-iteration loop below never calls model.optimize_occupations again once it starts --
+  // occupations stay exactly at whatever the pre-loop optimization (at the starting HF/DHF
+  // orbitals) left them, and only the orbitals are re-optimized each macro-iteration.
+  bool fixed_occupancies = false;
   // Largest |h| entry of the UNTRIMMED integrals (set by the no-pair trimming entry points; 0 = unknown): the roundoff of the
   // orbital-gradient sums scales with it, so the time-reversal symmetry checks allow ~1000 eps times it.
   double roundoff_scale = 0.0;

@@ -346,6 +346,15 @@ class Input {
   // off; turn it on when you specifically want that verification (it is unrelated to DEBUG TRUE's
   // own dense diagonalization check, which is exact but only affordable for small systems).
   bool check_hess_neo() const { return check_hess_neo_; }
+  // Optional; defaults to FALSE. Only meaningful with FULL_OPTIMIZATION TRUE (NON_RELATIVISTIC,
+  // X2C or C4_SPINOR alike -- the same macro-iteration loop, Full_opt/FullOptimization.cpp,
+  // drives all three). The occupation-number optimization that runs ONCE at the starting
+  // (HF/DHF) orbitals, before the macro loop begins, is unaffected -- occupations still get a
+  // sensible starting value. When true, the macro loop itself never re-optimizes them again:
+  // each macro-iteration only re-optimizes the orbitals at those fixed occupations, so
+  // FULL_OPTIMIZATION becomes a pure orbital optimization at fixed (already-optimized)
+  // occupation numbers instead of its usual alternation of the two.
+  bool fixed_occupancies() const { return fixed_occupancies_; }
   // Optional; defaults to FALSE. Only meaningful for C4_SPINOR + FULL_OPTIMIZATION: once the
   // positive-energy-only optimization has converged, runs the genuine min-max saddle-point stage
   // (Talman 1986; Saue, ChemPhysChem 12, 3077 (2011)): rotations that also mix the occupied
@@ -398,6 +407,7 @@ class Input {
   int neo_max_iterations_ = 100;
   double adam_neo_switch_tolerance_ = 1e-4;
   bool check_hess_neo_ = false;
+  bool fixed_occupancies_ = false;
   bool full_optimization_4c_neg_ = false;
 };
 
