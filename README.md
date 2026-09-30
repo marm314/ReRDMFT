@@ -89,7 +89,7 @@ anywhere on a line) are comments.
 | Keyword | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `NELEC` (or `NELECTRONS`) | int | *required* | Number of electrons. |
-| `BASIS` | string | *required* | Gaussian basis set file name. |
+| `BASIS` | string | *required* | Gaussian basis set file name. `src/Utils/download_basis.py <input_file.inp>` fetches it for you: it reads this keyword and the `GEOMETRY` block, downloads the matching basis from [Basis Set Exchange](https://www.basissetexchange.org) in Gaussian94 format for exactly the elements present, and writes it next to the input file under this exact name -- accepts a plain basis name (`BASIS 6-31G.gbs`) or this project's own `<molecule>-<basis>.gbs` convention (`BASIS lih-6-31g.gbs`), trying candidate names against Basis Set Exchange itself rather than guessing. |
 | `UNIT_LENGTH` | string | `ANGS` | Units of the `GEOMETRY` block's coordinates: `ANGS` (Angstrom, the default, converted to Bohr internally via the CODATA Bohr radius) or `BOHR`/`AU` (already atomic units, no conversion). Applied after the whole input file is parsed, so it may appear before or after `GEOMETRY`. Template: `examples/lih_gnof_unit_length_bohr.inp` (same system and converged energy as `lih_gnof_full_optimization.inp`, geometry given in Bohr instead of Angstrom). |
 | `GEOMETRY` ... `END` | block | *required* | Molecular geometry as `<symbol> <x> <y> <z>` lines, one atom per line, coordinates in the units `UNIT_LENGTH` says (Angstrom by default), converted to Bohr internally. |
 | `NON_RELATIVISTIC` | bool | `FALSE` | Run the standard nonrelativistic Hartree-Fock SCF (`NON_REL`). |
