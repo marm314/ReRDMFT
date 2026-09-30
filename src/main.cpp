@@ -2470,62 +2470,75 @@ int main(int argc, char** argv) {
     large_basis.build(input.geometry(), basis_set);
     large_normalization = rerdmft::normalizeCartesianBasis(large_basis.functions());
 
-    small_basis.build(input.geometry(), basis_set);
-    small_normalization = rerdmft::normalizeCartesianBasis(small_basis.functions());
-
-    spinor_basis.build(large_basis.functions(), small_basis.functions());
-
-    dirac_kinetic = rerdmft::diracKineticMatrix(large_basis.functions(), small_basis.functions(),
-                                                 input.speed_of_light());
-    dirac_rest_energy = rerdmft::diracRestEnergyMatrix(
-        large_basis.functions(), small_basis.functions(), input.speed_of_light());
-    vext = rerdmft::vextMatrix(large_basis.functions(), small_basis.functions(),
-                                input.geometry());
-    h_ukb = rerdmft::ukbHamiltonianMatrix(large_basis.functions(), small_basis.functions(),
-                                           input.geometry(), input.speed_of_light());
-    rkb_coefficients =
-        rerdmft::rkbCoefficients(large_basis.functions(), small_basis.functions());
-    h_rkb = rerdmft::rkbHamiltonianMatrix(h_ukb, rkb_coefficients);
-    logTiming("H_RKB built", t_start, t_checkpoint, timing_records);
-
     s_large = rerdmft::overlapMatrix(large_basis.functions());
     x_large = rerdmft::inverseSqrt(s_large);
 
-    s_small_ukb = rerdmft::overlapMatrix(small_basis.functions());
-    s_small = rerdmft::rkbSmallOverlapMatrix(small_basis.functions(), rkb_coefficients);
-    x_small = rerdmft::inverseSqrtHermitian(s_small);
+    // The small-component basis and every RKB/relativistic quantity built from it are only ever
+    // read by X2C's own report/SCF and by C4_SPINOR below -- NON_RELATIVISTIC builds its own
+    // one-electron Hamiltonian (schrodingerKineticMatrix/nuclearAttractionMatrix) and two-electron
+    // integrals (buildNonRelEri) independently of all of this, so skip it entirely when neither is
+    // requested: this is otherwise an O(n^3) generalized-eigenproblem diagonalization (the X2C
+    // decoupling below) plus the small-component basis/integral construction, wasted work for a
+    // NON_RELATIVISTIC-only run.
+    if (input.x2c() || input.c4_spinor()) {
+      small_basis.build(input.geometry(), basis_set);
+      small_normalization = rerdmft::normalizeCartesianBasis(small_basis.functions());
 
-    x_full = rerdmft::xFullMatrix(x_large, x_small);
-    // S_full = diag(S_Large, S_Large, S_small), the metric X_full
-    // orthonormalizes against (RkbOrthogonalization.h) -- built
-    // alongside X_full itself so both are always available together
-    // wherever one is needed (e.g. X2C_decoupling.h below).
-    s_full = rerdmft::sFullMatrix(s_large, s_small);
-    // One-electron X2C decoupling (X2C_DHF/X2C_decoupling.h): builds
-    // H_RKB_ortho and diagonalizes it -- ALWAYS needed below as the
-    // C4_DHF SCF's own initial guess (c_dhf/density_matrix), not just
-    // for the optional X2C report (Input.h's X2C keyword, gated
-    // further down at the report itself).
-    const auto x2c_result =
-        rerdmft::x2cDecoupling(h_rkb, s_large, x_large, s_small, s_full, x_full);
-    h_rkb_ortho = x2c_result.h_rkb_ortho;
-    h_rkb_ortho_eig = x2c_result.eigen;
-    x2c_c_tmp = x2c_result.c_tmp;
-    max_generalized_eigenproblem_residual = x2c_result.max_generalized_eigenproblem_residual;
-    // The exact X2C Hamiltonian (X2C_DHF/X2C_hamiltonian.h) -- ALWAYS
-    // built (cheap, O(n2^3) on the small Large-component-only space),
-    // since it feeds BOTH the X2C report below (h_x2c_ortho) AND the
-    // X2C-HF SCF (h_x2c alone as its fixed core Hamiltonian) -- both
-    // gated together by the single X2C keyword (Input.h).
-    x2c_hamiltonian = rerdmft::buildX2CHamiltonian(h_rkb, s_full, x2c_c_tmp);
+      spinor_basis.build(large_basis.functions(), small_basis.functions());
 
-    f_small = rerdmft::rkbSmallVextMatrix(small_basis.functions(), rkb_coefficients,
-                                           input.geometry());
-    h_positive_energy = rerdmft::rkbPositiveEnergyHamiltonian(h_rkb, s_small, f_small,
-                                                               input.speed_of_light());
-    h_positive_energy_ortho =
-        rerdmft::positiveEnergyOrthoHamiltonian(h_positive_energy, x_large);
-    h_positive_energy_eig = rerdmft::diagonalizeHermitian(h_positive_energy_ortho);
+      dirac_kinetic = rerdmft::diracKineticMatrix(large_basis.functions(), small_basis.functions(),
+                                                   input.speed_of_light());
+      dirac_rest_energy = rerdmft::diracRestEnergyMatrix(
+          large_basis.functions(), small_basis.functions(), input.speed_of_light());
+      vext = rerdmft::vextMatrix(large_basis.functions(), small_basis.functions(),
+                                  input.geometry());
+      h_ukb = rerdmft::ukbHamiltonianMatrix(large_basis.functions(), small_basis.functions(),
+                                             input.geometry(), input.speed_of_light());
+      rkb_coefficients =
+          rerdmft::rkbCoefficients(large_basis.functions(), small_basis.functions());
+      h_rkb = rerdmft::rkbHamiltonianMatrix(h_ukb, rkb_coefficients);
+      logTiming("H_RKB built", t_start, t_checkpoint, timing_records);
+
+      s_small_ukb = rerdmft::overlapMatrix(small_basis.functions());
+      s_small = rerdmft::rkbSmallOverlapMatrix(small_basis.functions(), rkb_coefficients);
+      x_small = rerdmft::inverseSqrtHermitian(s_small);
+
+      x_full = rerdmft::xFullMatrix(x_large, x_small);
+      // S_full = diag(S_Large, S_Large, S_small), the metric X_full
+      // orthonormalizes against (RkbOrthogonalization.h) -- built
+      // alongside X_full itself so both are always available together
+      // wherever one is needed (e.g. X2C_decoupling.h below).
+      s_full = rerdmft::sFullMatrix(s_large, s_small);
+      // One-electron X2C decoupling (X2C_DHF/X2C_decoupling.h): builds
+      // H_RKB_ortho and diagonalizes it -- needed as the C4_DHF SCF's
+      // own initial guess (c_dhf/density_matrix) whenever C4_SPINOR is
+      // on, not just for the optional X2C report (Input.h's X2C
+      // keyword, gated further down at the report itself) -- hence the
+      // combined X2C-or-C4_SPINOR guard above rather than X2C alone.
+      const auto x2c_result =
+          rerdmft::x2cDecoupling(h_rkb, s_large, x_large, s_small, s_full, x_full);
+      h_rkb_ortho = x2c_result.h_rkb_ortho;
+      h_rkb_ortho_eig = x2c_result.eigen;
+      x2c_c_tmp = x2c_result.c_tmp;
+      max_generalized_eigenproblem_residual = x2c_result.max_generalized_eigenproblem_residual;
+      // The exact X2C Hamiltonian (X2C_DHF/X2C_hamiltonian.h) -- cheap (O(n2^3) on the small
+      // Large-component-only space), but only ever read by the X2C report (h_x2c_ortho) and the
+      // X2C-HF SCF (h_x2c alone as its fixed core Hamiltonian), both gated by the X2C keyword
+      // (Input.h) -- so narrowed to that keyword alone, unlike the outer guard above (X2C_DHF's
+      // own decoupling, h_rkb_ortho/h_rkb_ortho_eig, IS still needed with C4_SPINOR alone, as
+      // C4_DHF's own SCF initial guess).
+      if (input.x2c()) {
+        x2c_hamiltonian = rerdmft::buildX2CHamiltonian(h_rkb, s_full, x2c_c_tmp);
+      }
+
+      f_small = rerdmft::rkbSmallVextMatrix(small_basis.functions(), rkb_coefficients,
+                                             input.geometry());
+      h_positive_energy = rerdmft::rkbPositiveEnergyHamiltonian(h_rkb, s_small, f_small,
+                                                                 input.speed_of_light());
+      h_positive_energy_ortho =
+          rerdmft::positiveEnergyOrthoHamiltonian(h_positive_energy, x_large);
+      h_positive_energy_eig = rerdmft::diagonalizeHermitian(h_positive_energy_ortho);
+    }
 
     // Builds (or loads) the packed AO integrals. With CHOLESKY TRUE they are decomposed once into AO Cholesky
     // vectors (checked and, if needed, retried with a smaller batch -- Utils/Cholesky_Decomposition.h) and the
@@ -3685,7 +3698,9 @@ int main(int argc, char** argv) {
   const std::size_t n_large = spinor_basis.nLarge();
   const std::size_t n_small = spinor_basis.nSmall();
 
-  if (input.debug()) {
+  // The whole relativistic setup this prints (small-component basis, Dirac/RKB matrices, X2C
+  // decoupling) is only built above when X2C or C4_SPINOR is on -- see the guard in the try block.
+  if (input.debug() && (input.x2c() || input.c4_spinor())) {
     printAoList("Large-component cartesian atomic orbitals", large_basis.functions(),
                 large_normalization);
     printAoList("Small-component cartesian atomic orbitals (unrestricted kinetic balance)",
@@ -3836,16 +3851,18 @@ int main(int argc, char** argv) {
                             h_rkb_ortho, rkb_coefficients.rows());
   }
 
-  std::cout << "\nH_UKB dimensions: " << h_ukb.rows() << " x " << h_ukb.cols() << "\n";
-  std::cout << "RKB coefficients C dimensions: " << rkb_coefficients.rows() << " x "
-             << rkb_coefficients.cols() << "\n";
-  std::cout << "H_RKB dimensions: " << h_rkb.rows() << " x " << h_rkb.cols() << "\n";
-  std::cout << "X_Large dimensions: " << x_large.rows() << " x " << x_large.cols() << "\n";
-  std::cout << "S_small dimensions: " << s_small.rows() << " x " << s_small.cols() << "\n";
-  std::cout << "X_small dimensions: " << x_small.rows() << " x " << x_small.cols() << "\n";
-  std::cout << "X_full dimensions: " << x_full.rows() << " x " << x_full.cols() << "\n";
-  std::cout << "H_RKB_ortho dimensions: " << h_rkb_ortho.rows() << " x " << h_rkb_ortho.cols()
-             << "\n";
+  if (input.x2c() || input.c4_spinor()) {
+    std::cout << "\nH_UKB dimensions: " << h_ukb.rows() << " x " << h_ukb.cols() << "\n";
+    std::cout << "RKB coefficients C dimensions: " << rkb_coefficients.rows() << " x "
+               << rkb_coefficients.cols() << "\n";
+    std::cout << "H_RKB dimensions: " << h_rkb.rows() << " x " << h_rkb.cols() << "\n";
+    std::cout << "X_Large dimensions: " << x_large.rows() << " x " << x_large.cols() << "\n";
+    std::cout << "S_small dimensions: " << s_small.rows() << " x " << s_small.cols() << "\n";
+    std::cout << "X_small dimensions: " << x_small.rows() << " x " << x_small.cols() << "\n";
+    std::cout << "X_full dimensions: " << x_full.rows() << " x " << x_full.cols() << "\n";
+    std::cout << "H_RKB_ortho dimensions: " << h_rkb_ortho.rows() << " x " << h_rkb_ortho.cols()
+               << "\n";
+  }
 
   // X2C report (decoupling + exact/approximate Hamiltonian + X2C-HF
   // SCF) is printed further below, between the NON_RELATIVISTIC and
@@ -3884,7 +3901,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  if (input.debug()) {
+  if (input.debug() && (input.x2c() || input.c4_spinor())) {
     std::cout << "\nPositive-energy eigenvalues (exact Feshbach reduction of H_RKB's Small-Small\n"
                   "block -- unlike H_RKB_ortho above, this never sums a -2c^2 term against an\n"
                   "O(1) one in floating point, so it stays accurate and exactly Kramers-paired\n"
@@ -3994,8 +4011,9 @@ int main(int argc, char** argv) {
   // final reports, per explicit user feedback (X2C is a two-component
   // approximation that sits conceptually between the nonrelativistic
   // and exact 4-component treatments). H_RKB_ortho/h_x2c themselves are
-  // already always built above (needed as C4_DHF's own initial guess);
-  // this only gates the report/SCF run, not the underlying computation.
+  // built above whenever X2C or C4_SPINOR is on (needed as C4_DHF's own
+  // initial guess) -- X2C being true here already guarantees that, so
+  // this only gates the report/SCF run itself, not the construction.
   if (input.x2c()) {
     std::cout << "\nX2C_DHF/X2C_decoupling.h: one-electron X2C decoupling (eigenvalues of\n"
                  "H_RKB_ortho, Kramers pairs, even/odd indices side by side):\n";
