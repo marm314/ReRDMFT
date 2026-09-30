@@ -1,0 +1,22 @@
+# Example ReRDMFT input file: LiH, 6-31G, GNOF, READ_OCCUPANCIES TRUE -- reads OCC.in (this
+# directory's own companion file) instead of running the usual LBFGS(gamma) occupation-number
+# optimization at the starting HF orbitals: "index" is the PNOF subspace (0 or 1, matching
+# PNOF_SUBSPACES 2 below), the two lines per subspace are that subspace's principal geminal (the
+# larger value) then its one virtual (PNOF_COUPLING 2), summing to 1 per subspace. Watch for
+# "READ_OCCUPANCIES TRUE: occupations read directly from OCC.in ... did NOT run" and the printed
+# occupation numbers matching OCC.in's own values exactly, and the RESTART file's own
+# self-consistency check ("gamma angles regenerate the occupation numbers") still passing --
+# confirming the occupations-to-gammas conversion is exact for externally-supplied occupations
+# too, not just ones this project's own optimizer produced.
+NELEC 4
+BASIS lih-6-31g.gbs
+NON_RELATIVISTIC TRUE
+FUNCTIONAL GNOF
+PNOF_SUBSPACES 2
+PNOF_COUPLING 2
+READ_OCCUPANCIES TRUE
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.594900
+END

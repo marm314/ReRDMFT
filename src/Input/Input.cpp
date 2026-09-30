@@ -308,6 +308,8 @@ void Input::read(const std::string& filename) {
       check_hess_neo_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "FIXED_OCCUPANCIES") {
       fixed_occupancies_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "READ_OCCUPANCIES") {
+      read_occupancies_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "FULL_OPTIMIZATION_4C_NEG") {
       full_optimization_4c_neg_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "SPEED_OF_LIGHT") {
@@ -353,6 +355,9 @@ void Input::read(const std::string& filename) {
   }
   if (fcidump_ && !has_functional_) {
     throw std::runtime_error("FCIDUMP TRUE requires FUNCTIONAL (there is otherwise no RDMFT orbital order to write)");
+  }
+  if (read_occupancies_ && !has_functional_) {
+    throw std::runtime_error("READ_OCCUPANCIES TRUE requires FUNCTIONAL (there are otherwise no occupations to read into)");
   }
   // Applied here, after the whole file is parsed, so UNIT_LENGTH may appear before or after
   // GEOMETRY: "BOHR"/"AU" coordinates are already atomic units, no conversion needed.
@@ -413,6 +418,7 @@ void Input::print(std::ostream& out) const {
   line("ADAM_NEO_SWITCH_TOLERANCE") << adam_neo_switch_tolerance_ << "\n";
   line("CHECK_HESS_NEO") << flag(check_hess_neo_) << "\n";
   line("FIXED_OCCUPANCIES") << flag(fixed_occupancies_) << "\n";
+  line("READ_OCCUPANCIES") << flag(read_occupancies_) << "\n";
   line("FULL_OPTIMIZATION_4C_NEG") << flag(full_optimization_4c_neg_) << "\n";
   line("SPEED_OF_LIGHT") << speed_of_light_ << "\n";
 

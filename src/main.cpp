@@ -84,6 +84,39 @@
 
 namespace {
 
+// READ_OCCUPANCIES support: one "<index> <occupation>" line per geminal (PNOF, index = subspace
+// 0..PNOF_SUBSPACES-1) or per Kramers/spin-tied active pair (JK_only, index unused) -- see
+// Input.h's own READ_OCCUPANCIES doc comment for the exact semantics.
+struct OccInLine {
+  int index = 0;
+  double occupation = 0.0;
+};
+
+std::vector<OccInLine> readOccIn(const std::string& path) {
+  std::ifstream file(path);
+  if (!file.is_open()) {
+    throw std::runtime_error("READ_OCCUPANCIES TRUE: could not open '" + path + "'");
+  }
+  std::vector<OccInLine> lines;
+  std::string raw_line;
+  int line_number = 0;
+  while (std::getline(file, raw_line)) {
+    ++line_number;
+    if (raw_line.find_first_not_of(" \t\r\n") == std::string::npos) continue;  // blank line
+    std::istringstream iss(raw_line);
+    OccInLine entry;
+    if (!(iss >> entry.index >> entry.occupation)) {
+      throw std::runtime_error("READ_OCCUPANCIES TRUE: '" + path + "' line " +
+                               std::to_string(line_number) + ": expected '<index> <occupation>'");
+    }
+    lines.push_back(entry);
+  }
+  if (lines.empty()) {
+    throw std::runtime_error("READ_OCCUPANCIES TRUE: '" + path + "' has no '<index> <occupation>' lines");
+  }
+  return lines;
+}
+
 // std::conj(double) returns std::complex<double>, not double -- these
 // overloads keep a T-templated caller's real (T=double) instantiation
 // real, the same established pattern used throughout Hessian_opt/ (e.g.
@@ -839,7 +872,8 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
                                    std::vector<TimingRecord>& timing_records,
                                    rerdmft::RestartCapture* restart = nullptr,
                                    const Eri* eri_full_block = nullptr,
-                                   const std::vector<double>* initial_occupations = nullptr) {
+                                   const std::vector<double>* initial_occupations = nullptr,
+                                   const std::vector<OccInLine>* occ_in = nullptr) {
   // Generic (element-access) view of the integrals, used by the production code below; the DEBUG /
   // validation blocks that need a dense Tensor4 re-bind `eri` to a dense view of `eri_in`.
   const Eri& eri = eri_in;
@@ -1097,6 +1131,36 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
     reduced_state0[i] = 0.5 * (occupations_active[pairs[i].first] + occupations_active[pairs[i].second]);
   }
 
+  // READ_OCCUPANCIES TRUE: OCC.in's occupations (index column ignored for JK_only) replace the
+  // OCCUPATION_INIT/READ_RESTART starting point above -- one line per Kramers/spin-tied active
+  // pair, in the SAME order `pairs` itself uses. The SQP below is skipped entirely (see its own
+  // call site); this just prepares its would-be starting point as the FINAL answer instead.
+  if (occ_in != nullptr) {
+    if (occ_in->size() != n_pairs) {
+      throw std::runtime_error(label + ": READ_OCCUPANCIES TRUE: OCC.in has " +
+                               std::to_string(occ_in->size()) + " line(s) but this run's active window has " +
+                               std::to_string(n_pairs) + " Kramers/spin-tied pair(s)");
+    }
+    double sum = 0.0;
+    for (std::size_t i = 0; i < n_pairs; ++i) {
+      reduced_state0[i] = std::min(1.0 - kOccupationEpsilon, std::max(kOccupationEpsilon, (*occ_in)[i].occupation));
+      sum += reduced_state0[i];
+    }
+    if (std::abs(2.0 * sum - n_electrons_active) > 1e-3) {
+      throw std::runtime_error(label + ": READ_OCCUPANCIES TRUE: OCC.in's occupations sum to " +
+                               std::to_string(2.0 * sum) + " (2x the per-pair values) but NELEC - 2*JK_FROZEN_PAIRS = " +
+                               std::to_string(n_electrons_active));
+    }
+    const double delta = n_electrons_active - 2.0 * sum;
+    double weight = 0.0;
+    for (const double a : reduced_state0) weight += a * (1.0 - a);
+    if (weight > 0.0) {
+      for (double& a : reduced_state0) {
+        a = std::min(1.0 - kOccupationEpsilon, std::max(kOccupationEpsilon, a + 0.5 * delta * a * (1.0 - a) / weight));
+      }
+    }
+  }
+
   // Finite-difference validation of jkFunctionalGradient/
   // jkFunctionalHessian (Occ_opt/OccupationEnergy.h) against
   // jkFunctionalEnergy/jkFunctionalGradient themselves, at the SQP's own
@@ -1138,31 +1202,53 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
         << std::setprecision(6) << "\n";
   }
 
-  out << "\n  SQP occupation-number optimization (Utils/SQP.h, FIXED orbitals/integrals,\n"
-      << "  " << n_pairs << " Kramers/spin pair(s), each tied to a SINGLE variable (both partners\n"
-      << "  always get EXACTLY the same occupation), sum(n) = " << n_electrons_active
-      << " constraint, " << kOccupationEpsilon << " <= n_p <= " << (1.0 - kOccupationEpsilon)
-      << "):\n";
+  if (occ_in != nullptr) {
+    out << "\n  READ_OCCUPANCIES TRUE: occupations read directly from OCC.in, " << n_pairs
+        << " Kramers/spin pair(s) (both partners get EXACTLY the same occupation) -- the SQP "
+           "occupation-number optimization below did NOT run.\n";
+  } else {
+    out << "\n  SQP occupation-number optimization (Utils/SQP.h, FIXED orbitals/integrals,\n"
+        << "  " << n_pairs << " Kramers/spin pair(s), each tied to a SINGLE variable (both partners\n"
+        << "  always get EXACTLY the same occupation), sum(n) = " << n_electrons_active
+        << " constraint, " << kOccupationEpsilon << " <= n_p <= " << (1.0 - kOccupationEpsilon)
+        << "):\n";
+  }
   try {
-    const auto sqp_result =
-        rerdmft::solveSqp(value_fn, gradient_fn, hessian_fn, a_eq, b_eq, lb, ub, reduced_state0);
-    logTiming(label + " SQP occupation-number optimization complete (" + functional_name + ")",
-              t_start, t_checkpoint, timing_records);
+    rerdmft::SqpResult sqp_result;
+    if (occ_in != nullptr) {
+      sqp_result.x = reduced_state0;
+      sqp_result.objective_value = value_fn(reduced_state0);
+      sqp_result.converged = true;
+      sqp_result.iterations = 0;
+    } else {
+      sqp_result =
+          rerdmft::solveSqp(value_fn, gradient_fn, hessian_fn, a_eq, b_eq, lb, ub, reduced_state0);
+      logTiming(label + " SQP occupation-number optimization complete (" + functional_name + ")",
+                t_start, t_checkpoint, timing_records);
+    }
     const auto optimized_active = expandActive(sqp_result.x);
     double optimized_occupation_sum = 0.0;
     for (const double n : optimized_active) optimized_occupation_sum += n;
     const double optimized_total_energy = sqp_result.objective_value + nuclear_repulsion_energy;
-    out << "    " << (sqp_result.converged ? "Converged" : "Did NOT converge") << " after "
-        << sqp_result.iterations << " iteration(s)\n";
+    if (occ_in == nullptr) {
+      out << "    " << (sqp_result.converged ? "Converged" : "Did NOT converge") << " after "
+          << sqp_result.iterations << " iteration(s)\n";
+    }
     out << "    Optimized sum of occupations (expect " << n_electrons_active
         << "): " << std::setprecision(10) << optimized_occupation_sum << std::setprecision(6)
         << "\n";
     out << "    Optimized electronic energy: " << std::setprecision(10)
         << sqp_result.objective_value << std::setprecision(6) << " Hartree\n";
-    out << "    Optimized total " << functional_name << " energy: " << std::setprecision(10)
-        << optimized_total_energy << std::setprecision(6) << " Hartree ("
-        << (optimized_total_energy <= total_energy ? "<=" : ">")
-        << " the initial-occupations value above, as expected for a minimization)\n";
+    if (occ_in != nullptr) {
+      out << "    Total " << functional_name << " energy at these occupations: "
+          << std::setprecision(10) << optimized_total_energy << std::setprecision(6)
+          << " Hartree (READ_OCCUPANCIES: no occupation-number optimization performed)\n";
+    } else {
+      out << "    Optimized total " << functional_name << " energy: " << std::setprecision(10)
+          << optimized_total_energy << std::setprecision(6) << " Hartree ("
+          << (optimized_total_energy <= total_energy ? "<=" : ">")
+          << " the initial-occupations value above, as expected for a minimization)\n";
+    }
     // Rounds to the SAME 5 decimals actually printed below, so the
     // reported sum matches what a reader would get by adding up the
     // displayed digits themselves (rather than the full-precision
@@ -1420,7 +1506,8 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
                                        std::vector<TimingRecord>& timing_records,
                                        rerdmft::RestartCapture* restart = nullptr,
                                        const Eri* eri_full_block = nullptr,
-                                       const std::vector<double>* initial_occupations = nullptr) {
+                                       const std::vector<double>* initial_occupations = nullptr,
+                                       const std::vector<OccInLine>* occ_in = nullptr) {
   // See buildFunctionalReport: generic view here, dense re-binding in the DEBUG blocks.
   const Eri& eri = eri_in;
   rerdmft::progressContext() = label;  // live progress lines (stderr) are prefixed with the method
@@ -1522,6 +1609,47 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
     }
   }
 
+  // READ_OCCUPANCIES TRUE: OCC.in overrides x0 (and whatever READ_RESTART set above) -- one line
+  // per geminal, `index` = subspace (0..pnof_subspaces-1), in file order WITHIN each subspace's
+  // group (matching the v=0..pnof_coupling-1 slot order `embed` below uses; v=0 is that
+  // subspace's principal geminal). The SQP/LBFGS optimizer further below is skipped entirely
+  // (see its own call site); this just prepares its would-be starting point as the FINAL answer.
+  if (occ_in != nullptr) {
+    std::vector<int> count(static_cast<std::size_t>(pnof_subspaces), 0);
+    for (const auto& file_line : *occ_in) {
+      if (file_line.index < 0 || file_line.index >= pnof_subspaces) {
+        throw std::runtime_error("READ_OCCUPANCIES TRUE: OCC.in has subspace index " +
+                                 std::to_string(file_line.index) + ", but PNOF_SUBSPACES is " +
+                                 std::to_string(pnof_subspaces));
+      }
+      const std::size_t s = static_cast<std::size_t>(file_line.index);
+      if (count[s] >= pnof_coupling) {
+        throw std::runtime_error("READ_OCCUPANCIES TRUE: OCC.in has more than PNOF_COUPLING (" +
+                                 std::to_string(pnof_coupling) + ") lines for subspace " +
+                                 std::to_string(file_line.index));
+      }
+      x0[s * static_cast<std::size_t>(pnof_coupling) + static_cast<std::size_t>(count[s])] =
+          file_line.occupation;
+      ++count[s];
+    }
+    for (int s = 0; s < pnof_subspaces; ++s) {
+      const std::size_t su = static_cast<std::size_t>(s);
+      if (count[su] != pnof_coupling) {
+        throw std::runtime_error("READ_OCCUPANCIES TRUE: OCC.in has " + std::to_string(count[su]) +
+                                 " line(s) for subspace " + std::to_string(s) +
+                                 ", expected PNOF_COUPLING = " + std::to_string(pnof_coupling));
+      }
+      double sum = 0.0;
+      const std::size_t base = su * static_cast<std::size_t>(pnof_coupling);
+      for (int v = 0; v < pnof_coupling; ++v) sum += x0[base + static_cast<std::size_t>(v)];
+      if (!(sum > 0.0)) {
+        throw std::runtime_error("READ_OCCUPANCIES TRUE: subspace " + std::to_string(s) +
+                                 "'s occupations sum to " + std::to_string(sum));
+      }
+      for (int v = 0; v < pnof_coupling; ++v) x0[base + static_cast<std::size_t>(v)] /= sum;
+    }
+  }
+
   auto embed = [&](const std::vector<double>& frontier) {
     std::vector<double> full(n_total, 0.0);
     for (std::size_t a = 0; a < n_core; ++a) {
@@ -1566,6 +1694,7 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
   out << "  Functional: " << functional_name << "   PNOF_SUBSPACES: " << pnof_subspaces
       << "   PNOF_COUPLING: " << pnof_coupling << "\n";
   if (occupations_from_restart) out << "  Starting occupations: READ_RESTART (occupation numbers / gammas of the restart file)\n";
+  if (occ_in != nullptr) out << "  Occupations: READ_OCCUPANCIES (OCC.in), overriding any of the above -- the occupation-number optimization below did NOT run\n";
   out << restart_note;
   out << "  Frozen-occupied (core) geminals: " << n_core
       << "   Frontier geminals: " << n_frontier << "\n";
@@ -1575,7 +1704,49 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
       << " energy: " << std::setprecision(10) << initial_total_energy << std::setprecision(6)
       << " Hartree\n";
 
-  if (sqp_pnof_occ) {
+  if (occ_in != nullptr) {
+    // READ_OCCUPANCIES TRUE: x0 already holds OCC.in's (normalized) occupations -- use them
+    // directly as the final answer, in whichever STATE FORMAT the macro loop below expects for
+    // SQP_PNOF_OCC's current setting (frontier occupations, or gamma angles via the exact
+    // inverse of pnofSubspaceOccupationsFromGammas).
+    optimized_occ = embed(x0);
+    optimized_electronic_energy = value_fn(x0);
+    occupations_optimized = true;
+    optimized_converged = true;
+    if (sqp_pnof_occ) {
+      optimized_state = x0;
+    } else {
+      const std::size_t n_gammas_per_subspace = static_cast<std::size_t>(pnof_coupling - 1);
+      optimized_state.assign(static_cast<std::size_t>(pnof_subspaces) * n_gammas_per_subspace, 0.0);
+      for (int s = 0; s < pnof_subspaces; ++s) {
+        const std::size_t base = static_cast<std::size_t>(s) * static_cast<std::size_t>(pnof_coupling);
+        const std::vector<double> occ_subspace(x0.begin() + static_cast<std::ptrdiff_t>(base),
+                                               x0.begin() + static_cast<std::ptrdiff_t>(base) + pnof_coupling);
+        const auto gammas = rerdmft::pnofSubspaceGammasFromOccupations(pnof_coupling, occ_subspace);
+        std::copy(gammas.begin(), gammas.end(),
+                  optimized_state.begin() + static_cast<std::ptrdiff_t>(static_cast<std::size_t>(s) * n_gammas_per_subspace));
+      }
+    }
+    const double optimized_total_energy = optimized_electronic_energy + nuclear_repulsion_energy;
+    out << "    Optimized electronic energy: " << std::setprecision(10) << optimized_electronic_energy
+        << std::setprecision(6) << " Hartree\n";
+    out << "    Optimized total " << functional_name << " energy: " << std::setprecision(10)
+        << optimized_total_energy << std::setprecision(6)
+        << " Hartree (READ_OCCUPANCIES: no occupation-number optimization performed)\n";
+    out << "    Optimized geminal occupation numbers (n_p, both members of each Kramers/spin "
+           "pair share this value; fixed 5 decimals):\n";
+    out << std::fixed << std::setprecision(5);
+    for (std::size_t a = 0; a < n_core; ++a) {
+      out << "      core        geminal (" << geminals[a].i << "," << geminals[a].ibar
+          << "): n = 1.00000 (frozen)\n";
+    }
+    for (std::size_t a = n_core; a < geminals.size(); ++a) {
+      out << "      subspace " << std::setw(2) << geminals[a].subspace_id << " "
+          << (geminals[a].is_principal ? "principal" : "virtual  ") << " geminal ("
+          << geminals[a].i << "," << geminals[a].ibar << "): n = " << x0[a - n_core] << "\n";
+    }
+    out << std::defaultfloat << std::setprecision(6);
+  } else if (sqp_pnof_occ) {
     // SQP_PNOF_OCC TRUE: box+equality-constrained SQP over the
     // occupations directly (Utils/SQP.h) -- per-subspace equality
     // constraint sum(n)=1 (2 electrons per subspace at full pair
@@ -2468,6 +2639,13 @@ int main(int argc, char** argv) {
     input.read(argv[1]);
     basis_set.read(input.basis_file());
 
+    // READ_OCCUPANCIES TRUE: read ONCE here (before any method-specific block), passed by
+    // pointer into every buildPnofFunctionalReport/buildFunctionalReport call below -- empty
+    // (nullptr) otherwise, so those functions run their usual occupation-number optimization.
+    const std::vector<OccInLine> occ_in_lines =
+        input.read_occupancies() ? readOccIn("OCC.in") : std::vector<OccInLine>();
+    const std::vector<OccInLine>* occ_in = input.read_occupancies() ? &occ_in_lines : nullptr;
+
     large_basis.build(input.geometry(), basis_set);
     large_normalization = rerdmft::normalizeCartesianBasis(large_basis.functions());
 
@@ -2650,13 +2828,13 @@ int main(int argc, char** argv) {
                 "NON_REL", h_spin, eri_any, 2 * n, 0, input.n_electrons(), input.functional(), restart_nuclear_repulsion,
                 input.pnof_subspaces(), input.pnof_coupling(), /*relativistic=*/false, input.sqp_pnof_occ(), input.debug(),
                 fullOptSettings(input), input.full_optimization_4c_neg(),
-                t_start, t_checkpoint, timing_records, &nonrel_restart, &eri_any, &ro.data.occupations);
+                t_start, t_checkpoint, timing_records, &nonrel_restart, &eri_any, &ro.data.occupations, occ_in);
           }
           return buildFunctionalReport(
               "NON_REL", h_spin, eri_any, dummyEnergies(2 * n), 0, input.n_electrons(), input.jk_frozen_pairs(),
               input.jk_active_pairs(), input.temperature(), input.functional(), input.occupation_init(),
               restart_nuclear_repulsion, input.debug(), fullOptSettings(input),
-              input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &nonrel_restart, &eri_any, &ro.data.occupations);
+              input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &nonrel_restart, &eri_any, &ro.data.occupations, occ_in);
         };
         nonrel_functional_report = input.cholesky() ? nonrel_functional(eri_spin_chol) : nonrel_functional(eri_spin_sym);
         writeRestartFile<double>(nonrel_restart_log, input, "NON_REL", nonrel_restart, blockDiagTwice(c_spatial), blockDiagTwice(h_core_nonrel),
@@ -2694,13 +2872,13 @@ int main(int argc, char** argv) {
                 "X2C_HF", h_x2c_mo, eri_any, dim, 0, input.n_electrons(), input.functional(), restart_nuclear_repulsion,
                 input.pnof_subspaces(), input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
                 fullOptSettings(input), input.full_optimization_4c_neg(),
-                t_start, t_checkpoint, timing_records, &x2c_restart, &eri_any, &ro.data.occupations);
+                t_start, t_checkpoint, timing_records, &x2c_restart, &eri_any, &ro.data.occupations, occ_in);
           }
           return buildFunctionalReport(
               "X2C_HF", h_x2c_mo, eri_any, dummyEnergies(dim), 0, input.n_electrons(), input.jk_frozen_pairs(),
               input.jk_active_pairs(), input.temperature(), input.functional(), input.occupation_init(),
               restart_nuclear_repulsion, input.debug(), fullOptSettings(input),
-              input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &x2c_restart, &eri_any, &ro.data.occupations);
+              input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &x2c_restart, &eri_any, &ro.data.occupations, occ_in);
         };
         x2c_functional_report = input.cholesky() ? x2c_functional(x2c_mo_chol) : x2c_functional(x2c_mo_sym);
         writeRestartFile<std::complex<double>>(x2c_restart_log, input, "X2C_HF", x2c_restart, c_x2c, x2c_hamiltonian.h_x2c, s_x2c, h_x2c_mo,
@@ -2801,13 +2979,13 @@ int main(int argc, char** argv) {
                 restart_nuclear_repulsion, input.pnof_subspaces(), input.pnof_coupling(), /*relativistic=*/true,
                 input.sqp_pnof_occ(), input.debug(), fullOptSettings(input),
                 input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &c4_restart, eri_full,
-                &ro.data.occupations);
+                &ro.data.occupations, occ_in);
           }
           return buildFunctionalReport(
               "C4_DHF", h_mo_restart, eri_any, dummyEnergies(dim - n_negative_r), n_negative_r, input.n_electrons(),
               input.jk_frozen_pairs(), input.jk_active_pairs(), input.temperature(), input.functional(),
               input.occupation_init(), restart_nuclear_repulsion, input.debug(), fullOptSettings(input), input.full_optimization_4c_neg(), t_start, t_checkpoint,
-              timing_records, &c4_restart, eri_full, &ro.data.occupations);
+              timing_records, &c4_restart, eri_full, &ro.data.occupations, occ_in);
         };
         dhf_functional_report = input.cholesky() ? dhf_functional_r(c4_mo_chol_r, &c4_mo_full_chol_r)
                                                  : dhf_functional_r(c4_mo_sym_r, &c4_mo_sym_r);
@@ -3038,7 +3216,7 @@ int main(int argc, char** argv) {
                 input.pnof_subspaces(), input.pnof_coupling(), /*relativistic=*/false,
                 input.sqp_pnof_occ(), input.debug(), fullOptSettings(input),
                 input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records,
-                &nonrel_restart);
+                &nonrel_restart, static_cast<decltype(&eri_any)>(nullptr), nullptr, occ_in);
           }
           return buildFunctionalReport(
               "NON_REL", h_spin, eri_any, nonrel_orbital_energies_spin, 0, input.n_electrons(),
@@ -3046,7 +3224,7 @@ int main(int argc, char** argv) {
               input.temperature(), input.functional(), input.occupation_init(),
               nonrel_hf_result.nuclear_repulsion_energy, input.debug(), fullOptSettings(input), input.full_optimization_4c_neg(),
               t_start, t_checkpoint, timing_records,
-              &nonrel_restart);
+              &nonrel_restart, static_cast<decltype(&eri_any)>(nullptr), nullptr, occ_in);
         };
         nonrel_functional_report = input.cholesky() ? nonrel_functional(eri_spin_chol) : nonrel_functional(eri_spin_sym);
         // RESTART file: spin-orbital coefficients [alpha; beta] x [alpha MOs, beta MOs] in the
@@ -3301,7 +3479,7 @@ int main(int argc, char** argv) {
                 input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
                 fullOptSettings(input),
                 input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records,
-                &x2c_restart);
+                &x2c_restart, static_cast<decltype(&eri_any)>(nullptr), nullptr, occ_in);
           }
           return buildFunctionalReport(
               "X2C_HF", h_x2c_mo, eri_any, x2c_hf_result.orbital_energies, 0,
@@ -3310,7 +3488,7 @@ int main(int argc, char** argv) {
               input.occupation_init(), x2c_hf_result.nuclear_repulsion_energy, input.debug(),
               fullOptSettings(input),
               input.full_optimization_4c_neg(), t_start, t_checkpoint,
-              timing_records, &x2c_restart);
+              timing_records, &x2c_restart, static_cast<decltype(&eri_any)>(nullptr), nullptr, occ_in);
         };
         x2c_functional_report = input.cholesky() ? x2c_functional(x2c_mo_chol) : x2c_functional(x2c_mo_sym);
         // RESTART file: the (Kramers-fixed) X2C-HF spinor coefficients times the FULL_OPTIMIZATION
@@ -3620,7 +3798,8 @@ int main(int argc, char** argv) {
                 input.functional(), dhf_result.nuclear_repulsion_energy, input.pnof_subspaces(),
                 input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
                 fullOptSettings(input),
-                input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &c4_restart, eri_full);
+                input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &c4_restart, eri_full,
+                nullptr, occ_in);
           }
           return buildFunctionalReport(
               "C4_DHF", h_mo, eri_any, dhf_orbital_energies_positive, n_negative,
@@ -3629,7 +3808,7 @@ int main(int argc, char** argv) {
               input.occupation_init(), dhf_result.nuclear_repulsion_energy, input.debug(),
               fullOptSettings(input),
               input.full_optimization_4c_neg(), t_start, t_checkpoint,
-              timing_records, &c4_restart, eri_full);
+              timing_records, &c4_restart, eri_full, nullptr, occ_in);
         };
         if (input.cholesky()) {
           // FULL_OPTIMIZATION_4C_NEG needs the negative-energy block too: the trimmed vectors above have it zeroed

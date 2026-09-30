@@ -355,6 +355,21 @@ class Input {
   // FULL_OPTIMIZATION becomes a pure orbital optimization at fixed (already-optimized)
   // occupation numbers instead of its usual alternation of the two.
   bool fixed_occupancies() const { return fixed_occupancies_; }
+  // Optional; defaults to FALSE. Requires FUNCTIONAL. Before the occupation-number optimization
+  // that normally runs once at the starting HF/DHF orbitals, reads a plain-text file named
+  // "OCC.in" in the working directory (one line per geminal/pair: "<index> <occupation>") and
+  // uses those occupations DIRECTLY instead -- the optimizer (SQP/LBFGS for PNOF, SQP for
+  // JK_only) does not run at all for that stage. For PNOF, `index` is the SUBSPACE number
+  // (0..PNOF_SUBSPACES-1): the file needs exactly PNOF_SUBSPACES groups of PNOF_COUPLING lines
+  // each, in file order within a group (first line of a group is that subspace's principal
+  // geminal), summing to 1 per subspace (renormalized if not exact); core (frozen) geminals are
+  // NOT listed, they stay fixed at 1 as usual. For JK_only functionals `index` is ignored (any
+  // value) -- only the occupation column matters, one line per Kramers/spin-tied active pair, in
+  // the same order the active window itself uses, summing to NELEC - 2*JK_FROZEN_PAIRS. If
+  // READ_RESTART is also TRUE, orbitals still come from the RESTART file as usual, but these
+  // occupations override the RESTART file's own. FULL_OPTIMIZATION's own macro loop (if it runs)
+  // is unaffected -- combine with FIXED_OCCUPANCIES TRUE to also keep it from re-optimizing them.
+  bool read_occupancies() const { return read_occupancies_; }
   // Optional; defaults to FALSE. Only meaningful for C4_SPINOR + FULL_OPTIMIZATION: once the
   // positive-energy-only optimization has converged, runs the genuine min-max saddle-point stage
   // (Talman 1986; Saue, ChemPhysChem 12, 3077 (2011)): rotations that also mix the occupied
@@ -408,6 +423,7 @@ class Input {
   double adam_neo_switch_tolerance_ = 1e-4;
   bool check_hess_neo_ = false;
   bool fixed_occupancies_ = false;
+  bool read_occupancies_ = false;
   bool full_optimization_4c_neg_ = false;
 };
 
