@@ -171,6 +171,19 @@ test_pccd_fock: $(BUILD_DIR)/test_pccd_fock
 $(BUILD_DIR)/test_pccd_fock: tests/test_pccd_fock.cpp $(BUILD_DIR)/pCCD.o $(BUILD_DIR)/PccdFock.o $(BUILD_DIR)/HartreeExchangeGradient.o $(BUILD_DIR)/LinearAlgebra.o $(BUILD_DIR)/LBFGS.o $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
+# Unit test of Hessian_opt/PccdHessian.h's pccdHessianElement vs a finite difference of the
+# pccdFockMatrix-based gradient, for a rotation pair mixing an ACTIVE index with an UNTOUCHED
+# one (the one combination FULL_OPTIMIZATION_4C_NEG's min-max stage needs but no ordinary
+# no-pair-trimmed example ever exercises). Needs rotateIntegralsExact (Full_opt/
+# FullOptimization.h/.cpp), so links every object the main binary does except main.o itself --
+# simpler than enumerating that function's own transitive closure by hand.
+.PHONY: test_pccd_hessian
+test_pccd_hessian: $(BUILD_DIR)/test_pccd_hessian
+	./$(BUILD_DIR)/test_pccd_hessian
+
+$(BUILD_DIR)/test_pccd_hessian: tests/test_pccd_hessian.cpp $(filter-out $(BUILD_DIR)/main.o,$(OBJS)) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
 # Unit test of Utils/KramersPairing (exact Kramers re-pairing of degenerate clusters).
 .PHONY: test_kramers_pairing
 test_kramers_pairing: $(BUILD_DIR)/test_kramers_pairing
