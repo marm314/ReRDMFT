@@ -205,13 +205,14 @@ void Input::read(const std::string& filename) {
       static const std::vector<std::string> kKnownFunctionals = {
           "SD",    "MBB",   "BBC2",     "CA",    "CGA",   "ML",
           "MLSIC", "GU",    "POWER",    "MULLER_AS",
-          "PNOF5", "PNOF7", "PNOF7S", "GNOF"};
+          "PNOF5", "PNOF7", "PNOF7S", "GNOF", "PCCD"};
       if (std::find(kKnownFunctionals.begin(), kKnownFunctionals.end(), upper) ==
           kKnownFunctionals.end()) {
         throw std::runtime_error("line " + std::to_string(line_number) +
                                   ": unrecognized FUNCTIONAL '" + token +
                                   "' (expected one of SD, MBB (or MULLER), BBC2, CA, CGA, ML, "
-                                  "MLSIC, GU, POWER, MULLER_AS, PNOF5, PNOF7, PNOF7S, GNOF)");
+                                  "MLSIC, GU, POWER, MULLER_AS, PNOF5, PNOF7, PNOF7S, GNOF, "
+                                  "PCCD)");
       }
       functional_ = upper;
       has_functional_ = true;
@@ -312,6 +313,29 @@ void Input::read(const std::string& filename) {
       read_occupancies_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "FULL_OPTIMIZATION_4C_NEG") {
       full_optimization_4c_neg_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "PCCD_FROZEN_PAIRS") {
+      pccd_frozen_pairs_ = parseInt(iss, line_number, keyword);
+      if (pccd_frozen_pairs_ < 0) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": PCCD_FROZEN_PAIRS must be at least 0");
+      }
+    } else if (keyword == "PCCD_ACTIVE_PAIRS") {
+      pccd_active_pairs_ = parseInt(iss, line_number, keyword);
+      if (pccd_active_pairs_ < 1) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": PCCD_ACTIVE_PAIRS must be at least 1");
+      }
+    } else if (keyword == "PCCD_AMPLITUDE_SOLVER") {
+      std::string token;
+      if (!(iss >> token)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": expected NEWTON or LBFGS after PCCD_AMPLITUDE_SOLVER");
+      }
+      pccd_amplitude_solver_ = toUpper(token);
+      if (pccd_amplitude_solver_ != "NEWTON" && pccd_amplitude_solver_ != "LBFGS") {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": PCCD_AMPLITUDE_SOLVER must be NEWTON or LBFGS");
+      }
     } else if (keyword == "SPEED_OF_LIGHT") {
       speed_of_light_ = parseDouble(iss, line_number, keyword);
       if (!(speed_of_light_ > 0.0)) {
@@ -421,6 +445,11 @@ void Input::print(std::ostream& out) const {
   line("READ_OCCUPANCIES") << flag(read_occupancies_) << "\n";
   line("FULL_OPTIMIZATION_4C_NEG") << flag(full_optimization_4c_neg_) << "\n";
   line("SPEED_OF_LIGHT") << speed_of_light_ << "\n";
+  line("PCCD_FROZEN_PAIRS") << pccd_frozen_pairs_ << "\n";
+  line("PCCD_ACTIVE_PAIRS") << pccd_active_pairs_
+                             << (pccd_active_pairs_ < 0 ? " (default; all remaining orbitals)" : "")
+                             << "\n";
+  line("PCCD_AMPLITUDE_SOLVER") << pccd_amplitude_solver_ << "\n";
 
   out.flags(saved_flags);
   out.precision(saved_precision);

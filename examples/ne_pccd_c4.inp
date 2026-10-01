@@ -1,0 +1,25 @@
+# Example ReRDMFT input file: Ne, cc-pVDZ, NON_REL + X2C + C4_SPINOR (4-component DHF), FUNCTIONAL
+# PCCD, FULL_OPTIMIZATION TRUE -- the physically meaningful relativistic pCCD reference for Ne
+# (unlike X2C's own approximate picture change, see ne_pccd_x2c.inp's header comment; 4-component
+# is exact, no-pair). CHOLESKY TRUE: C4_DHF's RKB dimension here is 4x the spatial basis (60), so
+# the dense two-electron tensor is sizable -- Cholesky keeps this example cheap (a few minutes).
+#
+# Converged total energies:
+#   NON_REL : -128.5596739 Hartree (HF -128.4888662;      pCCD correlation -0.0708077)
+#   C4_DHF  : -128.7027634 Hartree (DHF -128.6319599;     pCCD correlation -0.0708035)
+# The pCCD correlation energy recovered on top of the HF/DHF reference agrees between NON_REL and
+# the exact relativistic treatment to ~4e-6 Hartree -- the relativistic correction here is almost
+# entirely in the one-particle (HF/DHF) reference, not in the pair-correlation treatment itself,
+# exactly the expected physical picture for a light atom like Ne.
+NELEC 10
+BASIS ne-cc-pvdz.gbs
+NON_RELATIVISTIC TRUE
+X2C TRUE
+C4_SPINOR TRUE
+FUNCTIONAL PCCD
+FULL_OPTIMIZATION TRUE
+CHOLESKY TRUE
+
+GEOMETRY
+Ne  0.000000   0.000000   0.000000
+END

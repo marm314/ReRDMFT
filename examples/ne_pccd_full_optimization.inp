@@ -1,0 +1,17 @@
+# Example ReRDMFT input file: Ne, cc-pVDZ, FUNCTIONAL PCCD, FULL_OPTIMIZATION.
+# pCCD (Occ_opt/pCCD.h + Hessian_opt/PccdFock.h): t-/z-amplitude equations solved at the
+# HF orbitals, then FULL_OPTIMIZATION macro-iterates ADAM orbital rotations (fixed
+# occupations) and amplitude re-optimization (fixed orbitals) to convergence.
+# No frozen core (PCCD_FROZEN_PAIRS defaults to 0): converged energy -128.5596739 Hartree,
+# matching the literature oo-pCCD/cc-pVDZ reference for the Ne atom (-128.559674 Hartree)
+# to ~1e-7 Hartree.
+NELEC 10
+BASIS ne-cc-pvdz.gbs
+NON_RELATIVISTIC TRUE
+FUNCTIONAL PCCD
+FULL_OPTIMIZATION TRUE
+CHOLESKY FALSE
+
+GEOMETRY
+Ne  0.000000   0.000000   0.000000
+END

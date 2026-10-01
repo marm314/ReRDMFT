@@ -15,6 +15,7 @@
 #include "CholeskyEri.h"
 #include "Matrix.h"
 #include "PNOFs.h"
+#include "pCCD.h"
 #include "Tensor4.h"
 
 namespace rerdmft {
@@ -221,6 +222,28 @@ RdmftModel<T, Eri> makePnofModel(PnofFunctional functional, std::vector<PnofGemi
                             bool relativistic, bool sqp_occupations, std::size_t n_total,
                             std::size_t n_negative = 0);
 
+// pCCD (Occ_opt/pCCD.h + Hessian_opt/PccdFock.h), NON_REL (T = double) ONLY for now: unlike
+// JK_only/PNOF, pCCD's 2-RDM (D_pq/Q_pq) is NOT a closed-form function of the occupations alone
+// -- it depends on the converged t-/z-amplitudes, which must be RE-SOLVED whenever the integrals
+// change. `model.optimize_occupations` therefore re-solves the amplitudes at the macro loop's
+// (possibly rotated) integrals and caches the resulting PccdRdm (a shared, mutable cache
+// captured by every closure) for `model.energy`/`model.gradient` to read -- occupations (hence
+// the 2-RDM) stay FIXED during the ADAM/NEO orbital-rotation phase, exactly like PNOF/JK_only's
+// own `occ`-only closures, just with the extra RDM state threaded through the cache instead of
+// recomputed from `occ` on every call. `state` (the warm start `optimize_occupations` updates in
+// place) is the flattened [t; z] amplitude matrices (size 2*n_occ*n_vir), zero-initialized on the
+// very first call. No hessian_vector/hessian_matrix/symmetric_shortcut_energy are set (left at
+// their empty defaults): NEO falls back to ADAM with a printed note (FullOptSettings' own
+// documented behavior for a model with no hessian_vector), and the DEBUG symmetric-shortcut
+// cross-check is simply skipped (both already-supported, non-error code paths -- see
+// runFullOptimization's own guards). `reps`/`bar`/`n_core`/`n_occ`/`n_vir` are the SAME combined
+// (core ++ active-occupied ++ active-virtual) pair lists `buildPccdCoefficients`/`buildPccdFullTwoRdm`
+// take, resolved to actual array indices by the caller exactly like PNOF's own geminals.
+template <typename T, typename Eri = Tensor4<T>>
+RdmftModel<T, Eri> makePccdModel(std::vector<std::size_t> reps, std::vector<std::size_t> bar,
+                                  std::size_t n_core, std::size_t n_occ, std::size_t n_vir,
+                                  std::size_t n_total, PccdSettings amplitude_settings);
+
 // Exact rotation of the MO integrals into the basis C_new = C_old * U:
 // h' = U^dagger h U, eri'(pqrs) = sum conj(U_ap) conj(U_bq) U_cr U_ds
 // eri(abcd) (physics notation <ab|cd>, bra legs conjugated) -- four successive one-leg O(n^5) transforms, no Cholesky
@@ -308,6 +331,28 @@ FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const Tensor4<T>& eri,
                                       const std::vector<PnofGeminal>& geminals, std::size_t n_core,
                                       int pnof_subspaces, int pnof_coupling, bool relativistic,
                                       bool sqp_occupations, std::size_t n_total,
+                                      const FullOptSettings& settings, bool kramers_restricted,
+                                      double nuclear_repulsion_energy, std::ostream& log,
+                                      const std::vector<std::size_t>& spin_partner = {},
+                                      std::size_t n_negative = 0);
+
+// makePccdModel + runFullOptimization -- see makePccdModel's own header comment. Now covers
+// NON_REL (T = double), X2C_HF and C4_DHF (T = std::complex<double>) alike: `kramers_restricted`/
+// `n_negative`/`spin_partner` follow runFullOptimizationPnof's own conventions exactly (the
+// no-pair/C4_DHF trim-and-embed below mirrors its n_negative>0 branch, shifting `reps`/`bar` by
+// -n_negative instead of a PnofGeminal's `.i`/`.ibar`). Templated over `T` and `Eri`
+// (Tensor4/CholeskyEri/SymmetricEri, explicit instantiations in the .cpp for both T=double and
+// T=std::complex<double>) -- one template body covers every SCF path, unlike the JK_only/PNOF
+// entry points' separate per-Eri overloads (those exist only because PnofGeminal shifting needs
+// its own code per call; `reps`/`bar` shifting is generic over T/Eri already).
+template <typename T, typename Eri = Tensor4<T>>
+FullOptResult runFullOptimizationPccd(const Matrix<T>& h, const Eri& eri,
+                                      const std::vector<double>& occupations,
+                                      const std::vector<double>& state,
+                                      const std::vector<std::size_t>& reps,
+                                      const std::vector<std::size_t>& bar, std::size_t n_core,
+                                      std::size_t n_occ, std::size_t n_vir, std::size_t n_total,
+                                      const PccdSettings& amplitude_settings,
                                       const FullOptSettings& settings, bool kramers_restricted,
                                       double nuclear_repulsion_energy, std::ostream& log,
                                       const std::vector<std::size_t>& spin_partner = {},

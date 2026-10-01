@@ -753,6 +753,11 @@ bool isPnofFunctionalName(const std::string& functional_name) {
          functional_name == "PNOF7S" || functional_name == "GNOF";
 }
 
+// True for FUNCTIONAL PCCD -- needs buildPccdFunctionalReport instead (see its own comment).
+bool isPccdFunctionalName(const std::string& functional_name) {
+  return functional_name == "PCCD";
+}
+
 // An orbital / one-body state energy as text: fixed notation, 5 decimals at most.
 inline std::string energyText(double e) {
   std::ostringstream text;
@@ -2227,6 +2232,209 @@ inline rerdmft::Matrix<std::complex<double>> blockDiagTwice(const rerdmft::Matri
   return out;
 }
 
+// pCCD (Occ_opt/pCCD.h + Hessian_opt/PccdFock.h + Full_opt/FullOptimization.h's
+// makePccdModel/runFullOptimizationPccd), NON_REL (label == "NON_REL", T = double) ONLY for
+// now -- see makePccdModel's own header comment for why pCCD is wired separately from
+// buildPnofFunctionalReport (its 2-RDM is not a closed-form function of the occupations
+// alone). Unlike buildFunctionalReport/buildPnofFunctionalReport: no DEBUG cross-checks, no
+// READ_RESTART/RESTART-file support, and no FULL_OPTIMIZATION_4C_NEG (none of those make
+// sense yet for a NON_REL-only functional with no X2C/C4_DHF wiring). `n_active`/
+// `n_inactive_below` follow buildFunctionalReport's own convention (0 for NON_REL); pairs are
+// built with the SAME interleaved-numbering / toActualIndex trick buildPnofFunctionalReport
+// uses for NON_REL's block-layout spin-orbitals (Occ_opt/Orb_subspaces.h's own adjacent-pair
+// convention, pair_of[q] = q^1, applied in the INTERLEAVED numbering then converted to real
+// array indices): PCCD_FROZEN_PAIRS lowest-energy pairs are core (pinned n=1), the next
+// PCCD_ACTIVE_PAIRS (or all remaining) pairs are the t-/z-amplitude window, split into
+// occupied/virtual at NELEC - 2*PCCD_FROZEN_PAIRS electrons.
+template <typename T, typename Eri>
+std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::Matrix<T>& h,
+                                       const Eri& eri, std::size_t n_active,
+                                       std::size_t n_inactive_below, double n_electrons,
+                                       double nuclear_repulsion_energy, int pccd_frozen_pairs,
+                                       int pccd_active_pairs,
+                                       const std::string& amplitude_solver_name,
+                                       const rerdmft::FullOptSettings& full_opt,
+                                       bool full_optimization_4c_neg,
+                                       std::chrono::steady_clock::time_point t_start,
+                                       std::chrono::steady_clock::time_point& t_checkpoint,
+                                       std::vector<TimingRecord>& timing_records,
+                                       const Eri* eri_full_block = nullptr) {
+  rerdmft::progressContext() = label;
+  const std::size_t n_total = h.rows();
+  const std::size_t n_spatial = n_active / 2;
+  const std::size_t n_pairs_total = n_active / 2;
+  auto toActualIndex = [&](std::size_t q) -> std::size_t {
+    if (label != "NON_REL") return n_inactive_below + q;
+    const std::size_t spatial_k = q / 2;
+    const std::size_t spin = q % 2;
+    return (spin == 0) ? spatial_k : (n_spatial + spatial_k);
+  };
+
+  const std::size_t n_core = static_cast<std::size_t>(std::max(0, pccd_frozen_pairs));
+  if (n_core > n_pairs_total) {
+    throw std::runtime_error(label + ": PCCD_FROZEN_PAIRS requests " + std::to_string(n_core) +
+                              " frozen pairs but only " + std::to_string(n_pairs_total) +
+                              " pairs are available");
+  }
+  const std::size_t n_window =
+      pccd_active_pairs >= 0 ? static_cast<std::size_t>(pccd_active_pairs) : n_pairs_total - n_core;
+  if (n_core + n_window > n_pairs_total) {
+    throw std::runtime_error(label + ": PCCD_FROZEN_PAIRS + PCCD_ACTIVE_PAIRS requests " +
+                              std::to_string(n_core + n_window) + " pairs but only " +
+                              std::to_string(n_pairs_total) + " are available");
+  }
+  const double electrons_active = n_electrons - 2.0 * static_cast<double>(n_core);
+  if (std::abs(electrons_active - std::round(electrons_active)) > 1e-6 ||
+      std::lround(electrons_active) % 2 != 0) {
+    throw std::runtime_error(label + ": NELEC - 2*PCCD_FROZEN_PAIRS = " +
+                              std::to_string(electrons_active) +
+                              " is not a nonnegative even integer (closed-shell pairs only)");
+  }
+  const std::size_t n_occ = static_cast<std::size_t>(std::lround(electrons_active)) / 2;
+  if (n_occ == 0 || n_occ >= n_window) {
+    throw std::runtime_error(label + ": PCCD_ACTIVE_PAIRS (" + std::to_string(n_window) +
+                              " pairs) must leave both an occupied and a virtual pCCD window "
+                              "(NELEC - 2*PCCD_FROZEN_PAIRS = " + std::to_string(2 * n_occ) +
+                              " electrons = " + std::to_string(n_occ) + " occupied pairs)");
+  }
+  const std::size_t n_vir = n_window - n_occ;
+
+  const std::size_t n_combined = n_core + n_occ + n_vir;
+  std::vector<std::size_t> reps(n_combined), bar(n_combined);
+  for (std::size_t k = 0; k < n_combined; ++k) {
+    reps[k] = toActualIndex(2 * k);
+    bar[k] = toActualIndex(2 * k + 1);
+  }
+
+  const auto functional_name = std::string("PCCD");
+  logTiming(label + " pCCD pairs resolved (PCCD_FROZEN_PAIRS " + std::to_string(pccd_frozen_pairs) +
+                ", PCCD_ACTIVE_PAIRS " + std::to_string(pccd_active_pairs) + ")",
+            t_start, t_checkpoint, timing_records);
+
+  rerdmft::PccdSettings amp_settings;
+  amp_settings.solver = (amplitude_solver_name == "LBFGS") ? rerdmft::PccdAmplitudeSolver::kLbfgs
+                                                           : rerdmft::PccdAmplitudeSolver::kNewton;
+
+  const auto coeff = rerdmft::buildPccdCoefficients(h, eri, reps, bar, n_core, n_occ, n_vir);
+  rerdmft::Matrix<double> t0(n_occ, n_vir, 0.0), z0(n_occ, n_vir, 0.0);
+  const auto t_result = rerdmft::solvePccdTAmplitudes(coeff, t0, amp_settings);
+  const auto z_result = rerdmft::solvePccdZAmplitudes(coeff, t_result.t, z0, amp_settings);
+  logTiming(label + " pCCD t-/z-amplitudes solved (" + amplitude_solver_name + ")", t_start,
+            t_checkpoint, timing_records);
+  const rerdmft::PccdRdm rdm = rerdmft::buildPccdRdm(t_result.t, z_result.z);
+  const double electronic_energy =
+      rerdmft::pccdReferenceEnergy(coeff) + rerdmft::pccdCorrelationEnergy(coeff, t_result.t);
+  const double total_energy = electronic_energy + nuclear_repulsion_energy;
+
+  std::vector<double> occupations(n_total, 0.0);
+  for (std::size_t k = 0; k < n_core; ++k) occupations[reps[k]] = occupations[bar[k]] = 1.0;
+  for (std::size_t k = 0; k < n_occ; ++k) {
+    occupations[reps[n_core + k]] = occupations[bar[n_core + k]] = rdm.n_occ[k];
+  }
+  for (std::size_t k = 0; k < n_vir; ++k) {
+    occupations[reps[n_core + n_occ + k]] = occupations[bar[n_core + n_occ + k]] = rdm.n_vir[k];
+  }
+
+  const auto printOcc = [&](std::ostream& o, const std::vector<double>& occ) {
+    o << "  Pairs: " << n_core << " frozen-core, " << n_occ << " occupied, " << n_vir
+      << " virtual (amplitude window); Amplitude solver: " << amplitude_solver_name << "\n";
+    o << std::fixed << std::setprecision(5);
+    for (std::size_t k = 0; k < n_core; ++k) {
+      o << "    core     geminal (" << reps[k] << "," << bar[k] << "): n = 1.00000 (frozen)\n";
+    }
+    for (std::size_t k = 0; k < n_occ; ++k) {
+      o << "    occupied geminal (" << reps[n_core + k] << "," << bar[n_core + k]
+        << "): n = " << occ[reps[n_core + k]] << "\n";
+    }
+    for (std::size_t k = 0; k < n_vir; ++k) {
+      o << "    virtual  geminal (" << reps[n_core + n_occ + k] << "," << bar[n_core + n_occ + k]
+        << "): n = " << occ[reps[n_core + n_occ + k]] << "\n";
+    }
+    o << std::defaultfloat << std::setprecision(6);
+  };
+
+  std::ostringstream out;
+  out << "\n" << label
+      << " pCCD RDMFT functional evaluation (Occ_opt/pCCD.h, on the converged HF/DHF orbitals):\n";
+  out << "  t-amplitudes " << (t_result.t_converged ? "converged" : "did NOT converge") << " ("
+      << t_result.t_iterations << " iter., ||R|| = " << std::scientific << std::setprecision(2)
+      << t_result.t_residual_norm << std::defaultfloat << std::setprecision(6) << ")\n";
+  out << "  z-amplitudes " << (z_result.z_converged ? "converged" : "did NOT converge") << " ("
+      << z_result.z_iterations << " iter., ||R|| = " << std::scientific << std::setprecision(2)
+      << z_result.z_residual_norm << std::defaultfloat << std::setprecision(6) << ")\n";
+  printOcc(out, occupations);
+  out << "  Total pCCD energy (fixed orbitals): " << std::setprecision(10) << total_energy
+      << " Hartree (electronic " << electronic_energy << ")" << std::setprecision(6) << "\n";
+
+  rerdmft::FullOptResult full_result;
+  if (full_opt.enabled) {
+    std::vector<double> state(2 * n_occ * n_vir, 0.0);
+    for (std::size_t i = 0; i < n_occ; ++i) {
+      for (std::size_t a = 0; a < n_vir; ++a) {
+        state[i * n_vir + a] = t_result.t(i, a);
+        state[n_occ * n_vir + i * n_vir + a] = z_result.z(i, a);
+      }
+    }
+    const bool kramers_restricted = (label == "X2C_HF" || label == "C4_DHF");
+    try {
+      full_result = rerdmft::runFullOptimizationPccd<T, Eri>(
+          h, eri, occupations, state, reps, bar, n_core, n_occ, n_vir, n_total, amp_settings,
+          full_opt, kramers_restricted, nuclear_repulsion_energy, out,
+          label == "NON_REL" ? blockSpinPartner(n_total) : std::vector<std::size_t>{},
+          /*n_negative=*/n_inactive_below);
+      out << "\n  FULL_OPTIMIZATION " << (full_result.checks_passed && full_result.converged ? "converged" : "did NOT converge")
+          << " after " << full_result.iterations << " macro-iteration(s): total energy "
+          << std::setprecision(10) << full_result.electronic_energy + nuclear_repulsion_energy
+          << " Hartree" << std::setprecision(6) << "\n";
+      out << "  Optimized pCCD occupations after FULL_OPTIMIZATION:\n";
+      printOcc(out, full_result.occupations);
+    } catch (const std::exception& e) {
+      out << "\n  FULL_OPTIMIZATION FAILED: " << e.what() << "\n";
+    }
+    // Min-max (C4_DHF) stage: same structure as buildPnofFunctionalReport's own block --
+    // starting from the positive-energy-only minimum above, NEO extends the orbital rotations to
+    // include the positive<->negative-energy pairs and targets the saddle point. Needs
+    // `full_result`'s own accumulated rotation AND the FULL (untrimmed) integrals.
+    if (label == "C4_DHF" && full_optimization_4c_neg) {
+      if (!(full_result.checks_passed && full_result.converged && full_result.total_rotation.rows() > 0)) {
+        out << "\n  FULL_OPTIMIZATION_4C_NEG skipped: the positive-energy-only optimization did not converge"
+               " (or a validation check failed).\n";
+      } else if (eri_full_block == nullptr) {
+        out << "\n  FULL_OPTIMIZATION_4C_NEG skipped: the integrals including the negative-energy block are not available.\n";
+      } else {
+        try {
+          out << "\n  FULL_OPTIMIZATION_4C_NEG: min-max stage. Starting from the positive-energy-only pCCD minimum above, orbital rotations now\n"
+                 "  include the positive <-> negative-energy pairs: NEO converges the orbitals to the saddle point of the order set by the\n"
+                 "  occupied positive-energy spinors, then the amplitudes are fully re-solved, macro-iterated.\n";
+          rerdmft::FullOptSettings saddle_settings = full_opt;
+          saddle_settings.orbital_optimizer = rerdmft::OrbitalOptimizer::kNeo;
+          saddle_settings.saddle.n_negative = n_inactive_below;
+          saddle_settings.saddle.start_rotation = full_result.total_rotation;
+          saddle_settings.saddle.start_energy = full_result.electronic_energy;
+          // The pair list (reps/bar) is unchanged -- `n_negative=0` just stops the trim, letting
+          // the negative-energy branch join the rotation (exactly runFullOptimizationPnof's own
+          // min-max call).
+          const auto saddle_result = rerdmft::runFullOptimizationPccd<T, Eri>(
+              h, *eri_full_block, full_result.occupations, full_result.occupation_state, reps, bar,
+              n_core, n_occ, n_vir, n_total, amp_settings, saddle_settings,
+              /*kramers_restricted=*/true, nuclear_repulsion_energy, out, std::vector<std::size_t>{},
+              /*n_negative=*/0);
+          out << "  FULL_OPTIMIZATION_4C_NEG " << (saddle_result.checks_passed && saddle_result.converged ? "converged" : "did NOT converge")
+              << ": total energy " << std::setprecision(10)
+              << saddle_result.electronic_energy + nuclear_repulsion_energy << std::setprecision(6) << " Hartree ("
+              << std::scientific << std::setprecision(3)
+              << saddle_result.electronic_energy - full_result.electronic_energy << std::defaultfloat << std::setprecision(6)
+              << " relative to the positive-energy-only minimum)\n";
+        } catch (const std::exception& e) {
+          out << "\n  FULL_OPTIMIZATION_4C_NEG FAILED: " << e.what() << "\n";
+        }
+      }
+    }
+  }
+  logTiming(label + " pCCD functional report complete", t_start, t_checkpoint, timing_records);
+  return out.str();
+}
+
 // FCIDUMP keyword (NON_RELATIVISTIC only): the real n x n spatial rotation FULL_OPTIMIZATION
 // applied is the top-left block of the spin-orbital rotation `capture.total_rotation` --
 // identical to the bottom-right block, since NON_REL's FULL_OPTIMIZATION always ties alpha and
@@ -3209,6 +3417,13 @@ int main(int argc, char** argv) {
         // The functional stage (occupation optimization, FULL_OPTIMIZATION) runs on the Cholesky vectors when
         // CHOLESKY TRUE, on the dense tensor otherwise.
         const auto nonrel_functional = [&](const auto& eri_any) {
+          if (isPccdFunctionalName(input.functional())) {
+            return buildPccdFunctionalReport(
+                "NON_REL", h_spin, eri_any, 2 * n_spatial, 0, input.n_electrons(),
+                nonrel_hf_result.nuclear_repulsion_energy, input.pccd_frozen_pairs(),
+                input.pccd_active_pairs(), input.pccd_amplitude_solver(), fullOptSettings(input),
+                input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records);
+          }
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(
                 "NON_REL", h_spin, eri_any, 2 * n_spatial, 0, input.n_electrons(),
@@ -3472,6 +3687,14 @@ int main(int argc, char** argv) {
       if (input.has_functional()) {
         rerdmft::RestartCapture x2c_restart;
         const auto x2c_functional = [&](const auto& eri_any) {
+          if (isPccdFunctionalName(input.functional())) {
+            return buildPccdFunctionalReport(
+                "X2C_HF", h_x2c_mo, eri_any, h_x2c_mo.rows(), 0, input.n_electrons(),
+                x2c_hf_result.nuclear_repulsion_energy, input.pccd_frozen_pairs(),
+                input.pccd_active_pairs(), input.pccd_amplitude_solver(), fullOptSettings(input),
+                input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records,
+                static_cast<decltype(&eri_any)>(nullptr));
+          }
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(
                 "X2C_HF", h_x2c_mo, eri_any, h_x2c_mo.rows(), 0, input.n_electrons(),
@@ -3792,6 +4015,13 @@ int main(int argc, char** argv) {
             dhf_result.orbital_energies.end());
         rerdmft::RestartCapture c4_restart;
         const auto dhf_functional = [&](const auto& eri_any, const auto* eri_full) {
+          if (isPccdFunctionalName(input.functional())) {
+            return buildPccdFunctionalReport(
+                "C4_DHF", h_mo, eri_any, h_mo.rows() - n_negative, n_negative, input.n_electrons(),
+                dhf_result.nuclear_repulsion_energy, input.pccd_frozen_pairs(),
+                input.pccd_active_pairs(), input.pccd_amplitude_solver(), fullOptSettings(input),
+                input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, eri_full);
+          }
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(
                 "C4_DHF", h_mo, eri_any, h_mo.rows() - n_negative, n_negative, input.n_electrons(),

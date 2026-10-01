@@ -22,6 +22,8 @@
 #include "LinearAlgebra.h"
 #include "OccupationEnergy.h"
 #include "OrbitalGradient.h"
+#include "PccdFock.h"
+#include "PccdHessian.h"
 #include "PnofFock.h"
 #include "Progress.h"
 #include "PnofHessian.h"
@@ -349,6 +351,91 @@ Matrix<double> pnofHessianMatrixImpl(PnofFunctional functional, const std::vecto
     m = pnofHessianMatrix(functional, h, eri, geminals, occ, relativistic, fock, pair_indices);
   } else {
     m = pnofJointHessianMatrix(functional, h, eri, geminals, occ, relativistic, fock, pair_indices);
+  }
+  Matrix<double> sym(m.rows(), m.cols());
+  for (std::size_t i = 0; i < m.rows(); ++i)
+    for (std::size_t j = 0; j < m.cols(); ++j) sym(i, j) = 0.5 * (m(i, j) + m(j, i));
+  return sym;
+}
+
+// The pCCD counterparts of pnofHessianDiagonalImpl/pnofHessianVectorImpl/pnofHessianMatrixImpl
+// above -- same structure (real T: direct per-element sum/symmetrization; complex T: the joint
+// [t;y] functions), substituting pccdFockMatrix/pccdHessianMatrix/pccdJointHessianVector/
+// pccdJointHessianDiagonal/pccdJointHessianMatrix for their PNOF counterparts. `full`/`pair_of`
+// are the caller's cached full two-RDM (makePccdModel's own `cachedTwoRdm`, keyed by `occ`
+// exactly like PNOF's); `rdm` (pair-indexed, NOT the unfolded `full`) is only needed to rebuild
+// `fock` via pccdFockMatrix.
+template <typename T, typename EriT>
+std::vector<double> pccdHessianDiagonalImpl(const std::vector<std::size_t>& reps,
+                                            const std::vector<std::size_t>& bar, std::size_t n_core,
+                                            std::size_t n_occ, std::size_t n_vir, const PccdRdm& rdm,
+                                            const PccdFullTwoRdm& full,
+                                            const std::vector<std::size_t>& pair_of,
+                                            const std::vector<Pair>& pair_indices, const Matrix<T>& h,
+                                            const EriT& eri, const std::vector<double>& occ) {
+  const auto fock = pccdFockMatrix(h, eri, reps, bar, n_core, n_occ, n_vir, rdm, occ);
+  if constexpr (std::is_same_v<T, double>) {
+    const std::size_t n_pairs = pair_indices.size();
+    std::vector<double> d(n_pairs, 0.0);
+#pragma omp parallel for
+    for (std::size_t i = 0; i < n_pairs; ++i) {
+      const auto& [p, q] = pair_indices[i];
+      d[i] = hartreeExchangeHessianElement(h, eri, occ, full.two_rdm_h, full.two_rdm_x, fock, p, q, p, q,
+                                           pair_of, full.two_rdm_l1, full.two_rdm_l2);
+    }
+    return d;
+  } else {
+    return hartreeExchangeJointHessianDiagonal(h, eri, occ, full.two_rdm_h, full.two_rdm_x, fock, pair_indices,
+                                               pair_of, full.two_rdm_l1, full.two_rdm_l2);
+  }
+}
+
+template <typename T, typename EriT>
+std::vector<double> pccdHessianVectorImpl(const std::vector<std::size_t>& reps,
+                                          const std::vector<std::size_t>& bar, std::size_t n_core,
+                                          std::size_t n_occ, std::size_t n_vir, const PccdRdm& rdm,
+                                          const PccdFullTwoRdm& full,
+                                          const std::vector<std::size_t>& pair_of,
+                                          const std::vector<Pair>& pair_indices, const Matrix<T>& h,
+                                          const EriT& eri, const std::vector<double>& occ,
+                                          const std::vector<double>& v) {
+  const auto fock = pccdFockMatrix(h, eri, reps, bar, n_core, n_occ, n_vir, rdm, occ);
+  if constexpr (std::is_same_v<T, double>) {
+    const std::size_t n_pairs = pair_indices.size();
+    if (v.size() != n_pairs) throw std::runtime_error("pCCD hessian_vector: v has the wrong size");
+    std::vector<double> w(n_pairs, 0.0);
+#pragma omp parallel for
+    for (std::size_t i = 0; i < n_pairs; ++i) {
+      const auto& [p, q] = pair_indices[i];
+      double acc = 0.0;
+      for (std::size_t j = 0; j < n_pairs; ++j) {
+        const auto& [r, s] = pair_indices[j];
+        const double e_ij = hartreeExchangeHessianElement(h, eri, occ, full.two_rdm_h, full.two_rdm_x, fock,
+                                                          p, q, r, s, pair_of, full.two_rdm_l1, full.two_rdm_l2);
+        const double e_ji = hartreeExchangeHessianElement(h, eri, occ, full.two_rdm_h, full.two_rdm_x, fock,
+                                                          r, s, p, q, pair_of, full.two_rdm_l1, full.two_rdm_l2);
+        acc += 0.5 * (e_ij + e_ji) * v[j];
+      }
+      w[i] = acc;
+    }
+    return w;
+  } else {
+    return pccdJointHessianVector(h, eri, reps, bar, n_core, n_occ, n_vir, rdm, occ, fock, pair_indices, v);
+  }
+}
+
+template <typename T>
+Matrix<double> pccdHessianMatrixImpl(const std::vector<std::size_t>& reps,
+                                     const std::vector<std::size_t>& bar, std::size_t n_core,
+                                     std::size_t n_occ, std::size_t n_vir, const PccdRdm& rdm,
+                                     const std::vector<Pair>& pair_indices, const Matrix<T>& h,
+                                     const Tensor4<T>& eri, const std::vector<double>& occ) {
+  const auto fock = pccdFockMatrix(h, eri, reps, bar, n_core, n_occ, n_vir, rdm, occ);
+  Matrix<double> m;
+  if constexpr (std::is_same_v<T, double>) {
+    m = pccdHessianMatrix(h, eri, reps, bar, n_core, n_occ, n_vir, rdm, occ, fock, pair_indices);
+  } else {
+    m = pccdJointHessianMatrix(h, eri, reps, bar, n_core, n_occ, n_vir, rdm, occ, fock, pair_indices);
   }
   Matrix<double> sym(m.rows(), m.cols());
   for (std::size_t i = 0; i < m.rows(); ++i)
@@ -699,6 +786,146 @@ RdmftModel<T, Eri> makePnofModel(PnofFunctional functional, std::vector<PnofGemi
     const auto res = solveLbfgs(value_fn, gradient_fn, state);
     state = res.x;
     return RdmftOccupationResult{embedGammas(res.x), res.objective_value, res.converged, res.iterations};
+  };
+  return model;
+}
+
+template <typename T, typename Eri>
+RdmftModel<T, Eri> makePccdModel(std::vector<std::size_t> reps, std::vector<std::size_t> bar,
+                                  std::size_t n_core, std::size_t n_occ, std::size_t n_vir,
+                                  std::size_t n_total, PccdSettings amplitude_settings) {
+  RdmftModel<T, Eri> model;
+  const auto pair_of = buildPccdPairOf(reps, bar, n_total);
+
+  // Unlike PNOF/JK_only's own closures, pCCD's 2-RDM is NOT a function of `occ` alone -- it needs
+  // the converged t-/z-amplitudes too, which `optimize_occupations` (below) solves and stashes
+  // here for `energy`/`gradient` to read. Fixed (not re-solved) during the ADAM/NEO orbital-
+  // rotation phase, exactly like PNOF/JK_only's own `occ` is fixed then -- see makePccdModel's
+  // own header comment.
+  struct AmplitudeCache {
+    PccdRdm rdm;
+    bool valid = false;
+  };
+  const auto cache = std::make_shared<AmplitudeCache>();
+
+  model.print_occupations = [=](const std::vector<double>& occ, std::ostream& out) {
+    out << "    Optimized pCCD occupation numbers (n_p, both members of each Kramers/spin pair "
+           "share this value; fixed 5 decimals):\n";
+    out << std::fixed << std::setprecision(5);
+    for (std::size_t a = 0; a < n_core; ++a) {
+      out << "      core     geminal (" << reps[a] << "," << bar[a] << "): n = 1.00000 (frozen)\n";
+    }
+    for (std::size_t a = n_core; a < n_core + n_occ; ++a) {
+      out << "      occupied geminal (" << reps[a] << "," << bar[a] << "): n = " << occ[reps[a]]
+          << "\n";
+    }
+    for (std::size_t a = n_core + n_occ; a < n_core + n_occ + n_vir; ++a) {
+      out << "      virtual  geminal (" << reps[a] << "," << bar[a] << "): n = " << occ[reps[a]]
+          << "\n";
+    }
+    out << std::defaultfloat << std::setprecision(6);
+  };
+
+  model.energy = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ) {
+    if (!cache->valid) {
+      throw std::runtime_error(
+          "makePccdModel: energy called before the amplitudes were ever solved "
+          "(optimize_occupations must run at least once first)");
+    }
+    const auto full = buildPccdFullTwoRdm(reps, bar, n_core, n_occ, n_vir, cache->rdm, occ, n_total);
+    return hartreeExchangeEnergy(h, eri, occ, full.two_rdm_h, full.two_rdm_x, pair_of,
+                                 full.two_rdm_l1, full.two_rdm_l2);
+  };
+  model.gradient = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ) {
+    if (!cache->valid) {
+      throw std::runtime_error("makePccdModel: gradient called before the amplitudes were ever solved");
+    }
+    return orbitalGradient(pccdFockMatrix(h, eri, reps, bar, n_core, n_occ, n_vir, cache->rdm, occ));
+  };
+
+  {
+    // Cache of buildPccdFullTwoRdm's own output, keyed by `occ` (cache->rdm changes only when
+    // optimize_occupations runs, which also changes `occ` -- so keying on `occ` alone is exactly
+    // equivalent and lets this reuse PNOF's own TwoRdmCache idiom unchanged): built once per
+    // occupation vector and reused for every Hessian-vector product (each Davidson iteration of
+    // every Newton step) instead of per element, exactly like makePnofModel's own cache.
+    struct TwoRdmCache {
+      std::vector<double> occ;
+      PccdFullTwoRdm full;
+      bool valid = false;
+    };
+    const auto rdm_cache = std::make_shared<TwoRdmCache>();
+    const auto cachedTwoRdm = [=](const std::vector<double>& occ) -> const PccdFullTwoRdm& {
+      if (!rdm_cache->valid || rdm_cache->occ != occ) {
+        rdm_cache->full = buildPccdFullTwoRdm(reps, bar, n_core, n_occ, n_vir, cache->rdm, occ, n_total);
+        rdm_cache->occ = occ;
+        rdm_cache->valid = true;
+      }
+      return rdm_cache->full;
+    };
+    const auto pair_indices = lowerPairs(n_total, 0);
+    model.hessian_vector = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ,
+                               const std::vector<double>& v) {
+      return pccdHessianVectorImpl(reps, bar, n_core, n_occ, n_vir, cache->rdm, cachedTwoRdm(occ),
+                                   pair_of, pair_indices, h, eri, occ, v);
+    };
+    model.hessian_vector_dense = [=](const Matrix<T>& h, const Tensor4<T>& eri,
+                                     const std::vector<double>& occ, const std::vector<double>& v) {
+      return pccdHessianVectorImpl(reps, bar, n_core, n_occ, n_vir, cache->rdm, cachedTwoRdm(occ),
+                                   pair_of, pair_indices, h, eri, occ, v);
+    };
+    model.hessian_diagonal = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ) {
+      return pccdHessianDiagonalImpl(reps, bar, n_core, n_occ, n_vir, cache->rdm, cachedTwoRdm(occ),
+                                     pair_of, pair_indices, h, eri, occ);
+    };
+    model.hessian_diagonal_dense = [=](const Matrix<T>& h, const Tensor4<T>& eri, const std::vector<double>& occ) {
+      return pccdHessianDiagonalImpl(reps, bar, n_core, n_occ, n_vir, cache->rdm, cachedTwoRdm(occ),
+                                     pair_of, pair_indices, h, eri, occ);
+    };
+    model.hessian_matrix = [=](const Matrix<T>& h, const Tensor4<T>& eri, const std::vector<double>& occ) {
+      return pccdHessianMatrixImpl(reps, bar, n_core, n_occ, n_vir, cache->rdm, pair_indices, h, eri, occ);
+    };
+  }
+
+  model.optimize_occupations = [=](const Matrix<T>& h, const Eri& eri, std::vector<double>& state) {
+    const auto coeff = buildPccdCoefficients(h, eri, reps, bar, n_core, n_occ, n_vir);
+    Matrix<double> t0(n_occ, n_vir, 0.0), z0(n_occ, n_vir, 0.0);
+    // `state`: the flattened [t; z] warm start from the PREVIOUS macro-iteration's amplitude
+    // solve (zero on the very first call -- a valid, if slower-converging, starting point).
+    if (state.size() == 2 * n_occ * n_vir) {
+      for (std::size_t i = 0; i < n_occ; ++i) {
+        for (std::size_t a = 0; a < n_vir; ++a) {
+          t0(i, a) = state[i * n_vir + a];
+          z0(i, a) = state[n_occ * n_vir + i * n_vir + a];
+        }
+      }
+    }
+    const auto t_result = solvePccdTAmplitudes(coeff, t0, amplitude_settings);
+    const auto z_result = solvePccdZAmplitudes(coeff, t_result.t, z0, amplitude_settings);
+    const PccdRdm rdm = buildPccdRdm(t_result.t, z_result.z);
+    cache->rdm = rdm;
+    cache->valid = true;
+
+    std::vector<double> occ(n_total, 0.0);
+    for (std::size_t a = 0; a < n_core; ++a) occ[reps[a]] = occ[bar[a]] = 1.0;
+    for (std::size_t i = 0; i < n_occ; ++i) occ[reps[n_core + i]] = occ[bar[n_core + i]] = rdm.n_occ[i];
+    for (std::size_t a = 0; a < n_vir; ++a) {
+      occ[reps[n_core + n_occ + a]] = occ[bar[n_core + n_occ + a]] = rdm.n_vir[a];
+    }
+
+    state.assign(2 * n_occ * n_vir, 0.0);
+    for (std::size_t i = 0; i < n_occ; ++i) {
+      for (std::size_t a = 0; a < n_vir; ++a) {
+        state[i * n_vir + a] = t_result.t(i, a);
+        state[n_occ * n_vir + i * n_vir + a] = z_result.z(i, a);
+      }
+    }
+
+    const double electronic_energy =
+        pccdReferenceEnergy(coeff) + pccdCorrelationEnergy(coeff, t_result.t);
+    const bool converged = t_result.t_converged && z_result.z_converged;
+    const int iterations = t_result.t_iterations + z_result.z_iterations;
+    return RdmftOccupationResult{occ, electronic_energy, converged, iterations};
   };
   return model;
 }
@@ -2438,5 +2665,87 @@ template FullOptResult runFullOptimizationPnof<std::complex<double>>(
     const std::vector<PnofGeminal>&, std::size_t, int, int, bool, bool, std::size_t,
     const FullOptSettings&, bool, double, std::ostream&, const std::vector<std::size_t>&,
     std::size_t);
+
+// makePccdModel + runFullOptimization -- see FullOptimization.h's own header comment on this
+// function for how it covers NON_REL/X2C_HF/C4_DHF uniformly. The n_negative>0 (C4_DHF no-pair)
+// branch mirrors runFullOptimizationPnof's own EXACTLY (trim to the positive-energy block, shift
+// the pair-representative indices, recurse, then embed the trimmed result back), substituting a
+// plain `-n_negative` shift of `reps`/`bar` for a PnofGeminal's `.i`/`.ibar` shift -- `reps`/`bar`
+// carry no other state that needs adjusting.
+template <typename T, typename Eri>
+FullOptResult runFullOptimizationPccd(const Matrix<T>& h, const Eri& eri,
+                                      const std::vector<double>& occupations,
+                                      const std::vector<double>& state,
+                                      const std::vector<std::size_t>& reps,
+                                      const std::vector<std::size_t>& bar, std::size_t n_core,
+                                      std::size_t n_occ, std::size_t n_vir, std::size_t n_total,
+                                      const PccdSettings& amplitude_settings,
+                                      const FullOptSettings& settings, bool kramers_restricted,
+                                      double nuclear_repulsion_energy, std::ostream& log,
+                                      const std::vector<std::size_t>& spin_partner,
+                                      std::size_t n_negative) {
+  if (n_negative > 0) {
+    log << "\n  No-pair treatment: the " << n_negative << " negative-energy indices take no part in the optimization, so the loop runs on the\n"
+           "  positive-energy block alone (" << n_total - n_negative << " spinors) and the result is embedded back.\n";
+    std::vector<std::size_t> shifted_reps = reps, shifted_bar = bar;
+    for (std::size_t a = 0; a < shifted_reps.size(); ++a) {
+      if (shifted_reps[a] < n_negative || shifted_bar[a] < n_negative) {
+        throw std::runtime_error("FULL_OPTIMIZATION: a pCCD pair touches the negative-energy branch");
+      }
+      shifted_reps[a] -= n_negative;
+      shifted_bar[a] -= n_negative;
+    }
+    return embedTrimmedResult(
+        runFullOptimizationPccd<T>(positiveBlock(h, n_negative), positiveBlock(eri, n_negative),
+                                   std::vector<double>(occupations.begin() + static_cast<std::ptrdiff_t>(n_negative), occupations.end()),
+                                   state, shifted_reps, shifted_bar, n_core, n_occ, n_vir, n_total - n_negative,
+                                   amplitude_settings, withRoundoffScale(settings, h), kramers_restricted,
+                                   nuclear_repulsion_energy, log, spin_partner, 0),
+        n_negative, n_total);
+  }
+  const auto model = makePccdModel<T, Eri>(reps, bar, n_core, n_occ, n_vir, n_total, amplitude_settings);
+  // Pre-populate the model's amplitude cache (see makePccdModel's own header comment: unlike
+  // PNOF/JK_only, energy/gradient are NOT pure functions of `occ` alone) by solving the
+  // amplitudes once at the STARTING integrals before runChecks/the macro loop ever calls
+  // model.gradient -- `state` already carries a warm start (the caller's own amplitude solve),
+  // so this should converge in very few iterations, not redo real work.
+  static_cast<void>(occupations);  // superseded by warm_up.occupations below
+  std::vector<double> warm_state = state;
+  const auto warm_up = model.optimize_occupations(h, eri, warm_state);
+  return runFullOptimization<T, Eri>(h, eri, warm_up.occupations, warm_state, model, settings,
+                                     kramers_restricted, nuclear_repulsion_energy, log,
+                                     spin_partner, /*n_negative=*/0);
+}
+
+template FullOptResult runFullOptimizationPccd<double, Tensor4<double>>(
+    const Matrix<double>&, const Tensor4<double>&, const std::vector<double>&,
+    const std::vector<double>&, const std::vector<std::size_t>&, const std::vector<std::size_t>&,
+    std::size_t, std::size_t, std::size_t, std::size_t, const PccdSettings&,
+    const FullOptSettings&, bool, double, std::ostream&, const std::vector<std::size_t>&, std::size_t);
+template FullOptResult runFullOptimizationPccd<double, CholeskyEri<double>>(
+    const Matrix<double>&, const CholeskyEri<double>&, const std::vector<double>&,
+    const std::vector<double>&, const std::vector<std::size_t>&, const std::vector<std::size_t>&,
+    std::size_t, std::size_t, std::size_t, std::size_t, const PccdSettings&,
+    const FullOptSettings&, bool, double, std::ostream&, const std::vector<std::size_t>&, std::size_t);
+template FullOptResult runFullOptimizationPccd<double, SymmetricEri<double>>(
+    const Matrix<double>&, const SymmetricEri<double>&, const std::vector<double>&,
+    const std::vector<double>&, const std::vector<std::size_t>&, const std::vector<std::size_t>&,
+    std::size_t, std::size_t, std::size_t, std::size_t, const PccdSettings&,
+    const FullOptSettings&, bool, double, std::ostream&, const std::vector<std::size_t>&, std::size_t);
+template FullOptResult runFullOptimizationPccd<std::complex<double>, Tensor4<std::complex<double>>>(
+    const Matrix<std::complex<double>>&, const Tensor4<std::complex<double>>&, const std::vector<double>&,
+    const std::vector<double>&, const std::vector<std::size_t>&, const std::vector<std::size_t>&,
+    std::size_t, std::size_t, std::size_t, std::size_t, const PccdSettings&,
+    const FullOptSettings&, bool, double, std::ostream&, const std::vector<std::size_t>&, std::size_t);
+template FullOptResult runFullOptimizationPccd<std::complex<double>, CholeskyEri<std::complex<double>>>(
+    const Matrix<std::complex<double>>&, const CholeskyEri<std::complex<double>>&, const std::vector<double>&,
+    const std::vector<double>&, const std::vector<std::size_t>&, const std::vector<std::size_t>&,
+    std::size_t, std::size_t, std::size_t, std::size_t, const PccdSettings&,
+    const FullOptSettings&, bool, double, std::ostream&, const std::vector<std::size_t>&, std::size_t);
+template FullOptResult runFullOptimizationPccd<std::complex<double>, SymmetricEri<std::complex<double>>>(
+    const Matrix<std::complex<double>>&, const SymmetricEri<std::complex<double>>&, const std::vector<double>&,
+    const std::vector<double>&, const std::vector<std::size_t>&, const std::vector<std::size_t>&,
+    std::size_t, std::size_t, std::size_t, std::size_t, const PccdSettings&,
+    const FullOptSettings&, bool, double, std::ostream&, const std::vector<std::size_t>&, std::size_t);
 
 }  // namespace rerdmft

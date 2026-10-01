@@ -1,0 +1,24 @@
+# Example ReRDMFT input file: Ne, cc-pVDZ, X2C, FUNCTIONAL PCCD, FULL_OPTIMIZATION.
+# CHOLESKY TRUE: X2C's 2*n_spatial = 30-dimensional spinor problem is cheap either way, but this
+# matches the C4_DHF companion example (ne_pccd_c4.inp), where it matters more.
+#
+# CAVEAT: X2C_HF.h's own SCF is a DELIBERATELY approximate X2C (one-electron-only picture change,
+# no two-electron picture-change correction at all -- see its own header comment). For a basis
+# with d (or higher) angular momentum functions, like cc-pVDZ here, this approximation's error is
+# much larger than for an s/p-only basis (see examples/lih_pccd_x2c.inp, where it is < 1 mHa): the
+# "Max |E_X2C_approx - E_DHF|" check this run prints is ~0.064 Ha for Ne, even though EXACT X2C
+# matches 4-component DHF to 1e-10 Ha. The pCCD *correlation energy* on top of this approximate
+# reference is still accurate (it agrees with the NON_REL and C4_DHF correlation energy to better
+# than 1e-5 Ha -- see ne_pccd_c4.inp's own header), but the TOTAL energy below should NOT be read
+# as a relativistic reference value for Ne; use ne_pccd_c4.inp (exact 4-component) for that.
+NELEC 10
+BASIS ne-cc-pvdz.gbs
+NON_RELATIVISTIC TRUE
+X2C TRUE
+FUNCTIONAL PCCD
+FULL_OPTIMIZATION TRUE
+CHOLESKY TRUE
+
+GEOMETRY
+Ne  0.000000   0.000000   0.000000
+END

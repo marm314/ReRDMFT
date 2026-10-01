@@ -152,6 +152,25 @@ test_pnof_gradient: $(BUILD_DIR)/test_pnof_gradient
 $(BUILD_DIR)/test_pnof_gradient: tests/test_pnof_occupation_gradient.cpp $(BUILD_DIR)/PNOFs.o $(BUILD_DIR)/Orb_subspaces.o $(BUILD_DIR)/StringUtils.o $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
+# Unit test of Occ_opt/pCCD.h: pccdTJacobian vs finite differences, the exact 2-pair
+# analytic t-/z-amplitude solution, and the RDM-level energy cross-check.
+.PHONY: test_pccd
+test_pccd: $(BUILD_DIR)/test_pccd
+	./$(BUILD_DIR)/test_pccd
+
+$(BUILD_DIR)/test_pccd: tests/test_pccd_amplitudes.cpp $(BUILD_DIR)/pCCD.o $(BUILD_DIR)/LinearAlgebra.o $(BUILD_DIR)/LBFGS.o $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
+# Unit test of Hessian_opt/PccdFock.h's buildPccdFullTwoRdm: energy from the unfolded
+# full-orbital two_rdm_h/x/l1/l2 matrices vs Occ_opt/pCCD.h's own pccdReferenceEnergy +
+# pccdCorrelationEnergy, on synthetic NON_REL spin-orbital data.
+.PHONY: test_pccd_fock
+test_pccd_fock: $(BUILD_DIR)/test_pccd_fock
+	./$(BUILD_DIR)/test_pccd_fock
+
+$(BUILD_DIR)/test_pccd_fock: tests/test_pccd_fock.cpp $(BUILD_DIR)/pCCD.o $(BUILD_DIR)/PccdFock.o $(BUILD_DIR)/HartreeExchangeGradient.o $(BUILD_DIR)/LinearAlgebra.o $(BUILD_DIR)/LBFGS.o $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
 # Unit test of Utils/KramersPairing (exact Kramers re-pairing of degenerate clusters).
 .PHONY: test_kramers_pairing
 test_kramers_pairing: $(BUILD_DIR)/test_kramers_pairing

@@ -253,6 +253,28 @@ class Input {
   // 0 < NELEC - 2*JK_FROZEN_PAIRS < 2*JK_ACTIVE_PAIRS for an interior-feasible SQP box) is
   // checked in main.cpp, once the basis size is known.
   int jk_active_pairs() const { return jk_active_pairs_; }
+  // Optional; defaults to 0 when PCCD_FROZEN_PAIRS is absent. Only meaningful for FUNCTIONAL
+  // PCCD -- the pCCD counterpart of jk_frozen_pairs() above, SAME convention (aufbau-ordered,
+  // counted in pairs, pinned at exactly occupation 1, never a t-/z-amplitude variable: a
+  // frozen-core pCCD pair, not an occupation-optimization one -- there is no occupation
+  // optimization to freeze out of in the first place).
+  int pccd_frozen_pairs() const { return pccd_frozen_pairs_; }
+  // Optional; defaults to -1 (sentinel: "all remaining orbitals") when PCCD_ACTIVE_PAIRS is
+  // absent. Only meaningful for FUNCTIONAL PCCD, together with pccd_frozen_pairs() above: the
+  // NEXT 2*PCCD_ACTIVE_PAIRS spin-orbitals/spinors by energy become the t-/z-amplitude window
+  // (split by main.cpp into occupied/virtual pairs at NELEC - 2*PCCD_FROZEN_PAIRS electrons);
+  // every orbital above that window is deep virtual, excluded entirely (not even a frozen-at-0
+  // pair pCCD ever builds coefficients for). Counted in pairs, same reasoning as
+  // jk_active_pairs()'s own comment. Must be at least 1 when explicitly given.
+  int pccd_active_pairs() const { return pccd_active_pairs_; }
+  // Optional; defaults to "NEWTON" when PCCD_AMPLITUDE_SOLVER is absent. Selects how
+  // Occ_opt/pCCD.h's solvePccdTAmplitudes/solvePccdZAmplitudes drive the t-/z-amplitude residue
+  // equations to zero: NEWTON (exact Newton-Raphson, rebuilding and directly solving the
+  // analytic Jacobian every iteration -- quadratically convergent, the default) or LBFGS
+  // (Utils/LBFGS.h minimizing 0.5*||residual||^2 with the exact chain-rule gradient, no
+  // Jacobian ever solved). Case-insensitive, validated against this exact list, throws
+  // otherwise. Only meaningful for FUNCTIONAL PCCD.
+  const std::string& pccd_amplitude_solver() const { return pccd_amplitude_solver_; }
   // Optional; defaults to 1 when PNOF_SUBSPACES is absent. How many
   // independent PNOF-style (Piris) coupling subspaces to build
   // (Occ_opt/Orb_subspaces.h), one per occupied orbital PAIR outward
@@ -425,6 +447,9 @@ class Input {
   bool fixed_occupancies_ = false;
   bool read_occupancies_ = false;
   bool full_optimization_4c_neg_ = false;
+  int pccd_frozen_pairs_ = 0;
+  int pccd_active_pairs_ = -1;
+  std::string pccd_amplitude_solver_ = "NEWTON";
 };
 
 }  // namespace rerdmft
