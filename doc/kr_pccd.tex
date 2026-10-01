@@ -1,0 +1,519 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{amsmath,amssymb,bm,booktabs}
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue]{hyperref}
+
+\newcommand{\kb}[1]{\bar{#1}}                 % Kramers partner
+\newcommand{\Pd}[1]{P^{\dagger}_{#1}}
+\newcommand{\Pa}[1]{P_{#1}}
+\newcommand{\braket}[2]{\langle #1 | #2 \rangle}
+\newcommand{\asym}[4]{\langle #1 #2 \| #3 #4 \rangle}
+\newcommand{\dir}[4]{\langle #1 #2 | #3 #4 \rangle}
+\newcommand{\ev}[1]{\langle #1 \rangle}
+
+\title{Kramers-restricted relativistic pCCD:\\ amplitude equations, $\Lambda$ equations and density matrices}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\noindent Generalisation of Henderson, Bulik, Stein, Scuseria, J.~Chem.~Phys.~\textbf{141}, 244104 (2014)
+(henceforth HBSS) to a Kramers-restricted spinor basis including spin--orbit coupling
+(2c, X2C or 4c no-pair). Orbital gradient and Hessian are not given; only the quantities entering them
+($\gamma$ and $\Gamma$).
+
+%=====================================================================
+\section{Conventions}
+%=====================================================================
+
+\paragraph{Kramers basis.}
+Spinors come in Kramers pairs $\{\phi_p,\phi_{\kb p}\}$ with
+\begin{equation}
+  \phi_{\kb p} = \mathcal{K}\phi_p,\qquad \mathcal{K}\phi_{\kb p} = -\phi_p,\qquad \mathcal{K}^2=-1 ,
+\end{equation}
+e.g.\ $\mathcal{K}=-i\sigma_y\mathcal{C}_0$ (2c) or $-i(\sigma_y\oplus\sigma_y)\mathcal{C}_0$ (4c).
+Lower-case indices label Kramers \emph{pairs}: $i,j$ occupied, $a,b$ virtual, $p,q,r,s$ general.
+Upper-case $P,Q,R,S$ label individual spinors ($P\in\{p,\kb p\}$).
+The number of pairs is $n$, the number of electrons $N=2\,n_{\rm occ}$.
+
+\paragraph{Pair operators and seniority.}
+\begin{equation}
+  \Pd p = a^\dagger_p a^\dagger_{\kb p},\qquad
+  \Pa p = (\Pd p)^\dagger = a_{\kb p}\,a_p,\qquad
+  N_p = \Pd p\Pa p ,
+\end{equation}
+and seniority is $\Omega=\hat N-2\sum_p \hat n_p\hat n_{\kb p}$.
+On the seniority-zero space $N_p\in\{0,1\}$ is the \emph{pair} occupation and
+$\hat n_p=\hat n_{\kb p}=N_p$.
+The pair operators are hard-core bosons,
+$[\Pa p,\Pd q]=\delta_{pq}(1-2N_p)$ on this space (the same algebra as for $\uparrow\downarrow$ pairs).
+
+Note that $\Pd p$ is invariant under the phase freedom $\phi_p\to e^{i\theta}\phi_p$
+(which implies $\phi_{\kb p}\to e^{-i\theta}\phi_{\kb p}$) and, more generally, under any
+$SU(2)$ rotation inside the Kramers pair. All pair quantities below are therefore invariant
+under the Kramers-restricted (quaternion) gauge freedom, \emph{provided} $\phi_{\kb p}=\mathcal K\phi_p$
+is enforced exactly (it is automatic for quaternion-structured MO coefficients; it is \emph{not}
+automatic in a GHF/DHF code that does not impose Kramers symmetry).
+
+\paragraph{Hamiltonian and integrals.}
+\begin{equation}
+  H=\sum_{PQ} h_{PQ}\,a^\dagger_P a_Q+\frac12\sum_{PQRS}\dir PQRS\, a^\dagger_P a^\dagger_Q a_S a_R ,
+  \qquad \dir PQRS = (PR|QS),
+\end{equation}
+$\asym PQRS=\dir PQRS-\dir PQSR$.
+For a time-reversal-even Hamiltonian, $\langle\mathcal K A|h|\mathcal K B\rangle=h_{BA}$ and
+$\dir{\mathcal KA}{\mathcal KB}{\mathcal KC}{\mathcal KD}=\dir ABCD^{*}=\dir CDAB$; in particular
+$h_{\kb p\kb p}=h_{pp}\in\mathbb R$.
+Coulomb, exchange and ``opposite-Kramers'' exchange integrals are
+\begin{equation}
+  J_{pq}=(pp|qq),\qquad K_{pq}=(pq|qp)=\!\int\!\!\int\frac{\rho_{pq}(1)\,\rho_{pq}^{*}(2)}{r_{12}},\qquad
+  K_{p\kb q}=(p\kb q|\kb q p)=\!\int\!\!\int\frac{\rho_{p\kb q}(1)\,\rho_{p\kb q}^{*}(2)}{r_{12}},
+\end{equation}
+with $\rho_{AB}=\phi_A^\dagger\phi_B$. For a spin-free scalar kernel (Coulomb), using
+$\rho_{\kb p\kb q}=\rho_{qp}$ and $\rho_{p\kb q}=-\rho_{q\kb p}$ (hence $\rho_{p\kb p}\equiv 0$ pointwise):
+\begin{equation}
+  J_{p\kb q}=J_{pq},\qquad K_{p\kb p}=0,\qquad K_{pq}\ge 0,\quad K_{p\kb q}\ge 0 .
+  \label{eq:coulrel}
+\end{equation}
+In the nonrelativistic limit ($\phi_p=\varphi_p\alpha$, $\phi_{\kb p}=\varphi_p\beta$) $K_{p\kb q}=0$;
+with spin--orbit coupling $K_{p\kb q}\neq 0$ --- this is the opposite-spin exchange.
+
+%=====================================================================
+\section{Seniority-zero Hamiltonian}
+%=====================================================================
+
+Because $|0\rangle$, $T$ and $Z$ are all seniority-zero, every quantity in pCCD
+($E$, residuals, $\Lambda$ equations, $\gamma$, $\Gamma$) involves only the block of $H$ between
+seniority-zero states. Acting on that space, the only surviving terms of $H$ are
+(i) diagonal one-body terms, (ii) density--density terms between spinors, and
+(iii) pair transfer $\Pd p\Pa q$ (terms such as $a^\dagger_p a^\dagger_q a_{\kb q} a_{\kb p}$ or
+$a^\dagger_p a_{\kb p}$ annihilate every seniority-zero state). One obtains
+\begin{equation}
+  \boxed{\;
+  H_{\Omega=0}=\sum_p \varepsilon_p N_p+\sum_{p\neq q} G_{pq}\,\Pd p\Pa q
+  +\frac12\sum_{p\neq q} W_{pq}\,N_pN_q \;}
+  \label{eq:Hsz}
+\end{equation}
+with, for a general time-reversal-even interaction (Coulomb, Gaunt, Breit),
+\begin{align}
+  \varepsilon_p &= h_{pp}+h_{\kb p\kb p}+\asym p{\kb p}p{\kb p}
+     = 2h_{pp}+V_p, \qquad V_p\equiv\asym p{\kb p}p{\kb p}, \label{eq:eps}\\
+  G_{pq} &= \asym p{\kb p}q{\kb q} = \dir p{\kb p}q{\kb q}-\dir p{\kb p}{\kb q}q
+          = (pq|\kb p\kb q)-(p\kb q|\kb p q), \label{eq:G}\\
+  W_{pq} &= \sum_{P\in\{p,\kb p\}}\sum_{Q\in\{q,\kb q\}}\asym PQPQ
+          = 2\bigl(\asym pqpq+\asym p{\kb q}p{\kb q}\bigr). \label{eq:W}
+\end{align}
+Time-reversal symmetry makes $G$ and $W$ \emph{real symmetric} matrices
+($\dir p{\kb p}q{\kb q}$ and $\dir p{\kb p}{\kb q}q$ are each equal to their complex conjugates).
+Hence the pCCD amplitudes and all pair-level density matrices below are real, even though the
+spinors, $h_{PQ}$ and the general integrals are complex. Complex/quaternion algebra only enters through
+the integral transformation and the orbital rotations.
+
+\paragraph{Coulomb (Dirac--Coulomb, X2C-Coulomb, 2c-ECP) interaction.} Using Eq.~\eqref{eq:coulrel},
+\begin{equation}
+  \boxed{\;
+  \varepsilon_p=2h_{pp}+J_{pp},\qquad
+  G_{pq}=K_{pq}+K_{p\kb q},\qquad
+  W_{pq}=4J_{pq}-2K_{pq}-2K_{p\kb q}\;}
+  \label{eq:coulomb}
+\end{equation}
+(the relative sign in $G$ comes from $\rho_{\kb p q}=-\rho_{p\kb q}^{*}$, giving $(p\kb q|\kb p q)=-K_{p\kb q}$).
+For Gaunt/Breit terms (current densities are time-odd) Eqs.~\eqref{eq:coulrel} do not hold and the
+general forms \eqref{eq:eps}--\eqref{eq:W} must be used; in particular $V_p\neq J_{pp}$ in general.
+
+\paragraph{Dictionary to HBSS.}
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+HBSS (spin-orbitals, spatial indices) & nonrelativistic value & Kramers-restricted \\
+\midrule
+$v^{pp}_{qq}$, $p\neq q$ & $K_{pq}$ & $G_{pq}$ \\
+$v^{pp}_{pp}$ & $J_{pp}$ & $V_p$ \\
+$2\,(2v^{pq}_{pq}-v^{pq}_{qp})$, $p\neq q$ & $4J_{pq}-2K_{pq}$ & $W_{pq}$ \\
+$f^p_p$ & $h_{pp}+\sum_j(2J_{pj}-K_{pj})$ & $f_{pp}$ of Eq.~\eqref{eq:fock} \\
+\bottomrule
+\end{tabular}
+\end{center}
+With this substitution Eqs.~(12), (19), (A8)--(A11) of HBSS hold verbatim; below they are written
+directly in terms of $\varepsilon,G,W$, which avoids the bookkeeping of the $b=a$ and $j=i$ ladder terms.
+
+\paragraph{Reference energy and Fock diagonal.}
+\begin{align}
+  E_{\rm ref} &= \sum_i \varepsilon_i+\frac12\sum_{i\neq j}W_{ij}
+    = \sum_{I}h_{II}+\frac12\sum_{IJ}\asym IJIJ \nonumber\\
+  &\overset{\rm Coul.}{=} \sum_i 2h_{ii}+\sum_{ij}\bigl(2J_{ij}-K_{ij}-K_{i\kb j}\bigr),
+  \label{eq:Eref}\\[2pt]
+  f_{pp} &= h_{pp}+\sum_{J\in{\rm occ}}\asym pJpJ
+          = h_{pp}+\sum_j\bigl(\asym pjpj+\asym p{\kb j}p{\kb j}\bigr)
+     \overset{\rm Coul.}{=} h_{pp}+\sum_j\bigl(2J_{pj}-K_{pj}-K_{p\kb j}\bigr).
+  \label{eq:fock}
+\end{align}
+The Hartree, same-Kramers exchange and opposite-Kramers exchange contributions are explicit.
+(In \eqref{eq:Eref} the $i=j$ Coulomb term reduces to $J_{ii}$ since $K_{ii}=J_{ii}$, $K_{i\kb i}=0$.)
+
+%=====================================================================
+\section{pCCD energy and amplitude equations}
+%=====================================================================
+
+$|\Psi\rangle=e^{T}|0\rangle$, $T=\sum_{ia}t^a_i\,\Pd a\Pa i$, $\bar H=e^{-T}He^{T}$,
+$E=\langle 0|\bar H|0\rangle$, $0=R_{ia}\equiv\langle 0|\Pd i\Pa a\bar H|0\rangle$.
+
+\paragraph{Energy.}
+\begin{equation}
+  E=E_{\rm ref}+\sum_{ia}G_{ia}\,t^a_i .
+\end{equation}
+
+\paragraph{Amplitude equations.} Define
+\begin{equation}
+  \Delta_{ia}=\varepsilon_a-\varepsilon_i+\sum_{j\neq i}\bigl(W_{aj}-W_{ij}\bigr)
+  \;=\;2(f_{aa}-f_{ii})+V_a+V_i-W_{ia},
+  \label{eq:Delta}
+\end{equation}
+\begin{equation}
+  \Sigma^{(v)}_{a}=\sum_j G_{ja}t^a_j,\qquad \Sigma^{(o)}_{i}=\sum_b G_{ib}t^b_i ,\qquad
+  Y_{ji}=\sum_b G_{jb}\,t^b_i .
+\end{equation}
+Then
+\begin{equation}
+  \boxed{
+  \begin{aligned}
+  0=R_{ia}=\;& G_{ia}+\Bigl[\Delta_{ia}-2\bigl(\Sigma^{(v)}_a+\Sigma^{(o)}_i\bigr)+2G_{ia}t^a_i\Bigr]t^a_i\\
+   &+\sum_{b\neq a}G_{ab}\,t^b_i+\sum_{j\neq i}G_{ji}\,t^a_j+\sum_{j}t^a_j\,Y_{ji}
+  \end{aligned}}
+  \label{eq:tamp}
+\end{equation}
+All terms cost $\mathcal O(n_{\rm occ}^2n_{\rm vir}+n_{\rm occ}n_{\rm vir}^2)$.
+A quasi-Newton update $t^a_i\leftarrow t^a_i-R_{ia}/\Delta_{ia}$ (with DIIS) is the usual choice.
+
+For two pairs (one $i$, one $a$) this reduces to $G+(\varepsilon_a-\varepsilon_i)t-Gt^2=0$, i.e.\ exact
+diagonalisation of the $2\times2$ pair Hamiltonian.
+
+%=====================================================================
+\section{\texorpdfstring{$\Lambda$ ($z$-amplitude) equations}{Lambda (z-amplitude) equations}}
+%=====================================================================
+
+$\langle L|=\langle 0|(1+Z)$, $Z=\sum_{ia}z^i_a\,\Pd i\Pa a$,
+$\mathcal L(t,z)=E(t)+\sum_{ia}z^i_a R_{ia}(t)$, and $\partial\mathcal L/\partial t^a_i=0$ gives
+\begin{equation}
+  \boxed{
+  \begin{aligned}
+  0=\;& G_{ia}+\Bigl[\Delta_{ia}-2\bigl(\Sigma^{(v)}_a+\Sigma^{(o)}_i\bigr)+4G_{ia}t^a_i\Bigr]z^i_a
+       -2G_{ia}\Bigl(\sum_j z^j_a t^a_j+\sum_b z^i_b t^b_i\Bigr)\\
+      &+\sum_{b\neq a}G_{ab}\,z^i_b+\sum_{j\neq i}G_{ij}\,z^j_a
+       +\sum_{j}z^j_a\,Y_{ij}+\sum_{b}z^i_b\,X_{ab},
+       \qquad X_{ab}=\sum_j G_{ja}\,t^b_j .
+  \end{aligned}}
+  \label{eq:zamp}
+\end{equation}
+Linear in $z$; same diagonal preconditioner $\Delta_{ia}$ as the $t$ equations.
+In practice $z^i_a\approx t^a_i$ is a good starting guess.
+
+%=====================================================================
+\section{Density matrices}
+%=====================================================================
+
+All expectation values are biorthogonal:
+$\ev{O}=\langle 0|(1+Z)e^{-T}O\,e^{T}|0\rangle$.
+
+\subsection{Pair-level (independent) quantities}
+
+Intermediates (HBSS Eqs.~(A9), (A11)):
+\begin{equation}
+  x^j_i=\sum_a t^a_i z^j_a,\qquad x^b_a=\sum_i t^b_i z^i_a,\qquad
+  x^a_i=\sum_{jb}t^b_i\,t^a_j\,z^j_b,\qquad x_i\equiv x^i_i .
+\end{equation}
+
+\paragraph{Occupation numbers} ($n_p=\ev{N_p}$, identical for $p$ and $\kb p$):
+\begin{equation}
+  \boxed{\;n_i=1-x_i=1-\sum_a t^a_i z^i_a,\qquad n_a=x^a_a=\sum_i t^a_i z^i_a,\qquad
+  2\sum_p n_p=N .\;}
+\end{equation}
+
+\paragraph{Pair-transfer matrix} $D_{pq}=\ev{\Pd p\Pa q}$ (moves a pair $q\to p$), $D_{pp}=n_p$:
+\begin{equation}
+  \boxed{
+  \begin{aligned}
+  D_{ij}&=x^j_i=\sum_a t^a_i z^j_a\quad(i\neq j), \qquad
+  D_{ab}=x^b_a=\sum_i t^b_i z^i_a\quad(a\neq b),\\
+  D_{ai}&=z^i_a,\qquad
+  D_{ia}=t^a_i+x^a_i-2\,t^a_i\bigl(n_a+x_i-t^a_i z^i_a\bigr).
+  \end{aligned}}
+\end{equation}
+$D$ is \emph{not} symmetric ($D_{ia}\neq D_{ai}$); use it as is in a Lagrangian gradient, or
+symmetrise ($\tfrac12(D+D^{\rm T})$) only if the gradient code assumes a symmetric 2-RDM
+(the energy is unaffected because $G$ is symmetric).
+
+\paragraph{Pair density--density matrix} $Q_{pq}=\ev{N_pN_q}$, $p\neq q$:
+\begin{equation}
+  \boxed{\;
+  Q_{ij}=1-x_i-x_j\;(i\neq j),\qquad Q_{ia}=Q_{ai}=n_a-t^a_i z^i_a,\qquad Q_{ab}=0\;(a\neq b).\;}
+\end{equation}
+($Q_{ab}=0$ is exact for linear $Z$: the bra cannot de-excite two pairs.)
+
+\paragraph{Energy in terms of pair RDMs} (valid for any $t,z$; equals $\mathcal L$):
+\begin{equation}
+  \mathcal L=\sum_p\varepsilon_p n_p+\sum_{p\neq q}G_{pq}D_{pq}+\frac12\sum_{p\neq q}W_{pq}Q_{pq}.
+  \label{eq:Epair}
+\end{equation}
+
+\subsection{Spinor-level 1-RDM}
+
+Convention of HBSS: $\gamma^P_Q=\ev{a^\dagger_Q a_P}$. In the Kramers basis defining the pairs,
+\begin{equation}
+  \gamma^{p}_{q}=\gamma^{\kb p}_{\kb q}=\delta_{pq}\,n_p,\qquad \gamma^{p}_{\kb q}=\gamma^{\kb p}_{q}=0 .
+\end{equation}
+The pairing spinors are the natural spinors; the Kramers-summed occupations are $2n_p$
+(HBSS Eq.~(A8)).
+
+\subsection{Spinor-level 2-RDM}
+
+\paragraph{Normalisation.} We use the L\"owdin normalisation
+\begin{equation}
+  \Gamma^{PQ}_{RS}=\frac12\,\ev{a^\dagger_R a^\dagger_S a_Q a_P},\qquad
+  \sum_{PQ}\Gamma^{PQ}_{PQ}=\frac{N(N-1)}{2},
+  \label{eq:Gnorm}
+\end{equation}
+so that
+\begin{equation}
+  E=\sum_{PQ}h_{PQ}\,\gamma^{Q}_{P}+\sum_{PQRS}\dir PQRS\,\Gamma^{RS}_{PQ}
+   =\sum_{PQ}h_{PQ}\,\gamma^{Q}_{P}+\frac12\sum_{PQRS}\asym PQRS\,\Gamma^{RS}_{PQ}.
+\end{equation}
+This is half the HBSS $\Gamma$ (their Eq.~(26b) has no factor $\tfrac12$, and their energy/gradient,
+Eq.~(25), carries the corresponding $\tfrac12$). If the existing gradient/Hessian was coded with the
+HBSS normalisation, multiply its two-body terms by $2$ (or pass $2\Gamma$).
+The only non-vanishing elements are the following.
+
+\medskip\noindent\textbf{(a) Pair-transfer (``intra-pair'') block}, for all $p,r$ (including $p=r$):
+\begin{equation}
+  \boxed{\;
+  \Gamma^{p\kb p}_{r\kb r}=\Gamma^{\kb p p}_{\kb r r}=-\Gamma^{p\kb p}_{\kb r r}=-\Gamma^{\kb p p}_{r\kb r}=\tfrac12 D_{rp}\;}
+\end{equation}
+For $r=p$ this is the on-pair element $\tfrac12\ev{\hat n_p\hat n_{\kb p}}=\tfrac12 n_p$.
+
+\medskip\noindent\textbf{(b) Inter-pair density--density block}, for $p\neq q$ and all
+$P\in\{p,\kb p\}$, $Q\in\{q,\kb q\}$ (16 elements per unordered pair $\{p,q\}$):
+\begin{equation}
+  \boxed{\;
+  \Gamma^{PQ}_{PQ}=\Gamma^{QP}_{QP}=-\Gamma^{PQ}_{QP}=-\Gamma^{QP}_{PQ}=\tfrac12 Q_{pq}\;}
+\end{equation}
+i.e.\ Coulomb-type and exchange-type elements, both for same-Kramers ($P=p,Q=q$) and
+opposite-Kramers ($P=p,Q=\kb q$) combinations. Everything else is zero.
+
+\paragraph{Trace (sum rule).} The diagonal elements $\Gamma^{PQ}_{PQ}$ come from block (a) with $r=p$
+($P,Q=p,\kb p$ and $\kb p,p$: $2\times\tfrac12 n_p$) and from block (b) ($4$ Kramers combinations per
+ordered pair $p\neq q$: $4\times\tfrac12 Q_{pq}$):
+\begin{equation}
+  \boxed{\;\sum_{PQ}\Gamma^{PQ}_{PQ}=\sum_p n_p+2\sum_{p\neq q}Q_{pq}=\frac{N(N-1)}{2}\;}
+  \label{eq:trace}
+\end{equation}
+This holds for \emph{any} $t,z$, since $\ev{\hat N(\hat N-1)}=N(N-1)\,\langle 0|(1+Z)|0\rangle=N(N-1)$.
+Check at $t=z=0$: $n_{\rm occ}+2n_{\rm occ}(n_{\rm occ}-1)=\tfrac12N(N-1)$ with $N=2n_{\rm occ}$.
+Explicitly, with the formulas of Sec.~5.1,
+\begin{equation}
+  \sum_p n_p+2\sum_{p\neq q}Q_{pq}
+  =n_{\rm occ}+2\sum_{i\neq j}(1-x_i-x_j)+4\sum_{ia}\bigl(n_a-t^a_iz^i_a\bigr),
+\end{equation}
+where the $x$-dependent terms cancel identically because $\sum_a n_a=\sum_i x_i$.
+Likewise the partial trace gives the 1-RDM:
+$\sum_{Q}\Gamma^{PQ}_{RQ}=\tfrac{N-1}{2}\,\gamma^{P}_{R}$.
+
+Contracting (a) and (b) with the integrals reproduces Eq.~\eqref{eq:Epair}:
+block (a) gives $\sum_{pr}\asym r{\kb r}p{\kb p}D_{rp}$ (diagonal $\to V_p n_p$, off-diagonal $\to G_{rp}D_{rp}$);
+block (b) gives $\tfrac12\sum_{p\neq q}W_{pq}Q_{pq}$.
+
+\paragraph{Storage.} The full spinor 2-RDM is determined by $n_p$, $D_{pq}$ and $Q_{pq}$:
+$\mathcal O(n^2)$ real numbers. In a gradient/Hessian contraction the sparsity pattern above can be
+exploited directly (e.g.\ $\sum_{RST}\dir RSPT\,\Gamma^{QT}_{RS}$ only needs $T\in\{Q,\kb Q\}$-type
+index coincidences).
+
+\paragraph{Relation to the spin-summed matrices of HBSS.} Summing over Kramers labels as in
+HBSS Eq.~(26) and restoring their normalisation ($\Gamma_{\rm HBSS}=2\Gamma$) gives
+$\Gamma^{qq}_{pp}=2D_{pq}$, $\Gamma^{pq}_{pq}=4Q_{pq}$, $\Gamma^{qp}_{pq}=-2Q_{pq}$ ($p\ne q$), i.e.\
+HBSS Eqs.~(A10). With spin--orbit coupling these Kramers-summed objects are \emph{not} sufficient to
+evaluate $E$ or the orbital gradient, because $\dir PQRS$ depends on the individual Kramers labels
+(e.g.\ $K_{p\kb q}\neq 0$). Use the spinor-resolved blocks (a), (b).
+
+%=====================================================================
+\section{Remarks and checks}
+%=====================================================================
+
+\begin{enumerate}
+\item \textbf{Nonrelativistic limit.} See Sec.~\ref{sec:nrlimit}.
+
+\item \textbf{Relativistic DOCI reference.} Eq.~\eqref{eq:Hsz} is a hard-core-boson Hamiltonian;
+  its exact diagonalisation in the $\binom{n}{n_{\rm occ}}$ pair space is Kramers-restricted DOCI.
+  This is trivial to code and gives an independent check of $E_{\rm pCCD}\approx E_{\rm DOCI}$ and of
+  the RDMs (by direct evaluation of $\ev{\Pd p\Pa q}$, $\ev{N_pN_q}$ on the biorthogonal pCCD vectors).
+
+\item \textbf{Two-electron systems.} For a time-reversal-even two-electron state the pair function
+  admits a Kramers-paired natural-spinor expansion, so oo-pCCD should equal FCI (as in the
+  nonrelativistic case, HBSS Sec.~IV); a good end-to-end test (e.g.\ He, H$_2$, or a Kramers-restricted
+  active space of two electrons).
+
+\item \textbf{Numerical verification.} The expressions in this note were checked by brute force:
+  (i) Eqs.~\eqref{eq:tamp}, \eqref{eq:zamp} and all pair RDMs against explicit
+  $\langle 0|(1+Z)e^{-T}O\,e^{T}|0\rangle$ in the hard-core-boson space for random $t,z,\varepsilon,G,W$
+  (errors $\sim10^{-16}$; $z$ equations against finite differences of $\mathcal L$, $\sim10^{-10}$);
+  (ii) the trace \eqref{eq:trace} for random $t,z$;
+  (iii) the reduction \eqref{eq:Hsz}--\eqref{eq:coulomb} and the spinor 2-RDM blocks (a), (b)
+  against the full second-quantised spinor Hamiltonian (Jordan--Wigner, 6 spinors) built from random
+  Kramers-restricted 2-component spinors with a time-reversal-even spin--orbit-like one-body term
+  and a scalar two-body kernel.
+
+\item \textbf{Orbital optimisation.} Because pairing is defined w.r.t.\ Kramers pairs, rotations
+  within a Kramers pair are redundant; all inter-pair rotations (occ--occ, vir--vir, occ--vir) are
+  non-redundant, as in HBSS. The frozen-pair extension (fpCCSD) would require the full spinor
+  (non-pair) CC equations with $T^{(0)}_2$ fixed and is not covered here.
+\end{enumerate}
+
+%=====================================================================
+\section{Recovery of the nonrelativistic limit}
+\label{sec:nrlimit}
+%=====================================================================
+
+We show that for a spin-free Hamiltonian (nonrelativistic, or spin-free X2C/DC) and spin-pure
+Kramers pairs, every equation of this note reduces to the corresponding equation of HBSS.
+
+\subsection{Spin-pure Kramers pairs}
+
+Take $h$ spin-free and a scalar two-body kernel, and build the pairs from real spatial orbitals $\psi_p$:
+\begin{equation}
+  \phi_p=\psi_p\,\alpha,\qquad \phi_{\kb p}=\mathcal K\phi_p=\psi_p^{*}\,\beta=\psi_p\,\beta ,
+\end{equation}
+using $\mathcal K\alpha=\beta$, $\mathcal K\beta=-\alpha$ for $\mathcal K=-i\sigma_y\mathcal C_0$.
+Then $\Pd p=a^\dagger_{p\alpha}a^\dagger_{p\beta}=c^\dagger_{p\uparrow}c^\dagger_{p\downarrow}$, which is
+exactly HBSS Eq.~(7) (same ordering, same phase), and the seniority operator is HBSS Eq.~(1).
+
+\subsection{Integrals and the pair Hamiltonian}
+
+The spinor transition densities are
+\begin{equation}
+  \rho_{pq}=\rho_{\kb p\kb q}=\psi_p\psi_q,\qquad \rho_{p\kb q}=\psi_p\psi_q\,\alpha^\dagger\beta=0 .
+\end{equation}
+Hence, in terms of spatial integrals $J_{pq}=(pp|qq)$ and $K_{pq}=(pq|qp)$,
+\begin{equation}
+  J_{p\kb q}=J_{pq},\qquad K_{p\kb q}=0,\qquad V_p=\asym p{\kb p}p{\kb p}=J_{pp},
+\end{equation}
+and Eqs.~\eqref{eq:eps}--\eqref{eq:W} (or \eqref{eq:coulomb}) become
+\begin{equation}
+  \varepsilon_p=2h_{pp}+J_{pp}=2h_{pp}+v^{pp}_{pp},\qquad
+  G_{pq}=K_{pq}=v^{pp}_{qq},\qquad
+  W_{pq}=4J_{pq}-2K_{pq}=2\bigl(2v^{pq}_{pq}-v^{pq}_{qp}\bigr),
+  \label{eq:nrparams}
+\end{equation}
+with $v^{pq}_{rs}$ the spatial Dirac-notation integrals of HBSS. The opposite-Kramers exchange
+disappears and only the same-spin exchange survives. The reference energy and Fock diagonal,
+Eqs.~\eqref{eq:Eref}, \eqref{eq:fock}, become
+\begin{equation}
+  E_{\rm ref}=\sum_i 2h_{ii}+\sum_{ij}\bigl(2J_{ij}-K_{ij}\bigr)=E_{\rm RHF},\qquad
+  f_{pp}=h_{pp}+\sum_j\bigl(2J_{pj}-K_{pj}\bigr)=f^p_p ,
+\end{equation}
+the RHF energy and the RHF Fock diagonal used in HBSS.
+
+\paragraph{Spin-axis invariance.} Spin purity with a common quantisation axis is not required.
+If each pair has its own spin direction, $\phi_p=\psi_p\chi_p$ with $\chi_p$ an arbitrary normalised
+two-spinor, then $K_{pq}$ and $K_{p\kb q}$ are individually nonzero, but
+\begin{equation}
+  K_{pq}+K_{p\kb q}=\Bigl(|\langle\chi_p|\chi_q\rangle|^2+|\langle\chi_p|\mathcal K\chi_q\rangle|^2\Bigr)K_{pq}^{\rm spatial}
+  =K_{pq}^{\rm spatial},
+\end{equation}
+because $\{\chi_q,\mathcal K\chi_q\}$ is a complete orthonormal spin basis, and $J_{pq}$ is unchanged.
+Since only the sum $K_{pq}+K_{p\kb q}$ enters $G$ and $W$, Eq.~\eqref{eq:nrparams} still holds.
+This is a special case of the invariance of $\Pd p$, and hence of $\varepsilon$, $G$, $W$, under
+$SU(2)$ rotations within each Kramers pair.
+
+\subsection{Energy and amplitude equations}
+
+The pCCD energy becomes $E=E_{\rm RHF}+\sum_{ia}v^{ii}_{aa}t^a_i$, HBSS Eq.~(12a).
+
+For the residual, insert Eq.~\eqref{eq:nrparams} into the second form of Eq.~\eqref{eq:Delta}:
+\begin{equation}
+  \Delta_{ia}=2\bigl(f^a_a-f^i_i\bigr)+v^{aa}_{aa}+v^{ii}_{ii}-2\bigl(2v^{ia}_{ia}-v^{ia}_{ai}\bigr).
+\end{equation}
+In HBSS Eq.~(12b) the ladder sums $\sum_b v^{aa}_{bb}t^b_i$ and $\sum_j v^{jj}_{ii}t^a_j$ run over all
+$b$ and $j$; their diagonal terms $b=a$ and $j=i$ are $v^{aa}_{aa}t^a_i$ and $v^{ii}_{ii}t^a_i$.
+Splitting them off,
+\begin{equation}
+  \sum_b v^{aa}_{bb}t^b_i+\sum_j v^{jj}_{ii}t^a_j
+  =\bigl(v^{aa}_{aa}+v^{ii}_{ii}\bigr)t^a_i+\sum_{b\neq a}G_{ab}t^b_i+\sum_{j\neq i}G_{ji}t^a_j ,
+\end{equation}
+so the diagonal coefficient of $t^a_i$ in HBSS Eq.~(12b) is
+$2(f^a_a-f^i_i)+v^{aa}_{aa}+v^{ii}_{ii}-2(2v^{ia}_{ia}-v^{ia}_{ai})=\Delta_{ia}$.
+The remaining terms map one to one:
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+HBSS Eq.~(12b) & Eq.~\eqref{eq:tamp} \\
+\midrule
+$v^{aa}_{ii}$ & $G_{ia}$ \\
+$-2\bigl(\sum_j v^{jj}_{aa}t^a_j+\sum_b v^{ii}_{bb}t^b_i\bigr)t^a_i$ & $-2\bigl(\Sigma^{(v)}_a+\Sigma^{(o)}_i\bigr)t^a_i$ \\
+$+2v^{ii}_{aa}\,(t^a_i)^2$ & $+2G_{ia}(t^a_i)^2$ \\
+$\sum_{jb}v^{jj}_{bb}t^a_jt^b_i$ & $\sum_j t^a_jY_{ji}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+Hence Eq.~\eqref{eq:tamp} $=$ HBSS Eq.~(12b). The same splitting of $\sum_b v^{bb}_{aa}z^i_b$ and
+$\sum_j v^{ii}_{jj}z^j_a$ gives Eq.~\eqref{eq:zamp} $=$ HBSS Eq.~(19), with
+$-2(2v^{ia}_{ia}-v^{ia}_{ai}-2v^{ii}_{aa}t^a_i)z^i_a\to(-W_{ia}+4G_{ia}t^a_i)z^i_a$ and
+$\sum_{jb}t^b_j(v^{ii}_{bb}z^j_a+v^{jj}_{aa}z^i_b)\to\sum_j z^j_aY_{ij}+\sum_b z^i_bX_{ab}$.
+
+\subsection{Density matrices}
+
+The pair-level quantities $n_p$, $D_{pq}$, $Q_{pq}$ depend only on $t$ and $z$ (the hard-core-boson
+algebra is the same), so they are unchanged. Identify $p\equiv p\alpha$, $\kb p\equiv p\beta$.
+
+\paragraph{1-RDM.} The spin-summed matrix of HBSS is
+$\gamma^p_q({\rm HBSS})=\gamma^{p\alpha}_{q\alpha}+\gamma^{p\beta}_{q\beta}=2n_p\delta_{pq}$, i.e.\
+$\gamma^j_i=2(1-x_i)\delta_{ij}$ and $\gamma^b_a=2x^a_a\delta_{ab}$: HBSS Eq.~(A8).
+
+\paragraph{2-RDM.} With the L\"owdin normalisation \eqref{eq:Gnorm},
+\begin{equation}
+  \Gamma^{pq}_{rs}({\rm HBSS})=2\sum_{\sigma\sigma'}\Gamma^{p\sigma,\,q\sigma'}_{r\sigma,\,s\sigma'} .
+\end{equation}
+From blocks (a) and (b):
+\begin{itemize}
+\item $\Gamma^{qq}_{pp}$: only $\sigma\neq\sigma'$ survive, giving $2\times\tfrac12D_{pq}$, hence
+  $\Gamma^{qq}_{pp}({\rm HBSS})=2D_{pq}$. This yields
+  $\Gamma^{jj}_{ii}=2x^j_i$ ($i\neq j$), $\Gamma^{ii}_{ii}=2n_i=2(1-x_i)$ [HBSS (A10a)],
+  $\Gamma^{aa}_{ii}=2D_{ia}$ [HBSS (A10b)], $\Gamma^{ii}_{aa}=2z^i_a$ [HBSS (A10c)],
+  $\Gamma^{bb}_{aa}=2x^b_a$ [HBSS (A10d)].
+\item $\Gamma^{pq}_{pq}$, $p\neq q$: all four $(\sigma,\sigma')$ survive, giving $4\times\tfrac12Q_{pq}$, hence
+  $\Gamma^{pq}_{pq}({\rm HBSS})=4Q_{pq}$. This yields $\Gamma^{ij}_{ij}=4(1-x_i-x_j)$ [HBSS (A10e), $i\neq j$],
+  $\Gamma^{ia}_{ia}=4(x^a_a-t^a_iz^i_a)$ [HBSS (A10f)], $\Gamma^{ab}_{ab}=0$ for $a\neq b$ [HBSS (A10g)].
+  For $p=q$ only $\sigma\neq\sigma'$ survive and one recovers the $\delta_{ij}$ and $\delta_{ab}$ terms of
+  (A10e) and (A10g), both equal to $2n_p$.
+\item $\Gamma^{qp}_{pq}$, $p\neq q$: only $\sigma=\sigma'$ survive, giving $2\times(-\tfrac12Q_{pq})$, hence
+  $\Gamma^{qp}_{pq}({\rm HBSS})=-2Q_{pq}=-\tfrac12\Gamma^{pq}_{pq}({\rm HBSS})$: HBSS (A10h).
+\end{itemize}
+The only difference is the overall factor $2$ from the normalisation choice:
+$\sum_{pq}\Gamma^{pq}_{pq}({\rm HBSS})=N(N-1)$ versus $N(N-1)/2$ here.
+The blocks (a) and (b) themselves reduce to the familiar $\alpha\beta$-resolved pCCD 2-RDM, in which
+the opposite-spin exchange elements $\Gamma^{p\alpha,q\beta}_{q\alpha,p\beta}$ vanish.
+
+\subsection{Caveat: the orbital-optimisation space}
+
+The equations reduce exactly, but the stationary point reached by orbital optimisation need not be
+the HBSS one. Kramers-restricted (quaternion) rotations also include spin-mixing rotations, e.g.\
+$\phi_p=\psi_1\alpha+\psi_2\beta$. The corresponding geminal $\phi_p(1)\,\mathcal K\phi_p(2)$ is
+time-reversal invariant but contains triplet components, so it is not an $\hat S^2$ eigenfunction.
+With a spin-free Hamiltonian:
+\begin{itemize}
+\item Starting from spin-pure pairs (e.g.\ localised RHF orbitals), the orbital gradient in the
+  spin-mixing directions vanishes by symmetry, and the optimisation stays on the HBSS
+  (singlet-paired) oo-pCCD solution.
+\item Starting from generic spinors, or following a negative Hessian eigenvalue in the spin-mixing
+  block, the optimisation may reach a time-reversal-invariant but $\hat S^2$-broken pairing with lower
+  energy. This is the ``non-singlet pairing'' generalisation mentioned in the conclusions of HBSS.
+\end{itemize}
+For validation against HBSS or a nonrelativistic pCCD code, start from spin-pure pairs and check that
+the spin-mixing block of the orbital gradient vanishes. The lowest eigenvalue of the Hessian in that
+block indicates whether the singlet-paired solution is stable within the Kramers-restricted space.
+
+\paragraph{Numerical check.} With a spin-free one-body term and a scalar two-body kernel, the
+$\varepsilon$, $G$, $W$ built from Eqs.~\eqref{eq:eps}--\eqref{eq:W} agree with
+Eq.~\eqref{eq:nrparams} to machine precision, both for a common spin axis ($K_{p\kb q}=0$) and for
+random per-pair spin axes ($K_{p\kb q}\neq0$).
+
+\end{document}
+
