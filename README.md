@@ -106,7 +106,7 @@ anywhere on a line) are comments.
 | `DENSITY_TOLERANCE` | double (> 0) | `1e-6` | `C4_DHF` SCF density-change convergence threshold. |
 | `CHOLESKY` | bool | `FALSE` | Hold the two-electron integrals as Cholesky vectors and never build an n^4 object. The real AO Coulomb matrix is decomposed ONCE (`Utils/Cholesky_Decomposition.h`: NON_REL/X2C decompose the AO integrals, C4_SPINOR the combined {Large-Large} u {Small-Small} pair matrix, `C4_DHF/RkbCholesky.h`); the SCF Fock matrices, the MO-basis integrals (`Utils/AoCholesky.h`) and `FULL_OPTIMIZATION` all work on those vectors, and the AO integrals are not used again (they are rebuilt only under `DEBUG`, for the dense-vs-Cholesky checks). Every decomposition is verified against the integrals and retried with a smaller pivot batch if it misses `100*CHOLESKY_THRESHOLD + 1e-9`. With `ORBITAL_OPTIMIZER NEO` the Hessian-vector product is a finite difference of the gradient on the rotated vectors, O(N_chol n^3) with no dense cache. Without `CHOLESKY` the integrals are held as unique-element stores (`Utils/SymmetricEri.h`: about n^4/8 real or n^4/4 complex numbers, the rest rebuilt by symmetry) and transformed in slabs, never as a dense n^4 tensor. |
 | `CHOLESKY_THRESHOLD` | double (> 0) | `1e-10` | Residual-diagonal cutoff for the decomposition; looser = fewer vectors (faster, less accurate), tighter = more (slower, more exact). Only with `CHOLESKY TRUE`. |
-| `FUNCTIONAL` | string | *(none)* | Selects the density matrix functional to evaluate on the converged orbitals: a JK-only functional (`Occ_opt/JK_only.h`) -- `SD`, `MBB`/`MULLER`, `BBC2`, `CA`, `CGA`, `ML`, `MLSIC`, `GU`, `POWER` -- or a Piris natural orbital functional (`Occ_opt/PNOFs.h`) -- `PNOF5`, `PNOF7`, `PNOF7S`, `GNOF`. Unset: the whole RDMFT evaluation step below is skipped. |
+| `FUNCTIONAL` | string | *(none)* | Selects the density matrix functional to evaluate on the converged orbitals: a JK-only functional (`Occ_opt/JK_only.h`) -- `SD`, `MBB`/`MULLER`, `BBC2`, `CA`, `CGA`, `ML`, `MLSIC`, `GU`, `POWER` -- a Piris natural orbital functional (`Occ_opt/PNOFs.h`) -- `PNOF5`, `PNOF7`, `PNOF7S`, `GNOF` -- or `PCCD` (`Occ_opt/pCCD.h`, Kramers-restricted pCCD: t-/z-amplitude equations solved at fixed orbitals, then, with `FULL_OPTIMIZATION TRUE`, orbitals re-optimized exactly like PNOF/JK_only via the same generalized Fock/gradient machinery). Unset: the whole RDMFT evaluation step below is skipped. |
 | `OCCUPATION_INIT` | string | `PROPORTIONAL` | Initial fractional occupations for a JK-only `FUNCTIONAL`. `PROPORTIONAL`: aufbau redistributed into an interior box. `FERMI_DIRAC`: smeared at `TEMPERATURE`. (PNOF functionals build their own guess.) |
 | `JK_FROZEN_PAIRS` | int (>= 0) | `0` | Only with a JK-only `FUNCTIONAL`. Freezes the `2*JK_FROZEN_PAIRS` LOWEST-energy spin-orbitals/spinors at EXACTLY occupation 1 (never an SQP variable), mirroring PNOF's own frozen core. Counted in pairs (spin/Kramers partners) so no separate evenness check is ever needed. |
 | `JK_ACTIVE_PAIRS` | int (>= 1) | all remaining | Only with a JK-only `FUNCTIONAL`. The NEXT `2*JK_ACTIVE_PAIRS` spin-orbitals/spinors by energy (above `JK_FROZEN_PAIRS`) are the fractional-occupation SQP window, `sum(n) = NELEC - 2*JK_FROZEN_PAIRS`; everything above that is deep virtual, pinned at exactly 0. `NELEC - 2*JK_FROZEN_PAIRS` must be strictly between 0 and `2*JK_ACTIVE_PAIRS`, else a clear error. |
@@ -114,6 +114,9 @@ anywhere on a line) are comments.
 | `PNOF_SUBSPACES` | int (>= 1) | `1` | Only with a PNOF `FUNCTIONAL`. Number of independent coupling subspaces built outward from HOMO (`Occ_opt/Orb_subspaces.h`); throws if it exceeds the occupied pairs available. |
 | `PNOF_COUPLING` | int (>= 2) | `2` | Only with a PNOF `FUNCTIONAL`. Size of each subspace in pairs: 1 occupied + (`PNOF_COUPLING`-1) unoccupied. `2` is plain HOMO-LUMO pairing. |
 | `SQP_PNOF_OCC` | bool | `FALSE` | Only with a PNOF `FUNCTIONAL`. `FALSE`: optimize via `Utils/LBFGS.h` over unconstrained gamma angles (DoNOF's own approach). `TRUE`: optimize via `Utils/SQP.h` over occupations directly, with explicit box+equality constraints. Both agree to full precision when both converge. |
+| `PCCD_FROZEN_PAIRS` | int (>= 0) | `0` | Only with `FUNCTIONAL PCCD`. Freezes the `2*PCCD_FROZEN_PAIRS` LOWEST-energy spin-orbitals/spinors at EXACTLY occupation 1 (never a t-/z-amplitude variable) -- the frozen-core approximation, with no separate formula needed: a frozen pair is simply one with no amplitude at all (`x=0` identically), which the pCCD RDM formulas already reduce to correctly at that limit. Same pairs-not-electrons counting convention as `JK_FROZEN_PAIRS`. |
+| `PCCD_ACTIVE_PAIRS` | int (>= 1) | all remaining | Only with `FUNCTIONAL PCCD`. The NEXT `2*PCCD_ACTIVE_PAIRS` spin-orbitals/spinors by energy (above `PCCD_FROZEN_PAIRS`) become the t-/z-amplitude window, split into occupied/virtual pairs at `NELEC - 2*PCCD_FROZEN_PAIRS` electrons; everything above that is deep virtual, excluded entirely (pCCD never even builds coefficients for it). |
+| `PCCD_AMPLITUDE_SOLVER` | string | `NEWTON` | Only with `FUNCTIONAL PCCD`. `NEWTON`: exact Newton-Raphson, rebuilding and directly solving the analytic Jacobian every iteration (quadratically convergent; the z-equation is linear in z, so it converges in one iteration for free once t is converged). `LBFGS`: `Utils/LBFGS.h` minimizing 0.5\*\|\|residual\|\|^2 with the exact chain-rule gradient, no Jacobian ever solved. |
 | `FULL_OPTIMIZATION` | bool | `FALSE` | After occupation optimization (needs `FUNCTIONAL`), macro-iterate to convergence: an orbital-rotation step (`ORBITAL_OPTIMIZER`) at fixed occupations, then occupation re-optimization at the new orbitals, until `|E-E_old| < MACRO_ENERGY_TOLERANCE`. Works for `NON_REL` (real spin-orbitals), `X2C` (complex, Kramers-restricted rotations), and `C4_SPINOR` (complex, Kramers-restricted rotations *restricted to the positive-energy spinors only* -- see below). Validation checks gate the loop, and a final test verifies the optimized orbitals keep the expected symmetry (Kramers pairing for X2C/C4_SPINOR, spin symmetry for NON_REL, pair-symmetric energy for PNOF). |
 | `MAX_MACRO_ITERATIONS` | int | `1000` | Maximum number of macro-iterations of `FULL_OPTIMIZATION`. |
 | `MACRO_ENERGY_TOLERANCE` | float | `1e-9` | Energy convergence threshold of the macro-iteration loop. |
@@ -125,7 +128,7 @@ anywhere on a line) are comments.
 | `FIXED_OCCUPANCIES` | bool | `FALSE` | Only meaningful with `FULL_OPTIMIZATION TRUE` (`NON_RELATIVISTIC`, `X2C` or `C4_SPINOR` alike -- the same macro-iteration loop, `Full_opt/FullOptimization.cpp`, drives all three, including `FULL_OPTIMIZATION_4C_NEG`'s min-max stage). The occupation-number optimization that runs ONCE at the starting HF/DHF orbitals, before the macro loop, is unaffected. When `TRUE`, the macro loop itself never re-optimizes occupations again: each macro-iteration only re-optimizes the orbitals at those fixed occupations (logged as `occupations-fixed`), turning `FULL_OPTIMIZATION` into a pure orbital optimization at fixed occupation numbers instead of its usual alternation of the two. Template: `examples/lih_gnof_fixed_occupancies.inp`. |
 | `READ_OCCUPANCIES` | bool | `FALSE` | Requires `FUNCTIONAL`. Before the occupation-number optimization that normally runs once at the starting HF/DHF orbitals, reads a plain-text file named `OCC.in` in the working directory (one line per geminal/pair: `<index> <occupation>`) and uses those occupations DIRECTLY -- the optimizer (SQP/LBFGS for PNOF, SQP for JK_only) does not run at all for that stage. For PNOF, `index` is the SUBSPACE number (`0..PNOF_SUBSPACES-1`): the file needs exactly `PNOF_SUBSPACES` groups of `PNOF_COUPLING` lines each, in file order within a group (first line of a group is that subspace's principal geminal), summing to 1 per subspace (renormalized if not exact); core (frozen) geminals are NOT listed. For JK_only functionals `index` is ignored -- only the occupation column matters, one line per Kramers/spin-tied active pair, in the same order the active window itself uses, summing to `NELEC - 2*JK_FROZEN_PAIRS`. If `READ_RESTART` is also `TRUE`, orbitals still come from the RESTART file, but these occupations override the RESTART file's own. `FULL_OPTIMIZATION`'s own macro loop (if it runs) is unaffected by this keyword alone -- combine with `FIXED_OCCUPANCIES TRUE` to also keep it from re-optimizing them. Template: `examples/lih_gnof_read_occupancies.inp` (with its companion `examples/OCC.in`). |
 | `READ_RESTART` | bool | `FALSE` | Requires a `FUNCTIONAL`. `TRUE` skips the HF/DHF SCF of every requested method (`NON_RELATIVISTIC`, `X2C`, `C4_SPINOR`) and starts the functional calculation from `RESTART.NON_REL` / `RESTART.X2C_HF` / `RESTART.4C` of an earlier run, possibly at another geometry (potential-energy scans) -- see *Restarting from a previous run* below. |
-| `FULL_OPTIMIZATION_4C_NEG` | bool | `FALSE` | Only meaningful for `C4_SPINOR` + `FULL_OPTIMIZATION` (any `FUNCTIONAL`, `CHOLESKY` TRUE or FALSE). After the positive-energy-only optimization has converged, runs the genuine **min-max** stage: orbital rotations now include the positive <-> negative-energy pairs, driven by NEO to a saddle point (whatever `ORBITAL_OPTIMIZER` says), alternating with a full re-minimization of the occupation numbers -- see below. Skipped, with a message, if the first stage did not converge. |
+| `FULL_OPTIMIZATION_4C_NEG` | bool | `FALSE` | Only meaningful for `C4_SPINOR` + `FULL_OPTIMIZATION` (any `FUNCTIONAL`, `CHOLESKY` TRUE or FALSE). After the positive-energy-only optimization has converged, runs the genuine **min-max** stage: orbital rotations now include the positive <-> negative-energy pairs, driven by NEO to a saddle point (whatever `ORBITAL_OPTIMIZER` says), alternating with a full re-minimization of the occupation numbers -- see below. Skipped, with a message, if the first stage did not converge. **Known broken for `FUNCTIONAL PCCD`**: NEO diverges partway through the saddle search (confirmed on LiH/6-31G: clean Newton steps to a sensible point, then a sudden blow-up to an unphysical energy) -- not yet debugged; the ordinary (minimization-only) `FULL_OPTIMIZATION` is unaffected and fully validated for PCCD on NON_REL/X2C/C4_SPINOR alike. |
 | `X2C` | bool | `FALSE` | Print the one-electron X2C decoupling report and run the approximate X2C-HF SCF (see below), between the `NON_RELATIVISTIC` and `C4_SPINOR` reports. Independent of `C4_SPINOR` (the RKB Hamiltonian it needs is always built). With `DEBUG`, adds extra cross-checks. |
 
 ## X2C decoupling and X2C-HF
@@ -327,6 +330,47 @@ worked `C4_SPINOR`/`NON_RELATIVISTIC` examples, or
 `examples/water_X2C_gnof.inp` for the `X2C` case (`FUNCTIONAL GNOF`,
 `PNOF_COUPLING 2` throughout) -- direct PNOF counterparts of the MULLER
 examples above.
+
+## pCCD functional
+
+Setting `FUNCTIONAL` to `PCCD` (`Occ_opt/pCCD.h`) runs Kramers-restricted
+pair-coupled-cluster doubles (generalization of Henderson, Bulik, Stein,
+Scuseria, J. Chem. Phys. **141**, 244104 (2014) to a spin-with/Kramers-
+restricted spinor basis -- derivation in `doc/kr_pccd.tex`) instead of a
+JK-only or PNOF occupation-number optimization:
+
+1. Partition the occupied/unoccupied Kramers (or, for `NON_REL`, spin)
+   pairs into frozen-core (`PCCD_FROZEN_PAIRS`, pinned at n=1), active
+   occupied, and active virtual (`PCCD_ACTIVE_PAIRS`, or all remaining)
+   windows -- the same pairs-counted convention `JK_FROZEN_PAIRS`/
+   `JK_ACTIVE_PAIRS` use.
+2. Solve the t-/z-amplitude residue equations at the FIXED starting
+   orbitals (`PCCD_AMPLITUDE_SOLVER`: `NEWTON`, the default, or `LBFGS`)
+   and build the pair-level 1-/2-RDM (occupation numbers `n_p`, pair-
+   transfer `D_pq`, density-density `Q_pq`).
+3. With `FULL_OPTIMIZATION TRUE`, `Hessian_opt/PccdFock.h` unfolds that
+   RDM into the SAME `two_rdm_h`/`two_rdm_x`/`two_rdm_l1`/`two_rdm_l2`
+   ansatz PNOF's own `PnofFock.h` uses (the pair-transfer `D_pq` plays
+   exactly the role PNOF's `Pi_pq` does), so `ADAM`/`NEO` drive pCCD's
+   orbital rotations through the identical generalized Fock/Hessian
+   machinery -- no new, slower optimizer path. Each macro-iteration
+   re-solves the amplitudes at the newly rotated orbitals (pCCD's own
+   "occupation re-optimization" step) before the next rotation.
+
+Validated end to end on NON_REL/X2C/C4_SPINOR alike (ordinary,
+minimization-only `FULL_OPTIMIZATION` -- see the `FULL_OPTIMIZATION_4C_NEG`
+row above for the one known-broken case, the min-max saddle stage).
+`examples/ne_pccd_full_optimization.inp` (`NON_RELATIVISTIC`) matches the
+literature oo-pCCD/cc-pVDZ energy for the Ne atom (-128.559674 Hartree) to
+~1e-7 Hartree; `examples/ne_pccd_x2c.inp` and `examples/ne_pccd_c4.inp` are
+its `X2C`/`C4_SPINOR` counterparts (`CHOLESKY TRUE`, since `C4_SPINOR`'s RKB
+dimension there is sizable) -- the pCCD correlation energy recovered on top
+of the HF/DHF reference agrees between `NON_RELATIVISTIC` and exact
+4-component to ~4e-6 Hartree. `ne_pccd_x2c.inp`'s own header flags a
+separate, pre-existing issue it surfaced: `X2C` 's approximate (one-electron
+picture-change only) treatment has a much larger error for a basis with d
+(or higher) functions than for the s/p-only systems it was previously
+exercised on -- see that file's own comment for the numbers.
 
 ## FULL_OPTIMIZATION for C4_SPINOR: positive-energy-only orbital rotations
 
