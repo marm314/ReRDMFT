@@ -168,6 +168,36 @@ void testPairEnergyCrossCheck() {
   std::cout << "  E_pair(RDM) = " << std::setprecision(12) << e_pair
             << "   E_ref+E_corr = " << (e_ref_active + e_corr) << "   diff = " << diff << "\n";
   check(diff < 1e-8, "RDM-level energy (Eq. Epair) matches E_ref + E_corr");
+
+  // Trace sum rule (tex doc Eq. (trace)): sum_p n_p + 2*sum_{p!=q} Q_pq == N(N-1)/2, N = 2*n_occ
+  // (the NOMINAL electron count of the reference determinant -- holds for ANY t,z, not just
+  // converged ones, since it is a pure RDM identity with no integral/orbital dependence at all).
+  const std::size_t n_total_pairs = n_occ + n_vir;
+  double trace = 0.0;
+  for (std::size_t p = 0; p < n_total_pairs; ++p) trace += rdm.d(p, p);  // d(p,p) == n_p
+  for (std::size_t p = 0; p < n_total_pairs; ++p) {
+    for (std::size_t q = 0; q < n_total_pairs; ++q) {
+      if (p == q) continue;
+      trace += 2.0 * rdm.q(p, q);
+    }
+  }
+  const double n_electrons = 2.0 * static_cast<double>(n_occ);
+  const double expected_trace = 0.5 * n_electrons * (n_electrons - 1.0);
+  const double trace_err = std::abs(trace - expected_trace);
+  std::cout << "  trace = " << trace << "   N(N-1)/2 = " << expected_trace
+            << "   diff = " << trace_err << "\n";
+  check(trace_err < 1e-10, "2-RDM trace sum rule (sum n_p + 2 sum Q_pq = N(N-1)/2)");
+
+  // Symmetry: Q_pq must be symmetric (Q_pq == Q_qp, every block); D_pq is explicitly NOT
+  // symmetric in general (D_ia != D_ai -- tex doc, Sec. "Density matrices") and is not checked.
+  double worst_q_asym = 0.0;
+  for (std::size_t p = 0; p < n_total_pairs; ++p) {
+    for (std::size_t q = p + 1; q < n_total_pairs; ++q) {
+      worst_q_asym = std::max(worst_q_asym, std::abs(rdm.q(p, q) - rdm.q(q, p)));
+    }
+  }
+  std::cout << "  worst |Q_pq - Q_qp| = " << worst_q_asym << "\n";
+  check(worst_q_asym < 1e-12, "Q_pq is exactly symmetric");
 }
 
 }  // namespace

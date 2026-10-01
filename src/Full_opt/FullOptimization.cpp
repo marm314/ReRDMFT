@@ -1763,38 +1763,41 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
   // occupation lies below the threshold but is not negligible still curve downward by -O(4 c^2 n_i), so the
   // end-of-run check accepts anything between the count at `occupied_threshold` and the count at 1e-10.
   std::size_t saddle_order = 0, saddle_order_max = 0;
-  if (saddle) {
+  // Recomputed from the CURRENT occupations every time it is called (not just once, from the
+  // pre-loop `occupations`): occupation re-optimization inside the macro loop can push a
+  // positive-energy spinor's occupation across `occupied_threshold` (e.g. a pCCD pair's fresh
+  // amplitude re-solve collapsing the active window -- see project notes on the min-max
+  // divergence), which changes which electron-positron rotation parameters belong in the stiff
+  // `sector` NEO is told to maximize along. Calling this with stale occupations leaves NEO
+  // targeting the WRONG saddle order/sector for however many macro-iterations go by before the
+  // next refresh.
+  const auto refreshSaddleTargeting = [&](const std::vector<double>& occ_now) {
     const std::size_t nn = settings.saddle.n_negative;
+    const auto& prs = problem.pairs();
     const auto countMixed = [&](double threshold, std::size_t& n_occupied, std::size_t& n_pairs) {
       std::vector<Pair> mixed;
       n_occupied = 0;
-      for (std::size_t i = nn; i < occupations.size(); ++i) n_occupied += occupations[i] > threshold;
-      for (const auto& pr : problem.pairs()) {
+      for (std::size_t i = nn; i < occ_now.size(); ++i) n_occupied += occ_now[i] > threshold;
+      for (const auto& pr : prs) {
         const std::size_t lo = std::min(pr.first, pr.second), hi = std::max(pr.first, pr.second);
-        if (lo < nn && hi >= nn && occupations[hi] > threshold) mixed.push_back(pr);
+        if (lo < nn && hi >= nn && occ_now[hi] > threshold) mixed.push_back(pr);
       }
       n_pairs = mixed.size();
       return kr ? KramersRestriction(h.rows(), mixed).reducedSize() : (std::is_same_v<T, double> ? 1 : 2) * mixed.size();
     };
     std::size_t n_occupied = 0, n_pairs = 0, n_occupied_max = 0, n_pairs_max = 0;
-    saddle_order = countMixed(settings.saddle.occupied_threshold, n_occupied, n_pairs);
-    saddle_order_max = countMixed(1e-10, n_occupied_max, n_pairs_max);
-    log << "    Saddle-point order from the occupations: " << saddle_order << " = the " << (kr ? "Kramers-reduced " : "")
-        << "electron-positron rotation parameters (" << n_pairs << " pairs) of the " << n_occupied
-        << " positive-energy spinors with occupation > " << settings.saddle.occupied_threshold << " times the " << nn
+    const std::size_t new_order = countMixed(settings.saddle.occupied_threshold, n_occupied, n_pairs);
+    const std::size_t new_order_max = countMixed(1e-10, n_occupied_max, n_pairs_max);
+    const bool changed = new_order != saddle_order || new_order_max != saddle_order_max;
+    saddle_order = new_order;
+    saddle_order_max = new_order_max;
+    log << "    " << (changed ? "Saddle-point order RE-derived" : "Saddle-point order from the occupations") << ": "
+        << saddle_order << " = the " << (kr ? "Kramers-reduced " : "") << "electron-positron rotation parameters ("
+        << n_pairs << " pairs) of the " << n_occupied << " positive-energy spinors with occupation > "
+        << settings.saddle.occupied_threshold << " times the " << nn
         << " negative-energy spinors -- those directions are maximized, all others minimized"
         << (saddle_order_max > saddle_order ? " (" + std::to_string(saddle_order_max) + " counting occupations > 1e-10)" : std::string())
-        << ".\n"
-        << "    NEO applies it as a dynamic order: at every Newton step, the number of gradient-coupled Hessian directions with curvature below -"
-        << settings.saddle.curvature_cutoff << " (symmetry leaves only some of them coupled to the gradient).\n";
-  }
-  neo_options.step.target_order = 0;
-  if (saddle) {
-    neo_options.step.saddle_cutoff = settings.saddle.curvature_cutoff;
-    neo_options.step.guess_from_diagonal = false;
-    // Electron-positron parameters form the stiff sector NEO keeps its trial vectors pure in (see NeoStepOptions::sector).
-    const std::size_t nn = settings.saddle.n_negative;
-    const auto& prs = problem.pairs();
+        << ".\n";
     const auto electronPositron = [&](std::size_t pair) {
       return std::min(prs[pair].first, prs[pair].second) < nn && std::max(prs[pair].first, prs[pair].second) >= nn;
     };
@@ -1814,6 +1817,17 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
       return mask;
     };
     neo_options.step.sector = buildMask(electronPositron);
+  };
+  if (saddle) {
+    refreshSaddleTargeting(occupations);
+    log << "    NEO applies it as a dynamic order: at every Newton step, the number of gradient-coupled Hessian directions with curvature below -"
+        << settings.saddle.curvature_cutoff << " (symmetry leaves only some of them coupled to the gradient);"
+           " the order/sector above are RE-DERIVED from the occupations after every occupation re-optimization in the macro loop below.\n";
+  }
+  neo_options.step.target_order = 0;
+  if (saddle) {
+    neo_options.step.saddle_cutoff = settings.saddle.curvature_cutoff;
+    neo_options.step.guess_from_diagonal = false;
   }
   neo_options.gradient_tolerance = settings.gradient_tolerance;
   neo_options.max_iterations = settings.neo_max_iterations;  // fixed budget -- see its own comment.
@@ -2003,6 +2017,12 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
         if (!occ_result.converged) ++n_occ_unconverged;
       }
       occ = occ_result.occupations;
+      // Fresh occupations are in hand (and, for models like PCCD whose 2-RDM is cached per
+      // optimize_occupations call, the cache was just refreshed too) -- re-derive the saddle
+      // order/sector from THEM before the next macro-iteration's NEO call reads
+      // neo_options.step.sector, rather than running NEO against whatever occupations were
+      // current when the loop (or the last refresh) started.
+      if (saddle) refreshSaddleTargeting(occ);
       // Same energy definition as the orbital stage (see makePnofModel: the
       // optimizer's own value can differ for a non-symmetric eri).
       e_elec = model.energy(problem.h(), problem.eri(), occ);
