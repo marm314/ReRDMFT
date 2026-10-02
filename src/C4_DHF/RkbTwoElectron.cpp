@@ -389,10 +389,15 @@ RkbTwoElectronTensor rkbTwoElectronIntegrals(const std::vector<BasisFunction>& l
   const std::size_t n = 4 * n_large;
 
   // Real spatial-AO chemist-notation tensors (pq|rs): ll_ll all-Large,
-  // ll_ss Large electron-1 pair / Small electron-2 pair, ss_ss all-Small.
-  const Tensor4<double> ll_ll = twoElectronIntegrals(large_basis);
-  const Tensor4<double> ll_ss = twoElectronIntegralsCross(large_basis, small_basis);
-  const PackedTwoElectronTensor ss_ss = twoElectronIntegralsPacked(small_basis);  // 8-fold packed, never dense
+  // ll_ss Large electron-1 pair / Small electron-2 pair, ss_ss all-Small. Schwarz-prescreened at
+  // `cholesky_threshold` (same reasoning as RkbCholesky::build's own comment on this -- an
+  // element this skips was already going to contribute at most that much error): this is the
+  // CHOLESKY FALSE path, so there is no decomposition downstream to carry that argument, but the
+  // bound itself (|(pq|rs)| <= sqrt((pq|pq)(rs|rs))) is exact regardless.
+  const Tensor4<double> ll_ll = twoElectronIntegrals(large_basis, cholesky_threshold);
+  const Tensor4<double> ll_ss = twoElectronIntegralsCross(large_basis, small_basis, cholesky_threshold);
+  const PackedTwoElectronTensor ss_ss =
+      twoElectronIntegralsPacked(small_basis, cholesky_threshold);  // 8-fold packed, never dense
 
   // (Large,Large | RKB-Small(y2),RKB-Small(y2)): transform ll_ss's
   // electron-2 pair (legs 2,3). Index y in {0,1} means {alpha-partner,

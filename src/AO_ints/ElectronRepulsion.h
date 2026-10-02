@@ -23,14 +23,24 @@ namespace rerdmft {
 // two-electron tensor that is not going to be leg-transformed (e.g.
 // NON_REL/NonRelHartreeFock.h's), prefer twoElectronIntegralsPacked,
 // which stores only the unique values.
-Tensor4<double> twoElectronIntegrals(const std::vector<BasisFunction>& basis);
+//
+// `screening_threshold` (default 0.0, off -- every existing caller is unaffected): same Schwarz
+// prescreen as twoElectronIntegralsPacked (see its own comment) -- a skipped quadruplet simply
+// keeps its default 0.0 in the dense result, which the 8-fold write-out leaves correctly zero at
+// all 8 equivalent positions too.
+Tensor4<double> twoElectronIntegrals(const std::vector<BasisFunction>& basis,
+                                      double screening_threshold = 0.0);
 
 // Same integral, but with p,q drawn from `basis_pq` and r,s from
 // `basis_rs` (generally a different basis, e.g. Large vs unrestricted-
 // kinetic-balance Small). Exploits p<->q and r<->s symmetry (not the
 // (pq)<->(rs) swap, since the two sides are generally different bases).
+//
+// `screening_threshold`: same Schwarz prescreen as twoElectronIntegralsCrossPacked (default 0.0,
+// off); a skipped quadruplet keeps its default 0.0 at all 4 equivalent dense positions.
 Tensor4<double> twoElectronIntegralsCross(const std::vector<BasisFunction>& basis_pq,
-                                           const std::vector<BasisFunction>& basis_rs);
+                                           const std::vector<BasisFunction>& basis_rs,
+                                           double screening_threshold = 0.0);
 
 // Dense-triangular storage for (pq|rs) that stores only the values not
 // related by the full real-orbital 8-fold permutational symmetry: p<->q,
@@ -84,7 +94,76 @@ class PackedTwoElectronTensor {
 // PackedTwoElectronTensor) -- the same integral as twoElectronIntegrals,
 // via the same libcint evaluation, but exploiting the full 8-fold real-
 // orbital symmetry for STORAGE too, not just computation.
-PackedTwoElectronTensor twoElectronIntegralsPacked(const std::vector<BasisFunction>& basis);
+//
+// `screening_threshold` (default 0.0, i.e. off -- EVERY existing caller is unaffected): when
+// positive, a Schwarz/Cauchy-Schwarz prescreen skips evaluating (pq|rs) entirely (leaving it at
+// its default 0.0) whenever sqrt((pq|pq)) * sqrt((rs|rs)) < screening_threshold, since
+// |(pq|rs)| <= sqrt((pq|pq) * (rs|rs)) for the real Coulomb operator -- the same bound
+// Cholesky_Decomposition.h's own pivoted decomposition relies on for its diagonal-only
+// convergence check. The n*(n+1)/2 pair-diagonal values (pq|pq) are computed once up front
+// (O(n^2) quadruplets, cheap relative to the full O(n^4) loop they gate).
+PackedTwoElectronTensor twoElectronIntegralsPacked(const std::vector<BasisFunction>& basis,
+                                                    double screening_threshold = 0.0);
+
+// Dense-triangular-x-dense-triangular storage for the CROSS integral (pq|rs) with p,q from one
+// basis and r,s from another (e.g. Large vs unrestricted-kinetic-balance Small, as
+// twoElectronIntegralsCross computes): p<->q and r<->s are still exact symmetries of the
+// integrand (p(1)q(1) = q(1)p(1) regardless of which basis p,q belong to; same for r,s), so only
+// M_pq = n_pq*(n_pq+1)/2 unique pq-pairs times M_rs = n_rs*(n_rs+1)/2 unique rs-pairs need
+// storing -- UNLIKE PackedTwoElectronTensor, there is no further (pq)<->(rs) swap symmetry here
+// (the two sides are generally different bases, so that swap is not even well-typed), hence a
+// dense M_pq x M_rs rectangular array rather than a triangular one over a single combined index.
+// About a 4x reduction over the dense n_pq^2 x n_rs^2 Tensor4 twoElectronIntegralsCross returns
+// (not 8x, since the missing symmetry is exactly the one that gives the other factor of 2).
+class CrossPackedTwoElectronTensor {
+ public:
+  CrossPackedTwoElectronTensor() = default;
+  CrossPackedTwoElectronTensor(std::size_t n_pq, std::size_t n_rs)
+      : n_pq_(n_pq), n_rs_(n_rs), m_pq_(n_pq * (n_pq + 1) / 2), m_rs_(n_rs * (n_rs + 1) / 2),
+        data_(m_pq_ * m_rs_, 0.0) {}
+
+  std::size_t dimPq() const { return n_pq_; }
+  std::size_t dimRs() const { return n_rs_; }
+  // Real values actually stored -- about 1/4 of the dense n_pq^2 * n_rs^2 count.
+  std::size_t storedCount() const { return data_.size(); }
+
+  double operator()(std::size_t p, std::size_t q, std::size_t r, std::size_t s) const {
+    return data_[pairIndexPq(p, q) * m_rs_ + pairIndexRs(r, s)];
+  }
+
+  // Used only during construction: (p,q,r,s) and its 3 symmetry partners (p<->q, r<->s) share one
+  // slot, so it does not matter which representative the caller passes.
+  void set(std::size_t p, std::size_t q, std::size_t r, std::size_t s, double value) {
+    data_[pairIndexPq(p, q) * m_rs_ + pairIndexRs(r, s)] = value;
+  }
+
+ private:
+  static std::size_t pairIndex(std::size_t p, std::size_t q) {
+    const std::size_t lo = p < q ? p : q;
+    const std::size_t hi = p < q ? q : p;
+    return hi * (hi + 1) / 2 + lo;
+  }
+  std::size_t pairIndexPq(std::size_t p, std::size_t q) const { return pairIndex(p, q); }
+  std::size_t pairIndexRs(std::size_t r, std::size_t s) const { return pairIndex(r, s); }
+
+  std::size_t n_pq_ = 0, n_rs_ = 0, m_pq_ = 0, m_rs_ = 0;
+  std::vector<double> data_;
+};
+
+// Same integral as twoElectronIntegralsCross, via the same libcint evaluation, but exploiting
+// p<->q and r<->s symmetry for STORAGE too (see CrossPackedTwoElectronTensor), not just
+// computation. Prefer this over twoElectronIntegralsCross whenever the dense, GEMM-strided
+// Tensor4 layout is not itself needed (e.g. a Cholesky decomposition's PairMatrixSource, which
+// only ever reads individual elements/rows).
+//
+// `screening_threshold`: same Schwarz prescreen as twoElectronIntegralsPacked (default 0.0, off),
+// using each SIDE's own same-basis pair diagonal: |(pq|rs)| <= sqrt((pq|pq)_pq * (rs|rs)_rs)
+// holds regardless of pq and rs coming from different bases, since it is a property of the
+// Coulomb operator applied to the two (possibly different-basis) charge distributions, not of
+// the bases matching.
+CrossPackedTwoElectronTensor twoElectronIntegralsCrossPacked(const std::vector<BasisFunction>& basis_pq,
+                                                              const std::vector<BasisFunction>& basis_rs,
+                                                              double screening_threshold = 0.0);
 
 }  // namespace rerdmft
 

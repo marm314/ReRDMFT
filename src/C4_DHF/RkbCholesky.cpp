@@ -22,9 +22,11 @@ using C = std::complex<double>;
 // (LL|LL), (LL|SS), (SS|SS), presented to the pivoted decomposition without ever being assembled.
 class UnionCoulombPairs : public PairMatrixSource<double> {
  public:
-  // (LL|LL) and (SS|SS) are the 8-fold-packed real AO tensors (never expanded); the cross block (LL|SS) is a
-  // dense nl^2 x ns^2 array (it has no pair-exchange symmetry to pack).
-  UnionCoulombPairs(const PackedTwoElectronTensor& ll_ll, const Tensor4<double>& ll_ss, const PackedTwoElectronTensor& ss_ss)
+  // (LL|LL) and (SS|SS) are the 8-fold-packed real AO tensors; the cross block (LL|SS) is the
+  // 4-fold-packed CrossPackedTwoElectronTensor (p<->q and r<->s symmetry, no (pq)<->(rs) swap --
+  // see its own comment) -- none of the three is ever the dense n^4 array.
+  UnionCoulombPairs(const PackedTwoElectronTensor& ll_ll, const CrossPackedTwoElectronTensor& ll_ss,
+                     const PackedTwoElectronTensor& ss_ss)
       : ll_ll_(ll_ll), ll_ss_(ll_ss), ss_ss_(ss_ss), nl_(ll_ll.dim()), ns_(ss_ss.dim()) {}
 
   std::size_t size() const override { return nl_ * nl_ + ns_ * ns_; }
@@ -49,7 +51,7 @@ class UnionCoulombPairs : public PairMatrixSource<double> {
 
  private:
   const PackedTwoElectronTensor& ll_ll_;
-  const Tensor4<double>& ll_ss_;
+  const CrossPackedTwoElectronTensor& ll_ss_;
   const PackedTwoElectronTensor& ss_ss_;
   std::size_t nl_, ns_;
 };
@@ -76,11 +78,19 @@ RkbCholesky RkbCholesky::build(const std::vector<BasisFunction>& large_basis,
   FlatVectors<double> flat;
   {
     // The three real AO tensors (transient: released as soon as the decomposition is done): (LL|LL) and (SS|SS)
-    // 8-fold packed, the (LL|SS) cross block dense (nl^2 x ns^2).
+    // 8-fold packed, the (LL|SS) cross block 4-fold packed (see CrossPackedTwoElectronTensor) --
+    // about a 4x reduction over the dense nl^2 x ns^2 array, since the decomposition itself only
+    // ever reads individual elements/rows (PairMatrixSource), never needs the dense layout.
     progress("RKB Cholesky: real AO integrals (LL|LL), (LL|SS), (SS|SS)");
-    const PackedTwoElectronTensor ll_ll = twoElectronIntegralsPacked(large_basis);
-    const Tensor4<double> ll_ss = twoElectronIntegralsCross(large_basis, small_basis);
-    const PackedTwoElectronTensor ss_ss = twoElectronIntegralsPacked(small_basis);
+    // Schwarz-prescreened at the SAME threshold the decomposition itself targets: an element
+    // this build drops was already going to contribute at most `threshold` of error to the
+    // reconstruction, which is exactly the accuracy the pivoted decomposition's own stopping
+    // rule (dmax < threshold) already budgets for -- see Cholesky_Decomposition.h's own comment
+    // on why the largest diagonal residual bounds every off-diagonal one.
+    const PackedTwoElectronTensor ll_ll = twoElectronIntegralsPacked(large_basis, threshold);
+    const CrossPackedTwoElectronTensor ll_ss =
+        twoElectronIntegralsCrossPacked(large_basis, small_basis, threshold);
+    const PackedTwoElectronTensor ss_ss = twoElectronIntegralsPacked(small_basis, threshold);
     ProgressLine() << "RKB Cholesky: AO integrals done; decomposing the {LL} u {SS} pair matrix (dimension "
                    << large_basis.size() * large_basis.size() + small_basis.size() * small_basis.size() << ")";
     const UnionCoulombPairs pairs(ll_ll, ll_ss, ss_ss);

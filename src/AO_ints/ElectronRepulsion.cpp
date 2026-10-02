@@ -1,5 +1,7 @@
 #include "ElectronRepulsion.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 
 // libcint is a C library and its headers do not guard themselves with
@@ -87,11 +89,31 @@ double twoElectronQuadruplet(const BasisFunction& p, const BasisFunction& q,
   return buf[entry];
 }
 
+// sqrt((pq|pq)) for every unordered pair {p,q} of `basis`, in PackedTwoElectronTensor's own
+// triangular index (hi*(hi+1)/2 + lo) -- the per-pair "diagonal" the Schwarz prescreen bounds
+// |(pq|rs)| <= sqrt_diag[pq] * sqrt_diag[rs] against. O(n^2) quadruplets, cheap relative to the
+// O(n^4) loop it gates. Clamped at 0 before the sqrt: (pq|pq) is exactly the Coulomb
+// self-repulsion of the real charge distribution p*q and is mathematically >= 0, but a
+// near-degenerate/near-zero-overlap pair can round to a tiny negative double.
+std::vector<double> sqrtPairDiagonal(const std::vector<BasisFunction>& basis) {
+  const std::size_t n = basis.size();
+  std::vector<double> sqrt_diag(n * (n + 1) / 2, 0.0);
+#pragma omp parallel for schedule(dynamic)
+  for (std::size_t p = 0; p < n; ++p) {
+    for (std::size_t q = p; q < n; ++q) {
+      const double value = twoElectronQuadruplet(basis[p], basis[q], basis[p], basis[q]);
+      sqrt_diag[q * (q + 1) / 2 + p] = std::sqrt(std::max(0.0, value));
+    }
+  }
+  return sqrt_diag;
+}
+
 }  // namespace
 
-Tensor4<double> twoElectronIntegrals(const std::vector<BasisFunction>& basis) {
+Tensor4<double> twoElectronIntegrals(const std::vector<BasisFunction>& basis, double screening_threshold) {
   const std::size_t n = basis.size();
   Tensor4<double> result(n, n, n, n);
+  const std::vector<double> sqrt_diag = screening_threshold > 0.0 ? sqrtPairDiagonal(basis) : std::vector<double>();
 
   // Each (p,q) with p<=q owns a disjoint set of 8 output positions (the
   // canonical-representative selection below never revisits a symmetry
@@ -104,11 +126,15 @@ Tensor4<double> twoElectronIntegrals(const std::vector<BasisFunction>& basis) {
 #pragma omp parallel for schedule(dynamic)
   for (std::size_t p = 0; p < n; ++p) {
     for (std::size_t q = p; q < n; ++q) {
+      const double sqrt_diag_pq = screening_threshold > 0.0 ? sqrt_diag[q * (q + 1) / 2 + p] : 0.0;
       for (std::size_t r = 0; r < n; ++r) {
         for (std::size_t s = r; s < n; ++s) {
           const std::size_t pq = p * n + q;
           const std::size_t rs = r * n + s;
           if (rs < pq) continue;  // (pq|rs) == (rs|pq); do the (pq)<=(rs) half.
+          if (screening_threshold > 0.0 && sqrt_diag_pq * sqrt_diag[s * (s + 1) / 2 + r] < screening_threshold) {
+            continue;  // |(pq|rs)| <= sqrt_diag_pq * sqrt_diag_rs < threshold: leave it at 0.
+          }
 
           const double value = twoElectronQuadruplet(basis[p], basis[q], basis[r], basis[s]);
 
@@ -127,9 +153,11 @@ Tensor4<double> twoElectronIntegrals(const std::vector<BasisFunction>& basis) {
   return result;
 }
 
-PackedTwoElectronTensor twoElectronIntegralsPacked(const std::vector<BasisFunction>& basis) {
+PackedTwoElectronTensor twoElectronIntegralsPacked(const std::vector<BasisFunction>& basis,
+                                                    double screening_threshold) {
   const std::size_t n = basis.size();
   PackedTwoElectronTensor result(n);
+  const std::vector<double> sqrt_diag = screening_threshold > 0.0 ? sqrtPairDiagonal(basis) : std::vector<double>();
 
   // Same reasoning as twoElectronIntegrals: each canonical (p,q,r,s) with
   // p<=q, r<=s, (pq)<=(rs) maps to exactly one triangular slot (no two
@@ -140,11 +168,16 @@ PackedTwoElectronTensor twoElectronIntegralsPacked(const std::vector<BasisFuncti
 #pragma omp parallel for schedule(dynamic)
   for (std::size_t p = 0; p < n; ++p) {
     for (std::size_t q = p; q < n; ++q) {
+      const double sqrt_diag_pq = screening_threshold > 0.0 ? sqrt_diag[q * (q + 1) / 2 + p] : 0.0;
       for (std::size_t r = 0; r < n; ++r) {
         for (std::size_t s = r; s < n; ++s) {
           const std::size_t pq = p * n + q;
           const std::size_t rs = r * n + s;
           if (rs < pq) continue;  // (pq|rs) == (rs|pq); do the (pq)<=(rs) half.
+          if (screening_threshold > 0.0 &&
+              sqrt_diag_pq * sqrt_diag[s * (s + 1) / 2 + r] < screening_threshold) {
+            continue;  // |(pq|rs)| <= sqrt_diag_pq * sqrt_diag_rs < threshold: leave it at 0.
+          }
 
           const double value = twoElectronQuadruplet(basis[p], basis[q], basis[r], basis[s]);
           result.set(p, q, r, s, value);
@@ -156,18 +189,28 @@ PackedTwoElectronTensor twoElectronIntegralsPacked(const std::vector<BasisFuncti
 }
 
 Tensor4<double> twoElectronIntegralsCross(const std::vector<BasisFunction>& basis_pq,
-                                           const std::vector<BasisFunction>& basis_rs) {
+                                           const std::vector<BasisFunction>& basis_rs,
+                                           double screening_threshold) {
   const std::size_t n_pq = basis_pq.size();
   const std::size_t n_rs = basis_rs.size();
   Tensor4<double> result(n_pq, n_pq, n_rs, n_rs);
+  const std::vector<double> sqrt_diag_pq =
+      screening_threshold > 0.0 ? sqrtPairDiagonal(basis_pq) : std::vector<double>();
+  const std::vector<double> sqrt_diag_rs =
+      screening_threshold > 0.0 ? sqrtPairDiagonal(basis_rs) : std::vector<double>();
 
   // Same reasoning as twoElectronIntegrals: each (p,q) with p<=q owns a
   // disjoint set of output positions, so parallelizing over it is safe.
 #pragma omp parallel for schedule(dynamic)
   for (std::size_t p = 0; p < n_pq; ++p) {
     for (std::size_t q = p; q < n_pq; ++q) {
+      const double sqrt_diag_pq_val = screening_threshold > 0.0 ? sqrt_diag_pq[q * (q + 1) / 2 + p] : 0.0;
       for (std::size_t r = 0; r < n_rs; ++r) {
         for (std::size_t s = r; s < n_rs; ++s) {
+          if (screening_threshold > 0.0 &&
+              sqrt_diag_pq_val * sqrt_diag_rs[s * (s + 1) / 2 + r] < screening_threshold) {
+            continue;  // |(pq|rs)| <= sqrt_diag_pq * sqrt_diag_rs < threshold: leave it at 0.
+          }
           const double value =
               twoElectronQuadruplet(basis_pq[p], basis_pq[q], basis_rs[r], basis_rs[s]);
 
@@ -175,6 +218,41 @@ Tensor4<double> twoElectronIntegralsCross(const std::vector<BasisFunction>& basi
           result(q, p, r, s) = value;
           result(p, q, s, r) = value;
           result(q, p, s, r) = value;
+        }
+      }
+    }
+  }
+  return result;
+}
+
+CrossPackedTwoElectronTensor twoElectronIntegralsCrossPacked(const std::vector<BasisFunction>& basis_pq,
+                                                              const std::vector<BasisFunction>& basis_rs,
+                                                              double screening_threshold) {
+  const std::size_t n_pq = basis_pq.size();
+  const std::size_t n_rs = basis_rs.size();
+  CrossPackedTwoElectronTensor result(n_pq, n_rs);
+  const std::vector<double> sqrt_diag_pq =
+      screening_threshold > 0.0 ? sqrtPairDiagonal(basis_pq) : std::vector<double>();
+  const std::vector<double> sqrt_diag_rs =
+      screening_threshold > 0.0 ? sqrtPairDiagonal(basis_rs) : std::vector<double>();
+
+  // Same reasoning as twoElectronIntegralsCross: each canonical (p,q,r,s) with p<=q, r<=s maps to
+  // exactly one slot (no two canonical representatives ever collide), so parallelizing over (p,q)
+  // is safe -- and here there is no redundant write-out to 4 positions, since
+  // CrossPackedTwoElectronTensor::set already resolves either argument order to the same slot.
+#pragma omp parallel for schedule(dynamic)
+  for (std::size_t p = 0; p < n_pq; ++p) {
+    for (std::size_t q = p; q < n_pq; ++q) {
+      const double sqrt_diag_pq_val = screening_threshold > 0.0 ? sqrt_diag_pq[q * (q + 1) / 2 + p] : 0.0;
+      for (std::size_t r = 0; r < n_rs; ++r) {
+        for (std::size_t s = r; s < n_rs; ++s) {
+          if (screening_threshold > 0.0 &&
+              sqrt_diag_pq_val * sqrt_diag_rs[s * (s + 1) / 2 + r] < screening_threshold) {
+            continue;  // |(pq|rs)| <= sqrt_diag_pq * sqrt_diag_rs < threshold: leave it at 0.
+          }
+          const double value =
+              twoElectronQuadruplet(basis_pq[p], basis_pq[q], basis_rs[r], basis_rs[s]);
+          result.set(p, q, r, s, value);
         }
       }
     }

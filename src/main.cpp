@@ -3258,6 +3258,9 @@ int main(int argc, char** argv) {
           c4_mo_sym_r = rerdmft::rkbMoTwoElectronSymmetric(c4_spinor_eri, c_dhf_restart);
         }
         logTiming("C4_DHF MO integral transform complete (READ_RESTART)", t_start, t_checkpoint, timing_records);
+        // Same reasoning as the non-restart C4_DHF path: nothing below needs the AO-level RKB
+        // vectors once the MO transform(s) above have extracted c4_mo_chol_r/c4_mo_full_chol_r.
+        rkb_cholesky = rerdmft::RkbCholesky();
         const std::size_t n_negative_r = dim / 2;
         rerdmft::RestartCapture c4_restart;
         const auto dhf_functional_r = [&](const auto& eri_any, const auto* eri_full) {
@@ -4141,6 +4144,13 @@ int main(int argc, char** argv) {
         } else {
           dhf_functional_report = dhf_functional(c4_mo_sym, &c4_mo_sym);
         }
+        // The AO-level RKB vectors are never touched again: the MO transform(s) above (trimmed
+        // c4_mo_chol, and the untrimmed c4_mo_full_chol when FULL_OPTIMIZATION_4C_NEG ran) and the
+        // [DEBUG] Fock/MO-integral check further up already extracted everything needed from them,
+        // and the whole FULL_OPTIMIZATION (+ 4C_NEG saddle stage, if any) already ran synchronously
+        // inside dhf_functional() above. Release them now rather than keep O(N_chol * n_large^2)
+        // of memory alive for the rest of the program.
+        rkb_cholesky = rerdmft::RkbCholesky();
         // RESTART files: RESTART.4C (the positive-energy-only minimization); coefficients in the RKB spinor basis.
         const auto restart_fingerprint = rerdmft::basisFingerprint(large_basis.functions());
         writeRestartFile<std::complex<double>>(c4_restart_log, input, "4C", c4_restart, dhf_result.c_dhf, h_rkb, s_full, h_mo,
