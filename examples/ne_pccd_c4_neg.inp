@@ -1,0 +1,32 @@
+# Example ReRDMFT input file: Ne, cc-pVDZ, FUNCTIONAL PCCD, C4_DHF with the 4-component min-max
+# stage (FULL_OPTIMIZATION_4C_NEG TRUE) -- same no-pair pCCD minimum as ne_pccd_c4.inp, then NEO
+# extends the orbital rotations to the positive<->negative-energy pairs and converges to the
+# saddle point (Talman 1986/Saue ChemPhysChem 2011's min-max characterization), re-solving the
+# pCCD amplitudes at the new orbitals, macro-iterated. CHOLESKY TRUE keeps it cheap (under 2 min).
+#
+# Converged total energies:
+#   C4_DHF (no-pair, positive-energy-only minimum): -128.7027634 Hartree
+#   C4_DHF (min-max, including the negative-energy spinors): -128.7027634 Hartree
+#     (-6.689e-09 Hartree relative to the no-pair minimum -- the physically expected tiny scale
+#     of positive<->negative-energy mixing, O(1/c^2); see also lih_gnof_c4_neg_full_optimization.inp
+#     and lih_muller_c4_neg_full_optimization_cholesky.inp for the same scale on a different
+#     functional/system).
+#
+# This example only converges cleanly since the pCCD amplitude warm-up bug was fixed (the
+# amplitude cache used to be pre-populated at the UNROTATED starting integrals instead of the
+# no-pair minimum's own rotated ones, a basis mismatch that made NEO's very first trust-region
+# step wildly oversized and the whole min-max search diverge catastrophically within the first
+# macro-iteration -- confirmed on both LiH/6-31G and this system before the fix).
+NELEC 10
+BASIS ne-cc-pvdz.gbs
+NON_RELATIVISTIC TRUE
+X2C TRUE
+C4_SPINOR TRUE
+FUNCTIONAL PCCD
+FULL_OPTIMIZATION TRUE
+FULL_OPTIMIZATION_4C_NEG TRUE
+CHOLESKY TRUE
+
+GEOMETRY
+Ne  0.000000   0.000000   0.000000
+END

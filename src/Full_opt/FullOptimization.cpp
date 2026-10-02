@@ -24,6 +24,7 @@
 #include "OrbitalGradient.h"
 #include "PccdFock.h"
 #include "PccdHessian.h"
+#include "PhysicalConstants.h"
 #include "PnofFock.h"
 #include "Progress.h"
 #include "PnofHessian.h"
@@ -1823,6 +1824,75 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
     log << "    NEO applies it as a dynamic order: at every Newton step, the number of gradient-coupled Hessian directions with curvature below -"
         << settings.saddle.curvature_cutoff << " (symmetry leaves only some of them coupled to the gradient);"
            " the order/sector above are RE-DERIVED from the occupations after every occupation re-optimization in the macro loop below.\n";
+    // DEBUG TRUE: sanity-check the electron-positron curvature scale BEFORE any NEO step is taken,
+    // i.e. at the no-pair minimum the min-max search starts from. This block should be
+    // functional-independent: the lowest eigenvalue is dominated by the bare one-electron Dirac
+    // operator's 2mc^2 gap (-4c^2 per positive-occupied x negative-energy pair, see the comment
+    // above on `saddle_order`), not by the 2-RDM ansatz, so a correctly-behaved model (any
+    // functional) should show the SAME lowest eigenvalue here as the one found at the converged
+    // saddle point further down. A model whose starting curvature in this sector is anomalously
+    // far from that scale is a model NEO will mis-size its very first trust-region step for.
+    if (settings.debug && model.hessian_matrix) {
+      progress("FULL_OPTIMIZATION (NEO): dense Hessian diagonalization at the min-max STARTING point");
+      const auto& eri_dense0 = denseOf(problem.eri());
+      Matrix<double> hessian0 = model.hessian_matrix(problem.h(), eri_dense0, occupations);
+      const char* space0 = "unrestricted";
+      if (kr) {
+        hessian0 = kr->contractMatrix(hessian0);
+        space0 = "Kramers-restricted";
+      } else if (!spin_orbits.empty()) {
+        hessian0 = contractSpinRestricted(hessian0, spin_orbits);
+        space0 = "spin-restricted";
+      }
+      const SymmetricEigenResult start_eig = diagonalizeSymmetric(hessian0);
+      const auto& w0 = start_eig.eigenvalues;
+      const std::size_t n_neg0 =
+          static_cast<std::size_t>(std::count_if(w0.begin(), w0.end(), [](double e) { return e < -1e-6; }));
+      ProgressLine() << "FULL_OPTIMIZATION_4C_NEG starting-point Hessian: " << n_neg0 << " negative eigenvalue(s), lowest "
+                     << std::scientific << std::setprecision(3) << w0.front() << " (expected -4c^2 = "
+                     << (-4.0 * kSpeedOfLight * kSpeedOfLight) << ")" << std::defaultfloat << std::setprecision(6);
+      log << "    Hessian check (dense diagonalization of the " << space0 << " " << hessian0.rows() << " x " << hessian0.rows()
+          << " orbital-rotation Hessian, AT THE STARTING POINT before any NEO step): " << n_neg0
+          << " negative eigenvalue(s) (< -1e-6); lowest " << std::scientific << std::setprecision(3) << w0.front()
+          << std::defaultfloat << std::setprecision(6) << " (expected scale: -4c^2 = "
+          << std::scientific << std::setprecision(3) << (-4.0 * kSpeedOfLight * kSpeedOfLight)
+          << std::defaultfloat << std::setprecision(6) << ", default c; SPEED_OF_LIGHT TRUE changes this).\n";
+    }
+    // DEBUG TRUE: the electron-positron GRADIENT at the same starting point. Unlike the Hessian
+    // diagonal above, h_pq is EXACTLY zero between an occupied positive-energy spinor and any
+    // negative-energy one (eigenvectors of the same Hermitian one-electron Dirac operator at
+    // different eigenvalues), so this component of the gradient comes ENTIRELY from the
+    // two-electron/2-RDM part of the generalized Fock matrix -- it has no one-electron term to
+    // anchor it the way the Hessian diagonal does. A functional whose RDM misrepresents the true
+    // electron-positron coupling here would show up as an anomalously large gradient component,
+    // even though the Hessian (dominated by -4c^2 regardless of functional) looks fine.
+    if (settings.debug) {
+      const std::size_t nn = settings.saddle.n_negative;
+      const Matrix<T> g0 = model.gradient(problem.h(), problem.eri(), occupations);
+      double g_ep_max = 0.0, g_ord_max = 0.0;
+      std::size_t n_ep_pairs = 0, n_ord_pairs = 0;
+      for (const auto& [p, q] : problem.pairs()) {
+        const std::size_t lo = std::min(p, q), hi = std::max(p, q);
+        if (lo < nn && hi >= nn) {
+          g_ep_max = std::max(g_ep_max, std::abs(std::complex<double>(g0(p, q))));
+          ++n_ep_pairs;
+        } else {
+          g_ord_max = std::max(g_ord_max, std::abs(std::complex<double>(g0(p, q))));
+          ++n_ord_pairs;
+        }
+      }
+      ProgressLine() << "FULL_OPTIMIZATION_4C_NEG starting-point gradient: electron-positron max|g| = "
+                     << std::scientific << std::setprecision(3) << g_ep_max << " over " << n_ep_pairs
+                     << " pairs; ORDINARY max|g| = " << g_ord_max << " over " << n_ord_pairs << " pairs"
+                     << std::defaultfloat << std::setprecision(6);
+      log << "    Gradient AT THE STARTING POINT (before any NEO step): electron-positron max|g| = "
+          << std::scientific << std::setprecision(3) << g_ep_max << std::defaultfloat << std::setprecision(6)
+          << " over " << n_ep_pairs << " (occupied positive-energy) x (negative-energy) pairs -- NO one-electron"
+             " contribution (h_pq = 0 between eigenvectors of different Dirac eigenvalues), entirely from the"
+             " two-electron/RDM part of the generalized Fock matrix; ORDINARY (same-energy-sign) max|g| = "
+          << std::scientific << std::setprecision(3) << g_ord_max << std::defaultfloat << std::setprecision(6)
+          << " over " << n_ord_pairs << " pairs.\n";
+    }
   }
   neo_options.step.target_order = 0;
   if (saddle) {
@@ -2731,6 +2801,32 @@ FullOptResult runFullOptimizationPccd(const Matrix<T>& h, const Eri& eri,
   // so this should converge in very few iterations, not redo real work.
   static_cast<void>(occupations);  // superseded by warm_up.occupations below
   std::vector<double> warm_state = state;
+  // Min-max (FULL_OPTIMIZATION_4C_NEG) call: `settings.saddle.n_negative > 0` here means
+  // runFullOptimization (below) will rotate `h`/`eri` by `settings.saddle.start_rotation` BEFORE
+  // using them (see its own `h_start`/`eri_start`) -- i.e. the saddle search actually runs at the
+  // no-pair minimum's orbitals, not at `h`/`eri` as handed in (those are main.cpp's own pre-rotation
+  // integrals, reused across both the no-pair and the saddle call). Solving the warm-up amplitudes
+  // against the UNROTATED `h`/`eri` would freeze the cache at the wrong point from step 0 -- a
+  // basis mismatch against everything the saddle search itself evaluates against, independent of
+  // (and inevitably worse than) the usual staleness the search accumulates as NEO rotates further.
+  // Replicate that same rotation here, for the warm-up solve only.
+  if (settings.saddle.n_negative > 0) {
+    const std::size_t n = h.rows();
+    if (settings.saddle.start_rotation.rows() != n || settings.saddle.start_rotation.cols() != n) {
+      throw std::runtime_error("FULL_OPTIMIZATION_4C_NEG: the starting rotation has the wrong dimension");
+    }
+    Matrix<T> u0(n, n);
+    for (std::size_t i = 0; i < n * n; ++i) {
+      if constexpr (std::is_same_v<T, double>) u0.data()[i] = settings.saddle.start_rotation.data()[i].real();
+      else u0.data()[i] = settings.saddle.start_rotation.data()[i];
+    }
+    const Matrix<T> h_rot = oneElectronRotated(h, u0);
+    const Eri eri_rot = rotateEri(eri, u0);
+    const auto warm_up = model.optimize_occupations(h_rot, eri_rot, warm_state);
+    return runFullOptimization<T, Eri>(h, eri, warm_up.occupations, warm_state, model, settings,
+                                       kramers_restricted, nuclear_repulsion_energy, log,
+                                       spin_partner, /*n_negative=*/0);
+  }
   const auto warm_up = model.optimize_occupations(h, eri, warm_state);
   return runFullOptimization<T, Eri>(h, eri, warm_up.occupations, warm_state, model, settings,
                                      kramers_restricted, nuclear_repulsion_energy, log,

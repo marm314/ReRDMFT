@@ -128,7 +128,7 @@ anywhere on a line) are comments.
 | `FIXED_OCCUPANCIES` | bool | `FALSE` | Only meaningful with `FULL_OPTIMIZATION TRUE` (`NON_RELATIVISTIC`, `X2C` or `C4_SPINOR` alike -- the same macro-iteration loop, `Full_opt/FullOptimization.cpp`, drives all three, including `FULL_OPTIMIZATION_4C_NEG`'s min-max stage). The occupation-number optimization that runs ONCE at the starting HF/DHF orbitals, before the macro loop, is unaffected. When `TRUE`, the macro loop itself never re-optimizes occupations again: each macro-iteration only re-optimizes the orbitals at those fixed occupations (logged as `occupations-fixed`), turning `FULL_OPTIMIZATION` into a pure orbital optimization at fixed occupation numbers instead of its usual alternation of the two. Template: `examples/lih_gnof_fixed_occupancies.inp`. |
 | `READ_OCCUPANCIES` | bool | `FALSE` | Requires `FUNCTIONAL`. Before the occupation-number optimization that normally runs once at the starting HF/DHF orbitals, reads a plain-text file named `OCC.in` in the working directory (one line per geminal/pair: `<index> <occupation>`) and uses those occupations DIRECTLY -- the optimizer (SQP/LBFGS for PNOF, SQP for JK_only) does not run at all for that stage. For PNOF, `index` is the SUBSPACE number (`0..PNOF_SUBSPACES-1`): the file needs exactly `PNOF_SUBSPACES` groups of `PNOF_COUPLING` lines each, in file order within a group (first line of a group is that subspace's principal geminal), summing to 1 per subspace (renormalized if not exact); core (frozen) geminals are NOT listed. For JK_only functionals `index` is ignored -- only the occupation column matters, one line per Kramers/spin-tied active pair, in the same order the active window itself uses, summing to `NELEC - 2*JK_FROZEN_PAIRS`. If `READ_RESTART` is also `TRUE`, orbitals still come from the RESTART file, but these occupations override the RESTART file's own. `FULL_OPTIMIZATION`'s own macro loop (if it runs) is unaffected by this keyword alone -- combine with `FIXED_OCCUPANCIES TRUE` to also keep it from re-optimizing them. Template: `examples/lih_gnof_read_occupancies.inp` (with its companion `examples/OCC.in`). |
 | `READ_RESTART` | bool | `FALSE` | Requires a `FUNCTIONAL`. `TRUE` skips the HF/DHF SCF of every requested method (`NON_RELATIVISTIC`, `X2C`, `C4_SPINOR`) and starts the functional calculation from `RESTART.NON_REL` / `RESTART.X2C_HF` / `RESTART.4C` of an earlier run, possibly at another geometry (potential-energy scans) -- see *Restarting from a previous run* below. |
-| `FULL_OPTIMIZATION_4C_NEG` | bool | `FALSE` | Only meaningful for `C4_SPINOR` + `FULL_OPTIMIZATION` (any `FUNCTIONAL`, `CHOLESKY` TRUE or FALSE). After the positive-energy-only optimization has converged, runs the genuine **min-max** stage: orbital rotations now include the positive <-> negative-energy pairs, driven by NEO to a saddle point (whatever `ORBITAL_OPTIMIZER` says), alternating with a full re-minimization of the occupation numbers -- see below. Skipped, with a message, if the first stage did not converge. **Known broken for `FUNCTIONAL PCCD`**: NEO diverges partway through the saddle search (confirmed on LiH/6-31G: clean Newton steps to a sensible point, then a sudden blow-up to an unphysical energy) -- not yet debugged; the ordinary (minimization-only) `FULL_OPTIMIZATION` is unaffected and fully validated for PCCD on NON_REL/X2C/C4_SPINOR alike. |
+| `FULL_OPTIMIZATION_4C_NEG` | bool | `FALSE` | Only meaningful for `C4_SPINOR` + `FULL_OPTIMIZATION` (any `FUNCTIONAL`, `CHOLESKY` TRUE or FALSE). After the positive-energy-only optimization has converged, runs the genuine **min-max** stage: orbital rotations now include the positive <-> negative-energy pairs, driven by NEO to a saddle point (whatever `ORBITAL_OPTIMIZER` says), alternating with a full re-minimization of the occupation numbers -- see below. Skipped, with a message, if the first stage did not converge. Validated for `FUNCTIONAL PCCD` too (fixed: the amplitude warm-up that pre-populates pCCD's frozen 2-RDM cache used to solve against the UNROTATED starting integrals instead of the no-pair minimum's own rotated ones -- a basis mismatch that made NEO's very first trust-region step wildly oversized and the whole search diverge catastrophically; confirmed on LiH/6-31G and Ne/cc-pVDZ before the fix, both converge cleanly to the expected O(1/c^2) correction now -- see `examples/ne_pccd_c4_neg.inp`). |
 | `X2C` | bool | `FALSE` | Print the one-electron X2C decoupling report and run the approximate X2C-HF SCF (see below), between the `NON_RELATIVISTIC` and `C4_SPINOR` reports. Independent of `C4_SPINOR` (the RKB Hamiltonian it needs is always built). With `DEBUG`, adds extra cross-checks. |
 
 ## X2C decoupling and X2C-HF
@@ -357,14 +357,18 @@ JK-only or PNOF occupation-number optimization:
    re-solves the amplitudes at the newly rotated orbitals (pCCD's own
    "occupation re-optimization" step) before the next rotation.
 
-Validated end to end on NON_REL/X2C/C4_SPINOR alike (ordinary,
-minimization-only `FULL_OPTIMIZATION` -- see the `FULL_OPTIMIZATION_4C_NEG`
-row above for the one known-broken case, the min-max saddle stage).
+Validated end to end on NON_REL/X2C/C4_SPINOR alike, both the ordinary,
+minimization-only `FULL_OPTIMIZATION` and the `FULL_OPTIMIZATION_4C_NEG`
+min-max saddle stage (see that row above for the warm-up basis-mismatch bug
+this surfaced and its fix).
 `examples/ne_pccd_full_optimization.inp` (`NON_RELATIVISTIC`) matches the
 literature oo-pCCD/cc-pVDZ energy for the Ne atom (-128.559674 Hartree) to
 ~1e-7 Hartree; `examples/ne_pccd_x2c.inp` and `examples/ne_pccd_c4.inp` are
 its `X2C`/`C4_SPINOR` counterparts (`CHOLESKY TRUE`, since `C4_SPINOR`'s RKB
-dimension there is sizable) -- the pCCD correlation energy recovered on top
+dimension there is sizable), and `examples/ne_pccd_c4_neg.inp` adds the
+min-max stage on top of `ne_pccd_c4.inp` (converges to the same energy,
+`-6.689e-09` Hartree below the no-pair minimum -- the expected O(1/c^2)
+scale) -- the pCCD correlation energy recovered on top
 of the HF/DHF reference agrees between `NON_RELATIVISTIC` and exact
 4-component to ~4e-6 Hartree. `ne_pccd_x2c.inp`'s own header flags a
 separate, pre-existing issue it surfaced: `X2C` 's approximate (one-electron
