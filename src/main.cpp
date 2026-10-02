@@ -2258,7 +2258,9 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
                                        std::chrono::steady_clock::time_point t_start,
                                        std::chrono::steady_clock::time_point& t_checkpoint,
                                        std::vector<TimingRecord>& timing_records,
-                                       const Eri* eri_full_block = nullptr) {
+                                       rerdmft::RestartCapture* restart = nullptr,
+                                       const Eri* eri_full_block = nullptr,
+                                       const std::vector<double>* restart_amplitudes = nullptr) {
   rerdmft::progressContext() = label;
   const std::size_t n_total = h.rows();
   const std::size_t n_spatial = n_active / 2;
@@ -2317,6 +2319,26 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
 
   const auto coeff = rerdmft::buildPccdCoefficients(h, eri, reps, bar, n_core, n_occ, n_vir);
   rerdmft::Matrix<double> t0(n_occ, n_vir, 0.0), z0(n_occ, n_vir, 0.0);
+  // READ_RESTART: seed t0/z0 from the restart file's own converged amplitudes instead of a cold
+  // start -- same flattened [t; z] convention as makePccdModel's `state` (Full_opt/
+  // FullOptimization.cpp). The window (n_occ, n_vir) is re-derived above from THIS run's own
+  // PCCD_FROZEN_PAIRS/PCCD_ACTIVE_PAIRS, not stored in the file, so a mismatched window shows up
+  // here as a size mismatch rather than silently misreading the vector.
+  if (restart_amplitudes != nullptr) {
+    if (restart_amplitudes->size() != 2 * n_occ * n_vir) {
+      throw std::runtime_error(label + ": READ_RESTART amplitudes have " +
+                                std::to_string(restart_amplitudes->size()) + " entries but this run's PCCD window (" +
+                                std::to_string(n_occ) + " occupied x " + std::to_string(n_vir) +
+                                " virtual pairs) needs " + std::to_string(2 * n_occ * n_vir) +
+                                " -- a different PCCD_FROZEN_PAIRS/PCCD_ACTIVE_PAIRS than the restart file's?");
+    }
+    for (std::size_t i = 0; i < n_occ; ++i) {
+      for (std::size_t a = 0; a < n_vir; ++a) {
+        t0(i, a) = (*restart_amplitudes)[i * n_vir + a];
+        z0(i, a) = (*restart_amplitudes)[n_occ * n_vir + i * n_vir + a];
+      }
+    }
+  }
   const auto t_result = rerdmft::solvePccdTAmplitudes(coeff, t0, amp_settings);
   const auto z_result = rerdmft::solvePccdZAmplitudes(coeff, t_result.t, z0, amp_settings);
   logTiming(label + " pCCD t-/z-amplitudes solved (" + amplitude_solver_name + ")", t_start,
@@ -2356,6 +2378,9 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
   std::ostringstream out;
   out << "\n" << label
       << " pCCD RDMFT functional evaluation (Occ_opt/pCCD.h, on the converged HF/DHF orbitals):\n";
+  out << "  Amplitude guess: " << (restart_amplitudes != nullptr ? "READ_RESTART (t-/z-amplitudes of the restart file)"
+                                                                 : std::string("cold start (t = z = 0)"))
+      << "\n";
   out << "  t-amplitudes " << (t_result.t_converged ? "converged" : "did NOT converge") << " ("
       << t_result.t_iterations << " iter., ||R|| = " << std::scientific << std::setprecision(2)
       << t_result.t_residual_norm << std::defaultfloat << std::setprecision(6) << ")\n";
@@ -2429,6 +2454,37 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
           out << "\n  FULL_OPTIMIZATION_4C_NEG FAILED: " << e.what() << "\n";
         }
       }
+    }
+  }
+
+  // RESTART data: the final occupations/amplitudes (after the macro loop when it ran and its
+  // validation checks passed, otherwise the fixed-orbital amplitude solve) and the accumulated
+  // rotation -- same convention as buildFunctionalReport/buildPnofFunctionalReport's own RESTART
+  // block. Like those, this reflects the ORDINARY FULL_OPTIMIZATION result even when
+  // FULL_OPTIMIZATION_4C_NEG also ran (its own saddle-stage result is not persisted here either).
+  if (restart != nullptr) {
+    restart->valid = true;
+    restart->kind = "PCCD";
+    restart->jk_frozen_pairs = static_cast<std::int64_t>(n_core);
+    restart->jk_active_pairs = static_cast<std::int64_t>(n_occ + n_vir);
+    restart->occupations = occupations;
+    std::vector<double> flat_state(2 * n_occ * n_vir, 0.0);
+    for (std::size_t i = 0; i < n_occ; ++i) {
+      for (std::size_t a = 0; a < n_vir; ++a) {
+        flat_state[i * n_vir + a] = t_result.t(i, a);
+        flat_state[n_occ * n_vir + i * n_vir + a] = z_result.z(i, a);
+      }
+    }
+    restart->amplitudes = flat_state;
+    restart->electronic_energy = electronic_energy;
+    restart->converged = t_result.t_converged && z_result.z_converged;
+    if (full_result.checks_passed) {
+      restart->occupations = full_result.occupations;
+      restart->amplitudes = full_result.occupation_state;
+      restart->electronic_energy = full_result.electronic_energy;
+      restart->converged = full_result.converged;
+      restart->orbitals_optimized = true;
+      restart->total_rotation = full_result.total_rotation;
     }
   }
   logTiming(label + " pCCD functional report complete", t_start, t_checkpoint, timing_records);
@@ -2520,6 +2576,7 @@ void writeRestartFile(std::ostream& out, const rerdmft::Input& input, const std:
     data.converged = capture.converged;
     data.occupations = capture.occupations;
     data.gammas = capture.gammas;
+    data.amplitudes = capture.amplitudes;
     if constexpr (std::is_same_v<T, double>) {
       // NON_REL: real orbitals. Written as real coefficients (the imaginary parts are exactly 0).
       rerdmft::Matrix<double> c_real(c_final.rows(), c_final.cols());
@@ -2537,6 +2594,7 @@ void writeRestartFile(std::ostream& out, const rerdmft::Input& input, const std:
                       back.jk_frozen_pairs == data.jk_frozen_pairs && back.jk_active_pairs == data.jk_active_pairs &&
                       back.total_energy == data.total_energy &&
                       back.occupations == data.occupations && back.gammas == data.gammas &&
+                      back.amplitudes == data.amplitudes &&
                       back.rows == data.rows && back.cols == data.cols &&
                       back.coefficients == data.coefficients;
 
@@ -2970,15 +3028,22 @@ int main(int argc, char** argv) {
         return e;
       };
       const auto restartFingerprint = rerdmft::basisFingerprint(large_basis.functions());
-      // JK_only windows must agree with the file's; a difference is reported (the occupations are still checked against the
-      // window of this run when the functional stage starts, and refused if a frozen/deep-virtual position is not exactly 1/0).
+      // JK_only/PCCD windows must agree with the file's; a difference is reported (the occupations/amplitudes are
+      // still checked against the window of this run when the functional stage starts, and refused if a
+      // frozen/deep-virtual position is not exactly 1/0, or the amplitude vector's size does not fit).
       const auto noteWindow = [&](std::ostream& out, const rerdmft::RestartOrbitals& ro) {
-        if (ro.data.kind != "OCCUPATIONS" || isPnofFunctionalName(input.functional())) return;
-        if (ro.data.jk_frozen_pairs != input.jk_frozen_pairs() ||
-            (input.jk_active_pairs() >= 0 && ro.data.jk_active_pairs != input.jk_active_pairs())) {
-          out << "    Note: the restart file's JK_only window (" << ro.data.jk_frozen_pairs << " frozen / " << ro.data.jk_active_pairs
-                    << " active pair(s)) differs from this run's (" << input.jk_frozen_pairs() << " / "
-                    << (input.jk_active_pairs() >= 0 ? std::to_string(input.jk_active_pairs()) : std::string("all the rest")) << ").\n";
+        if (ro.data.kind == "GAMMAS" || isPnofFunctionalName(input.functional())) return;
+        const bool pccd = ro.data.kind == "PCCD";
+        if (ro.data.jk_frozen_pairs != (pccd ? input.pccd_frozen_pairs() : input.jk_frozen_pairs()) ||
+            ((pccd ? input.pccd_active_pairs() : input.jk_active_pairs()) >= 0 &&
+             ro.data.jk_active_pairs != (pccd ? input.pccd_active_pairs() : input.jk_active_pairs()))) {
+          out << "    Note: the restart file's " << (pccd ? "PCCD" : "JK_only") << " window (" << ro.data.jk_frozen_pairs
+              << " frozen / " << ro.data.jk_active_pairs << " active pair(s)) differs from this run's ("
+              << (pccd ? input.pccd_frozen_pairs() : input.jk_frozen_pairs()) << " / "
+              << ((pccd ? input.pccd_active_pairs() : input.jk_active_pairs()) >= 0
+                      ? std::to_string(pccd ? input.pccd_active_pairs() : input.jk_active_pairs())
+                      : std::string("all the rest"))
+              << ").\n";
         }
       };
       const auto pseudoKramersEnergies = [](std::size_t n) {  // one Kramers pair per cluster: no cluster mixing
@@ -3031,6 +3096,14 @@ int main(int argc, char** argv) {
         logTiming("NON_REL MO integral transform complete (READ_RESTART)", t_start, t_checkpoint, timing_records);
         rerdmft::RestartCapture nonrel_restart;
         const auto nonrel_functional = [&](const auto& eri_any) {
+          if (isPccdFunctionalName(input.functional())) {
+            return buildPccdFunctionalReport(
+                "NON_REL", h_spin, eri_any, 2 * n, 0, input.n_electrons(),
+                restart_nuclear_repulsion, input.pccd_frozen_pairs(), input.pccd_active_pairs(),
+                input.pccd_amplitude_solver(), fullOptSettings(input), input.full_optimization_4c_neg(),
+                t_start, t_checkpoint, timing_records, &nonrel_restart,
+                static_cast<decltype(&eri_any)>(nullptr), &ro.data.amplitudes);
+          }
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(
                 "NON_REL", h_spin, eri_any, 2 * n, 0, input.n_electrons(), input.functional(), restart_nuclear_repulsion,
@@ -3075,6 +3148,13 @@ int main(int argc, char** argv) {
         logTiming("X2C-HF MO integral transform complete (READ_RESTART)", t_start, t_checkpoint, timing_records);
         rerdmft::RestartCapture x2c_restart;
         const auto x2c_functional = [&](const auto& eri_any) {
+          if (isPccdFunctionalName(input.functional())) {
+            return buildPccdFunctionalReport(
+                "X2C_HF", h_x2c_mo, eri_any, dim, 0, input.n_electrons(), restart_nuclear_repulsion,
+                input.pccd_frozen_pairs(), input.pccd_active_pairs(), input.pccd_amplitude_solver(),
+                fullOptSettings(input), input.full_optimization_4c_neg(), t_start, t_checkpoint,
+                timing_records, &x2c_restart, static_cast<decltype(&eri_any)>(nullptr), &ro.data.amplitudes);
+          }
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(
                 "X2C_HF", h_x2c_mo, eri_any, dim, 0, input.n_electrons(), input.functional(), restart_nuclear_repulsion,
@@ -3181,6 +3261,13 @@ int main(int argc, char** argv) {
         const std::size_t n_negative_r = dim / 2;
         rerdmft::RestartCapture c4_restart;
         const auto dhf_functional_r = [&](const auto& eri_any, const auto* eri_full) {
+          if (isPccdFunctionalName(input.functional())) {
+            return buildPccdFunctionalReport(
+                "C4_DHF", h_mo_restart, eri_any, dim - n_negative_r, n_negative_r, input.n_electrons(),
+                restart_nuclear_repulsion, input.pccd_frozen_pairs(), input.pccd_active_pairs(),
+                input.pccd_amplitude_solver(), fullOptSettings(input), input.full_optimization_4c_neg(),
+                t_start, t_checkpoint, timing_records, &c4_restart, eri_full, &ro.data.amplitudes);
+          }
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(
                 "C4_DHF", h_mo_restart, eri_any, dim - n_negative_r, n_negative_r, input.n_electrons(), input.functional(),
@@ -3422,7 +3509,8 @@ int main(int argc, char** argv) {
                 "NON_REL", h_spin, eri_any, 2 * n_spatial, 0, input.n_electrons(),
                 nonrel_hf_result.nuclear_repulsion_energy, input.pccd_frozen_pairs(),
                 input.pccd_active_pairs(), input.pccd_amplitude_solver(), fullOptSettings(input),
-                input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records);
+                input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records,
+                &nonrel_restart);
           }
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(
@@ -3693,7 +3781,7 @@ int main(int argc, char** argv) {
                 x2c_hf_result.nuclear_repulsion_energy, input.pccd_frozen_pairs(),
                 input.pccd_active_pairs(), input.pccd_amplitude_solver(), fullOptSettings(input),
                 input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records,
-                static_cast<decltype(&eri_any)>(nullptr));
+                &x2c_restart, static_cast<decltype(&eri_any)>(nullptr));
           }
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(
@@ -4020,7 +4108,8 @@ int main(int argc, char** argv) {
                 "C4_DHF", h_mo, eri_any, h_mo.rows() - n_negative, n_negative, input.n_electrons(),
                 dhf_result.nuclear_repulsion_energy, input.pccd_frozen_pairs(),
                 input.pccd_active_pairs(), input.pccd_amplitude_solver(), fullOptSettings(input),
-                input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, eri_full);
+                input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records,
+                &c4_restart, eri_full);
           }
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(

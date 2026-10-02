@@ -12,10 +12,11 @@
 namespace rerdmft {
 
 // RESTART file: the final result of an RDMFT run (NON_REL, X2C_HF or 4C), written in BINARY so that
-// a later run can start from it: the occupation numbers (JK_only functionals) or the GAMMA
-// angles (PNOF functionals) and the final molecular-orbital coefficients. Only the WRITER is
-// used by the program for now; readRestart exists to verify the file (main.cpp reads every file
-// back right after writing it) and, through Utils/RestartLoader.h, for READ_RESTART.
+// a later run can start from it: the occupation numbers (JK_only functionals), the GAMMA
+// angles (PNOF functionals), or the t-/z-amplitudes (PCCD) and the final molecular-orbital
+// coefficients. Only the WRITER is used by the program for now; readRestart exists to verify the
+// file (main.cpp reads every file back right after writing it) and, through
+// Utils/RestartLoader.h, for READ_RESTART.
 //
 // File layout (all integers little-endian, doubles IEEE-754 binary64 little-endian):
 //   8 bytes   magic "RERDMFT\0"
@@ -23,13 +24,15 @@ namespace rerdmft {
 //   uint32    byte-order marker 0x01020304 (a reader on a big-endian host refuses the file)
 //   string    method            ("NON_REL" | "X2C_HF" | "4C")           string = uint64 length + bytes
 //   string    functional        (the FUNCTIONAL keyword, upper case)
-//   string    kind              ("OCCUPATIONS" | "GAMMAS")
+//   string    kind              ("OCCUPATIONS" | "GAMMAS" | "PCCD")
 //   uint64    basis fingerprint (BasisFingerprint.h's basisFingerprint of the Large AO basis)
 //   int64     n_electrons
-//   int64     pnof_subspaces, pnof_coupling, n_core   (PNOF; 0 for JK_only)
-//   int64     jk_frozen_pairs, jk_active_pairs        (JK_only: the RESOLVED occupation window -- pairs pinned at
-//                                                      occupation 1, and pairs in the fractional-occupation window
-//                                                      above them, JK_ACTIVE_PAIRS absent = all the rest; 0 for PNOF)
+//   int64     pnof_subspaces, pnof_coupling, n_core   (PNOF; 0 for JK_only/PCCD)
+//   int64     jk_frozen_pairs, jk_active_pairs        (JK_only/PCCD: the RESOLVED occupation window -- pairs
+//                                                      pinned at occupation 1 (PCCD_FROZEN_PAIRS for PCCD), and
+//                                                      pairs in the fractional-occupation/amplitude window above
+//                                                      them (PCCD_ACTIVE_PAIRS for PCCD), *_ACTIVE_PAIRS absent =
+//                                                      all the rest; 0 for PNOF)
 //   double    final total energy (Hartree, nuclear repulsion included)
 //   uint8     orbitals_optimized (1: FULL_OPTIMIZATION rotated the orbitals away from the SCF ones)
 //   uint8     converged          (1: the optimization that produced the file reported convergence)
@@ -37,7 +40,14 @@ namespace rerdmft {
 //                            spin-orbital/spinor of the MO basis, always present
 //   vector    gammas        (uint64 count + doubles): PNOF only, subspace after subspace,
 //                            pnof_coupling-1 angles each (Occ_opt/PNOFs.h's trigonometric
-//                            parameterization); empty for JK_only
+//                            parameterization); empty for JK_only/PCCD
+//   vector    amplitudes    (uint64 count + doubles): PCCD only, the flattened [t; z] amplitude
+//                            state (Full_opt/FullOptimization.cpp's makePccdModel own `state`
+//                            convention: t(i,a) at index i*n_vir+a, z(i,a) at
+//                            n_occ*n_vir + i*n_vir+a; n_occ/n_vir are NOT stored here -- they are
+//                            re-derived from jk_frozen_pairs/jk_active_pairs and n_electrons
+//                            exactly as a fresh run would, and the reader validates the vector's
+//                            size against that window); empty for PNOF/JK_only
 //   uint8     complex_coefficients (0: real orbitals, 1: complex spinors)
 //   uint64    rows, cols of the coefficient matrix
 //   doubles   rows*cols coefficients, ROW-major; complex: (real, imag) pairs
@@ -70,6 +80,7 @@ struct RestartData {
   bool converged = false;
   std::vector<double> occupations;
   std::vector<double> gammas;
+  std::vector<double> amplitudes;  // PCCD: flattened [t; z], see the file-layout comment above
   bool complex_coefficients = false;
   std::uint64_t rows = 0;
   std::uint64_t cols = 0;
@@ -86,11 +97,12 @@ struct RestartData {
 // of one method, before the SCF coefficients are attached.
 struct RestartCapture {
   bool valid = false;
-  std::string kind;                  // "OCCUPATIONS" or "GAMMAS"
+  std::string kind;                  // "OCCUPATIONS", "GAMMAS" or "PCCD"
   std::vector<double> occupations;   // full occupation vector
   std::vector<double> gammas;        // PNOF
+  std::vector<double> amplitudes;    // PCCD: flattened [t; z]
   std::int64_t n_core = 0;           // PNOF: number of frozen core geminals
-  std::int64_t jk_frozen_pairs = 0;  // JK_only: resolved JK_FROZEN_PAIRS / active window (pairs)
+  std::int64_t jk_frozen_pairs = 0;  // JK_only/PCCD: resolved *_FROZEN_PAIRS / active window (pairs)
   std::int64_t jk_active_pairs = 0;
   double electronic_energy = 0.0;    // final electronic energy (no nuclear repulsion)
   bool orbitals_optimized = false;
@@ -98,7 +110,7 @@ struct RestartCapture {
   Matrix<std::complex<double>> total_rotation;  // FULL_OPTIMIZATION rotation; empty = identity
 };
 
-constexpr std::uint32_t kRestartVersion = 1;
+constexpr std::uint32_t kRestartVersion = 2;  // v2: adds the `amplitudes` vector (PCCD)
 
 // Writes `data` to `path` (overwriting). Throws std::runtime_error if the file cannot be
 // written or the data are inconsistent (empty/mismatched sizes, unknown kind).

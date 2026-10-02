@@ -95,12 +95,15 @@ Matrix<std::complex<double>> RestartData::coefficientsComplex() const {
 
 void writeRestart(const std::string& path, const RestartData& data) {
   if (!hostIsLittleEndian()) throw std::runtime_error("writeRestart: big-endian hosts are not supported");
-  if (data.kind != "OCCUPATIONS" && data.kind != "GAMMAS") {
-    throw std::runtime_error("writeRestart: kind must be OCCUPATIONS or GAMMAS");
+  if (data.kind != "OCCUPATIONS" && data.kind != "GAMMAS" && data.kind != "PCCD") {
+    throw std::runtime_error("writeRestart: kind must be OCCUPATIONS, GAMMAS or PCCD");
   }
   if (data.occupations.empty()) throw std::runtime_error("writeRestart: no occupation numbers");
   if (data.kind == "GAMMAS" && data.gammas.empty()) {
     throw std::runtime_error("writeRestart: kind GAMMAS without gamma angles");
+  }
+  if (data.kind == "PCCD" && data.amplitudes.empty()) {
+    throw std::runtime_error("writeRestart: kind PCCD without t-/z-amplitudes");
   }
   const std::size_t entries = data.rows * data.cols * (data.complex_coefficients ? 2 : 1);
   if (data.rows == 0 || data.cols == 0 || data.coefficients.size() != entries) {
@@ -126,6 +129,7 @@ void writeRestart(const std::string& path, const RestartData& data) {
   put<std::uint8_t>(out, data.converged ? 1 : 0);
   putVector(out, data.occupations);
   putVector(out, data.gammas);
+  putVector(out, data.amplitudes);
   put<std::uint8_t>(out, data.complex_coefficients ? 1 : 0);
   put<std::uint64_t>(out, data.rows);
   put<std::uint64_t>(out, data.cols);
@@ -166,6 +170,7 @@ RestartData readRestart(const std::string& path) {
   d.converged = get<std::uint8_t>(in) != 0;
   d.occupations = getVector(in);
   d.gammas = getVector(in);
+  d.amplitudes = getVector(in);
   d.complex_coefficients = get<std::uint8_t>(in) != 0;
   d.rows = get<std::uint64_t>(in);
   d.cols = get<std::uint64_t>(in);
