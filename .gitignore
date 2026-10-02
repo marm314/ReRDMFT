@@ -5,3 +5,4 @@ src/GitVersion.h
 RESTART.*
 FCIDUMP
 *.live
+tests_mau/
