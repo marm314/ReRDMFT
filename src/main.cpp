@@ -876,7 +876,7 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
                                    std::chrono::steady_clock::time_point& t_checkpoint,
                                    std::vector<TimingRecord>& timing_records,
                                    rerdmft::RestartCapture* restart = nullptr,
-                                   const Eri* eri_full_block = nullptr,
+                                   const std::function<Eri()>& eri_full_block_factory = std::function<Eri()>(),
                                    const std::vector<double>* initial_occupations = nullptr,
                                    const std::vector<OccInLine>* occ_in = nullptr) {
   // Generic (element-access) view of the integrals, used by the production code below; the DEBUG /
@@ -1418,7 +1418,7 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
         if (!(full_result.checks_passed && full_result.converged && full_result.total_rotation.rows() > 0)) {
           out << "\n  FULL_OPTIMIZATION_4C_NEG skipped: the positive-energy-only optimization did not converge"
                  " (or a validation check failed).\n";
-        } else if (eri_full_block == nullptr) {
+        } else if (!eri_full_block_factory) {
           out << "\n  FULL_OPTIMIZATION_4C_NEG skipped: the integrals including the negative-energy block are not available.\n";
         } else {
           try {
@@ -1430,8 +1430,13 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
             saddle_settings.saddle.n_negative = frozen_base;
             saddle_settings.saddle.start_rotation = full_result.total_rotation;
             saddle_settings.saddle.start_energy = full_result.electronic_energy;
+            // Built here, NOT by the caller up front: for CHOLESKY TRUE this is the untrimmed
+            // (recompression-free) MO transform of the AO vectors, comparable in size to the AO
+            // vectors themselves -- deferring it to the exact point it is needed means the
+            // no-pair FULL_OPTIMIZATION loop above never pays to hold it in memory.
+            const Eri eri_full_block = eri_full_block_factory();
             const auto saddle_result = rerdmft::runFullOptimizationJk<T>(
-                h, *eri_full_block, full_result.occupations, full_result.occupation_state, functional, f_l,
+                h, eri_full_block, full_result.occupations, full_result.occupation_state, functional, f_l,
                 n_electrons_active, n_total, n_frozen, n_inactive_below, n_active, /*two_columns=*/true, saddle_settings,
                 /*kramers_restricted=*/true, nuclear_repulsion_energy, out, std::vector<std::size_t>{}, /*n_negative=*/0);
             out << "  FULL_OPTIMIZATION_4C_NEG " << (saddle_result.checks_passed && saddle_result.converged ? "converged" : "did NOT converge")
@@ -1510,7 +1515,7 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
                                        std::chrono::steady_clock::time_point& t_checkpoint,
                                        std::vector<TimingRecord>& timing_records,
                                        rerdmft::RestartCapture* restart = nullptr,
-                                       const Eri* eri_full_block = nullptr,
+                                       const std::function<Eri()>& eri_full_block_factory = std::function<Eri()>(),
                                        const std::vector<double>* initial_occupations = nullptr,
                                        const std::vector<OccInLine>* occ_in = nullptr) {
   // See buildFunctionalReport: generic view here, dense re-binding in the DEBUG blocks.
@@ -2118,7 +2123,7 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
         if (!(full_result.checks_passed && full_result.converged && full_result.total_rotation.rows() > 0)) {
           out << "\n  FULL_OPTIMIZATION_4C_NEG skipped: the positive-energy-only optimization did not converge"
                  " (or a validation check failed).\n";
-        } else if (eri_full_block == nullptr) {
+        } else if (!eri_full_block_factory) {
           out << "\n  FULL_OPTIMIZATION_4C_NEG skipped: the integrals including the negative-energy block are not available.\n";
         } else {
           try {
@@ -2130,8 +2135,10 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
             saddle_settings.saddle.n_negative = n_inactive_below;
             saddle_settings.saddle.start_rotation = full_result.total_rotation;
             saddle_settings.saddle.start_energy = full_result.electronic_energy;
+            // Built here, not up front by the caller -- see buildFunctionalReport's own comment.
+            const Eri eri_full_block = eri_full_block_factory();
             const auto saddle_result = rerdmft::runFullOptimizationPnof<T>(
-                h, *eri_full_block, full_result.occupations, full_result.occupation_state, functional, geminals, n_core,
+                h, eri_full_block, full_result.occupations, full_result.occupation_state, functional, geminals, n_core,
                 pnof_subspaces, pnof_coupling, relativistic, sqp_pnof_occ, n_total, saddle_settings,
                 /*kramers_restricted=*/true, nuclear_repulsion_energy, out, std::vector<std::size_t>{}, /*n_negative=*/0);
             out << "  FULL_OPTIMIZATION_4C_NEG " << (saddle_result.checks_passed && saddle_result.converged ? "converged" : "did NOT converge")
@@ -2259,7 +2266,7 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
                                        std::chrono::steady_clock::time_point& t_checkpoint,
                                        std::vector<TimingRecord>& timing_records,
                                        rerdmft::RestartCapture* restart = nullptr,
-                                       const Eri* eri_full_block = nullptr,
+                                       const std::function<Eri()>& eri_full_block_factory = std::function<Eri()>(),
                                        const std::vector<double>* restart_amplitudes = nullptr) {
   rerdmft::progressContext() = label;
   const std::size_t n_total = h.rows();
@@ -2424,7 +2431,7 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
       if (!(full_result.checks_passed && full_result.converged && full_result.total_rotation.rows() > 0)) {
         out << "\n  FULL_OPTIMIZATION_4C_NEG skipped: the positive-energy-only optimization did not converge"
                " (or a validation check failed).\n";
-      } else if (eri_full_block == nullptr) {
+      } else if (!eri_full_block_factory) {
         out << "\n  FULL_OPTIMIZATION_4C_NEG skipped: the integrals including the negative-energy block are not available.\n";
       } else {
         try {
@@ -2438,9 +2445,12 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
           saddle_settings.saddle.start_energy = full_result.electronic_energy;
           // The pair list (reps/bar) is unchanged -- `n_negative=0` just stops the trim, letting
           // the negative-energy branch join the rotation (exactly runFullOptimizationPnof's own
-          // min-max call).
+          // min-max call). Built here, not up front by the caller -- see buildFunctionalReport's
+          // own comment on why (the untrimmed Cholesky transform is comparable in size to the AO
+          // vectors themselves; this way the no-pair FULL_OPTIMIZATION loop above never holds it).
+          const Eri eri_full_block = eri_full_block_factory();
           const auto saddle_result = rerdmft::runFullOptimizationPccd<T, Eri>(
-              h, *eri_full_block, full_result.occupations, full_result.occupation_state, reps, bar,
+              h, eri_full_block, full_result.occupations, full_result.occupation_state, reps, bar,
               n_core, n_occ, n_vir, n_total, amp_settings, saddle_settings,
               /*kramers_restricted=*/true, nuclear_repulsion_energy, out, std::vector<std::size_t>{},
               /*n_negative=*/0);
@@ -3102,20 +3112,20 @@ int main(int argc, char** argv) {
                 restart_nuclear_repulsion, input.pccd_frozen_pairs(), input.pccd_active_pairs(),
                 input.pccd_amplitude_solver(), fullOptSettings(input), input.full_optimization_4c_neg(),
                 t_start, t_checkpoint, timing_records, &nonrel_restart,
-                static_cast<decltype(&eri_any)>(nullptr), &ro.data.amplitudes);
+                {}, &ro.data.amplitudes);
           }
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(
                 "NON_REL", h_spin, eri_any, 2 * n, 0, input.n_electrons(), input.functional(), restart_nuclear_repulsion,
                 input.pnof_subspaces(), input.pnof_coupling(), /*relativistic=*/false, input.sqp_pnof_occ(), input.debug(),
                 fullOptSettings(input), input.full_optimization_4c_neg(),
-                t_start, t_checkpoint, timing_records, &nonrel_restart, &eri_any, &ro.data.occupations, occ_in);
+                t_start, t_checkpoint, timing_records, &nonrel_restart, {}, &ro.data.occupations, occ_in);
           }
           return buildFunctionalReport(
               "NON_REL", h_spin, eri_any, dummyEnergies(2 * n), 0, input.n_electrons(), input.jk_frozen_pairs(),
               input.jk_active_pairs(), input.temperature(), input.functional(), input.occupation_init(),
               restart_nuclear_repulsion, input.debug(), fullOptSettings(input),
-              input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &nonrel_restart, &eri_any, &ro.data.occupations, occ_in);
+              input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &nonrel_restart, {}, &ro.data.occupations, occ_in);
         };
         nonrel_functional_report = input.cholesky() ? nonrel_functional(eri_spin_chol) : nonrel_functional(eri_spin_sym);
         writeRestartFile<double>(nonrel_restart_log, input, "NON_REL", nonrel_restart, blockDiagTwice(c_spatial), blockDiagTwice(h_core_nonrel),
@@ -3153,20 +3163,20 @@ int main(int argc, char** argv) {
                 "X2C_HF", h_x2c_mo, eri_any, dim, 0, input.n_electrons(), restart_nuclear_repulsion,
                 input.pccd_frozen_pairs(), input.pccd_active_pairs(), input.pccd_amplitude_solver(),
                 fullOptSettings(input), input.full_optimization_4c_neg(), t_start, t_checkpoint,
-                timing_records, &x2c_restart, static_cast<decltype(&eri_any)>(nullptr), &ro.data.amplitudes);
+                timing_records, &x2c_restart, {}, &ro.data.amplitudes);
           }
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(
                 "X2C_HF", h_x2c_mo, eri_any, dim, 0, input.n_electrons(), input.functional(), restart_nuclear_repulsion,
                 input.pnof_subspaces(), input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
                 fullOptSettings(input), input.full_optimization_4c_neg(),
-                t_start, t_checkpoint, timing_records, &x2c_restart, &eri_any, &ro.data.occupations, occ_in);
+                t_start, t_checkpoint, timing_records, &x2c_restart, {}, &ro.data.occupations, occ_in);
           }
           return buildFunctionalReport(
               "X2C_HF", h_x2c_mo, eri_any, dummyEnergies(dim), 0, input.n_electrons(), input.jk_frozen_pairs(),
               input.jk_active_pairs(), input.temperature(), input.functional(), input.occupation_init(),
               restart_nuclear_repulsion, input.debug(), fullOptSettings(input),
-              input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &x2c_restart, &eri_any, &ro.data.occupations, occ_in);
+              input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &x2c_restart, {}, &ro.data.occupations, occ_in);
         };
         x2c_functional_report = input.cholesky() ? x2c_functional(x2c_mo_chol) : x2c_functional(x2c_mo_sym);
         writeRestartFile<std::complex<double>>(x2c_restart_log, input, "X2C_HF", x2c_restart, c_x2c, x2c_hamiltonian.h_x2c, s_x2c, h_x2c_mo,
@@ -3248,45 +3258,56 @@ int main(int argc, char** argv) {
         const auto h_mo_restart = rerdmft::rkbMoOneElectronTransform(h_rkb, c_dhf_restart);
         kramersStructureTestOneBody(c4_structure_log, "C4_DHF (READ_RESTART)", h_mo_restart, /*repairs_if_failed=*/false);
         rerdmft::SymmetricEri<std::complex<double>> c4_mo_sym_r;
-        rerdmft::CholeskyEri<std::complex<double>> c4_mo_chol_r, c4_mo_full_chol_r;
+        rerdmft::CholeskyEri<std::complex<double>> c4_mo_chol_r;
         if (input.cholesky()) {
           c4_mo_chol_r = rerdmft::rkbCholeskyToMo(rkb_cholesky, c_dhf_restart, dim / 2, input.cholesky_threshold());
-          if (input.full_optimization_4c_neg() && fullOptSettings(input).enabled) {
-            c4_mo_full_chol_r = rerdmft::rkbCholeskyToMo(rkb_cholesky, c_dhf_restart, /*n_negative=*/0, input.cholesky_threshold());
-          }
         } else {
           c4_mo_sym_r = rerdmft::rkbMoTwoElectronSymmetric(c4_spinor_eri, c_dhf_restart);
         }
         logTiming("C4_DHF MO integral transform complete (READ_RESTART)", t_start, t_checkpoint, timing_records);
-        // Same reasoning as the non-restart C4_DHF path: nothing below needs the AO-level RKB
-        // vectors once the MO transform(s) above have extracted c4_mo_chol_r/c4_mo_full_chol_r.
-        rkb_cholesky = rerdmft::RkbCholesky();
         const std::size_t n_negative_r = dim / 2;
         rerdmft::RestartCapture c4_restart;
-        const auto dhf_functional_r = [&](const auto& eri_any, const auto* eri_full) {
+        const auto dhf_functional_r = [&](const auto& eri_any, const auto& eri_full_factory) {
           if (isPccdFunctionalName(input.functional())) {
             return buildPccdFunctionalReport(
                 "C4_DHF", h_mo_restart, eri_any, dim - n_negative_r, n_negative_r, input.n_electrons(),
                 restart_nuclear_repulsion, input.pccd_frozen_pairs(), input.pccd_active_pairs(),
                 input.pccd_amplitude_solver(), fullOptSettings(input), input.full_optimization_4c_neg(),
-                t_start, t_checkpoint, timing_records, &c4_restart, eri_full, &ro.data.amplitudes);
+                t_start, t_checkpoint, timing_records, &c4_restart, eri_full_factory, &ro.data.amplitudes);
           }
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(
                 "C4_DHF", h_mo_restart, eri_any, dim - n_negative_r, n_negative_r, input.n_electrons(), input.functional(),
                 restart_nuclear_repulsion, input.pnof_subspaces(), input.pnof_coupling(), /*relativistic=*/true,
                 input.sqp_pnof_occ(), input.debug(), fullOptSettings(input),
-                input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &c4_restart, eri_full,
+                input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &c4_restart, eri_full_factory,
                 &ro.data.occupations, occ_in);
           }
           return buildFunctionalReport(
               "C4_DHF", h_mo_restart, eri_any, dummyEnergies(dim - n_negative_r), n_negative_r, input.n_electrons(),
               input.jk_frozen_pairs(), input.jk_active_pairs(), input.temperature(), input.functional(),
               input.occupation_init(), restart_nuclear_repulsion, input.debug(), fullOptSettings(input), input.full_optimization_4c_neg(), t_start, t_checkpoint,
-              timing_records, &c4_restart, eri_full, &ro.data.occupations, occ_in);
+              timing_records, &c4_restart, eri_full_factory, &ro.data.occupations, occ_in);
         };
-        dhf_functional_report = input.cholesky() ? dhf_functional_r(c4_mo_chol_r, &c4_mo_full_chol_r)
-                                                 : dhf_functional_r(c4_mo_sym_r, &c4_mo_sym_r);
+        if (input.cholesky()) {
+          // Lazy, same reasoning as the non-restart C4_DHF path: only built if/when the saddle
+          // stage inside dhf_functional_r() actually needs it.
+          const std::function<rerdmft::CholeskyEri<std::complex<double>>()> full_chol_factory_r =
+              (input.full_optimization_4c_neg() && fullOptSettings(input).enabled)
+                  ? std::function<rerdmft::CholeskyEri<std::complex<double>>()>([&]() {
+                      return rerdmft::rkbCholeskyToMo(rkb_cholesky, c_dhf_restart, /*n_negative=*/0,
+                                                      input.cholesky_threshold());
+                    })
+                  : std::function<rerdmft::CholeskyEri<std::complex<double>>()>();
+          dhf_functional_report = dhf_functional_r(c4_mo_chol_r, full_chol_factory_r);
+        } else {
+          const std::function<rerdmft::SymmetricEri<std::complex<double>>()> full_sym_factory_r = [&]() { return c4_mo_sym_r; };
+          dhf_functional_report = dhf_functional_r(c4_mo_sym_r, full_sym_factory_r);
+        }
+        // The AO-level RKB vectors are never touched again: the trimmed transform above and the
+        // (possibly lazily-built, inside dhf_functional_r above) untrimmed one have already
+        // extracted everything needed from them.
+        rkb_cholesky = rerdmft::RkbCholesky();
         writeRestartFile<std::complex<double>>(c4_restart_log, input, "4C", c4_restart, c_dhf_restart, h_rkb, s_full, h_mo_restart,
                                                restartFingerprint, restart_nuclear_repulsion);
       }
@@ -3522,7 +3543,7 @@ int main(int argc, char** argv) {
                 input.pnof_subspaces(), input.pnof_coupling(), /*relativistic=*/false,
                 input.sqp_pnof_occ(), input.debug(), fullOptSettings(input),
                 input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records,
-                &nonrel_restart, static_cast<decltype(&eri_any)>(nullptr), nullptr, occ_in);
+                &nonrel_restart, {}, nullptr, occ_in);
           }
           return buildFunctionalReport(
               "NON_REL", h_spin, eri_any, nonrel_orbital_energies_spin, 0, input.n_electrons(),
@@ -3530,7 +3551,7 @@ int main(int argc, char** argv) {
               input.temperature(), input.functional(), input.occupation_init(),
               nonrel_hf_result.nuclear_repulsion_energy, input.debug(), fullOptSettings(input), input.full_optimization_4c_neg(),
               t_start, t_checkpoint, timing_records,
-              &nonrel_restart, static_cast<decltype(&eri_any)>(nullptr), nullptr, occ_in);
+              &nonrel_restart, {}, nullptr, occ_in);
         };
         nonrel_functional_report = input.cholesky() ? nonrel_functional(eri_spin_chol) : nonrel_functional(eri_spin_sym);
         // RESTART file: spin-orbital coefficients [alpha; beta] x [alpha MOs, beta MOs] in the
@@ -3784,7 +3805,7 @@ int main(int argc, char** argv) {
                 x2c_hf_result.nuclear_repulsion_energy, input.pccd_frozen_pairs(),
                 input.pccd_active_pairs(), input.pccd_amplitude_solver(), fullOptSettings(input),
                 input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records,
-                &x2c_restart, static_cast<decltype(&eri_any)>(nullptr));
+                &x2c_restart, {});
           }
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(
@@ -3793,7 +3814,7 @@ int main(int argc, char** argv) {
                 input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
                 fullOptSettings(input),
                 input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records,
-                &x2c_restart, static_cast<decltype(&eri_any)>(nullptr), nullptr, occ_in);
+                &x2c_restart, {}, nullptr, occ_in);
           }
           return buildFunctionalReport(
               "X2C_HF", h_x2c_mo, eri_any, x2c_hf_result.orbital_energies, 0,
@@ -3802,7 +3823,7 @@ int main(int argc, char** argv) {
               input.occupation_init(), x2c_hf_result.nuclear_repulsion_energy, input.debug(),
               fullOptSettings(input),
               input.full_optimization_4c_neg(), t_start, t_checkpoint,
-              timing_records, &x2c_restart, static_cast<decltype(&eri_any)>(nullptr), nullptr, occ_in);
+              timing_records, &x2c_restart, {}, nullptr, occ_in);
         };
         x2c_functional_report = input.cholesky() ? x2c_functional(x2c_mo_chol) : x2c_functional(x2c_mo_sym);
         // RESTART file: the (Kramers-fixed) X2C-HF spinor coefficients times the FULL_OPTIMIZATION
@@ -4105,14 +4126,14 @@ int main(int argc, char** argv) {
                 static_cast<std::ptrdiff_t>(n_negative),
             dhf_result.orbital_energies.end());
         rerdmft::RestartCapture c4_restart;
-        const auto dhf_functional = [&](const auto& eri_any, const auto* eri_full) {
+        const auto dhf_functional = [&](const auto& eri_any, const auto& eri_full_factory) {
           if (isPccdFunctionalName(input.functional())) {
             return buildPccdFunctionalReport(
                 "C4_DHF", h_mo, eri_any, h_mo.rows() - n_negative, n_negative, input.n_electrons(),
                 dhf_result.nuclear_repulsion_energy, input.pccd_frozen_pairs(),
                 input.pccd_active_pairs(), input.pccd_amplitude_solver(), fullOptSettings(input),
                 input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records,
-                &c4_restart, eri_full);
+                &c4_restart, eri_full_factory);
           }
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(
@@ -4120,7 +4141,7 @@ int main(int argc, char** argv) {
                 input.functional(), dhf_result.nuclear_repulsion_energy, input.pnof_subspaces(),
                 input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
                 fullOptSettings(input),
-                input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &c4_restart, eri_full,
+                input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &c4_restart, eri_full_factory,
                 nullptr, occ_in);
           }
           return buildFunctionalReport(
@@ -4130,19 +4151,25 @@ int main(int argc, char** argv) {
               input.occupation_init(), dhf_result.nuclear_repulsion_energy, input.debug(),
               fullOptSettings(input),
               input.full_optimization_4c_neg(), t_start, t_checkpoint,
-              timing_records, &c4_restart, eri_full, nullptr, occ_in);
+              timing_records, &c4_restart, eri_full_factory, nullptr, occ_in);
         };
         if (input.cholesky()) {
-          // FULL_OPTIMIZATION_4C_NEG needs the negative-energy block too: the trimmed vectors above have it zeroed
-          // and recompressed away, so the full-block vectors are built separately (only when that stage will run).
-          rerdmft::CholeskyEri<std::complex<double>> c4_mo_full_chol;
-          if (input.full_optimization_4c_neg() && fullOptSettings(input).enabled) {
-            c4_mo_full_chol = rerdmft::rkbCholeskyToMo(rkb_cholesky, dhf_result.c_dhf, /*n_negative=*/0,
-                                                       input.cholesky_threshold());
-          }
-          dhf_functional_report = dhf_functional(c4_mo_chol, &c4_mo_full_chol);
+          // FULL_OPTIMIZATION_4C_NEG needs the negative-energy block too: the trimmed vector above
+          // has it zeroed and recompressed away, so the full-block vectors are built separately --
+          // LAZILY, via this factory, so the no-pair FULL_OPTIMIZATION loop inside dhf_functional()
+          // never holds the untrimmed (recompression-free, AO-vector-sized) transform in memory;
+          // it only gets built at the exact point the saddle stage needs it, if it runs at all.
+          const std::function<rerdmft::CholeskyEri<std::complex<double>>()> full_chol_factory =
+              (input.full_optimization_4c_neg() && fullOptSettings(input).enabled)
+                  ? std::function<rerdmft::CholeskyEri<std::complex<double>>()>([&]() {
+                      return rerdmft::rkbCholeskyToMo(rkb_cholesky, dhf_result.c_dhf, /*n_negative=*/0,
+                                                      input.cholesky_threshold());
+                    })
+                  : std::function<rerdmft::CholeskyEri<std::complex<double>>()>();
+          dhf_functional_report = dhf_functional(c4_mo_chol, full_chol_factory);
         } else {
-          dhf_functional_report = dhf_functional(c4_mo_sym, &c4_mo_sym);
+          const std::function<rerdmft::SymmetricEri<std::complex<double>>()> full_sym_factory = [&]() { return c4_mo_sym; };
+          dhf_functional_report = dhf_functional(c4_mo_sym, full_sym_factory);
         }
         // The AO-level RKB vectors are never touched again: the MO transform(s) above (trimmed
         // c4_mo_chol, and the untrimmed c4_mo_full_chol when FULL_OPTIMIZATION_4C_NEG ran) and the
