@@ -39,14 +39,22 @@ Matrix<double> inverseSqrt(const Matrix<double>& s);
 SymmetricEigenResult diagonalizeSymmetric(const Matrix<double>& a);
 
 // Like inverseSqrt, but for a complex Hermitian positive-definite matrix, and with one addition:
-// internally diagonally preconditions S (S' = D^-1 S D^-1, D = diag(sqrt(S_ii))) before eigendecomposing
-// (LAPACKE_zheev) and un-scales the result -- an exact identity, not an approximation, that removes any
-// ill-conditioning coming from the matrix's own basis functions having wildly different self-overlaps
-// (e.g. a restricted-kinetic-balance Small-component overlap for a heavy element); a near-identity
-// rescaling for an already well-scaled S. inverseSqrt (the real case) deliberately does NOT do this --
-// see its own comment. Throws std::runtime_error under the same conditions as inverseSqrt (eigenvalue
-// of the diagonally-rescaled matrix at or below 1e-10).
-Matrix<std::complex<double>> inverseSqrtHermitian(const Matrix<std::complex<double>>& s);
+// `precondition` (default true) diagonally preconditions S (S' = D^-1 S D^-1, D = diag(sqrt(S_ii)))
+// before eigendecomposing (LAPACKE_zheev) and un-scales the result -- an exact identity, not an
+// approximation, that removes any ill-conditioning coming from the matrix's own basis functions
+// having wildly different self-overlaps (e.g. a restricted-kinetic-balance Small-component overlap
+// for a heavy element, whose raising-term weight -2*a_k*c_k scales with each primitive's own
+// exponent -- a property of RKB-by-differentiation itself, independent of whether the small basis is
+// built via uKB projection or true analytic RKB, and independent of the large-component spherical
+// transform/LOWGEN work, which act on angular redundancy and genuine linear dependence, not on this
+// scale); a near-identity rescaling for an already well-scaled S. inverseSqrt (the real case)
+// deliberately does NOT do this -- see its own comment. `precondition=false` restores the plain
+// (un-preconditioned) S^-1/2, exposed so the two can be compared directly on a hard case (e.g. a
+// heavy-element uncontracted basis) instead of assuming either one -- see git history/PR discussion
+// for why this parameter exists. Throws std::runtime_error under the same conditions as inverseSqrt
+// (eigenvalue of the [rescaled, if preconditioned] matrix at or below 1e-10).
+Matrix<std::complex<double>> inverseSqrtHermitian(const Matrix<std::complex<double>>& s,
+                                                   bool precondition = true);
 
 // Diagonalizes a complex Hermitian matrix via LAPACK (LAPACKE_zheev).
 // Throws std::runtime_error if `a` is not square, or LAPACK fails to

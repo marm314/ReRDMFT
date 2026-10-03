@@ -3067,7 +3067,7 @@ int main(int argc, char** argv) {
               "does not yet thread through the rest of the pipeline.");
         }
       }
-      x_small = rerdmft::inverseSqrtHermitian(s_small);
+      x_small = rerdmft::inverseSqrtHermitian(s_small, input.precondition_small_overlap());
 
       x_full = rerdmft::xFullMatrix(x_large, x_small);
       // S_full = diag(S_Large, S_Large, S_small), the metric X_full

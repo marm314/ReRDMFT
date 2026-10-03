@@ -57,6 +57,17 @@ class Input {
   // basis too (same buildSphericalTransform/transformAoCholeskyToSpherical machinery X2C uses),
   // removing l>=2 Cartesian contaminant combinations from ITS results as well.
   bool cartesian() const { return cartesian_; }
+  // Optional; defaults to false. Diagonal (Jacobi) preconditioning for the RKB Small-component
+  // overlap's S^-1/2 (Linear_Algebra/LinearAlgebra.h's inverseSqrtHermitian, main.cpp's x_small) --
+  // added for a heavy-element uncontracted basis (Xe/dyall.v2z) while the Small-component basis was
+  // still uKB (pooled, near-duplicate exponents across shells). With true analytic RKB (one Small
+  // partner per Large function, no pooling) plus the spherical/LOWGEN large-component reduction, a
+  // basis-only diagnostic on Xe/dyall.v2z shows s_small is no longer anywhere near singular (smallest
+  // eigenvalue ~0.35, nine orders of magnitude above the 1e-8 LOWGEN threshold) either way, and DIRAC
+  // itself (dirone.F's LOWGEN) diagonalizes its own overlaps raw, with no such rescaling at all --
+  // so this defaults OFF now. Kept as a keyword (not deleted) in case a more extreme basis than
+  // dyall.v2z ever needs it back.
+  bool precondition_small_overlap() const { return precondition_small_overlap_; }
   // Optional; defaults to false when the C4_SPINOR keyword is absent.
   // When true, additionally builds the full 4-component Dirac-Hartree-Fock
   // two-electron Coulomb repulsion tensor in the RKB spinor basis
@@ -422,6 +433,7 @@ class Input {
   double speed_of_light_ = kSpeedOfLight;
   bool non_relativistic_ = false;
   bool cartesian_ = true;
+  bool precondition_small_overlap_ = false;
   bool c4_spinor_ = false;
   bool x2c_ = false;
   bool hessian_mean_field_ = false;

@@ -150,23 +150,25 @@ HermitianEigenResult diagonalizeHermitian(const Matrix<std::complex<double>>& a_
   return result;
 }
 
-Matrix<std::complex<double>> inverseSqrtHermitian(const Matrix<std::complex<double>>& s) {
+Matrix<std::complex<double>> inverseSqrtHermitian(const Matrix<std::complex<double>>& s, bool precondition) {
   // Diagonal (Jacobi) preconditioning: S'(i,j) = S(i,j) / sqrt(S(i,i) S(j,j)), i.e. S' = D^-1 S D^-1 with
   // D = diag(sqrt(S_ii)) (real: a Hermitian matrix's diagonal is always real). S^-1/2 then satisfies
   // X = D^-1 Y, Y = S'^-1/2, EXACTLY -- not an approximation. Unlike inverseSqrt (the real, non-Hermitian
   // case -- deliberately NOT given this treatment, see its own comment), this one earns its keep: a
   // restricted-kinetic-balance Small-component overlap (RkbOverlap.h) inherits a genuinely huge diagonal
-  // spread (self-overlaps differing by many orders of magnitude) from differentiating Large AOs across a
-  // heavy element's full exponent range, and this is the ONLY numerically cheap way found so far to keep
-  // that case's pseudo-inverse-of-rkbCoefficients fix (RkbTransformation.cpp) below the downstream Kramers
-  // orthonormality check's 1e-6 threshold (without it: ~1.4e-5, still failing; with it: ~1.9e-9). For an
-  // already well-scaled S (diagonal entries all close to 1) this is a near-identity rescaling.
+  // spread (self-overlaps differing by many orders of magnitude) from each primitive's raising-term weight
+  // -2*a_k*c_k scaling with its own exponent -- a property of RKB-by-differentiation itself (true analytic
+  // RKB or the old uKB projection alike; untouched by the large-component spherical/LOWGEN treatment,
+  // which acts on angular redundancy and genuine linear dependence, not this scale). `precondition=false`
+  // skips this (plain, un-preconditioned S^-1/2) for direct comparison on a hard case.
   const std::size_t un = s.rows();
-  std::vector<double> d(un);
-  for (std::size_t i = 0; i < un; ++i) d[i] = std::sqrt(s(i, i).real());
-  Matrix<std::complex<double>> s_scaled(un, un);
-  for (std::size_t i = 0; i < un; ++i)
-    for (std::size_t j = 0; j < un; ++j) s_scaled(i, j) = s(i, j) / (d[i] * d[j]);
+  std::vector<double> d(un, 1.0);
+  Matrix<std::complex<double>> s_scaled = s;
+  if (precondition) {
+    for (std::size_t i = 0; i < un; ++i) d[i] = std::sqrt(s(i, i).real());
+    for (std::size_t i = 0; i < un; ++i)
+      for (std::size_t j = 0; j < un; ++j) s_scaled(i, j) = s(i, j) / (d[i] * d[j]);
+  }
 
   const HermitianEigenResult eig = diagonalizeHermitian(s_scaled);
 
@@ -175,13 +177,15 @@ Matrix<std::complex<double>> inverseSqrtHermitian(const Matrix<std::complex<doub
   for (std::size_t i = 0; i < un; ++i) {
     if (eig.eigenvalues[i] <= kMinEigenvalue) {
       throw std::runtime_error(
-          "inverseSqrtHermitian: matrix is not safely positive definite (diagonally-rescaled eigenvalue " +
+          "inverseSqrtHermitian: matrix is not safely positive definite (" +
+          std::string(precondition ? "diagonally-rescaled " : "") + "eigenvalue " +
           std::to_string(eig.eigenvalues[i]) + " <= " + std::to_string(kMinEigenvalue) + ")");
     }
     inv_sqrt_w[i] = 1.0 / std::sqrt(eig.eigenvalues[i]);
   }
 
-  // Y = S'^-1/2 = U diag(1/sqrt(w)) U^dagger, then X = D^-1 Y (row i scaled by 1/d[i]).
+  // Y = S'^-1/2 = U diag(1/sqrt(w)) U^dagger, then X = D^-1 Y (row i scaled by 1/d[i] -- the identity
+  // when precondition=false, d[i]=1 throughout).
   const Matrix<std::complex<double>>& u = eig.eigenvectors;
   Matrix<std::complex<double>> x(un, un, std::complex<double>(0.0, 0.0));
   for (std::size_t i = 0; i < un; ++i) {
