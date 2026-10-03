@@ -349,6 +349,40 @@ projection) applies to the two-electron Coulomb integrals: each AO Cholesky vect
 tensor's) Large legs are transformed by $T_{\text{final}}$ before the RKB-Small projection
 (\texttt{C4\_DHF/RkbCholesky.h}, \texttt{RkbTwoElectron.cpp}).
 
+\subsection*{6.4 A consequence: $X_{\text{full}}$'s Large block is the identity}
+
+$T_{\text{final}}$ was built, in \S5, specifically so that $T_{\text{final}}^{\dagger}S_{\text{large,cart}}T_{\text{final}}=I$
+exactly -- that is what Löwdin/canonical orthogonalization \emph{means}: whatever the spherical
+overlap $S_{\text{large,sph}}=T_{\text{sph}}^{\dagger}S_{\text{large,cart}}T_{\text{sph}}$ looks like
+(generally \emph{not} diagonal -- different atoms' and shells' spherical AOs still overlap),
+$X_{\text{LOWGEN}}$ re-expresses it as the identity \emph{by definition}. Consequently the quantity
+\texttt{main.cpp} calls \texttt{s\_large} downstream is already $I$, so re-deriving
+$x_{\text{large}}=S_{\text{large}}^{-1/2}$ from it trivially gives back $I$ again:
+\begin{equation}
+x_{\text{large}} \;=\; S_{\text{large}}^{-1/2} \;=\; I^{-1/2} \;=\; I_{n_{\text{L,final}}}.
+\end{equation}
+Since \texttt{RkbOrthogonalization.h}'s $X_{\text{full}}=\mathrm{diag}(x_{\text{large}},x_{\text{large}},x_{\text{small}})$
+(\S1's overall orthonormalization matrix for the full RKB problem), this means
+\begin{equation}
+X_{\text{full}} \;=\; \mathrm{diag}\big(I_{n_{\text{L,final}}},\,I_{n_{\text{L,final}}},\,X_{\text{small}}\big):
+\end{equation}
+\emph{both} Large spin blocks of $X_{\text{full}}$ are the identity, and every genuine
+orthonormalization step $X_{\text{full}}$ performs is concentrated in $X_{\text{small}}$ -- which is
+decidedly \emph{not} trivial, since $S_{\text{small}}$ is far from the identity (a wide eigenvalue
+spread even where it is not near-singular, \S5). Two things worth being precise about here. First,
+this is an \emph{orthonormalized-AO} basis, not yet the \emph{molecular-orbital} basis: $H_{\text{RKB}}$'s
+Large-Large block in this basis is a Hermitian matrix with no particular structure (not diagonal) --
+the actual MOs only emerge later, by \emph{diagonalizing}
+$H_{\text{RKB,ortho}}=X_{\text{full}}^{\dagger}H_{\text{RKB}}X_{\text{full}}$ and transforming back
+($C_{\text{MO}}=X_{\text{full}}U$), a separate variational step. Second, a direct practical
+consequence of $X_{\text{full}}$'s Large block being $I$: multiplying by the identity changes
+nothing, so
+\begin{equation}
+H_{\text{RKB,ortho}} \;=\; X_{\text{full}}^{\dagger}H_{\text{RKB}}X_{\text{full}}
+\end{equation}
+leaves $H_{\text{RKB}}$'s own Large-Large block completely untouched -- only its Large-Small and
+Small-Small blocks are actually transformed, through $X_{\text{small}}$.
+
 \section*{7. Summary of the pipeline}
 
 \begin{enumerate}
