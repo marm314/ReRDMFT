@@ -1,0 +1,372 @@
+\documentclass[11pt]{article}
+\usepackage{amsmath,amssymb}
+\usepackage[margin=1in]{geometry}
+
+\newcommand{\bs}[1]{\boldsymbol{#1}}
+
+\title{Restricted Kinetic Balance (RKB): Equations and Implementation\\
+\large Analytic construction, spherical large-component reduction, and the LOWGEN safety net}
+\author{}
+\date{}
+
+\begin{document}
+\sloppy
+\maketitle
+
+\section*{1. Kinetic balance}
+
+The one-electron Dirac equation couples a large-component spinor $\psi_L$ and a small-component
+spinor $\psi_S$ through
+\begin{equation}
+\psi_S \;=\; \frac{1}{2c}\,\bs\sigma\!\cdot\!\bs p\;\psi_L
+\qquad\text{(restricted kinetic balance, RKB)},
+\end{equation}
+with $\bs p = -i\nabla$ and $\bs\sigma=(\sigma_x,\sigma_y,\sigma_z)$ the Pauli matrices. A
+finite-basis 4-component calculation must choose a small-component AO basis that reproduces this
+relation \emph{exactly} for every large-component basis function; otherwise the calculation
+suffers from ``variational collapse'' into spurious negative-energy states. The overall factor
+$1/2c$ is a normalization convention absorbed into \texttt{Utils/DiracKinetic.h}'s own matrix
+elements and plays no role below -- the only thing that must be built \emph{exactly} is the
+AO-basis image of $\bs\sigma\!\cdot\!\bs p\,\psi_L$ for every large function $\psi_L$.
+
+This project builds that image \emph{analytically}, by literal differentiation of each
+large-component Cartesian Gaussian, rather than numerically (via an unrestricted kinetic-balance
+basis projected down by a generalized inverse) as earlier versions of this code did.
+
+\section*{2. Differentiating a Cartesian Gaussian}
+
+A contracted large-component Cartesian AO is
+\begin{equation}
+\chi(\bs r) \;=\; \sum_k c_k\, x^{l_x} y^{l_y} z^{l_z}\, e^{-a_k r^2},
+\end{equation}
+where the sum runs over primitives $k$ (exponent $a_k$, libcint-convention coefficient $c_k$; see
+\S3) and $l_x+l_y+l_z=l$. Differentiating one Cartesian axis gives, exactly, a \emph{lowering} and
+a \emph{raising} piece:
+\begin{equation}
+\frac{\partial}{\partial x}\Big[x^{l_x} y^{l_y} z^{l_z} e^{-a_k r^2}\Big]
+\;=\;
+\underbrace{l_x\, x^{l_x-1} y^{l_y} z^{l_z}\, e^{-a_k r^2}}_{\text{lowering (absent if } l_x=0)}
+\;-\;
+\underbrace{2 a_k\, x^{l_x+1} y^{l_y} z^{l_z}\, e^{-a_k r^2}}_{\text{raising (always present)}},
+\end{equation}
+and likewise for $\partial/\partial y$, $\partial/\partial z$. Each of the (up to) six resulting
+elementary terms per large function is itself an ordinary Cartesian Gaussian AO and is appended to
+the RKB small-component basis (\texttt{RKB/RkbDerivativeTerms.cpp}, \texttt{buildRkbSmallBasis}).
+Because this is a literal calculus identity, \emph{no} overlap matrix inversion or least-squares
+projection is needed to recover the expansion -- the small-component partner of every large
+function is built directly, in closed form, and no two large functions ever share an elementary
+small-component term (unlike the pooled unrestricted-kinetic-balance scheme this replaced).
+
+\subsection*{2.1 The libcint normalization correction}
+
+The naive weights above ($l_x$ for lowering, $-2a_k$ for raising) are only correct if $c_k$ is a
+literal coefficient multiplying the bare monomial $\times$ Gaussian. In practice $c_k$ is stored in
+\emph{libcint's own convention}, which applies a hidden, $(l,\text{component})$-dependent internal
+scale (via \texttt{CINTgto\_norm}) that plain differentiation does not know about: changing a
+term's Cartesian type from $(l,\,\bs c_{\text{old}})$ to $(l\pm1,\,\bs c_{\text{new}})$ at the same
+exponent $a$ requires an additional correction factor
+\begin{equation}
+\text{weight}_{\text{libcint}} \;=\; \text{weight}_{\text{literal}}\times
+\frac{\kappa(l_{\text{new}},\bs c_{\text{new}},a)}{\kappa(l_{\text{old}},\bs c_{\text{old}},a)},
+\qquad
+\kappa(l,\bs c,a) \;=\; \sqrt{\dfrac{S_{\text{true}}(\bs c,a)}{S_{\text{raw}}(l,\bs c,a)}},
+\end{equation}
+where $S_{\text{raw}}(l,\bs c,a)$ is libcint's own raw self-overlap of a unit-coefficient primitive
+of Cartesian type $\bs c=(l_x,l_y,l_z)$ (\texttt{Integrals.h}'s \texttt{shellSelfOverlap}, the same
+machinery \texttt{normalizeCartesianBasis} itself uses), and $S_{\text{true}}$ is the ordinary,
+convention-free mathematical self-overlap of the bare monomial $\times$ Gaussian,
+\begin{equation}
+S_{\text{true}}(l_x,l_y,l_z,a) \;=\; M(l_x,a)\,M(l_y,a)\,M(l_z,a),
+\qquad
+M(n,a) \;=\; \frac{(2n-1)!!}{(4a)^n}\sqrt{\frac{\pi}{2a}}
+\end{equation}
+(the elementary 1-D Gaussian moment $\int x^{2n} e^{-2ax^2}\,dx$). This correction factor is
+computed \emph{directly} from already-validated integral machinery, not from an assumed formula
+for libcint's internal convention -- confirmed empirically to resolve a multi-Hartree discrepancy
+(a ratio of exactly $\sqrt3$ for an $s\!\to\!p$ transition) down to machine precision against the
+independent \texttt{nablaIntegral} ground truth.
+
+\section*{3. Assembling the RKB expansion coefficients}
+
+Write $D_k(p)$ for the pair of elementary terms (lowering, raising) that differentiation along
+axis $k\in\{x,y,z\}$ produces for large function $p$, each already carrying its own closed-form,
+libcint-corrected coefficient from \S2. The restricted-kinetic-balance relation
+$\psi_S\propto\bs\sigma\!\cdot\!\bs p\,\psi_L$ expands, in the 2-spinor (large-alpha, large-beta)
+$\times$ (small-alpha, small-beta) block structure, as
+\begin{equation}
+\bs\sigma\!\cdot\!\bs p
+= \begin{pmatrix} p_z & p_x - i p_y \\ p_x + i p_y & -p_z \end{pmatrix},
+\qquad p_k = -i\,\partial_k ,
+\end{equation}
+giving the four RKB coefficient blocks (\texttt{RKB/RkbTransformation.cpp}, cross-validated two
+independent ways: against this project's own earlier numerically-projected construction via an
+integration-by-parts identity, and directly against $\bs\sigma\!\cdot\!\bs p$ applied to an
+explicit two-component spinor):
+\begin{align}
+C_{(\text{L}\alpha,\text{S}\alpha)} &= -i\,D_z(p), &
+C_{(\text{L}\alpha,\text{S}\beta)} &= -i\,D_x(p) + D_y(p), \\
+C_{(\text{L}\beta,\text{S}\alpha)} &= -i\,D_x(p) - D_y(p), &
+C_{(\text{L}\beta,\text{S}\beta)} &= +i\,D_z(p).
+\end{align}
+Collected over every large function $p$, this is the $(2n_{\text{L}})\times(2n_{\text{S}})$ matrix
+$C$ returned by \texttt{rkbCoefficients}, satisfying
+$\bs\sigma\!\cdot\!\bs p\,|\text{Large}_p\rangle = \sum_q C_{pq}\,|\text{Small}_q\rangle$ exactly,
+with $n_{\text{S}}$ the raw analytic small-basis size (at most $6n_{\text{L}}$, before the
+reduction of \S4--\S5).
+
+\subsection*{3.1 Concrete assembly}
+
+The $D_k(p)$ notation above is shorthand, not a separate object to compute: it stands for whichever
+elementary small-basis function(s) \S2 built for large function $p$ along axis $k$, each
+\emph{already carrying its own closed-form, libcint-corrected coefficient} ($l_k$ or $-2a_i$, times
+the §2.1 correction) inside that small basis function itself -- that weight is never stored in $C$.
+$C$ therefore stores only the bare Pauli-matrix phase, placed at whichever column index(es) \S2's
+bookkeeping (\texttt{RkbDerivativeTerms}: six slots \texttt{lower\_x, raise\_x, lower\_y, raise\_y,
+lower\_z, raise\_z} per large function, \texttt{lower\_k} absent/omitted whenever $l_k=0$ already)
+assigned to those terms. Writing $q^{-}_k(p)$/$q^{+}_k(p)$ for $p$'s lowering/raising column index
+along axis $k$ (omitted if absent), row $p$ of each spin block of $C$ has at most six nonzero
+entries, read directly off the four formulas above:
+\begin{align}
+\text{Large-}\alpha\text{ row, Small-}\alpha\text{ block:} &\quad C_{p,\,q^{\mp}_z(p)} = -i, \\
+\text{Large-}\alpha\text{ row, Small-}\beta\text{ block:} &\quad C_{p,\,q^{\mp}_x(p)} = -i,\;\; C_{p,\,q^{\mp}_y(p)} = +1, \\
+\text{Large-}\beta\text{ row, Small-}\alpha\text{ block:} &\quad C_{p,\,q^{\mp}_x(p)} = -i,\;\; C_{p,\,q^{\mp}_y(p)} = -1, \\
+\text{Large-}\beta\text{ row, Small-}\beta\text{ block:} &\quad C_{p,\,q^{\mp}_z(p)} = +i,
+\end{align}
+(each ``$q^{\mp}_k(p)$'' standing for \emph{two} entries, at $q^{-}_k(p)$ and $q^{+}_k(p)$
+separately, both carrying the same phase) and every other entry of row $p$ is exactly zero -- $C$ is
+sparse by construction, never assembled as, or requiring the inversion of, a dense overlap matrix.
+This is the entirety of \texttt{rkbCoefficients}'s loop body (\texttt{RKB/RkbTransformation.cpp}).
+
+\paragraph{Worked example (why $C$ is just $\pm i,\pm1$).} Take the (Large-$\alpha$,Small-$\alpha$)
+block, $p_z=-i\partial_z$ acting on $\text{Large}_p = x^{l_x}y^{l_y}z^{l_z}e^{-ar^2}$:
+\begin{equation}
+-i\,\partial_z\,\text{Large}_p
+\;=\; -i\Big[\underbrace{l_z\,x^{l_x}y^{l_y}z^{l_z-1}e^{-ar^2}}_{\text{lowering piece}}
+\;-\; \underbrace{2a\,x^{l_x}y^{l_y}z^{l_z+1}e^{-ar^2}}_{\text{raising piece}}\Big].
+\end{equation}
+The two bracketed pieces are \emph{not} bare monomials still waiting to be scaled -- by \S2's own
+construction, $\text{Small}_{q^{-}_z(p)}$ \emph{is}, as a stored basis function, exactly
+$l_z\,x^{l_x}y^{l_y}z^{l_z-1}e^{-ar^2}$ (times the \S2.1 libcint correction), and
+$\text{Small}_{q^{+}_z(p)}$ \emph{is} exactly $-2a\,x^{l_x}y^{l_y}z^{l_z+1}e^{-ar^2}$ (times the same
+correction) -- the weight was baked into the object when \S2 built it, never left as a separate
+factor to apply later. So the identity above reads, with no further scaling needed,
+\begin{equation}
+-i\,\partial_z\,\text{Large}_p \;=\; (-i)\cdot\text{Small}_{q^{-}_z(p)} \;+\; (-i)\cdot\text{Small}_{q^{+}_z(p)},
+\end{equation}
+i.e.\ $C_{p,q^{-}_z(p)}=C_{p,q^{+}_z(p)}=-i$ exactly, matching the table above. \S2 (the basis
+functions) and $C$ (this matrix) divide the calculus between them by construction: \S2 carries every
+quantitative weight ($l_k$, $-2a_k$, the libcint correction), $C$ carries only which spin block gets
+which axis's derivative, with the bare Pauli phase -- which is also exactly why $C$ needs no
+numerical work (projection, inversion, least squares) to write down.
+
+The RKB small-component overlap and one-electron matrices follow from $C$
+by the congruence
+\begin{equation}
+S_{\text{small}} \;=\; \overline{C}\,S_{\text{uKB}}\,C^{T}
+\qquad(\texttt{RKB/RkbOverlap.h's rkbSmallOverlapMatrix}),
+\end{equation}
+where $S_{\text{uKB}}$ (shape $2n_{\text{S}}\times2n_{\text{S}}$) is the ordinary Cartesian AO
+overlap of the raw analytic small basis, and $\overline{C}$ is the plain (elementwise) complex
+conjugate of $C$ -- \emph{not} $C^{\dagger}$: this is \emph{not} the usual $C^{\dagger}SC$
+congruence pattern (conjugate-transpose on one side, plain $C$ on the other), but conjugate-only on
+the left and transpose-only on the right, so that the shapes work out
+($2n_{\text{L}}\times2n_{\text{S}}$, then $\times2n_{\text{S}}\times2n_{\text{S}}$, then
+$\times2n_{\text{S}}\times2n_{\text{L}}$, giving $2n_{\text{L}}\times2n_{\text{L}}$). \S6 explains
+where this convention actually comes from.
+
+\section*{4. Large-component spherical reduction}
+
+For angular momentum $l\ge2$ a Cartesian shell contains redundant combinations: 6 Cartesian $d$'s
+for 5 genuine spherical harmonics, 10 $f$'s for 7, and so on ($\tfrac{(l+1)(l+2)}2$ Cartesian
+components vs.\ $2l+1$ spherical ones). DIRAC itself, and this project's own
+\texttt{Utils/SphericalTransform.h}, work in the spherical (real-solid-harmonic) large-component
+basis for exactly this reason.
+
+The genuine angular-momentum-$l$ subspace is the \emph{harmonic} one: polynomials annihilated by
+the Laplacian. Writing $\mathcal L_l$ for the exact, small-integer linear map from degree-$l$
+monomials to degree-$(l-2)$ monomials induced by $\partial_x^2+\partial_y^2+\partial_z^2$, the
+harmonic subspace is $\ker\mathcal L_l$, of dimension exactly $2l+1$ (a standard fact:
+$\dim\ker\mathcal L_l = \tfrac{(l+1)(l+2)}2-\tfrac{(l-1)l}2 = 2l+1$). Since $\ker\mathcal L_l =
+\ker(\mathcal L_l^{\!\top}\mathcal L_l)$, this null space is found by diagonalizing the symmetric,
+positive-semidefinite matrix
+\begin{equation}
+\mathcal L_l^{\!\top}\mathcal L_l \;=\; U\,\mathrm{diag}(\mu_1\le\mu_2\le\cdots)\,U^{\!\top},
+\qquad
+N \;:=\; U_{[\,:\,,\,1:2l+1\,]},
+\end{equation}
+i.e.\ $N$ is the $\tfrac{(l+1)(l+2)}2\times(2l+1)$ matrix of eigenvectors belonging to
+$\mathcal L_l^{\!\top}\mathcal L_l$'s $2l+1$ zero eigenvalues (exact, machine-precision zeros, since
+$\mathcal L_l$ has only small-integer entries, with an $O(1)$ gap to every remaining eigenvalue) --
+\texttt{SphericalTransform.cpp}'s \texttt{harmonicNullSpaceBasis}. Since eigenvectors of a symmetric
+matrix are orthonormal, $N^{\!\top}N=I_{2l+1}$ already; $N$ is an orthonormal basis of the harmonic
+subspace in the Euclidean sense only, not yet under the physical Gaussian overlap metric. Löwdin-
+orthonormalizing $N$ under the shell's own physical overlap metric $\bar S_l$ -- a small,
+\emph{universal} reference matrix
+depending only on $l$ (e.g.\ $6\times6$ for a $d$-shell), computed once from an arbitrary reference
+exponent/coefficient, since a shell's self-overlap is always a scalar multiple of it regardless of
+the actual molecule or basis set (\emph{not} to be confused with $S_{\text{uKB}}$ of \S3/\S6, the
+real, molecule-specific small-component AO overlap) -- gives the final transform block
+\begin{equation}
+T_l \;=\; N\,\big(N^{\!\top} \bar S_l N\big)^{-1/2}
+\qquad\Big(\text{an } \tfrac{(l+1)(l+2)}2 \times (2l+1) \text{ matrix, } T_l^{\!\top} \bar S_l T_l = I\Big),
+\end{equation}
+computed once per angular momentum and cached. The molecule's actual Cartesian large-component
+basis is an ordered list of shells $s=1,\dots,n_{\text{shells}}$, each with its own angular momentum
+$l_s$ (possibly repeated: a basis typically has several $s$-shells, several $p$-shells, \ldots);
+the full Cartesian-to-spherical transform is simply these shells' own $T_{l_s}$ blocks placed
+block-diagonally, in shell order, reusing the same $T_l$ matrix wherever two shells share an $l$:
+\begin{equation}
+T_{\text{sph}} \;=\; \mathrm{blockdiag}\big(T_{l_1},\,T_{l_2},\,\dots,\,T_{l_{n_{\text{shells}}}}\big)
+\qquad(\texttt{buildSphericalTransform}),
+\end{equation}
+an $n_{\text{large,cart}}\times n_{\text{large,sph}}$ matrix overall
+($n_{\text{large,sph}}=\sum_s(2l_s+1) \le n_{\text{large,cart}}=\sum_s\tfrac{(l_s+1)(l_s+2)}2$, equal
+only if every shell has $l_s\le1$). Validated to machine precision
+($\max|T_l^{\!\top}\bar S_lT_l-I|\sim10^{-15}$) for every angular momentum libcint supports,
+$l=0,\dots,6$.
+
+\section*{5. The LOWGEN safety net}
+
+On top of the exact spherical reduction, DIRAC's own \texttt{LOWGEN} routine (\texttt{dirone.F})
+applies a further, numerically-triggered canonical (Löwdin) orthogonalization: diagonalize the
+overlap $S=U\,\mathrm{diag}(w)\,U^{\!\top}$ and keep only
+\begin{equation}
+X \;=\; U_{\text{kept}}\,\mathrm{diag}\big(w_{\text{kept}}^{-1/2}\big),
+\qquad \text{kept} = \{\,i : w_i > \text{STOL}\,\},
+\end{equation}
+genuinely \emph{dropping} columns (not inverting them) whenever an eigenvalue falls at or below the
+threshold -- $\text{STOL}(1)=10^{-6}$ for the large component, $\text{STOL}(2)=10^{-8}$ for the
+small, matching DIRAC's own defaults. This project's
+\texttt{Linear\_Algebra/LinearAlgebra.h}'s \texttt{canonicalOrthogonalize}/
+\texttt{canonicalOrthogonalizeHermitian} implement exactly this generic $S\mapsto X$ map. Define
+$X_{\text{LOWGEN}}$ as this map applied, specifically, to the \emph{already-spherical} large overlap
+at threshold $\text{STOL}(1)$,
+\begin{equation}
+S_{\text{large,sph}} \;=\; T_{\text{sph}}^{\!\top}S_{\text{large,cart}}T_{\text{sph}},
+\qquad
+X_{\text{LOWGEN}} \;:=\; X\big(S_{\text{large,sph}},\,\text{STOL}(1)\big),
+\end{equation}
+and combine it with $T_{\text{sph}}$ into one transform,
+\begin{equation}
+T_{\text{final}} \;=\; T_{\text{sph}}\,X_{\text{LOWGEN}},
+\end{equation}
+so that the large-component dimension only shrinks further than the exact spherical count when a
+\emph{genuine} residual near-linear-dependence is found (confirmed to be a no-op, bit-identical to
+$T_{\text{sph}}$ alone, for every basis tested so far).
+
+\section*{6. Keeping the small-component dimension matched}
+
+Recall from \S3: $C$ is the $(2n_{\text{L}})\times(2n_{\text{S}})$ matrix with
+$\bs\sigma\!\cdot\!\bs p\,|\text{Large}_p\rangle = \sum_q C_{pq}|\text{Small}_q\rangle$, built one
+small partner per \emph{large} function, $n_{\text{L}}$ being whatever large-component count is
+currently in play (Cartesian, or already spherical/LOWGEN-reduced -- the construction in \S2--\S3
+does not care). This section explains why reducing $n_{\text{L}}$ via $T_{\text{final}}$
+automatically reduces the \emph{projected} RKB small-component count to match it exactly, with no
+separate bookkeeping.
+
+\subsection*{6.1 The raw (uKB) one-electron Hamiltonian}
+
+Before any RKB projection, the one-electron Hamiltonian lives on the direct sum of the
+Large-component AO space (dimension $2n_{\text{L}}$, both spins) and the \emph{raw analytic} small
+basis of \S2 (dimension $2n_{\text{S}}$, both spins), with block structure
+(\texttt{UKB/UkbHamiltonian.h} $=$ \texttt{Utils/DiracKinetic.h} $+$ \texttt{Vext/Vext.h}):
+\begin{equation}
+H_{\text{uKB}} \;=\;
+\begin{pmatrix} V_{\text{LL}} & T_{\text{LS}} \\ T_{\text{LS}}^{\dagger} & V_{\text{SS}}-2c^2 S_{\text{uKB}} \end{pmatrix},
+\qquad\text{dimension } (2n_{\text{L}}+2n_{\text{S}})\times(2n_{\text{L}}+2n_{\text{S}}),
+\end{equation}
+$V_{\text{LL}}$/$V_{\text{SS}}$ the nuclear attraction over the Large/raw-Small AOs respectively,
+$T_{\text{LS}}$ the Large--Small kinetic coupling built from $D_x,D_y,D_z$ (\S2) with exactly the
+same $\bs\sigma\!\cdot\!\bs p$ weights as \S3, and $-2c^2S_{\text{uKB}}$ the small-component rest
+mass term ($S_{\text{uKB}}$ as in \S3).
+
+\subsection*{6.2 The RKB embedding, and its tautological dimension-matching property}
+
+Given \emph{any} coefficient matrix $C$ of shape $(2m)\times(2n_{\text{S}})$ (not yet assumed equal
+to the $C$ of \S3), define its RKB embedding (\texttt{RKB/RkbHamiltonian.h}'s
+\texttt{rkbEmbeddingMatrix})
+\begin{equation}
+W(C) \;=\; \begin{pmatrix} I_{2m} & 0 \\ 0 & C^{T} \end{pmatrix},
+\qquad\text{shape } (2m+2n_{\text{S}})\times 4m,
+\end{equation}
+and the RKB-projected Hamiltonian $H_{\text{RKB}} = W(C)^{\dagger}H_{\text{uKB}}\,W(C)$. Since
+$(C^{T})^{\dagger}=\overline{C}$ (transposing $C^T$ undoes the transpose, then the outer dagger
+conjugates), $W(C)^{\dagger}$'s bottom-right block is $\overline{C}$, not $C^{\dagger}$ -- exactly
+the $\overline{C}(\cdot)C^{T}$ pattern of \S3's $S_{\text{small}}$ formula, which is in fact nothing
+but $H_{\text{RKB}}$'s own Small-Small block with $S_{\text{uKB}}$ in place of $H_{\text{uKB}}$'s
+Small-Small block. The crucial, purely definitional fact is: \textbf{$W(C)$'s own output dimension
+is $4m$} -- $2m$ for the (unchanged) Large legs, and \emph{exactly} $2m$ again for the
+RKB-compressed Small legs, \emph{regardless of $n_{\text{S}}$}. Whatever large-orbital count $m$
+the rows of $C$ happen to represent, that is what the compressed Small-component dimension comes
+out as, by construction -- not because of any additional reduction step on the Small side.
+
+\subsection*{6.3 Applying this with the reduced large dimension}
+
+\S3's $C$ has $m=n_{\text{L,cart}}$ (one partner per \emph{Cartesian} large function). Feeding it
+directly into $W(\cdot)$ would therefore give a Small-component count of $n_{\text{L,cart}}$, not
+the smaller $n_{\text{L,final}}$ that \S4--\S5 reduced the Large side to. The fix is to row-project
+$C$ through the \emph{same} $T_{\text{final}}$ \emph{before} forming $W$, so that its row count
+already reflects the reduced Large dimension. Spin-duplicating $T_{\text{final}}$ block-diagonally
+across the $\alpha,\beta$ Large spin-orbitals,
+\begin{equation}
+T_{\text{spin}} \;=\; \begin{pmatrix} T_{\text{final}} & 0 \\ 0 & T_{\text{final}} \end{pmatrix}
+\qquad\big(\text{shape } 2n_{\text{L,cart}}\times2n_{\text{L,final}}\big),
+\end{equation}
+define the embedding that reduces \emph{only} the Large legs of $H_{\text{uKB}}$, leaving the raw
+analytic Small legs completely untouched,
+\begin{equation}
+V \;=\; \begin{pmatrix} T_{\text{spin}} & 0 \\ 0 & I_{2n_{\text{S}}} \end{pmatrix}
+\qquad\big(\text{shape } (2n_{\text{L,cart}}+2n_{\text{S}})\times(2n_{\text{L,final}}+2n_{\text{S}})\big),
+\end{equation}
+and apply it to both $H_{\text{uKB}}$ and $C$ (\texttt{main.cpp}'s X2C/C4\_SPINOR construction
+block, \emph{before} any RKB projection happens):
+\begin{equation}
+H_{\text{uKB}}' \;=\; V^{\dagger} H_{\text{uKB}}\, V
+\quad\big(\text{shape } (2n_{\text{L,final}}+2n_{\text{S}})^2\big),
+\qquad
+C' \;=\; T_{\text{spin}}^{\dagger}\, C
+\quad\big(\text{shape } 2n_{\text{L,final}}\times2n_{\text{S}}\big).
+\end{equation}
+\textbf{Raw $C$ connects Cartesian large $\leftrightarrow$ Cartesian small (both sides of \S2--\S3
+are built from Cartesian differentiation); $C'$ connects spherical large $\leftrightarrow$ Cartesian
+small -- the row-projection changes only which large-component combinations index the rows, never
+touching the (deliberately never spherically transformed) small/RKB side.} In the actual code,
+\texttt{rkb\_coefficients} holds $C$ only momentarily and is overwritten in place by $C'$ before any
+downstream use, so everything from here on ($S_{\text{small}}$, $H_{\text{RKB}}$, the two-electron
+integrals) is built from $C'$, never the raw $C$.
+
+Now form the RKB embedding of \S6.2 with $m=n_{\text{L,final}}$, i.e.\ with $C'$ in place of the
+original $C$:
+\begin{equation}
+H_{\text{RKB}} \;=\; W(C')^{\dagger}\,H_{\text{uKB}}'\,W(C')
+\qquad\big(\text{shape } 4n_{\text{L,final}}\big).
+\end{equation}
+By \S6.2's tautological property, this Hamiltonian's Small-component block is \emph{exactly}
+$2n_{\text{L,final}}$-dimensional -- matching the Large block automatically, with no
+$n_{\text{large}}\ne n_{\text{small}}$ plumbing anywhere downstream. The identical mechanism
+(sandwich the Large legs with $T_{\text{final}}$, feed the row-projected $C'$ into the same RKB
+projection) applies to the two-electron Coulomb integrals: each AO Cholesky vector's (or dense
+tensor's) Large legs are transformed by $T_{\text{final}}$ before the RKB-Small projection
+(\texttt{C4\_DHF/RkbCholesky.h}, \texttt{RkbTwoElectron.cpp}).
+
+\section*{7. Summary of the pipeline}
+
+\begin{enumerate}
+\item Build the large-component Cartesian AO basis (libcint), individually normalized.
+\item Differentiate each large function analytically (\S2) $\to$ raw analytic RKB small basis,
+      and the exact expansion matrix $C$ (\S3).
+\item Build the large-component spherical transform $T_{\text{sph}}$ (\S4); combine with the
+      LOWGEN safety net into $T_{\text{final}}$ (\S5).
+\item Row-project $C\to C'=T_{\text{spin}}^{\dagger}C$ and sandwich the one-/two-electron
+      large-component legs with $T_{\text{final}}$ \emph{before} the RKB projection (\S6), so the
+      Small-component dimension tracks the Large one automatically.
+\item Build $S_{\text{small}}=\overline{C'}\,S_{\text{uKB}}\,C'^{T}$; apply the SAME LOWGEN check
+      (\S5) to $S_{\text{small}}$ itself, independently, to catch any genuine near-degeneracy the
+      Large-side reduction does not already explain. If none is found (every basis tested so far),
+      $X_{\text{small}}=S_{\text{small}}^{-1/2}$ as usual. If one is found, this is DIRAC's own
+      accepted $n_{\text{positive}}\ne n_{\text{negative}}$ case (\texttt{NESH}$\,\ne\,$\texttt{NPSH}),
+      not yet threaded through the rest of this project's pipeline, and the calculation stops with
+      an explicit, actionable error rather than silently mismatching dimensions.
+\end{enumerate}
+
+\end{document}
