@@ -179,6 +179,31 @@ CholeskyEri<double> aoCholeskyToMoSpinOrbital(const AoCholesky& ao, const Matrix
   return CholeskyEri<double>::fromVectors(out);
 }
 
+AoCholesky transformAoCholeskyToSpherical(const AoCholesky& ao, const Matrix<double>& transform) {
+  const std::size_t n_cart = transform.rows(), n_sph = transform.cols();
+  checkSquare(ao, n_cart, "transformAoCholeskyToSpherical");
+  AoCholesky out;
+  out.n = n_sph;
+  out.vectors.resize(ao.vectors.size());
+  const SerialBlasScope serial_blas_guard;
+#pragma omp parallel
+  {
+    Matrix<double> tmp(n_cart, n_sph);
+#pragma omp for schedule(dynamic)
+    for (std::size_t l = 0; l < ao.vectors.size(); ++l) {
+      Matrix<double> bp(n_sph, n_sph);
+      dgemmRow(false, false, static_cast<int>(n_cart), static_cast<int>(n_sph), static_cast<int>(n_cart),
+               ao.vectors[l].data(), static_cast<int>(n_cart), transform.data(), static_cast<int>(n_sph), 0.0,
+               tmp.data(), static_cast<int>(n_sph));  // B T
+      dgemmRow(true, false, static_cast<int>(n_sph), static_cast<int>(n_sph), static_cast<int>(n_cart),
+               transform.data(), static_cast<int>(n_sph), tmp.data(), static_cast<int>(n_sph), 0.0, bp.data(),
+               static_cast<int>(n_sph));  // T^T B T
+      out.vectors[l] = std::move(bp);
+    }
+  }
+  return out;
+}
+
 CholeskyEri<C> aoCholeskyToMoSpinor(const AoCholesky& ao, const Matrix<C>& c) {
   const std::size_t n = ao.n, nmo = c.cols();
   if (c.rows() != 2 * n) throw std::runtime_error("aoCholeskyToMoSpinor: C must have 2*n_AO rows ([alpha; beta] blocks)");

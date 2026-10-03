@@ -32,6 +32,16 @@ Matrix<double> moOneElectronTransform(const Matrix<double>& h_ao, const Matrix<d
 Tensor4<double> moTwoElectronTransformPhysics(const PackedTwoElectronTensor& eri_ao_chemist,
                                                const Matrix<double>& c);
 
+// Transforms a packed, CHEMIST-notation AO tensor into a NEW orbital basis (`c`, n_ao x n_new --
+// need not be square or even an MO basis at all), staying in packed chemist notation throughout --
+// used to re-express an AO tensor in a different AO-like representation (e.g. Cartesian to
+// spherical large-component AOs, Utils/SphericalTransform.h) rather than to transform into MOs.
+// Same 4-sequential-leg-GEMM technique as moTwoElectronTransformPhysics's own chemist-notation
+// intermediate, just returned directly (no physics reindex) and re-packed. Intended for small
+// systems (same O(n_ao^4) densify + O(n^5) leg-transform cost as moTwoElectronTransformPhysics).
+PackedTwoElectronTensor transformPackedChemist(const PackedTwoElectronTensor& eri_ao_chemist,
+                                                const Matrix<double>& c);
+
 // Same result as moTwoElectronTransformPhysics above (verified to
 // agree to floating-point precision at the default threshold before
 // being trusted -- see main.cpp, CHOLESKY TRUE/FALSE both reproducing

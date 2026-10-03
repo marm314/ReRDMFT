@@ -50,6 +50,16 @@ CholeskyEri<double> aoCholeskyToMoSpinOrbital(const AoCholesky& ao, const Matrix
 CholeskyEri<std::complex<double>> aoCholeskyToMoSpinor(const AoCholesky& ao,
                                                          const Matrix<std::complex<double>>& c_spinor);
 
+// Transforms every Cartesian-large-AO Cholesky vector B_L to the spherical large-AO basis,
+// B'_L = T^T B_L T (T = Utils/SphericalTransform.h's buildSphericalTransform(...).transform,
+// n_cart x n_sph) -- mathematically identical to aoCholeskyToMoSpinOrbital's own per-vector
+// transform, just with the rectangular spherical-reduction matrix in place of a square MO
+// coefficient matrix, and no spin-orbital doubling (the result is a plain, n_sph-dimensional
+// AoCholesky, exactly like the input). Used by X2C's own two-electron integrals so they stay
+// consistent with the now-spherical h_x2c -- see main.cpp's X2C/C4_SPINOR construction block and
+// SphericalTransform.h's own comment on why the large-component basis goes spherical at all.
+AoCholesky transformAoCholeskyToSpherical(const AoCholesky& ao, const Matrix<double>& transform);
+
 }  // namespace rerdmft
 
 #endif  // RERDMFT_UTILS_AOCHOLESKY_H

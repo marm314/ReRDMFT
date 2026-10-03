@@ -171,6 +171,26 @@ Tensor4<double> moTwoElectronTransformPhysics(const PackedTwoElectronTensor& eri
   return physics_mo;
 }
 
+PackedTwoElectronTensor transformPackedChemist(const PackedTwoElectronTensor& eri_ao_chemist,
+                                                const Matrix<double>& c) {
+  if (c.rows() != eri_ao_chemist.dim()) {
+    throw std::runtime_error("transformPackedChemist: c row count does not match eri_ao_chemist's dimension");
+  }
+  const std::size_t n_new = c.cols();
+  const Tensor4<double> ao_dense = densify(eri_ao_chemist);
+  const Tensor4<double> t1 = transformLeg1(ao_dense, c);
+  const Tensor4<double> t2 = transformLeg2(t1, c);
+  const Tensor4<double> t3 = transformLeg3(t2, c);
+  const Tensor4<double> chemist_new = transformLeg4(t3, c);  // chemist_new(p,q,r,s) == (pq|rs) in the new basis
+
+  PackedTwoElectronTensor out(n_new);
+  for (std::size_t p = 0; p < n_new; ++p)
+    for (std::size_t q = 0; q < n_new; ++q)
+      for (std::size_t r = 0; r < n_new; ++r)
+        for (std::size_t s = 0; s < n_new; ++s) out.set(p, q, r, s, chemist_new(p, q, r, s));
+  return out;
+}
+
 Tensor4<double> moTwoElectronTransformPhysicsCholesky(const PackedTwoElectronTensor& eri_ao_chemist,
                                                        const Matrix<double>& c, double threshold) {
   if (c.rows() != eri_ao_chemist.dim()) {

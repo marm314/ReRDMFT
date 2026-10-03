@@ -37,6 +37,19 @@ std::vector<NormalizationCheck> normalizeCartesianBasis(
 // as an ongoing check on normalizeCartesianBasis's result.
 Matrix<double> overlapMatrix(const std::vector<BasisFunction>& basis);
 
+// The nf x nf (nf = cartesianComponents(l).size()) self-overlap of ONE contracted shell (all its
+// cartesian components at once), placed at an arbitrary center -- a Gaussian shell's self overlap
+// does not depend on where it is centered. `exponents`/`coefficients` are raw (pre-primitive-
+// normalization) values, exactly as normalizeCartesianBasis itself expects them -- it is in fact
+// built from this same routine (Integrals.cpp). Exposed for Utils/SphericalTransform.h, which needs
+// this exact overlap convention (same primitive normalization, before normalizeCartesianBasis's own
+// subsequent per-component rescaling) to derive the universal Cartesian-to-real-solid-harmonic
+// transformation for a given l: that transformation only depends on l, not on any particular shell's
+// actual exponents/contraction (the shell self-overlap is always a single overall scalar times a
+// universal, l-dependent matrix -- see SphericalTransform.cpp's own derivation).
+Matrix<double> shellSelfOverlap(int l, const std::vector<double>& exponents,
+                                 const std::vector<double>& coefficients);
+
 }  // namespace rerdmft
 
 #endif  // RERDMFT_INTEGRALS_H

@@ -11,6 +11,7 @@
 #include "ElectronRepulsion.h"
 #include "LinearAlgebra.h"
 #include "RkbTwoElectron.h"
+#include "SphericalTransform.h"
 
 namespace rerdmft {
 
@@ -73,8 +74,10 @@ Matrix<C> promote(const Matrix<double>& m) {
 
 RkbCholesky RkbCholesky::build(const std::vector<BasisFunction>& large_basis,
                                const std::vector<BasisFunction>& small_basis,
-                               const Matrix<C>& rkb_coefficients, double threshold, CholeskyCheckReport* report) {
+                               const Matrix<C>& rkb_coefficients, const Matrix<double>& large_transform,
+                               double threshold, CholeskyCheckReport* report) {
   const std::size_t nl = large_basis.size(), ns = small_basis.size();
+  const std::size_t nl_sph = large_transform.cols();
   FlatVectors<double> flat;
   {
     // The three real AO tensors (transient: released as soon as the decomposition is done): (LL|LL) and (SS|SS)
@@ -98,7 +101,7 @@ RkbCholesky RkbCholesky::build(const std::vector<BasisFunction>& large_basis,
   }
   ProgressLine() << "RKB Cholesky: " << flat.count << " vectors; projecting them into the RKB basis";
   RkbCholesky out;
-  out.n_large = nl;
+  out.n_large = nl_sph;
   out.large.resize(flat.count);
   out.small[0].resize(flat.count);
   out.small[1].resize(flat.count);
@@ -108,8 +111,11 @@ RkbCholesky RkbCholesky::build(const std::vector<BasisFunction>& large_basis,
     Matrix<double> b(nl, nl), s(ns, ns);
     std::copy(row, row + nl * nl, b.data());
     std::copy(row + nl * nl, row + nl * nl + ns * ns, s.data());
-    out.large[l] = std::move(b);
-    for (std::size_t y = 0; y < 2; ++y) out.small[y][l] = rkbProjectSmallVector(s, rkb_coefficients, y, nl, ns);
+    // Large-component Cartesian-to-spherical reduction, same transform/reasoning as the one-electron
+    // H_RKB side (main.cpp's X2C/C4_SPINOR construction block) -- B'_L = T^T B_L T.
+    out.large[l] = transformToSpherical(b, large_transform);
+    for (std::size_t y = 0; y < 2; ++y)
+      out.small[y][l] = rkbProjectSmallVector(s, rkb_coefficients, y, nl_sph, ns);
   }
   return out;
 }

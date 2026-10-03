@@ -302,6 +302,17 @@ Matrix<std::complex<double>> promoteToComplex(const Matrix<double>& m) {
   return result;
 }
 
+// transformLeg's own `matrix` convention is (new_dim x old_dim) -- the transpose of `large_transform`
+// itself (n_cart x n_final), promoted to complex (always real-valued, but transformLeg's complex
+// GEMM path is what every other leg-transform in this file already uses).
+Matrix<std::complex<double>> transposePromote(const Matrix<double>& m) {
+  Matrix<std::complex<double>> result(m.cols(), m.rows());
+  for (std::size_t i = 0; i < m.cols(); ++i) {
+    for (std::size_t j = 0; j < m.rows(); ++j) result(i, j) = std::complex<double>(m(j, i), 0.0);
+  }
+  return result;
+}
+
 // Projects a single (n_small x n_small) Cholesky vector V of the real
 // (Small,Small|Small,Small) chemist-notation tensor ss_ss into the
 // RKB-Small(y) "partner" flavor (row_offset = y*n_large), applying
@@ -383,9 +394,13 @@ Matrix<std::complex<double>> rkbProjectSmallVector(const Matrix<double>& v,
 RkbTwoElectronTensor rkbTwoElectronIntegrals(const std::vector<BasisFunction>& large_basis,
                                               const std::vector<BasisFunction>& small_basis,
                                               const Matrix<std::complex<double>>& rkb_coefficients,
-                                              bool use_cholesky, double cholesky_threshold) {
-  const std::size_t n_large = large_basis.size();
+                                              const Matrix<double>& large_transform, bool use_cholesky,
+                                              double cholesky_threshold) {
   const std::size_t n_small = small_basis.size();
+  // n_large is the FINAL (spherical, plus any LOWGEN reduction) large dimension -- rkb_coefficients'
+  // own row count already matches it (main.cpp's row-projection); large_basis.size() (Cartesian) is
+  // only ever needed below to build the raw AO integrals, immediately transformed away.
+  const std::size_t n_large = large_transform.cols();
   const std::size_t n = 4 * n_large;
 
   // Real spatial-AO chemist-notation tensors (pq|rs): ll_ll all-Large,
@@ -394,10 +409,25 @@ RkbTwoElectronTensor rkbTwoElectronIntegrals(const std::vector<BasisFunction>& l
   // element this skips was already going to contribute at most that much error): this is the
   // CHOLESKY FALSE path, so there is no decomposition downstream to carry that argument, but the
   // bound itself (|(pq|rs)| <= sqrt((pq|pq)(rs|rs))) is exact regardless.
-  const Tensor4<double> ll_ll = twoElectronIntegrals(large_basis, cholesky_threshold);
-  const Tensor4<double> ll_ss = twoElectronIntegralsCross(large_basis, small_basis, cholesky_threshold);
+  const Tensor4<double> ll_ll_cart = twoElectronIntegrals(large_basis, cholesky_threshold);
+  const Tensor4<double> ll_ss_cart = twoElectronIntegralsCross(large_basis, small_basis, cholesky_threshold);
   const PackedTwoElectronTensor ss_ss =
       twoElectronIntegralsPacked(small_basis, cholesky_threshold);  // 8-fold packed, never dense
+
+  // Large-component Cartesian-to-final-basis reduction (same transform/reasoning as the one-electron
+  // H_RKB side, main.cpp's X2C/C4_SPINOR construction block): applied to ll_ll's all 4 Large legs and
+  // ll_ss's first 2 (Large) legs -- its last 2 (Small, raw-analytic) legs are untouched here, handled
+  // by rkb_coefficients exactly as before. Always exactly real-valued (a real transform of real data,
+  // just carried through transformLeg's complex GEMM path like every other leg-transform in this
+  // file); kept complex throughout rather than converted back, since it is immediately combined with
+  // genuinely complex RKB-projected pieces below anyway.
+  const Matrix<std::complex<double>> t_t = transposePromote(large_transform);
+  Tensor4<std::complex<double>> ll_ll = transformLeg(ll_ll_cart, 0, t_t);
+  ll_ll = transformLeg(ll_ll, 1, t_t);
+  ll_ll = transformLeg(ll_ll, 2, t_t);
+  ll_ll = transformLeg(ll_ll, 3, t_t);
+  Tensor4<std::complex<double>> ll_ss = transformLeg(ll_ss_cart, 0, t_t);
+  ll_ss = transformLeg(ll_ss, 1, t_t);
 
   // (Large,Large | RKB-Small(y2),RKB-Small(y2)): transform ll_ss's
   // electron-2 pair (legs 2,3). Index y in {0,1} means {alpha-partner,
@@ -475,7 +505,7 @@ RkbTwoElectronTensor rkbTwoElectronIntegrals(const std::vector<BasisFunction>& l
           // two slots are otherwise independent of each other (e.g.
           // electron-1 = Large-alpha with electron-2 = Large-beta is a
           // perfectly ordinary, generally nonzero Coulomb integral).
-          const std::complex<double> ll_ll_val(ll_ll(a, c, b, d), 0.0);
+          const std::complex<double> ll_ll_val = ll_ll(a, c, b, d);
           result.set(off_large_alpha + a, off_large_alpha + b, off_large_alpha + c,
                      off_large_alpha + d, ll_ll_val);
           result.set(off_large_beta + a, off_large_beta + b, off_large_beta + c,

@@ -32,9 +32,17 @@ struct RkbCholesky {
   std::size_t nVectors() const { return large.size(); }
   std::size_t dim() const { return 4 * n_large; }
 
+  // `large_transform` (Utils/SphericalTransform.h's buildSphericalTransform(large_basis).transform,
+  // n_large_cart x n_large_sph) converts each AO Cholesky vector's Large block to the spherical large
+  // basis right after the raw (Cartesian) AO integrals are decomposed; `rkb_coefficients` must already
+  // be the SAME transform's row-projected version (see main.cpp's X2C/C4_SPINOR construction block),
+  // so that `n_large` below (= large_transform.cols()) matches rkb_coefficients.rows()/2 and the
+  // resulting Large/Small flavor blocks come out the same (spherical) size, exactly as the one-electron
+  // H_RKB side already does.
   static RkbCholesky build(const std::vector<BasisFunction>& large_basis,
                            const std::vector<BasisFunction>& small_basis,
-                           const Matrix<std::complex<double>>& rkb_coefficients, double threshold,
+                           const Matrix<std::complex<double>>& rkb_coefficients,
+                           const Matrix<double>& large_transform, double threshold,
                            CholeskyCheckReport* report = nullptr);
 };
 

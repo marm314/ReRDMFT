@@ -42,6 +42,7 @@
 #include "KramersSymmetry.h"
 #include "LBFGS.h"
 #include "LinearAlgebra.h"
+#include "SphericalTransform.h"
 #include "MoIntegralTransform.h"
 #include "MolecularBasis.h"
 #include "NonRelHartreeFock.h"
@@ -2205,9 +2206,10 @@ rerdmft::PackedTwoElectronTensor buildNonRelEri(const std::vector<rerdmft::Basis
 rerdmft::RkbTwoElectronTensor buildC4SpinorEri(
     const rerdmft::Input& input, const std::vector<rerdmft::BasisFunction>& large_basis,
     const std::vector<rerdmft::BasisFunction>& small_basis,
-    const rerdmft::Matrix<std::complex<double>>& rkb_coefficients, bool use_cholesky) {
-  return rerdmft::rkbTwoElectronIntegrals(large_basis, small_basis, rkb_coefficients, use_cholesky,
-                                           input.cholesky_threshold());
+    const rerdmft::Matrix<std::complex<double>>& rkb_coefficients,
+    const rerdmft::Matrix<double>& large_transform, bool use_cholesky) {
+  return rerdmft::rkbTwoElectronIntegrals(large_basis, small_basis, rkb_coefficients, large_transform,
+                                           use_cholesky, input.cholesky_threshold());
 }
 
 // How the SCF loops were accelerated, for their headers.
@@ -2823,13 +2825,37 @@ int main(int argc, char** argv) {
   rerdmft::SmallComponentBasis small_basis;
   rerdmft::SpinorBasis spinor_basis;
   std::vector<rerdmft::NormalizationCheck> large_normalization;
-  std::vector<rerdmft::NormalizationCheck> small_normalization;
   rerdmft::Matrix<std::complex<double>> dirac_kinetic;
   rerdmft::Matrix<std::complex<double>> dirac_rest_energy;
   rerdmft::Matrix<std::complex<double>> vext;
   rerdmft::Matrix<std::complex<double>> h_ukb;
   rerdmft::Matrix<std::complex<double>> rkb_coefficients;
   rerdmft::Matrix<std::complex<double>> h_rkb;
+  // s_large_cart/x_large_cart: NON_RELATIVISTIC's own large-component overlap/Loewdin matrix, built
+  // once from large_basis.functions() and used EXCLUSIVELY by NON_RELATIVISTIC -- Cartesian by
+  // default (CARTESIAN TRUE, Input.h), or spherically transformed (via nonrel_transform below) when
+  // the user opts into CARTESIAN FALSE. Entirely independent of X2C/C4_SPINOR, which always use a
+  // spherical large-component basis with no option (s_large/x_large below hold THEIR version, built
+  // by the X2C/C4_SPINOR block further down) -- every X2C/C4_DHF call site in this file reads
+  // s_large/x_large, never s_large_cart/x_large_cart.
+  rerdmft::Matrix<double> s_large_cart;
+  rerdmft::Matrix<double> x_large_cart;
+  // Identity-shaped (unset) when CARTESIAN TRUE (the default); otherwise NON_RELATIVISTIC's own
+  // Cartesian-to-spherical transform (Utils/SphericalTransform.h), applied to s_large_cart/
+  // x_large_cart, h_core_nonrel, and nonrel_eri/ao_cholesky right after each is built from the
+  // Cartesian large_basis -- entirely separate from X2C/C4_SPINOR's own large_transform_final (no
+  // sharing of ao_cholesky/nonrel_eri between the two when NON_REL's own basis choice differs).
+  rerdmft::Matrix<double> nonrel_transform;
+  rerdmft::SphericalTransformResult large_spherical;
+  // The transform actually used everywhere downstream of large_spherical's own construction: the
+  // pure spherical reduction, further combined with the LOWGEN safety net's own Loewdin matrix if
+  // (rarely) that finds something to drop -- see the X2C/C4_SPINOR construction block below.
+  rerdmft::Matrix<double> large_transform_final;
+  // true whenever an l>=2 shell actually shrinks the large-component dimension (large_spherical's own
+  // n_spherical < large_basis.functions().size()) -- decides whether X2C's own CHOLESKY FALSE path
+  // needs its separate nonrel_eri_sph (buildNonRelEri's packed tensor is otherwise already Cartesian
+  // and usable as-is); see prepareX2CEriSph's own comment.
+  bool large_spherical_active = false;
   rerdmft::Matrix<double> s_large;
   rerdmft::Matrix<double> x_large;
   rerdmft::Matrix<double> s_small_ukb;
@@ -2855,6 +2881,13 @@ int main(int argc, char** argv) {
   // by the NON_REL and X2C paths; the SCF Fock matrices and every MO-basis integral representation come from
   // them, and the packed AO tensor is dropped unless DEBUG needs it for the dense-vs-Cholesky checks.
   rerdmft::AoCholesky ao_cholesky;
+  // X2C's own spherical-large-AO copy of ao_cholesky (Utils/AoCholesky.h's transformAoCholeskyToSpherical),
+  // built on demand right before X2C's SCF/MO-transform/READ_RESTART code needs it -- kept entirely
+  // separate from ao_cholesky itself, which NON_RELATIVISTIC uses untouched in its own Cartesian form.
+  rerdmft::AoCholesky ao_cholesky_sph;
+  // X2C's own spherical-large-AO copy of nonrel_eri, for the CHOLESKY FALSE path (MoIntegralTransform.h's
+  // transformPackedChemist) -- same purpose as ao_cholesky_sph, just for the packed/dense representation.
+  rerdmft::PackedTwoElectronTensor nonrel_eri_sph;
   bool ao_cholesky_ready = false;
   std::string ao_cholesky_report;     // what the decomposition (and, under DEBUG, the checks) found
   std::size_t nonrel_eri_dim = 0, nonrel_eri_stored = 0;
@@ -2925,8 +2958,13 @@ int main(int argc, char** argv) {
     large_basis.build(input.geometry(), basis_set);
     large_normalization = rerdmft::normalizeCartesianBasis(large_basis.functions());
 
-    s_large = rerdmft::overlapMatrix(large_basis.functions());
-    x_large = rerdmft::inverseSqrt(s_large);
+    s_large_cart = rerdmft::overlapMatrix(large_basis.functions());
+    if (!input.cartesian()) {
+      const auto nonrel_spherical = rerdmft::buildSphericalTransform(large_basis.functions());
+      nonrel_transform = nonrel_spherical.transform;
+      s_large_cart = rerdmft::transformToSpherical(s_large_cart, nonrel_transform);
+    }
+    x_large_cart = rerdmft::inverseSqrt(s_large_cart);
 
     // The small-component basis and every RKB/relativistic quantity built from it are only ever
     // read by X2C's own report/SCF and by C4_SPINOR below -- NON_RELATIVISTIC builds its own
@@ -2936,8 +2974,7 @@ int main(int argc, char** argv) {
     // decoupling below) plus the small-component basis/integral construction, wasted work for a
     // NON_RELATIVISTIC-only run.
     if (input.x2c() || input.c4_spinor()) {
-      small_basis.build(input.geometry(), basis_set);
-      small_normalization = rerdmft::normalizeCartesianBasis(small_basis.functions());
+      small_basis.build(large_basis.functions());
 
       spinor_basis.build(large_basis.functions(), small_basis.functions());
 
@@ -2949,23 +2986,87 @@ int main(int argc, char** argv) {
                                   input.geometry());
       h_ukb = rerdmft::ukbHamiltonianMatrix(large_basis.functions(), small_basis.functions(),
                                              input.geometry(), input.speed_of_light());
-      rerdmft::PseudoInverseReport rkb_coeff_report;
-      rkb_coefficients =
-          rerdmft::rkbCoefficients(large_basis.functions(), small_basis.functions(), &rkb_coeff_report);
+      rkb_coefficients = rerdmft::rkbCoefficients(large_basis.functions(), small_basis.termIndex());
+
+      // Large-component Cartesian-to-spherical reduction (DIRAC-style: both X2C and C4_SPINOR work
+      // in a spherical large-component basis, l>=2 Cartesian contaminant combinations removed) --
+      // applied HERE, to h_ukb and rkb_coefficients BEFORE the RKB small-component projection below,
+      // not after: rkbEmbeddingMatrix's compressed-small output dimension is DEFINED as
+      // rkb_coefficients.rows(), so shrinking rkb_coefficients' large-orbital rows via the SAME
+      // transform that shrinks the large AO basis keeps "exactly one RKB small partner per large
+      // function" matched at the NEW, spherical large count -- exactly DIRAC's own (fully spherical,
+      // large and RKB-small) construction, with no n_large != n_small plumbing needed anywhere
+      // downstream (xFullMatrix/sFullMatrix/X2C_hamiltonian.cpp/RkbCholesky all keep their existing,
+      // symmetric-dimension assumptions, now simply satisfied at the spherical dimension instead of
+      // the Cartesian one). Verified numerically on a toy basis before being wired in here (see
+      // SphericalTransform.h's own comment on sphericalLargeEmbedding).
+      large_spherical = rerdmft::buildSphericalTransform(large_basis.functions());
+      large_spherical_active = large_spherical.n_spherical != large_basis.functions().size();
+
+      // DIRAC's own LOWGEN safety net (Utils/LinearAlgebra.h's canonicalOrthogonalize, STOL(1)=1e-6
+      // threshold, matching dirrdn.F): catches GENUINE residual linear dependence in the spherical
+      // large-component overlap (e.g. near-duplicate exponents across different shells) that the
+      // exact, deterministic spherical reduction above does not remove. Only actually applied (and
+      // only then does the orthonormal basis stop matching today's plain-Loewdin one) when it finds
+      // something to drop -- every basis in examples/ keeps large_transform_final == the spherical
+      // transform alone, bit-identical to before this safety net existed. Folded into ONE combined
+      // transform (large_transform_final = T_spherical * T_lowdin) and applied the SAME way
+      // (row-projecting rkb_coefficients before the RKB small-component projection) so the RKB-small
+      // dimension keeps matching exactly, no matter how much further this safety net reduces the
+      // large dimension -- see large_spherical's own construction above for why that ordering works.
+      large_transform_final = large_spherical.transform;
+      {
+        const rerdmft::Matrix<double> s_large_spherical_only =
+            rerdmft::transformToSpherical(s_large_cart, large_spherical.transform);
+        rerdmft::RankReductionReport large_lowdin_report;
+        const rerdmft::Matrix<double> large_lowdin =
+            rerdmft::canonicalOrthogonalize(s_large_spherical_only, 1e-6, &large_lowdin_report);
+        if (large_lowdin_report.n_dropped > 0) {
+          std::cout << "  Note: large-component LOWGEN safety net (DIRAC STOL(1)-style, threshold "
+                        "1e-6) dropped "
+                     << large_lowdin_report.n_dropped
+                     << " near-linearly-dependent direction(s) beyond the spherical reduction "
+                        "(largest dropped eigenvalue "
+                     << large_lowdin_report.largest_dropped << ").\n";
+          large_transform_final = large_spherical.transform * large_lowdin;
+        }
+      }
+
+      s_large = rerdmft::transformToSpherical(s_large_cart, large_transform_final);
+      x_large = rerdmft::inverseSqrt(s_large);
+      {
+        const rerdmft::Matrix<std::complex<double>> v_sph = rerdmft::sphericalLargeEmbedding(
+            large_transform_final, 2 * small_basis.functions().size());
+        h_ukb = rerdmft::dagger(v_sph) * (h_ukb * v_sph);
+        rkb_coefficients =
+            rerdmft::dagger(rerdmft::spinDuplicateComplex(large_transform_final)) * rkb_coefficients;
+      }
+
       h_rkb = rerdmft::rkbHamiltonianMatrix(h_ukb, rkb_coefficients);
       logTiming("H_RKB built", t_start, t_checkpoint, timing_records);
-      if (rkb_coeff_report.n_dropped > 0) {
-        std::cout << std::scientific << std::setprecision(2)
-                   << "  RKB kinetic-balance: " << rkb_coeff_report.n_dropped << " of "
-                   << (rkb_coeff_report.n_dropped + rkb_coeff_report.n_kept)
-                   << " Small-component AO combinations dropped as near-linearly-dependent when"
-                      " forming sigma.p's expansion (eigenvalue of the Small-component overlap <= 1e-10,"
-                      " largest dropped " << rkb_coeff_report.largest_dropped << ", smallest kept "
-                   << rkb_coeff_report.smallest_kept << ")\n" << std::defaultfloat;
-      }
 
       s_small_ukb = rerdmft::overlapMatrix(small_basis.functions());
       s_small = rerdmft::rkbSmallOverlapMatrix(small_basis.functions(), rkb_coefficients);
+      // Same LOWGEN safety net, small/RKB side (DIRAC STOL(2)-style threshold 1e-8): only actually
+      // consulted (and only then does x_small stop matching today's plain inverseSqrtHermitian
+      // result bit-for-bit) if it finds something to drop. Unlike the large side above, a genuine
+      // drop HERE cannot be silently absorbed by re-projecting something upstream -- it would mean
+      // n_small_RKB < n_large (DIRAC's accepted NESH != NPSH), which this project does not yet
+      // thread through xFullMatrix/sFullMatrix/RkbCholesky/FullOptimization's no-pair logic/Kramers
+      // utilities/RESTART -- so this throws a clear, actionable error instead of proceeding unsafely.
+      {
+        rerdmft::RankReductionReport small_lowdin_report;
+        rerdmft::canonicalOrthogonalizeHermitian(s_small, 1e-8, &small_lowdin_report);
+        if (small_lowdin_report.n_dropped > 0) {
+          throw std::runtime_error(
+              "RKB small-component overlap has " + std::to_string(small_lowdin_report.n_dropped) +
+              " near-linearly-dependent direction(s) (DIRAC STOL(2)-style threshold 1e-8, largest "
+              "dropped eigenvalue " + std::to_string(small_lowdin_report.largest_dropped) +
+              ") beyond what the large-component side's own reduction already accounts for -- this "
+              "is the genuine asymmetric-dimension case (DIRAC's NESH != NPSH) that this project "
+              "does not yet thread through the rest of the pipeline.");
+        }
+      }
       x_small = rerdmft::inverseSqrtHermitian(s_small);
 
       x_full = rerdmft::xFullMatrix(x_large, x_small);
@@ -3010,6 +3111,16 @@ int main(int argc, char** argv) {
     // packed tensor is released unless DEBUG will compare against it.
     const auto prepareNonRelEri = [&](const std::string& what) {
       nonrel_eri = buildNonRelEri(large_basis.functions());
+      // NON_RELATIVISTIC's own basis choice (Input.h's CARTESIAN keyword) applies HERE, before the
+      // Cholesky decomposition below -- so ao_cholesky comes out already in whichever basis was
+      // requested, with no separate transform step needed for it. X2C_HF's own call into this
+      // function (what == "X2C_HF") always needs a CARTESIAN nonrel_eri/ao_cholesky (the input to
+      // its own, separate large_transform_final), so it skips this -- and defensively rebuilds from
+      // scratch (see its call sites' "|| !input.cartesian()") instead of trusting NON_REL's own,
+      // possibly non-Cartesian, cache.
+      if (what == "NON_REL" && !input.cartesian()) {
+        nonrel_eri = rerdmft::transformPackedChemist(nonrel_eri, nonrel_transform);
+      }
       nonrel_eri_dim = nonrel_eri.dim();
       nonrel_eri_stored = nonrel_eri.storedCount();
       logTiming("Two-electron integrals built (" + what + ")", t_start, t_checkpoint, timing_records);
@@ -3029,6 +3140,20 @@ int main(int argc, char** argv) {
         ao_cholesky_report = report.str();
         logTiming("AO Cholesky decomposition complete", t_start, t_checkpoint, timing_records);
         if (!input.debug()) nonrel_eri = rerdmft::PackedTwoElectronTensor();
+      }
+    };
+
+    // X2C's own two-electron integrals must be expressed in the SAME spherical large-AO basis as
+    // h_x2c_hamiltonian (built above): ao_cholesky/nonrel_eri themselves stay Cartesian (shared with,
+    // and owned by, NON_RELATIVISTIC), so this builds a separate, spherical-basis copy on demand --
+    // via transformAoCholeskyToSpherical (CHOLESKY TRUE) or MoIntegralTransform.h's
+    // transformPackedChemist (CHOLESKY FALSE; a dense O(n^4) leg transform, fine at X2C's
+    // Large-only, small-system scale).
+    const auto prepareX2CEriSph = [&]() {
+      if (input.cholesky()) {
+        ao_cholesky_sph = rerdmft::transformAoCholeskyToSpherical(ao_cholesky, large_transform_final);
+      } else if (large_spherical_active) {
+        nonrel_eri_sph = rerdmft::transformPackedChemist(nonrel_eri, large_transform_final);
       }
     };
 
@@ -3073,12 +3198,13 @@ int main(int argc, char** argv) {
       };
 
       if (input.non_relativistic()) {
-        const auto h_core_nonrel = rerdmft::schrodingerKineticMatrix(large_basis.functions()) +
+        auto h_core_nonrel = rerdmft::schrodingerKineticMatrix(large_basis.functions()) +
                                    rerdmft::nuclearAttractionMatrix(large_basis.functions(), input.geometry());
+        if (!input.cartesian()) h_core_nonrel = rerdmft::transformToSpherical(h_core_nonrel, nonrel_transform);
         prepareNonRelEri("NON_REL");
-        const std::size_t n = s_large.rows();
+        const std::size_t n = s_large_cart.rows();
         const auto ro = rerdmft::readRestartOrbitals("RESTART.NON_REL", "NON_REL", input.n_electrons(), 2 * n, 2 * n,
-                                                     /*expected_complex=*/false, blockDiagTwice(s_large), nonrel_structure_log,
+                                                     /*expected_complex=*/false, blockDiagTwice(s_large_cart), nonrel_structure_log,
                                                      /*tolerance=*/1e-10, /*block_size=*/n);
         noteWindow(nonrel_structure_log, ro);
         // Spin-restriction sanity check on the RAW file (before any Loewdin correction for the current geometry):
@@ -3139,13 +3265,19 @@ int main(int argc, char** argv) {
         };
         nonrel_functional_report = input.cholesky() ? nonrel_functional(eri_spin_chol) : nonrel_functional(eri_spin_sym);
         writeRestartFile<double>(nonrel_restart_log, input, "NON_REL", nonrel_restart, blockDiagTwice(c_spatial), blockDiagTwice(h_core_nonrel),
-                                 blockDiagTwice(s_large), h_spin, restartFingerprint, restart_nuclear_repulsion);
+                                 blockDiagTwice(s_large_cart), h_spin, restartFingerprint, restart_nuclear_repulsion);
         writeNonRelFcidump(input, c_spatial, h_core_nonrel, nonrel_eri, ao_cholesky, nonrel_restart,
                            restart_nuclear_repulsion, nonrel_restart_log);
       }
 
       if (input.x2c()) {
-        if (!input.non_relativistic()) prepareNonRelEri("X2C_HF");
+        if (!input.non_relativistic() || !input.cartesian()) {
+          // If NON_REL already ran with CARTESIAN FALSE, its cached ao_cholesky/nonrel_eri is
+          // spherical -- not reusable as X2C's CARTESIAN input, so force a fresh decomposition too.
+          if (!input.cartesian()) ao_cholesky_ready = false;
+          prepareNonRelEri("X2C_HF");
+        }
+        prepareX2CEriSph();
         const std::size_t dim = 2 * x_large.rows();
         const auto s_x2c = rerdmft::extractLargeComponentBlock(s_full, dim);
         const auto ro = rerdmft::readRestartOrbitals("RESTART.X2C_HF", "X2C_HF", input.n_electrons(), dim, dim,
@@ -3161,9 +3293,9 @@ int main(int argc, char** argv) {
         rerdmft::CholeskyEri<std::complex<double>> x2c_mo_chol;
         rerdmft::SymmetricEri<std::complex<double>> x2c_mo_sym;
         if (input.cholesky()) {
-          x2c_mo_chol = rerdmft::aoCholeskyToMoSpinor(ao_cholesky, c_x2c);
+          x2c_mo_chol = rerdmft::aoCholeskyToMoSpinor(ao_cholesky_sph, c_x2c);
         } else {
-          x2c_mo_sym = rerdmft::x2cMoTwoElectronSymmetric(nonrel_eri, c_x2c);
+          x2c_mo_sym = rerdmft::x2cMoTwoElectronSymmetric(large_spherical_active ? nonrel_eri_sph : nonrel_eri, c_x2c);
         }
         logTiming("X2C-HF MO integral transform complete (READ_RESTART)", t_start, t_checkpoint, timing_records);
         rerdmft::RestartCapture x2c_restart;
@@ -3194,16 +3326,16 @@ int main(int argc, char** argv) {
       }
 
       if (input.c4_spinor()) {
-        const std::size_t dim = 4 * large_basis.functions().size();
+        const std::size_t dim = 4 * x_large.rows();
         c4_eri_dim = dim;
         if (input.cholesky()) {
           rerdmft::CholeskyCheckReport check;
           rkb_cholesky = rerdmft::RkbCholesky::build(large_basis.functions(), small_basis.functions(), rkb_coefficients,
-                                                      input.cholesky_threshold(), &check);
+                                                      large_transform_final, input.cholesky_threshold(), &check);
           logTiming("Two-electron integrals built (C4_DHF, Cholesky vectors, READ_RESTART)", t_start, t_checkpoint, timing_records);
         } else {
           c4_spinor_eri = buildC4SpinorEri(input, large_basis.functions(), small_basis.functions(), rkb_coefficients,
-                                           /*use_cholesky=*/false);
+                                           large_transform_final, /*use_cholesky=*/false);
           logTiming("Two-electron integrals built (C4_DHF, READ_RESTART)", t_start, t_checkpoint, timing_records);
         }
         const auto ro = rerdmft::readRestartOrbitals("RESTART.4C", "4C", input.n_electrons(), dim, dim,
@@ -3327,18 +3459,19 @@ int main(int argc, char** argv) {
       const auto schrodinger_kinetic = rerdmft::schrodingerKineticMatrix(large_basis.functions());
       const auto vext_large =
           rerdmft::nuclearAttractionMatrix(large_basis.functions(), input.geometry());
-      const auto h_core_nonrel = schrodinger_kinetic + vext_large;
-      h_core_nonrel_ortho = x_large * (h_core_nonrel * x_large);
+      auto h_core_nonrel = schrodinger_kinetic + vext_large;
+      if (!input.cartesian()) h_core_nonrel = rerdmft::transformToSpherical(h_core_nonrel, nonrel_transform);
+      h_core_nonrel_ortho = x_large_cart * (h_core_nonrel * x_large_cart);
       h_core_nonrel_eig = rerdmft::diagonalizeSymmetric(h_core_nonrel_ortho);
 
-      const auto nonrel_c_initial = x_large * h_core_nonrel_eig.eigenvectors;
+      const auto nonrel_c_initial = x_large_cart * h_core_nonrel_eig.eigenvectors;
       const auto nonrel_density_initial =
           rerdmft::nonRelDensityMatrix(nonrel_c_initial, input.n_electrons());
       prepareNonRelEri("NON_REL");
       const auto run_nonrel_scf = [&](const auto& eri_source) {
         return rerdmft::runNonRelativisticHartreeFock(
-            eri_source, h_core_nonrel, x_large, nonrel_density_initial,
-            input.n_electrons(), input.geometry(), input.mixing(), s_large, input.scf_diis_size(),
+            eri_source, h_core_nonrel, x_large_cart, nonrel_density_initial,
+            input.n_electrons(), input.geometry(), input.mixing(), s_large_cart, input.scf_diis_size(),
             input.max_iterations(), input.energy_tolerance(), input.density_tolerance());
       };
       nonrel_hf_result = input.cholesky() ? run_nonrel_scf(ao_cholesky) : run_nonrel_scf(nonrel_eri);
@@ -3579,7 +3712,7 @@ int main(int argc, char** argv) {
           return out;
         };
         writeRestartFile<double>(nonrel_restart_log, input, "NON_REL", nonrel_restart, blockDiagTwice(nonrel_hf_result.c_matrix),
-                                 blockDiagTwice(h_core_nonrel), blockDiagTwice(s_large), h_spin,
+                                 blockDiagTwice(h_core_nonrel), blockDiagTwice(s_large_cart), h_spin,
                                  rerdmft::basisFingerprint(large_basis.functions()),
                                  nonrel_hf_result.nuclear_repulsion_energy);
         writeNonRelFcidump(input, nonrel_hf_result.c_matrix, h_core_nonrel, nonrel_eri, ao_cholesky, nonrel_restart,
@@ -3592,7 +3725,13 @@ int main(int argc, char** argv) {
       // geometry+basis, independent of any relativistic setting); build
       // it fresh otherwise -- the X2C-HF SCF below does not require
       // NON_RELATIVISTIC.
-      if (!input.non_relativistic()) prepareNonRelEri("X2C_HF");
+      if (!input.non_relativistic() || !input.cartesian()) {
+        // If NON_REL already ran with CARTESIAN FALSE, its cached ao_cholesky/nonrel_eri is
+        // spherical -- not reusable as X2C's CARTESIAN input, so force a fresh decomposition too.
+        if (!input.cartesian()) ao_cholesky_ready = false;
+        prepareNonRelEri("X2C_HF");
+      }
+      prepareX2CEriSph();
 
       // The ORDINARY (real, non-relativistic) two-electron Coulomb
       // integrals over the Large AO basis, in dense PHYSICS notation --
@@ -3614,10 +3753,11 @@ int main(int argc, char** argv) {
       const bool x2c_dense = input.debug() || input.hessian_mean_field();  // dense Tensor4s: DEBUG suites / HESSIAN_MEAN_FIELD
       rerdmft::Tensor4<double> eri_x2c_spin;
       if (input.debug()) {
-        rerdmft::Matrix<double> identity_large(n_large, n_large, 0.0);
-        for (std::size_t i = 0; i < n_large; ++i) identity_large(i, i) = 1.0;
+        // large_transform_final (n_large_cart x n_large_final) converts nonrel_eri (Cartesian) directly to
+        // the final (spherical, plus any LOWGEN reduction) large basis in this one step -- it is NOT the
+        // identity whenever an l>=2 shell is present, unlike the plain format-conversion this replaced.
         const auto eri_large_physics =
-            rerdmft::moTwoElectronTransformPhysics(nonrel_eri, identity_large);
+            rerdmft::moTwoElectronTransformPhysics(nonrel_eri, large_transform_final);
         eri_x2c_spin = rerdmft::closedShellSpinOrbitalTwoElectron(eri_large_physics, n_large);
         logTiming("X2C_HF spin-orbital two-electron integrals built (DEBUG)", t_start, t_checkpoint, timing_records);
       }
@@ -3647,7 +3787,8 @@ int main(int argc, char** argv) {
             rerdmft::extractLargeComponentBlock(s_full, x_large_block.rows()), input.scf_diis_size(),
             input.max_iterations(), input.energy_tolerance(), input.density_tolerance());
       };
-      x2c_hf_result = input.cholesky() ? run_x2c_scf(ao_cholesky) : run_x2c_scf(nonrel_eri);
+      x2c_hf_result = input.cholesky() ? run_x2c_scf(ao_cholesky_sph)
+                                       : run_x2c_scf(large_spherical_active ? nonrel_eri_sph : nonrel_eri);
       logTiming("X2C-HF SCF complete", t_start, t_checkpoint, timing_records);
 
       // Canonicalize each converged Kramers pair's relative phase
@@ -3675,9 +3816,10 @@ int main(int argc, char** argv) {
         // Only actually consumed below under DEBUG/HESSIAN_MEAN_FIELD or FUNCTIONAL (see NON_REL's identical
         // comment) -- skip it for a bare X2C-HF run.
         if (input.cholesky() && (x2c_dense || input.has_functional()))
-          x2c_mo_chol = rerdmft::aoCholeskyToMoSpinor(ao_cholesky, x2c_hf_result.c_matrix);
+          x2c_mo_chol = rerdmft::aoCholeskyToMoSpinor(ao_cholesky_sph, x2c_hf_result.c_matrix);
         if (!input.cholesky() || input.debug()) {
-          x2c_mo_sym = rerdmft::x2cMoTwoElectronSymmetric(nonrel_eri, x2c_hf_result.c_matrix);
+          x2c_mo_sym = rerdmft::x2cMoTwoElectronSymmetric(large_spherical_active ? nonrel_eri_sph : nonrel_eri,
+                                                           x2c_hf_result.c_matrix);
         } else if (input.hessian_mean_field()) {
           x2c_mo_sym = rerdmft::symmetricFromCholesky(x2c_mo_chol);
         }
@@ -3855,14 +3997,15 @@ int main(int argc, char** argv) {
       c_dhf = rerdmft::rkbCoefficientMatrix(x_full, h_rkb_ortho_eig.eigenvectors);
       density_matrix = rerdmft::rkbDensityMatrix(c_dhf, input.n_electrons());
 
-      c4_eri_dim = 4 * large_basis.functions().size();
+      c4_eri_dim = 4 * x_large.rows();
       if (input.cholesky()) {
         // ONE decomposition of the real AO Coulomb matrix over {LL} u {SS} pairs; everything else (SCF Fock
         // matrices, MO-basis vectors) follows from the vectors. The packed RKB tensor is built only under
         // DEBUG, exactly (no Cholesky), as the dense reference for the dense-vs-Cholesky checks.
         rerdmft::CholeskyCheckReport check;
         rkb_cholesky = rerdmft::RkbCholesky::build(large_basis.functions(), small_basis.functions(),
-                                                    rkb_coefficients, input.cholesky_threshold(), &check);
+                                                    rkb_coefficients, large_transform_final,
+                                                    input.cholesky_threshold(), &check);
         std::ostringstream report;
         report << std::scientific << std::setprecision(2) << "  RKB integrals held as " << rkb_cholesky.nVectors()
                << " Cholesky vectors from one decomposition of the AO {LL} u {SS} Coulomb matrix (threshold "
@@ -3875,13 +4018,13 @@ int main(int argc, char** argv) {
         logTiming("Two-electron integrals built (C4_DHF, Cholesky vectors)", t_start, t_checkpoint, timing_records);
         if (input.debug()) {
           c4_spinor_eri = buildC4SpinorEri(input, large_basis.functions(), small_basis.functions(),
-                                                  rkb_coefficients, /*use_cholesky=*/false);
+                                                  rkb_coefficients, large_transform_final, /*use_cholesky=*/false);
           c4_eri_available = true;
           c4_eri_stored = c4_spinor_eri.storedCount();
         }
       } else {
         c4_spinor_eri = buildC4SpinorEri(input, large_basis.functions(), small_basis.functions(),
-                                                rkb_coefficients, /*use_cholesky=*/false);
+                                                rkb_coefficients, large_transform_final, /*use_cholesky=*/false);
         c4_eri_available = true;
         c4_eri_stored = c4_spinor_eri.storedCount();
         logTiming("Two-electron integrals built (C4_DHF)", t_start, t_checkpoint, timing_records);
@@ -4260,8 +4403,9 @@ int main(int argc, char** argv) {
   if (input.debug() && (input.x2c() || input.c4_spinor())) {
     printAoList("Large-component cartesian atomic orbitals", large_basis.functions(),
                 large_normalization);
-    printAoList("Small-component cartesian atomic orbitals (unrestricted kinetic balance)",
-                small_basis.functions(), small_normalization);
+    std::cout << "\nRKB small-component basis (" << small_basis.functions().size()
+               << " elementary sigma.p-derivative terms, built directly and analytically from"
+                  " the large basis -- not independently normalized; see RkbDerivativeTerms.h)\n";
 
     std::cout << "\nFour-component spinor basis:\n";
     std::cout << "  Large-component AOs per spin block: " << spinor_basis.nLarge() << "\n";
@@ -4356,12 +4500,11 @@ int main(int argc, char** argv) {
     std::cout << "  Max |H_RKB - H_UKB| within Large-Large block (expect exactly 0): "
                << max_large_block_change << "\n";
 
-    std::cout << "\nLoewdin orthonormalization matrix X_Large = S_Large^-1/2:\n";
+    std::cout << "\nLoewdin orthonormalization matrix X_Large = S_Large^-1/2 (spherical large basis):\n";
     std::cout << "  Dimensions: " << x_large.rows() << " x " << x_large.cols() << "\n";
-    const auto s_large_check = rerdmft::overlapMatrix(large_basis.functions());
     double max_asymmetry = 0.0;
     double max_lowdin_error = 0.0;
-    const auto xsx = x_large * (s_large_check * x_large);
+    const auto xsx = x_large * (s_large * x_large);
     for (std::size_t i = 0; i < x_large.rows(); ++i) {
       for (std::size_t j = 0; j < x_large.cols(); ++j) {
         max_asymmetry = std::max(max_asymmetry, std::abs(x_large(i, j) - x_large(j, i)));

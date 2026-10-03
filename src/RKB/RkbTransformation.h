@@ -4,45 +4,42 @@
 #include <complex>
 #include <vector>
 
-#include "LinearAlgebra.h"
 #include "Matrix.h"
 #include "MolecularBasis.h"
+#include "RkbDerivativeTerms.h"
 
 namespace rerdmft {
 
-// Builds the restricted-kinetic-balance (RKB) expansion coefficients C that
-// express sigma.p acting on each Large spin-orbital as a linear
-// combination of the (larger, redundant) unrestricted-kinetic-balance
-// Small spin-orbitals already built by SmallComponentBasis:
+// Builds the restricted-kinetic-balance (RKB) expansion coefficients C that express sigma.p acting
+// on each Large spin-orbital as a linear combination of the RKB small-component basis
+// (buildRkbSmallBasis, RkbDerivativeTerms.h):
 //
 //   sigma.p |Large_p> = sum_q C_pq |Small_q>
 //
-// (p ranges over the 2*nLarge Large spin-orbitals, q over the 2*nSmall
-// Small ones, sigma the Pauli matrices, p = -i grad_r the momentum
-// operator). Projecting onto <Small_t| and using the Small-component
-// overlap matrix S_tq = <Small_t|Small_q> gives M = C S, i.e. C = M S^+,
-// with M_tp = <Small_t|sigma.p|Large_p>. S^+ is the PSEUDO-inverse
-// (pseudoInverseSymmetric, LinearAlgebra.h), not a literal inverse: a large,
-// fully uncontracted basis (e.g. a heavy element's dyall basis) can make
-// the raw Small-component overlap S genuinely, legitimately near-singular
-// (true near-linear-dependency among its tightest functions, not a scaling
-// artifact -- confirmed by its diagonal already being exactly 1, i.e.
-// individually normalized). A plain LU inverse (invert()) has no
-// conditioning safeguard at all and silently returns garbage in that case
-// (observed: |S * S^-1 - I| ~ 1e3 on Xe/dyall.v2z) -- the pseudo-inverse
-// instead drops near-null eigendirections rather than amplifying them,
-// which changes nothing about C's shape (still 2*nLarge x 2*nSmall, same
-// downstream RKB dimension) since the dropped directions represent
-// information nothing downstream could safely use anyway. Pass `report` to
-// see how many directions were dropped, if any -- 0 for any well-behaved
-// (segmented/contracted, or lighter-element) basis.
+// Unlike an unrestricted-kinetic-balance scheme (project history: SmallComponentBasis's earlier,
+// now-removed uKB basis), this is an EXACT, closed-form identity, not a least-squares/numerical
+// projection -- differentiating a Cartesian Gaussian is itself exact and closed-form (see
+// RkbDerivativeTerms.h), and the small basis here is built to contain exactly the pieces each large
+// function's own derivative needs, with no inversion of any overlap matrix required to recover C.
+// sigma.p = sigma_x p_x + sigma_y p_y + sigma_z p_z (p_k = -i d/dx_k) couples the two spin flavors;
+// writing D_k(p) for the elementary-term pair (lower_k(p), raise_k(p)) that RkbDerivativeTerms
+// indexes (each already carrying its own closed-form coefficient, so each contributes with
+// unit weight), direct application of the Pauli matrices gives:
+//   (Large-alpha, Small-alpha): -i * D_z(p)
+//   (Large-alpha, Small-beta ): -i * D_x(p) + D_y(p)
+//   (Large-beta,  Small-alpha): -i * D_x(p) - D_y(p)
+//   (Large-beta,  Small-beta ): +i * D_z(p)
+// cross-checked two independent ways: against this project's own earlier (now-removed) numerical
+// M*S^-1 construction's sign convention (itself validated against M. Rodriguez-Mayorga's
+// m_relativistic.f90/MOLGW) via the integration-by-parts relation between the two, and directly
+// against sigma.p applied to an explicit two-component spinor -- both agree exactly.
 //
-// Returned as a (2*nLarge x 2*nSmall) matrix following the same spin block
-// ordering as SpinorBasis: rows [Large-alpha, Large-beta], columns
-// [Small-alpha, Small-beta].
+// `term_index` must be buildRkbSmallBasis's own output for this exact `large_basis` (same order).
+// Returned as a (2*nLarge x 2*nSmall) matrix following the same spin block ordering as SpinorBasis:
+// rows [Large-alpha, Large-beta], columns [Small-alpha, Small-beta] (nSmall = the RKB small basis
+// size, i.e. term_index-implied basis, NOT a separately-counted spatial basis).
 Matrix<std::complex<double>> rkbCoefficients(const std::vector<BasisFunction>& large_basis,
-                                              const std::vector<BasisFunction>& small_basis,
-                                              PseudoInverseReport* report = nullptr);
+                                              const std::vector<RkbDerivativeTerms>& term_index);
 
 }  // namespace rerdmft
 

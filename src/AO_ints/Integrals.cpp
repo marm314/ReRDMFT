@@ -1,5 +1,6 @@
 #include "Integrals.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <stdexcept>
@@ -23,13 +24,10 @@ extern "C" FINT cint1e_ovlp_cart(double* out, FINT* shls, FINT* atm,
                                   FINT natm, FINT* bas, FINT nbas,
                                   double* env);
 
-// Computes the nf x nf self-overlap block of one contracted shell (all of
-// its cartesian components), placed at an arbitrary center. A Gaussian
-// shell's self overlap does not depend on where it is centered, so the
-// origin is used here regardless of the atom's actual position.
-std::vector<double> shellSelfOverlap(int l,
-                                      const std::vector<double>& exponents,
-                                      const std::vector<double>& coefficients) {
+}  // namespace
+
+Matrix<double> shellSelfOverlap(int l, const std::vector<double>& exponents,
+                                 const std::vector<double>& coefficients) {
   const FINT n_prim = static_cast<FINT>(exponents.size());
 
   FINT atm[ATM_SLOTS] = {0};
@@ -54,8 +52,12 @@ std::vector<double> shellSelfOverlap(int l,
   const FINT nf = CINTcgto_cart(0, bas);
   std::vector<double> buf(static_cast<std::size_t>(nf) * static_cast<std::size_t>(nf));
   cint1e_ovlp_cart(buf.data(), shls, atm, 1, bas, 1, env.data());
-  return buf;
+  Matrix<double> result(static_cast<std::size_t>(nf), static_cast<std::size_t>(nf));
+  std::copy(buf.begin(), buf.end(), result.data());
+  return result;
 }
+
+namespace {
 
 // <bra|ket> for one specific pair of individually-normalized cartesian AOs,
 // placed at their real atomic centers. Built as a minimal, independent
@@ -154,11 +156,10 @@ std::vector<NormalizationCheck> normalizeCartesianBasis(
       coefficients[p] *= CINTgto_norm(l, exponents[p]);
     }
 
-    const std::vector<double> overlap =
-        shellSelfOverlap(l, exponents, coefficients);
+    const Matrix<double> overlap = shellSelfOverlap(l, exponents, coefficients);
 
     for (int k = 0; k < nf; ++k) {
-      const double s_kk = overlap[static_cast<std::size_t>(k) * nf + k];
+      const double s_kk = overlap(static_cast<std::size_t>(k), static_cast<std::size_t>(k));
       const double scale = 1.0 / std::sqrt(s_kk);
 
       BasisFunction& fn = functions[i + static_cast<std::size_t>(k)];

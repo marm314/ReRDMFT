@@ -82,37 +82,29 @@ SymmetricEigenResult diagonalizeSymmetric(const Matrix<double>& a_in) {
 }
 
 Matrix<double> inverseSqrt(const Matrix<double>& s) {
-  // Diagonal (Jacobi) preconditioning: S'(i,j) = S(i,j) / sqrt(S(i,i) S(j,j)), i.e. S' = D^-1 S D^-1 with
-  // D = diag(sqrt(S_ii)). S^-1/2 then satisfies X = D^-1 Y, Y = S'^-1/2, EXACTLY (X^dagger S X = Y^dagger
-  // D^-1 S D^-1 Y = Y^dagger S' Y = I when Y^dagger S' Y = I) -- not an approximation, and it changes nothing
-  // about dimension (still a full-rank S^-1/2, same shape). Worth doing unconditionally: a basis whose
-  // functions carry wildly different self-overlaps (e.g. restricted-kinetic-balance Small-component functions
-  // derived from Large AOs spanning many orders of magnitude in exponent -- see RkbOverlap.h) can have a raw S
-  // with a condition number many orders of magnitude worse than its diagonally-rescaled S', because the bad
-  // conditioning is then just an artifact of that per-function scale disparity, not genuine linear dependency.
-  // For an already well-scaled S (diagonal entries all close to 1, e.g. a normalized AO overlap matrix) this is
-  // a near-identity rescaling and reproduces the unscaled result to machine precision.
-  const std::size_t un = s.rows();
-  std::vector<double> d(un);
-  for (std::size_t i = 0; i < un; ++i) d[i] = std::sqrt(s(i, i));
-  Matrix<double> s_scaled(un, un);
-  for (std::size_t i = 0; i < un; ++i)
-    for (std::size_t j = 0; j < un; ++j) s_scaled(i, j) = s(i, j) / (d[i] * d[j]);
-
-  const SymmetricEigenResult eig = diagonalizeSymmetric(s_scaled);
+  // Deliberately NOT diagonally preconditioned like inverseSqrtHermitian's own (see its comment): this is
+  // used for the Large-component overlap (main.cpp's x_large), whose diagonal is already ~1 (a normalized
+  // AO basis) -- rescaling changes nothing mathematically there, but DOES perturb which representative
+  // eigenbasis LAPACK picks within an exactly-degenerate eigenspace (atoms with full p/d/f shells have
+  // several), at the ~1e-15 level. That's an equally valid S^-1/2, but it cascades through the nonlinear
+  // SCF/FULL_OPTIMIZATION far enough to flip an already-borderline gradient-vs-finite-difference check
+  // (Xe/NON_REL/PCCD: 2.0e-6 vs its own 1e-6 threshold) from pass to fail for no actual accuracy gain --
+  // confirmed by bisection (fine on the LU/no-cholesky-fix commit, broke exactly when this was added).
+  const SymmetricEigenResult eig = diagonalizeSymmetric(s);
+  const std::size_t un = eig.eigenvalues.size();
 
   constexpr double kMinEigenvalue = 1e-10;
   std::vector<double> inv_sqrt_w(un);
   for (std::size_t i = 0; i < un; ++i) {
     if (eig.eigenvalues[i] <= kMinEigenvalue) {
       throw std::runtime_error(
-          "inverseSqrt: matrix is not safely positive definite (diagonally-rescaled eigenvalue " +
+          "inverseSqrt: matrix is not safely positive definite (eigenvalue " +
           std::to_string(eig.eigenvalues[i]) + " <= " + std::to_string(kMinEigenvalue) + ")");
     }
     inv_sqrt_w[i] = 1.0 / std::sqrt(eig.eigenvalues[i]);
   }
 
-  // Y = S'^-1/2 = U diag(1/sqrt(w)) U^T, then X = D^-1 Y (row i scaled by 1/d[i]).
+  // S^-1/2 = U diag(1/sqrt(w)) U^T: X(i,j) = sum_k U(i,k) (1/sqrt(w_k)) U(j,k).
   const Matrix<double>& u = eig.eigenvectors;
   Matrix<double> x(un, un, 0.0);
   for (std::size_t i = 0; i < un; ++i) {
@@ -121,7 +113,7 @@ Matrix<double> inverseSqrt(const Matrix<double>& s) {
       for (std::size_t k = 0; k < un; ++k) {
         sum += u(i, k) * inv_sqrt_w[k] * u(j, k);
       }
-      x(i, j) = sum / d[i];
+      x(i, j) = sum;
     }
   }
   return x;
@@ -159,12 +151,16 @@ HermitianEigenResult diagonalizeHermitian(const Matrix<std::complex<double>>& a_
 }
 
 Matrix<std::complex<double>> inverseSqrtHermitian(const Matrix<std::complex<double>>& s) {
-  // Diagonal (Jacobi) preconditioning -- same exact identity as inverseSqrt's own (see its comment): a
-  // Hermitian matrix's diagonal is always real, so D = diag(sqrt(S_ii)) is real and this rescaling is just as
-  // valid here. This is the fix for exactly the restricted-kinetic-balance Small-component overlap case that
-  // motivated it: S_small = C^dagger S_uKB C inherits a huge diagonal spread (self-overlaps differing by many
-  // orders of magnitude) from differentiating Large AOs across a heavy element's full exponent range, which
-  // otherwise shows up as a raw condition number many orders of magnitude worse than necessary.
+  // Diagonal (Jacobi) preconditioning: S'(i,j) = S(i,j) / sqrt(S(i,i) S(j,j)), i.e. S' = D^-1 S D^-1 with
+  // D = diag(sqrt(S_ii)) (real: a Hermitian matrix's diagonal is always real). S^-1/2 then satisfies
+  // X = D^-1 Y, Y = S'^-1/2, EXACTLY -- not an approximation. Unlike inverseSqrt (the real, non-Hermitian
+  // case -- deliberately NOT given this treatment, see its own comment), this one earns its keep: a
+  // restricted-kinetic-balance Small-component overlap (RkbOverlap.h) inherits a genuinely huge diagonal
+  // spread (self-overlaps differing by many orders of magnitude) from differentiating Large AOs across a
+  // heavy element's full exponent range, and this is the ONLY numerically cheap way found so far to keep
+  // that case's pseudo-inverse-of-rkbCoefficients fix (RkbTransformation.cpp) below the downstream Kramers
+  // orthonormality check's 1e-6 threshold (without it: ~1.4e-5, still failing; with it: ~1.9e-9). For an
+  // already well-scaled S (diagonal entries all close to 1) this is a near-identity rescaling.
   const std::size_t un = s.rows();
   std::vector<double> d(un);
   for (std::size_t i = 0; i < un; ++i) d[i] = std::sqrt(s(i, i).real());
@@ -264,39 +260,77 @@ Matrix<std::complex<double>> invertGeneral(const Matrix<std::complex<double>>& a
   return result;
 }
 
-Matrix<double> pseudoInverseSymmetric(const Matrix<double>& s, double threshold, PseudoInverseReport* report) {
+Matrix<double> canonicalOrthogonalize(const Matrix<double>& s, double threshold, RankReductionReport* report) {
   const SymmetricEigenResult eig = diagonalizeSymmetric(s);
   const std::size_t un = eig.eigenvalues.size();
 
-  std::vector<double> inv_w(un);
-  std::size_t n_dropped = 0;
+  std::vector<std::size_t> keep;
   double smallest_kept = 0.0, largest_dropped = 0.0;
   for (std::size_t i = 0; i < un; ++i) {
     if (eig.eigenvalues[i] > threshold) {
-      inv_w[i] = 1.0 / eig.eigenvalues[i];
+      keep.push_back(i);
       if (smallest_kept == 0.0 || eig.eigenvalues[i] < smallest_kept) smallest_kept = eig.eigenvalues[i];
     } else {
-      inv_w[i] = 0.0;
-      ++n_dropped;
       largest_dropped = std::max(largest_dropped, eig.eigenvalues[i]);
     }
   }
 
-  // S^+ = U diag(f(w)) U^T: X(i,j) = sum_k U(i,k) f(w_k) U(j,k).
+  // X(:,j) = U(:,keep[j]) / sqrt(w_keep[j]): an (un x n_eff) matrix, n_eff = keep.size() <= un.
+  const std::size_t n_eff = keep.size();
   const Matrix<double>& u = eig.eigenvectors;
-  Matrix<double> x(un, un, 0.0);
-  for (std::size_t i = 0; i < un; ++i) {
-    for (std::size_t j = 0; j < un; ++j) {
-      double sum = 0.0;
-      for (std::size_t k = 0; k < un; ++k) {
-        sum += u(i, k) * inv_w[k] * u(j, k);
-      }
-      x(i, j) = sum;
-    }
+  Matrix<double> x(un, n_eff, 0.0);
+  for (std::size_t j = 0; j < n_eff; ++j) {
+    const double fac = 1.0 / std::sqrt(eig.eigenvalues[keep[j]]);
+    for (std::size_t i = 0; i < un; ++i) x(i, j) = u(i, keep[j]) * fac;
   }
   if (report) {
-    report->n_dropped = n_dropped;
-    report->n_kept = un - n_dropped;
+    report->n_kept = n_eff;
+    report->n_dropped = un - n_eff;
+    report->smallest_kept = smallest_kept;
+    report->largest_dropped = largest_dropped;
+  }
+  return x;
+}
+
+Matrix<std::complex<double>> canonicalOrthogonalizeHermitian(const Matrix<std::complex<double>>& s, double threshold,
+                                                              RankReductionReport* report) {
+  // Same diagonal (Jacobi) preconditioning as inverseSqrtHermitian, and for the same reason: a
+  // restricted-kinetic-balance Small-component overlap's diagonal spans many orders of magnitude
+  // (differentiating Large AOs across a heavy element's full exponent range), which would otherwise
+  // make `threshold` meaningless (an eigenvalue can be tiny purely from scale, not genuine linear
+  // dependence). S' = D^-1 S D^-1 (D = diag(sqrt(S_ii))); the kept/dropped decision and `threshold`
+  // itself apply to S''s eigenvalues, then X = D^-1 Y (Y = S'^-1/2-style kept/scaled eigenvectors)
+  // un-scales back -- exact, not approximate, like inverseSqrtHermitian's own version.
+  const std::size_t un = s.rows();
+  std::vector<double> d(un);
+  for (std::size_t i = 0; i < un; ++i) d[i] = std::sqrt(s(i, i).real());
+  Matrix<std::complex<double>> s_scaled(un, un);
+  for (std::size_t i = 0; i < un; ++i)
+    for (std::size_t j = 0; j < un; ++j) s_scaled(i, j) = s(i, j) / (d[i] * d[j]);
+
+  const HermitianEigenResult eig = diagonalizeHermitian(s_scaled);
+
+  std::vector<std::size_t> keep;
+  double smallest_kept = 0.0, largest_dropped = 0.0;
+  for (std::size_t i = 0; i < un; ++i) {
+    if (eig.eigenvalues[i] > threshold) {
+      keep.push_back(i);
+      if (smallest_kept == 0.0 || eig.eigenvalues[i] < smallest_kept) smallest_kept = eig.eigenvalues[i];
+    } else {
+      largest_dropped = std::max(largest_dropped, eig.eigenvalues[i]);
+    }
+  }
+
+  const std::size_t n_eff = keep.size();
+  const Matrix<std::complex<double>>& u = eig.eigenvectors;
+  Matrix<std::complex<double>> x(un, n_eff, std::complex<double>(0.0, 0.0));
+  for (std::size_t j = 0; j < n_eff; ++j) {
+    const double fac = 1.0 / std::sqrt(eig.eigenvalues[keep[j]]);
+    for (std::size_t i = 0; i < un; ++i) x(i, j) = u(i, keep[j]) * fac / d[i];
+  }
+  if (report) {
+    report->n_kept = n_eff;
+    report->n_dropped = un - n_eff;
     report->smallest_kept = smallest_kept;
     report->largest_dropped = largest_dropped;
   }

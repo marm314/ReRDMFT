@@ -50,6 +50,13 @@ class Input {
   // basis (SchrodingerKinetic.h), printing its eigenvalues for comparison
   // against the relativistic ones.
   bool non_relativistic() const { return non_relativistic_; }
+  // Optional; defaults to true (today's long-standing behavior, bit-identical unless explicitly
+  // turned off). Scoped to NON_RELATIVISTIC alone -- X2C/C4_SPINOR always use a spherical
+  // large-component basis (DIRAC-style, no option; see Utils/SphericalTransform.h). When FALSE,
+  // NON_RELATIVISTIC instead runs its entire one/two-electron pipeline in the spherical large-AO
+  // basis too (same buildSphericalTransform/transformAoCholeskyToSpherical machinery X2C uses),
+  // removing l>=2 Cartesian contaminant combinations from ITS results as well.
+  bool cartesian() const { return cartesian_; }
   // Optional; defaults to false when the C4_SPINOR keyword is absent.
   // When true, additionally builds the full 4-component Dirac-Hartree-Fock
   // two-electron Coulomb repulsion tensor in the RKB spinor basis
@@ -414,6 +421,7 @@ class Input {
   bool debug_ = false;
   double speed_of_light_ = kSpeedOfLight;
   bool non_relativistic_ = false;
+  bool cartesian_ = true;
   bool c4_spinor_ = false;
   bool x2c_ = false;
   bool hessian_mean_field_ = false;

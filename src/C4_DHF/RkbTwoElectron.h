@@ -63,9 +63,18 @@ using RkbTwoElectronTensor = SymmetricEri<std::complex<double>>;
 // why this is a legitimate, verified-equivalent reformulation) -- this is
 // the one Cholesky application that compresses well, so worth enabling
 // explicitly (CHOLESKY TRUE) for larger small-component bases.
+// `large_transform` (Utils/SphericalTransform.h's large_transform_final in main.cpp: the spherical
+// reduction, further combined with the LOWGEN safety net's own Loewdin matrix if that ever finds
+// something to drop -- n_large_cart x n_large_final) converts the (Large,Large|Large,Large) and
+// (Large,Large|Small,Small) tensors' LARGE legs to the SAME final large basis h_rkb/rkb_coefficients
+// already use, right after they are built from the Cartesian large_basis -- `rkb_coefficients` must
+// already be the row-projected version (see main.cpp's X2C/C4_SPINOR construction block), so its own
+// row count already matches large_transform.cols(). The RKB-Small legs (built from rkb_coefficients'
+// columns) are untouched by this, exactly as the one-electron H_RKB side works.
 RkbTwoElectronTensor rkbTwoElectronIntegrals(const std::vector<BasisFunction>& large_basis,
                                               const std::vector<BasisFunction>& small_basis,
                                               const Matrix<std::complex<double>>& rkb_coefficients,
+                                              const Matrix<double>& large_transform,
                                               bool use_cholesky = false, double cholesky_threshold = 1e-10);
 
 // Projects one real symmetric (n_small x n_small) pair vector of the Small-basis Coulomb matrix into the
