@@ -403,4 +403,43 @@ Small-Small blocks are actually transformed, through $X_{\text{small}}$.
       an explicit, actionable error rather than silently mismatching dimensions.
 \end{enumerate}
 
+\section*{8. Empirical note: the large-side reduction also helps the small side}
+
+Since $T_{\text{spin}}$ is real, $C'=T_{\text{spin}}^{\dagger}C$ gives, for \S3's congruence,
+\begin{equation}
+S_{\text{small}} \;=\; \overline{C'}\,S_{\text{uKB}}\,C'^{T}
+\;=\; T_{\text{spin}}^{T}\big(\overline{C}\,S_{\text{uKB}}\,C^{T}\big)T_{\text{spin}}
+\;=:\; T_{\text{spin}}^{T}\,S_{\text{small}}^{\text{raw}}\,T_{\text{spin}},
+\end{equation}
+i.e.\ $S_{\text{small}}$ is \emph{exactly} $S_{\text{small}}^{\text{raw}}$ -- the small overlap one
+partner per \emph{Cartesian} large function would give, with no \S4--\S5 treatment at all --
+congruence-transformed by the very same $T_{\text{final}}$ that orthonormalizes the large side. This
+raises a natural question: does that congruence, beyond matching dimensions (\S6), actually improve
+$S_{\text{small}}$'s conditioning? Checked directly on Xe/dyall.v2z ($n_{\text{L,cart}}=132$,
+$n_{\text{L,sph}}=121$, no LOWGEN drops on either side for this basis):
+\begin{center}
+\begin{tabular}{lcc}
+ & smallest eigenvalue & largest eigenvalue \\\hline
+$S_{\text{small}}^{\text{raw}}$ (Cartesian-large-paired, no \S4--\S5) & $2.55\times10^{-5}$ & $1.51\times10^{8}$ \\
+$S_{\text{small}}$ (after the \S4--\S5 congruence) & $3.53\times10^{-1}$ & $2.14\times10^{8}$
+\end{tabular}
+\end{center}
+a $\sim\!1.4\times10^4$-fold improvement in the smallest eigenvalue from the large-side treatment
+\emph{alone} -- confirming that removing the exact, guaranteed Cartesian $l\ge2$ redundancy from the
+large side \emph{before} differentiating it (\S2) also removes near-redundant content it would
+otherwise have introduced into the small basis, the same mechanism DIRAC's own \texttt{RKBCAR} trick
+(\texttt{dirgp.F}) exploits by construction. Two caveats on interpreting this. First, it does not
+revise the earlier, separate finding that motivated this entire rewrite: the original Xe crash
+(\texttt{fixKramersPairing}: ``the orthonormal RKB basis is not orthonormal'') was root-caused to the
+old unrestricted-kinetic-balance scheme's \emph{pooling} of near-duplicate elementary terms across
+different large shells -- a qualitatively different, exact (machine-precision) near-singularity that
+true analytic RKB (\S2, no pooling at all) eliminates on its own; this section documents a
+\emph{second, additive} effect on top of that fix, not a competing explanation for it. Second,
+neither eigenvalue above was ever in danger for this basis ($2.55\times10^{-5}$ is still four orders
+of magnitude above the $\text{STOL}(2)=10^{-8}$ threshold of \S5): the practical significance is for
+a more extreme basis, where $S_{\text{small}}^{\text{raw}}$'s own minimum eigenvalue might fall
+\emph{below} threshold on its own -- there, the large-side spherical/LOWGEN treatment could be
+exactly what keeps the small side well-conditioned too, with no separate small-side-specific fix
+needed.
+
 \end{document}
