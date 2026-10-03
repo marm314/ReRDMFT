@@ -2949,10 +2949,20 @@ int main(int argc, char** argv) {
                                   input.geometry());
       h_ukb = rerdmft::ukbHamiltonianMatrix(large_basis.functions(), small_basis.functions(),
                                              input.geometry(), input.speed_of_light());
+      rerdmft::PseudoInverseReport rkb_coeff_report;
       rkb_coefficients =
-          rerdmft::rkbCoefficients(large_basis.functions(), small_basis.functions());
+          rerdmft::rkbCoefficients(large_basis.functions(), small_basis.functions(), &rkb_coeff_report);
       h_rkb = rerdmft::rkbHamiltonianMatrix(h_ukb, rkb_coefficients);
       logTiming("H_RKB built", t_start, t_checkpoint, timing_records);
+      if (rkb_coeff_report.n_dropped > 0) {
+        std::cout << std::scientific << std::setprecision(2)
+                   << "  RKB kinetic-balance: " << rkb_coeff_report.n_dropped << " of "
+                   << (rkb_coeff_report.n_dropped + rkb_coeff_report.n_kept)
+                   << " Small-component AO combinations dropped as near-linearly-dependent when"
+                      " forming sigma.p's expansion (eigenvalue of the Small-component overlap <= 1e-10,"
+                      " largest dropped " << rkb_coeff_report.largest_dropped << ", smallest kept "
+                   << rkb_coeff_report.smallest_kept << ")\n" << std::defaultfloat;
+      }
 
       s_small_ukb = rerdmft::overlapMatrix(small_basis.functions());
       s_small = rerdmft::rkbSmallOverlapMatrix(small_basis.functions(), rkb_coefficients);

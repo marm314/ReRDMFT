@@ -142,6 +142,23 @@ the nonrelativistic and exact 4-component treatments). With `DEBUG`
 also set, extra detail is added throughout (called out per step
 below); the underlying computation itself is unaffected by `DEBUG`.
 
+Both this and `C4_SPINOR` share one upstream piece: `X_full =
+diag(X_Large, X_Large, X_Small)`, where `X_Small` orthonormalizes the
+restricted-kinetic-balance (RKB) projection of the Small-component
+basis built from `C = M S^+` (`sigma.p` expanded in the Small AOs,
+`RKB/RkbTransformation.h`). `S^+` is a pseudo-inverse
+(`Linear_Algebra/LinearAlgebra.h`'s `pseudoInverseSymmetric`), not a
+literal inverse: a fully uncontracted basis (e.g. a heavy element's
+Dyall relativistic basis) can make the raw Small-component overlap
+genuinely, legitimately near-singular -- a plain inverse has no
+conditioning safeguard and silently returns garbage there. Near-null
+eigendirections (eigenvalue `<= 1e-10`) are dropped instead of
+amplified; this changes nothing about `C`'s dimensions, so the
+positive-/negative-energy split stays exactly `n_mo/2` either way, and
+it is a no-op for any well-conditioned basis. When it does trigger, a
+line is printed: `RKB kinetic-balance: N of M Small-component AO
+combinations dropped ...`.
+
 1. **Decoupling**: diagonalizing the orthonormalized 4-component
    Hamiltonian `H_RKB_ortho = X_full^dagger H_RKB X_full` block-
    diagonalizes the Dirac equation into positive-/negative-energy

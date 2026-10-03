@@ -301,10 +301,23 @@ Matrix<std::complex<double>> fixKramersPairing(const Matrix<std::complex<double>
   Matrix<C> t(n_final, n_final, C{});
   for (std::size_t a = 0; a < n_final; ++a) {
     for (std::size_t b = 0; b < n_final; ++b) {
-      C g{}, tt{};
+      // Kahan (compensated) summation: for a basis as ill-conditioned as a heavy element's
+      // uncontracted small-component overlap (eigenvalues spanning many orders of magnitude,
+      // e.g. ~1e-13 to ~10 for Xe/dyall.v2z), this dot product over n_orig terms of wildly
+      // different magnitude loses real precision to ordinary floating-point cancellation --
+      // gram_error ~ eps * cond(S) in plain summation. Kahan recovers close to full
+      // double-precision accuracy in the final sum without needing extended precision, by
+      // tracking what each addition drops and feeding it back into the next term.
+      C g{}, g_c{}, tt{}, tt_c{};
       for (std::size_t r = 0; r < n_orig; ++r) {
-        g += std::conj(v(r, a)) * s_v(r, b);
-        tt += std::conj(v(r, a)) * theta_v(r, b);
+        const C g_term = std::conj(v(r, a)) * s_v(r, b) - g_c;
+        const C g_next = g + g_term;
+        g_c = (g_next - g) - g_term;
+        g = g_next;
+        const C tt_term = std::conj(v(r, a)) * theta_v(r, b) - tt_c;
+        const C tt_next = tt + tt_term;
+        tt_c = (tt_next - tt) - tt_term;
+        tt = tt_next;
       }
       gram(a, b) = g;
       t(a, b) = tt;

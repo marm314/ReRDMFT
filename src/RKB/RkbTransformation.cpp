@@ -23,7 +23,8 @@ Matrix<std::complex<double>> toComplex(const Matrix<double>& m) {
 }  // namespace
 
 Matrix<std::complex<double>> rkbCoefficients(const std::vector<BasisFunction>& large_basis,
-                                              const std::vector<BasisFunction>& small_basis) {
+                                              const std::vector<BasisFunction>& small_basis,
+                                              PseudoInverseReport* report) {
   const std::size_t n_large = large_basis.size();
   const std::size_t n_small = small_basis.size();
 
@@ -46,7 +47,7 @@ Matrix<std::complex<double>> rkbCoefficients(const std::vector<BasisFunction>& l
   //                            =  i sum_k sigma_k Dk[p][t].
   // With sigma_x=[[0,1],[1,0]], sigma_y=[[0,-i],[i,0]], sigma_z=[[1,0],[0,-1]],
   // built here transposed (rows=Large p, cols=Small t) to match M's usage
-  // as the left factor of M * S^-1.
+  // as the left factor of M * S^+.
   const std::complex<double> i_unit(0.0, 1.0);
   Matrix<std::complex<double>> m_alpha_alpha(n_large, n_small);
   Matrix<std::complex<double>> m_alpha_beta(n_large, n_small);
@@ -62,7 +63,7 @@ Matrix<std::complex<double>> rkbCoefficients(const std::vector<BasisFunction>& l
   }
 
   const Matrix<double> s_small = overlapMatrix(small_basis);
-  const Matrix<double> s_small_inv = invert(s_small);
+  const Matrix<double> s_small_inv = pseudoInverseSymmetric(s_small, 1e-10, report);
   const Matrix<std::complex<double>> s_small_inv_c = toComplex(s_small_inv);
 
   const Matrix<std::complex<double>> c_alpha_alpha = m_alpha_alpha * s_small_inv_c;

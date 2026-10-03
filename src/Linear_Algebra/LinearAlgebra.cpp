@@ -1,5 +1,6 @@
 #include "LinearAlgebra.h"
 
+#include <algorithm>
 #include <cmath>
 #include <complex>
 #include <stdexcept>
@@ -81,21 +82,37 @@ SymmetricEigenResult diagonalizeSymmetric(const Matrix<double>& a_in) {
 }
 
 Matrix<double> inverseSqrt(const Matrix<double>& s) {
-  const SymmetricEigenResult eig = diagonalizeSymmetric(s);
-  const std::size_t un = eig.eigenvalues.size();
+  // Diagonal (Jacobi) preconditioning: S'(i,j) = S(i,j) / sqrt(S(i,i) S(j,j)), i.e. S' = D^-1 S D^-1 with
+  // D = diag(sqrt(S_ii)). S^-1/2 then satisfies X = D^-1 Y, Y = S'^-1/2, EXACTLY (X^dagger S X = Y^dagger
+  // D^-1 S D^-1 Y = Y^dagger S' Y = I when Y^dagger S' Y = I) -- not an approximation, and it changes nothing
+  // about dimension (still a full-rank S^-1/2, same shape). Worth doing unconditionally: a basis whose
+  // functions carry wildly different self-overlaps (e.g. restricted-kinetic-balance Small-component functions
+  // derived from Large AOs spanning many orders of magnitude in exponent -- see RkbOverlap.h) can have a raw S
+  // with a condition number many orders of magnitude worse than its diagonally-rescaled S', because the bad
+  // conditioning is then just an artifact of that per-function scale disparity, not genuine linear dependency.
+  // For an already well-scaled S (diagonal entries all close to 1, e.g. a normalized AO overlap matrix) this is
+  // a near-identity rescaling and reproduces the unscaled result to machine precision.
+  const std::size_t un = s.rows();
+  std::vector<double> d(un);
+  for (std::size_t i = 0; i < un; ++i) d[i] = std::sqrt(s(i, i));
+  Matrix<double> s_scaled(un, un);
+  for (std::size_t i = 0; i < un; ++i)
+    for (std::size_t j = 0; j < un; ++j) s_scaled(i, j) = s(i, j) / (d[i] * d[j]);
+
+  const SymmetricEigenResult eig = diagonalizeSymmetric(s_scaled);
 
   constexpr double kMinEigenvalue = 1e-10;
   std::vector<double> inv_sqrt_w(un);
   for (std::size_t i = 0; i < un; ++i) {
     if (eig.eigenvalues[i] <= kMinEigenvalue) {
       throw std::runtime_error(
-          "inverseSqrt: matrix is not safely positive definite (eigenvalue " +
+          "inverseSqrt: matrix is not safely positive definite (diagonally-rescaled eigenvalue " +
           std::to_string(eig.eigenvalues[i]) + " <= " + std::to_string(kMinEigenvalue) + ")");
     }
     inv_sqrt_w[i] = 1.0 / std::sqrt(eig.eigenvalues[i]);
   }
 
-  // S^-1/2 = U diag(1/sqrt(w)) U^T: X(i,j) = sum_k U(i,k) (1/sqrt(w_k)) U(j,k).
+  // Y = S'^-1/2 = U diag(1/sqrt(w)) U^T, then X = D^-1 Y (row i scaled by 1/d[i]).
   const Matrix<double>& u = eig.eigenvectors;
   Matrix<double> x(un, un, 0.0);
   for (std::size_t i = 0; i < un; ++i) {
@@ -104,7 +121,7 @@ Matrix<double> inverseSqrt(const Matrix<double>& s) {
       for (std::size_t k = 0; k < un; ++k) {
         sum += u(i, k) * inv_sqrt_w[k] * u(j, k);
       }
-      x(i, j) = sum;
+      x(i, j) = sum / d[i];
     }
   }
   return x;
@@ -142,21 +159,33 @@ HermitianEigenResult diagonalizeHermitian(const Matrix<std::complex<double>>& a_
 }
 
 Matrix<std::complex<double>> inverseSqrtHermitian(const Matrix<std::complex<double>>& s) {
-  const HermitianEigenResult eig = diagonalizeHermitian(s);
-  const std::size_t un = eig.eigenvalues.size();
+  // Diagonal (Jacobi) preconditioning -- same exact identity as inverseSqrt's own (see its comment): a
+  // Hermitian matrix's diagonal is always real, so D = diag(sqrt(S_ii)) is real and this rescaling is just as
+  // valid here. This is the fix for exactly the restricted-kinetic-balance Small-component overlap case that
+  // motivated it: S_small = C^dagger S_uKB C inherits a huge diagonal spread (self-overlaps differing by many
+  // orders of magnitude) from differentiating Large AOs across a heavy element's full exponent range, which
+  // otherwise shows up as a raw condition number many orders of magnitude worse than necessary.
+  const std::size_t un = s.rows();
+  std::vector<double> d(un);
+  for (std::size_t i = 0; i < un; ++i) d[i] = std::sqrt(s(i, i).real());
+  Matrix<std::complex<double>> s_scaled(un, un);
+  for (std::size_t i = 0; i < un; ++i)
+    for (std::size_t j = 0; j < un; ++j) s_scaled(i, j) = s(i, j) / (d[i] * d[j]);
+
+  const HermitianEigenResult eig = diagonalizeHermitian(s_scaled);
 
   constexpr double kMinEigenvalue = 1e-10;
   std::vector<double> inv_sqrt_w(un);
   for (std::size_t i = 0; i < un; ++i) {
     if (eig.eigenvalues[i] <= kMinEigenvalue) {
       throw std::runtime_error(
-          "inverseSqrtHermitian: matrix is not safely positive definite (eigenvalue " +
+          "inverseSqrtHermitian: matrix is not safely positive definite (diagonally-rescaled eigenvalue " +
           std::to_string(eig.eigenvalues[i]) + " <= " + std::to_string(kMinEigenvalue) + ")");
     }
     inv_sqrt_w[i] = 1.0 / std::sqrt(eig.eigenvalues[i]);
   }
 
-  // S^-1/2 = U diag(1/sqrt(w)) U^dagger: X(i,j) = sum_k U(i,k) (1/sqrt(w_k)) conj(U(j,k)).
+  // Y = S'^-1/2 = U diag(1/sqrt(w)) U^dagger, then X = D^-1 Y (row i scaled by 1/d[i]).
   const Matrix<std::complex<double>>& u = eig.eigenvectors;
   Matrix<std::complex<double>> x(un, un, std::complex<double>(0.0, 0.0));
   for (std::size_t i = 0; i < un; ++i) {
@@ -165,7 +194,7 @@ Matrix<std::complex<double>> inverseSqrtHermitian(const Matrix<std::complex<doub
       for (std::size_t k = 0; k < un; ++k) {
         sum += u(i, k) * inv_sqrt_w[k] * std::conj(u(j, k));
       }
-      x(i, j) = sum;
+      x(i, j) = sum / d[i];
     }
   }
   return x;
@@ -233,6 +262,45 @@ Matrix<std::complex<double>> invertGeneral(const Matrix<std::complex<double>>& a
     }
   }
   return result;
+}
+
+Matrix<double> pseudoInverseSymmetric(const Matrix<double>& s, double threshold, PseudoInverseReport* report) {
+  const SymmetricEigenResult eig = diagonalizeSymmetric(s);
+  const std::size_t un = eig.eigenvalues.size();
+
+  std::vector<double> inv_w(un);
+  std::size_t n_dropped = 0;
+  double smallest_kept = 0.0, largest_dropped = 0.0;
+  for (std::size_t i = 0; i < un; ++i) {
+    if (eig.eigenvalues[i] > threshold) {
+      inv_w[i] = 1.0 / eig.eigenvalues[i];
+      if (smallest_kept == 0.0 || eig.eigenvalues[i] < smallest_kept) smallest_kept = eig.eigenvalues[i];
+    } else {
+      inv_w[i] = 0.0;
+      ++n_dropped;
+      largest_dropped = std::max(largest_dropped, eig.eigenvalues[i]);
+    }
+  }
+
+  // S^+ = U diag(f(w)) U^T: X(i,j) = sum_k U(i,k) f(w_k) U(j,k).
+  const Matrix<double>& u = eig.eigenvectors;
+  Matrix<double> x(un, un, 0.0);
+  for (std::size_t i = 0; i < un; ++i) {
+    for (std::size_t j = 0; j < un; ++j) {
+      double sum = 0.0;
+      for (std::size_t k = 0; k < un; ++k) {
+        sum += u(i, k) * inv_w[k] * u(j, k);
+      }
+      x(i, j) = sum;
+    }
+  }
+  if (report) {
+    report->n_dropped = n_dropped;
+    report->n_kept = un - n_dropped;
+    report->smallest_kept = smallest_kept;
+    report->largest_dropped = largest_dropped;
+  }
+  return x;
 }
 
 }  // namespace rerdmft
