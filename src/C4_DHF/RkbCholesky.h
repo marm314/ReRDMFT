@@ -47,12 +47,14 @@ Matrix<std::complex<double>> rkbFockMatrix(const Matrix<std::complex<double>>& h
 // (C the 4 n_large x n_mo spinor coefficients), W_L = B'_L^T.
 //
 // `n_negative` > 0 (the first n_negative MO indices are the negative-energy Dirac-sea branch, as in
-// FULL_OPTIMIZATION's no-pair treatment): the vectors are restricted to the positive-energy block (every
-// element touching the negative branch is set to zero -- it only ever meets an exactly-zero occupation
-// coefficient) and then RECOMPRESSED: with the negative block gone the N_chol vectors are nearly linearly
-// dependent, so the eigen-decomposition of their Gram matrix keeps only the directions with eigenvalue
-// above threshold/N_chol (element error <= threshold). Pure linear algebra on the vectors, no integrals are
-// touched again; on LiH/6-31G it takes 662 vectors back to about 60.
+// FULL_OPTIMIZATION's no-pair treatment): the transform is restricted to the positive-energy columns of `c`
+// FROM THE START (never materializes the full n_mo x n_mo vectors -- see the .cpp's own comment on why this
+// is bit-identical to transforming in full and slicing afterward) and the result is then RECOMPRESSED: with
+// the negative block gone the N_chol vectors are nearly linearly dependent, so the eigen-decomposition of
+// their Gram matrix keeps only the directions with eigenvalue above threshold/N_chol (element error <=
+// threshold). Pure linear algebra on the vectors, no integrals are touched again; on LiH/6-31G it takes 662
+// vectors back to about 60. The returned CholeskyEri is still n_mo x n_mo (zero-padded on the negative block,
+// which only ever meets an exactly-zero occupation coefficient).
 CholeskyEri<std::complex<double>> rkbCholeskyToMo(const RkbCholesky& eri,
                                                    const Matrix<std::complex<double>>& c_dhf,
                                                    std::size_t n_negative = 0, double threshold = 1e-10);

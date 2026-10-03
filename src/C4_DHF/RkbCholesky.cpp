@@ -189,11 +189,21 @@ Matrix<C> rkbFockMatrix(const Matrix<C>& h_rkb, const RkbCholesky& ao, const Mat
 CholeskyEri<C> rkbCholeskyToMo(const RkbCholesky& ao, const Matrix<C>& c, std::size_t n_negative, double threshold) {
   const std::size_t nl = ao.n_large, nmo = c.cols();
   if (c.rows() != 4 * nl) throw std::runtime_error("rkbCholeskyToMo: C must have 4*n_large rows");
+  // Transform directly into the (nn:nmo, nn:nmo) positive-energy block instead of building the full nmo x nmo
+  // W_L and slicing afterward: W_L(p,q) = sum_f C_f(:,p)^+ B^f_L C_f(:,q) depends only on columns p and q of C,
+  // never on any other column, so restricting every C_f used below to its columns [nn, nmo) (via a pointer
+  // offset + the UNCHANGED leading dimension nmo, i.e. a strided view, no copy) gives bit-identical results to
+  // computing the full matrix first -- just without the n_negative rows/columns that no-pair discards right
+  // after. With nn = nmo/2 (the default no-pair case) this is a 4x reduction in both the per-vector GEMM cost
+  // and the O(N_chol * nmo^2) `out` storage below, which otherwise dwarfs everything else in memory for a
+  // heavy element's large RKB dimension. nn = 0 (the untrimmed FULL_OPTIMIZATION_4C_NEG factory call) makes
+  // m = nmo, reducing exactly to the old unrestricted transform.
+  const std::size_t nn = n_negative, m = nmo - nn;
   std::vector<Matrix<C>> out(ao.nVectors());
   const SerialBlasScope serial_blas_guard;
 #pragma omp parallel
   {
-    Matrix<C> bc, tmp(nl, nmo), bp(nmo, nmo);
+    Matrix<C> bc, tmp(nl, m), bp(m, m);
 #pragma omp for schedule(dynamic)
     for (std::size_t l = 0; l < ao.nVectors(); ++l) {
       for (int f = 0; f < 4; ++f) {
@@ -205,29 +215,29 @@ CholeskyEri<C> rkbCholeskyToMo(const RkbCholesky& ao, const Matrix<C>& c, std::s
         } else {
           bf = &ao.small[static_cast<std::size_t>(f - 2)][l];
         }
-        const C* cf = c.data() + static_cast<std::size_t>(f) * nl * nmo;  // flavor block, nl x nmo
-        zgemm(false, static_cast<int>(nl), static_cast<int>(nmo), static_cast<int>(nl), bf->data(), static_cast<int>(nl),
-              cf, static_cast<int>(nmo), 0.0, tmp.data(), static_cast<int>(nmo));                          // B^f C_f
-        zgemm(true, static_cast<int>(nmo), static_cast<int>(nmo), static_cast<int>(nl), cf, static_cast<int>(nmo),
-              tmp.data(), static_cast<int>(nmo), f == 0 ? 0.0 : 1.0, bp.data(), static_cast<int>(nmo));   // += C_f^+ B^f C_f
+        const C* cf = c.data() + static_cast<std::size_t>(f) * nl * nmo + nn;  // flavor block, columns [nn, nmo), ld=nmo
+        zgemm(false, static_cast<int>(nl), static_cast<int>(m), static_cast<int>(nl), bf->data(), static_cast<int>(nl),
+              cf, static_cast<int>(nmo), 0.0, tmp.data(), static_cast<int>(m));                          // B^f C_f(:,nn:)
+        zgemm(true, static_cast<int>(m), static_cast<int>(m), static_cast<int>(nl), cf, static_cast<int>(nmo),
+              tmp.data(), static_cast<int>(m), f == 0 ? 0.0 : 1.0, bp.data(), static_cast<int>(m));   // += C_f(:,nn:)^+ B^f C_f(:,nn:)
       }
-      Matrix<C> w(nmo, nmo);
-      for (std::size_t x = 0; x < nmo; ++x)
-        for (std::size_t y = 0; y < nmo; ++y) w(x, y) = bp(y, x);  // W = B'^T
+      Matrix<C> w(m, m);
+      for (std::size_t x = 0; x < m; ++x)
+        for (std::size_t y = 0; y < m; ++y) w(x, y) = bp(y, x);  // W = B'^T
       out[l] = std::move(w);
     }
   }
-  if (n_negative == 0) return CholeskyEri<C>::fromVectors(out);
+  if (nn == 0) return CholeskyEri<C>::fromVectors(out);
 
-  // Positive-energy block only, then recompress. Rows A_L = the (nmo-nn)^2 entries of the block of W_L;
+  // Recompress: rows A_L = the m^2 entries of W_L (already the positive-energy block, nothing left to slice);
   // M = A^T conj(A) is unchanged by any unitary mixing of the rows, so diagonalize the Gram matrix
   // G = A A^dagger (G u_k = lambda_k u_k) and keep A'_k = sum_L conj(u_k(L)) A_L for lambda_k > tau:
   // dropping the others changes every element of M by at most the sum of their eigenvalues.
-  const std::size_t nn = n_negative, m = nmo - nn, nchol = out.size();
+  const std::size_t nchol = out.size();
   Matrix<C> a(nchol, m * m);
   for (std::size_t l = 0; l < nchol; ++l)
     for (std::size_t x = 0; x < m; ++x)
-      for (std::size_t y = 0; y < m; ++y) a(l, x * m + y) = out[l](nn + x, nn + y);
+      for (std::size_t y = 0; y < m; ++y) a(l, x * m + y) = out[l](x, y);
   Matrix<C> gram(nchol, nchol);
   {
     const C alpha(1.0, 0.0), beta(0.0, 0.0);

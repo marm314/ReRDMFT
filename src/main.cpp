@@ -3352,7 +3352,10 @@ int main(int argc, char** argv) {
       // Tensor4 exists only for the DEBUG validation suites and the HESSIAN_MEAN_FIELD diagnostic.
       const bool nonrel_dense = input.debug() || input.hessian_mean_field();
       rerdmft::CholeskyEri<double> eri_spin_chol;
-      if (input.cholesky()) {
+      // Only actually consumed below under DEBUG (the dense-vs-Cholesky check), HESSIAN_MEAN_FIELD (expanded
+      // into eri_spin_sym), or FUNCTIONAL (the RDMFT evaluation) -- skip the transform entirely for a bare
+      // HF run, which otherwise pays its full O(N_chol * n^2) cost and memory for a result nothing reads.
+      if (input.cholesky() && (nonrel_dense || input.has_functional())) {
         eri_spin_chol = rerdmft::aoCholeskyToMoSpinOrbital(ao_cholesky, nonrel_hf_result.c_matrix);
       }
       logTiming("NON_REL MO integral transform complete", t_start, t_checkpoint, timing_records);
@@ -3659,7 +3662,10 @@ int main(int argc, char** argv) {
       rerdmft::CholeskyEri<std::complex<double>> x2c_mo_chol;           // CHOLESKY TRUE: MO-basis vectors
       const auto transformX2cToMo = [&]() {
         h_x2c_mo = rerdmft::x2cMoOneElectronTransform(x2c_hamiltonian.h_x2c, x2c_hf_result.c_matrix);
-        if (input.cholesky()) x2c_mo_chol = rerdmft::aoCholeskyToMoSpinor(ao_cholesky, x2c_hf_result.c_matrix);
+        // Only actually consumed below under DEBUG/HESSIAN_MEAN_FIELD or FUNCTIONAL (see NON_REL's identical
+        // comment) -- skip it for a bare X2C-HF run.
+        if (input.cholesky() && (x2c_dense || input.has_functional()))
+          x2c_mo_chol = rerdmft::aoCholeskyToMoSpinor(ao_cholesky, x2c_hf_result.c_matrix);
         if (!input.cholesky() || input.debug()) {
           x2c_mo_sym = rerdmft::x2cMoTwoElectronSymmetric(nonrel_eri, x2c_hf_result.c_matrix);
         } else if (input.hessian_mean_field()) {
@@ -3933,8 +3939,13 @@ int main(int argc, char** argv) {
       rerdmft::CholeskyEri<std::complex<double>> c4_mo_chol;
       const auto transformToMo = [&]() {
         h_mo = rerdmft::rkbMoOneElectronTransform(h_rkb, dhf_result.c_dhf);
-        // No-pair: negative-energy block dropped, vectors recompressed (see rkbCholeskyToMo).
-        if (input.cholesky()) {
+        // No-pair: negative-energy block dropped, vectors recompressed (see rkbCholeskyToMo). Only actually
+        // consumed below under DEBUG/HESSIAN_MEAN_FIELD or FUNCTIONAL (see NON_REL/X2C's identical comment) --
+        // skip it for a bare C4_DHF run. This matters far more here than for NON_REL/X2C: rkbCholeskyToMo
+        // builds the FULL (positive+negative-energy) n_mo x n_mo vector per Cholesky vector before trimming
+        // to the positive-energy block, i.e. 4x the final size, times N_chol -- for a heavy element this is
+        // easily several GB of pure waste when nothing downstream reads c4_mo_chol at all.
+        if (input.cholesky() && (c4_dense || input.has_functional())) {
           c4_mo_chol = rerdmft::rkbCholeskyToMo(rkb_cholesky, dhf_result.c_dhf, h_mo.rows() / 2, input.cholesky_threshold());
         }
         if (!input.cholesky() || input.debug()) {
