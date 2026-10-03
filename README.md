@@ -93,6 +93,7 @@ anywhere on a line) are comments.
 | `UNIT_LENGTH` | string | `ANGS` | Units of the `GEOMETRY` block's coordinates: `ANGS` (Angstrom, the default, converted to Bohr internally via the CODATA Bohr radius) or `BOHR`/`AU` (already atomic units, no conversion). Applied after the whole input file is parsed, so it may appear before or after `GEOMETRY`. Template: `examples/lih_gnof_unit_length_bohr.inp` (same system and converged energy as `lih_gnof_full_optimization.inp`, geometry given in Bohr instead of Angstrom). |
 | `GEOMETRY` ... `END` | block | *required* | Molecular geometry as `<symbol> <x> <y> <z>` lines, one atom per line, coordinates in the units `UNIT_LENGTH` says (Angstrom by default), converted to Bohr internally. |
 | `NON_RELATIVISTIC` | bool | `FALSE` | Run the standard nonrelativistic Hartree-Fock SCF (`NON_REL`). |
+| `CARTESIAN` | bool | `TRUE` | Only affects `NON_RELATIVISTIC`: `TRUE` (the default, bit-identical to this project's long-standing behavior) runs it in the raw Cartesian large-component AO basis libcint produces; `FALSE` runs its entire one-/two-electron pipeline in the spherical large-component basis instead (`Utils/SphericalTransform.h`, the same transform `X2C`/`C4_SPINOR` always use, see below), removing `l >= 2` Cartesian contaminant combinations from its results too. `X2C`/`C4_SPINOR` are unaffected by this keyword -- they always use the spherical basis, no option, matching DIRAC. |
 | `C4_SPINOR` | bool | `FALSE` | Run the 4-component Dirac-Hartree-Fock SCF (`C4_DHF`), building the RKB two-electron Coulomb tensor. Opt-in since both time and memory cost scale steeply with basis size. Both this SCF and the `X2C` one are Kramers-restricted for an even `NELEC`: every iteration's density is projected onto its time-reversal-even part (spin-orbit mixing of the spinors is kept; only the magnetization is removed), so they cannot drift into a lower-energy Kramers-broken solution at unstable geometries (e.g. stretched LiH with `CHOLESKY TRUE`). The output reports the largest element removed (~0 when the iteration stayed symmetric by itself). |
 | `DEBUG` | bool | `FALSE` | Print detailed basis/matrix diagnostics, plus internal cross-checks (efficient-vs-RDMFT-ansatz gradient formulas, finite-difference gradient/Hessian tests) for whichever of `NON_RELATIVISTIC`/`C4_SPINOR` is on. Every test that needs the two-electron integrals as a DENSE tensor (the RDMFT-ansatz gradient test, the Kramers/spin structure tests of the integrals, exact-vs-Cholesky rotation, the Hessian-diagonal finite difference, dense-vs-Cholesky comparisons of the Fock matrix and MO integrals) runs only with `DEBUG TRUE`; the dense tensors are built for it on demand. |
 | `HESSIAN_MEAN_FIELD` | bool | `FALSE` | For every method that is on (`NON_RELATIVISTIC`, `X2C`, `C4_SPINOR`), build the full dense real-step orbital-rotation Hessian of the converged HF/DHF solution (integer occupations, Hartree/exchange formulas) and diagonalize it completely, reporting the numbers of negative, near-zero and positive eigenvalues: a genuine minimum is expected for `NON_REL` and `X2C`, a saddle for `C4_SPINOR` (negative-energy branch included). O(n^5)/O(n^6), needs the dense two-electron tensor, opt-in. |
@@ -143,21 +144,49 @@ also set, extra detail is added throughout (called out per step
 below); the underlying computation itself is unaffected by `DEBUG`.
 
 Both this and `C4_SPINOR` share one upstream piece: `X_full =
-diag(X_Large, X_Large, X_Small)`, where `X_Small` orthonormalizes the
-restricted-kinetic-balance (RKB) projection of the Small-component
-basis built from `C = M S^+` (`sigma.p` expanded in the Small AOs,
-`RKB/RkbTransformation.h`). `S^+` is a pseudo-inverse
-(`Linear_Algebra/LinearAlgebra.h`'s `pseudoInverseSymmetric`), not a
-literal inverse: a fully uncontracted basis (e.g. a heavy element's
-Dyall relativistic basis) can make the raw Small-component overlap
-genuinely, legitimately near-singular -- a plain inverse has no
-conditioning safeguard and silently returns garbage there. Near-null
-eigendirections (eigenvalue `<= 1e-10`) are dropped instead of
-amplified; this changes nothing about `C`'s dimensions, so the
-positive-/negative-energy split stays exactly `n_mo/2` either way, and
-it is a no-op for any well-conditioned basis. When it does trigger, a
-line is printed: `RKB kinetic-balance: N of M Small-component AO
-combinations dropped ...`.
+diag(X_Large, X_Large, X_Small)`, built the way DIRAC itself builds its
+own RKB basis, rather than the numerical uKB-projection scheme earlier
+versions of this project used:
+
+- **Analytic restricted kinetic balance**: each Small-component AO is
+  built directly, in closed form, as `sigma.p` applied to its own
+  Large-component partner (`d/dx[x^lx y^ly z^lz exp(-a r^2)]`'s
+  lowering/raising pieces, `RKB/RkbDerivativeTerms.h`) -- exactly ONE
+  RKB Small partner per Large function, by construction, with no
+  redundant unrestricted-kinetic-balance (uKB) basis to pool or project
+  down from (`RKB/RkbTransformation.h`'s `rkbCoefficients` is now pure
+  bookkeeping of these closed-form weights, not a numerical `C = M S^+`
+  solve).
+- **Spherical Large-component basis**: `X2C`/`C4_SPINOR` always work in
+  a spherical (real-solid-harmonic) Large-component basis, not the raw
+  Cartesian one libcint produces -- `l >= 2` Cartesian shells (6
+  Cartesian `d`'s for 5 genuine spherical harmonics, 10 `f` for 7, ...)
+  are reduced to their non-redundant spherical combinations
+  (`Utils/SphericalTransform.h`, derived from first principles: a
+  Laplacian null-space computation, not a transcribed coefficient
+  table). This transform is applied to `rkb_coefficients`' own Large-
+  orbital rows *before* the RKB projection above happens, so "exactly
+  one RKB Small partner per Large function" automatically lands at the
+  new, smaller spherical dimension -- Small's own dimension tracks
+  Large's exactly, with no separate bookkeeping needed anywhere
+  downstream. `NON_RELATIVISTIC` is unaffected unless `CARTESIAN FALSE`
+  opts it into the same treatment (see above).
+- **LOWGEN safety net**: on top of the exact spherical reduction,
+  `Linear_Algebra/LinearAlgebra.h`'s `canonicalOrthogonalize`/
+  `canonicalOrthogonalizeHermitian` (DIRAC's own `LOWGEN`, with its
+  `STOL(1)=1e-6`/`STOL(2)=1e-8`-style thresholds) catches any further,
+  *genuine* near-linear-dependence -- e.g. near-duplicate exponents
+  across different shells of a heavy element's uncontracted basis --
+  that the deterministic spherical step does not remove. On the Large
+  side this is folded into the SAME transform used above (so it can
+  never desync Large from Small); it is a no-op (bit-identical results)
+  for every basis this project has been tested on. If the Small side
+  ever needs an *independent* reduction beyond what tracking Large
+  already gives it -- the genuine `n_positive != n_negative` case DIRAC
+  itself accepts (`NESH != NPSH`) -- this project does not yet thread
+  that asymmetric dimension through the rest of the pipeline
+  (`FullOptimization`'s no-pair slicing, RESTART, ...), so it stops with
+  a clear, actionable error rather than silently mismatching dimensions.
 
 1. **Decoupling**: diagonalizing the orthonormalized 4-component
    Hamiltonian `H_RKB_ortho = X_full^dagger H_RKB X_full` block-
