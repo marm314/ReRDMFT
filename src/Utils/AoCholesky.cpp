@@ -4,6 +4,7 @@
 
 #include <omp.h>
 
+#include <algorithm>
 #include <stdexcept>
 
 #include "BlasThreads.h"
@@ -33,12 +34,74 @@ void checkSquare(const AoCholesky& ao, std::size_t rows, const char* who) {
   if (ao.n != rows) throw std::runtime_error(std::string(who) + ": AO Cholesky dimension does not match the matrices");
 }
 
+// The real AO Coulomb matrix over a single basis's own pair index {p,q} (n^2 pairs), (pq|rs)
+// evaluated on demand (ElectronRepulsion.h's twoElectronQuadruplet) and Schwarz-prescreened at
+// `threshold` -- the single-basis analogue of RkbCholesky.cpp's OnDemandUnionCoulombPairs (no LL/SS
+// split needed here, NON_RELATIVISTIC/X2C both work in one AO basis).
+class OnDemandPairs : public PairMatrixSource<double> {
+ public:
+  OnDemandPairs(const std::vector<BasisFunction>& basis, double threshold)
+      : basis_(basis), n_(basis.size()), threshold_(threshold),
+        sqrt_diag_(threshold > 0.0 ? sqrtPairDiagonal(basis) : std::vector<double>()) {}
+  std::size_t size() const override { return n_ * n_; }
+  double diagonal(std::size_t i) const override { return at(i, i); }
+  double at(std::size_t i, std::size_t j) const override {
+    const std::size_t p = i / n_, q = i % n_, r = j / n_, s = j % n_;
+    if (threshold_ > 0.0 && sqrtDiag(p, q) * sqrtDiag(r, s) < threshold_) return 0.0;
+    return twoElectronQuadruplet(basis_[p], basis_[q], basis_[r], basis_[s]);
+  }
+  void row(std::size_t i, double* out) const override {
+    const std::size_t total = n_ * n_;
+    const std::size_t p = i / n_, q = i % n_;
+    const BasisFunction& fp = basis_[p];
+    const BasisFunction& fq = basis_[q];
+    const double sqrt_diag_i = sqrtDiag(p, q);
+#pragma omp parallel for schedule(dynamic)
+    for (std::size_t j = 0; j < total; ++j) {
+      const std::size_t r = j / n_, s = j % n_;
+      if (threshold_ > 0.0 && sqrt_diag_i * sqrtDiag(r, s) < threshold_) {
+        out[j] = 0.0;
+        continue;
+      }
+      out[j] = twoElectronQuadruplet(fp, fq, basis_[r], basis_[s]);
+    }
+  }
+
+ private:
+  double sqrtDiag(std::size_t p, std::size_t q) const {
+    if (threshold_ <= 0.0) return 0.0;
+    const std::size_t lo = p < q ? p : q, hi = p < q ? q : p;
+    return sqrt_diag_[hi * (hi + 1) / 2 + lo];
+  }
+  const std::vector<BasisFunction>& basis_;
+  std::size_t n_;
+  double threshold_;
+  std::vector<double> sqrt_diag_;
+};
+
 }  // namespace
 
 AoCholesky AoCholesky::fromPacked(const PackedTwoElectronTensor& eri, double threshold, CholeskyCheckReport* report) {
   AoCholesky ao;
   ao.n = eri.dim();
   ao.vectors = choleskyDecomposeEriChecked(eri, threshold, report);
+  return ao;
+}
+
+AoCholesky AoCholesky::fromOnDemand(const std::vector<BasisFunction>& basis, double threshold,
+                                     CholeskyCheckReport* report) {
+  const OnDemandPairs pairs(basis, threshold);
+  const FlatVectors<double> flat = choleskyDecomposePairsChecked<double>(pairs, threshold, report);
+  const std::size_t n = basis.size();
+  AoCholesky ao;
+  ao.n = n;
+  ao.vectors.resize(flat.count);
+#pragma omp parallel for schedule(dynamic)
+  for (std::size_t l = 0; l < flat.count; ++l) {
+    Matrix<double> b(n, n);
+    std::copy(flat.data.data() + l * flat.pair_dim, flat.data.data() + (l + 1) * flat.pair_dim, b.data());
+    ao.vectors[l] = std::move(b);
+  }
   return ao;
 }
 

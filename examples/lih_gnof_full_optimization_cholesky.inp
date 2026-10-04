@@ -13,6 +13,7 @@ FUNCTIONAL GNOF
 PNOF_SUBSPACES 2
 PNOF_COUPLING 2
 CHOLESKY TRUE
+ON_DEMAND_ERI FALSE  # off here to keep this example's historical fast runtime (the whole packed AO tensor already fits in memory); default is TRUE, see lih_gnof_c4_full_optimization_cholesky.inp for the on-demand path demonstrated explicitly.
 FULL_OPTIMIZATION TRUE
 
 GEOMETRY

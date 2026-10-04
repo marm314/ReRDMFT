@@ -230,7 +230,7 @@ $(BUILD_DIR)/test_symmetric_eri: tests/test_symmetric_eri.cpp | $(BUILD_DIR)
 test_ao_cholesky: $(BUILD_DIR)/test_ao_cholesky
 	./$(BUILD_DIR)/test_ao_cholesky
 
-$(BUILD_DIR)/test_ao_cholesky: tests/test_ao_cholesky.cpp $(BUILD_DIR)/AoCholesky.o $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o $(BUILD_DIR)/SpinorRotation.o $(BUILD_DIR)/LinearAlgebra.o | $(BUILD_DIR)
+$(BUILD_DIR)/test_ao_cholesky: tests/test_ao_cholesky.cpp $(BUILD_DIR)/AoCholesky.o $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o $(BUILD_DIR)/SpinorRotation.o $(BUILD_DIR)/LinearAlgebra.o $(BUILD_DIR)/ElectronRepulsion.o $(BUILD_DIR)/Integrals.o $(BUILD_DIR)/Shell.o | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
 # Unit test of Utils/SymmetricTransform.h (slab four-index transform into a SymmetricEri).

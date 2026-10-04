@@ -39,10 +39,15 @@ struct RkbCholesky {
   // so that `n_large` below (= large_transform.cols()) matches rkb_coefficients.rows()/2 and the
   // resulting Large/Small flavor blocks come out the same (spherical) size, exactly as the one-electron
   // H_RKB side already does.
+  //
+  // `on_demand` (Input.h's ON_DEMAND_ERI, default TRUE): TRUE evaluates every (LL|LL)/(LL|SS)/(SS|SS)
+  // quadruplet ON DEMAND (OnDemandUnionCoulombPairs below) -- no AO tensor is ever materialized,
+  // trading speed for the O(n^2)-only memory footprint that makes this safe even for a basis (e.g.
+  // Xe/dyall.v2z) whose (SS|SS) alone would otherwise need tens of GB (UnionCoulombPairs, FALSE).
   static RkbCholesky build(const std::vector<BasisFunction>& large_basis,
                            const std::vector<BasisFunction>& small_basis,
                            const Matrix<std::complex<double>>& rkb_coefficients,
-                           const Matrix<double>& large_transform, double threshold,
+                           const Matrix<double>& large_transform, double threshold, bool on_demand,
                            CholeskyCheckReport* report = nullptr);
 };
 

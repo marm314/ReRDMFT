@@ -183,6 +183,8 @@ void Input::read(const std::string& filename) {
       }
     } else if (keyword == "CHOLESKY") {
       cholesky_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "ON_DEMAND_ERI") {
+      on_demand_eri_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "CARTESIAN") {
       cartesian_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "PRECONDITION_SMALL_OVERLAP") {
@@ -424,6 +426,7 @@ void Input::print(std::ostream& out) const {
   line("ENERGY_TOLERANCE") << energy_tolerance_ << "\n";
   line("DENSITY_TOLERANCE") << density_tolerance_ << "\n";
   line("CHOLESKY") << flag(cholesky_) << "\n";
+  line("ON_DEMAND_ERI") << flag(on_demand_eri_) << "\n";
   line("CARTESIAN") << flag(cartesian_) << "\n";
   line("PRECONDITION_SMALL_OVERLAP") << flag(precondition_small_overlap_) << "\n";
   line("CHOLESKY_THRESHOLD") << cholesky_threshold_ << "\n";

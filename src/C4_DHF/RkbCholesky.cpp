@@ -4,6 +4,7 @@
 
 #include <omp.h>
 
+#include <iomanip>
 #include <stdexcept>
 
 #include "BlasThreads.h"
@@ -20,7 +21,12 @@ namespace {
 using C = std::complex<double>;
 
 // The real AO Coulomb matrix over the pair index {LL pairs (nl^2)} u {SS pairs (ns^2)}, blocks
-// (LL|LL), (LL|SS), (SS|SS), presented to the pivoted decomposition without ever being assembled.
+// (LL|LL), (LL|SS), (SS|SS), presented to the pivoted decomposition without ever being assembled
+// into the UNION (there is no dense/packed n2 x n2 array either way) -- but (LL|LL)/(LL|SS)/(SS|SS)
+// THEMSELVES are each pre-built once, up front, in packed form. Fast (every quadruplet evaluated
+// exactly once, however many times the decomposition later reads it) but needs O(n_small^4/8)
+// memory for (SS|SS) -- use ONLY when kMaxFastBytes (RkbCholesky::build) says that fits; otherwise
+// OnDemandUnionCoulombPairs below.
 class UnionCoulombPairs : public PairMatrixSource<double> {
  public:
   // (LL|LL) and (SS|SS) are the 8-fold-packed real AO tensors; the cross block (LL|SS) is the
@@ -57,6 +63,90 @@ class UnionCoulombPairs : public PairMatrixSource<double> {
   std::size_t nl_, ns_;
 };
 
+// Same pair matrix as UnionCoulombPairs above, but with NEITHER the dense nor the packed
+// representation of (LL|LL)/(LL|SS)/(SS|SS) EVER materialized: every (pq|rs) quadruplet is instead
+// evaluated lazily, via twoElectronQuadruplet (ElectronRepulsion.h), each time the decomposition
+// asks for it. Needed because the raw analytic RKB small basis (RkbDerivativeTerms.h) is NOT
+// deduplicated across large functions the way the old unrestricted-kinetic-balance basis was, so
+// n_small can run into the hundreds even for a single heavy atom -- (SS|SS)'s packed storage alone
+// would already be tens of GB there (confirmed: 540 small functions for Xe/dyall.v2z, ~85 GB),
+// long before the O(n_small) Cholesky-vector storage the decomposition itself actually needs.
+// Schwarz screening still applies (same sqrt-diagonal bound as before), precomputed once up front
+// (O(n^2), trivial memory either way). The real cost of avoiding the upfront build: nothing here is
+// cached between calls, so a quadruplet needed by several different `row()` calls (one per pivot)
+// is re-evaluated from scratch every time -- measurably slower than UnionCoulombPairs for any case
+// that could have afforded the fast path instead, which is exactly why RkbCholesky::build only
+// reaches for this when the fast path's own memory estimate says it would not fit.
+class OnDemandUnionCoulombPairs : public PairMatrixSource<double> {
+ public:
+  OnDemandUnionCoulombPairs(const std::vector<BasisFunction>& large_basis,
+                            const std::vector<BasisFunction>& small_basis, double threshold)
+      : large_(large_basis),
+        small_(small_basis),
+        nl_(large_basis.size()),
+        ns_(small_basis.size()),
+        threshold_(threshold),
+        sqrt_diag_ll_(threshold > 0.0 ? sqrtPairDiagonal(large_basis) : std::vector<double>()),
+        sqrt_diag_ss_(threshold > 0.0 ? sqrtPairDiagonal(small_basis) : std::vector<double>()) {}
+
+  std::size_t size() const override { return nl_ * nl_ + ns_ * ns_; }
+  double diagonal(std::size_t i) const override { return at(i, i); }
+
+  double at(std::size_t i, std::size_t j) const override {
+    const std::size_t nl2 = nl_ * nl_;
+    const bool i_large = i < nl2;
+    const bool j_large = j < nl2;
+    const std::size_t pq = i_large ? i : i - nl2;
+    const std::size_t rs = j_large ? j : j - nl2;
+    const std::size_t p = pq / (i_large ? nl_ : ns_), q = pq % (i_large ? nl_ : ns_);
+    const std::size_t r = rs / (j_large ? nl_ : ns_), s = rs % (j_large ? nl_ : ns_);
+    if (threshold_ > 0.0 &&
+        sqrtDiag(i_large, p, q) * sqrtDiag(j_large, r, s) < threshold_) {
+      return 0.0;
+    }
+    return twoElectronQuadruplet(basisFn(i_large, p), basisFn(i_large, q), basisFn(j_large, r),
+                                  basisFn(j_large, s));
+  }
+
+  void row(std::size_t i, double* out) const override {
+    const std::size_t nl2 = nl_ * nl_, total = nl2 + ns_ * ns_;
+    const bool i_large = i < nl2;
+    const std::size_t pq = i_large ? i : i - nl2;
+    const std::size_t p = pq / (i_large ? nl_ : ns_), q = pq % (i_large ? nl_ : ns_);
+    const BasisFunction& fp = basisFn(i_large, p);
+    const BasisFunction& fq = basisFn(i_large, q);
+    const double sqrt_diag_i = sqrtDiag(i_large, p, q);
+#pragma omp parallel for schedule(dynamic)
+    for (std::size_t j = 0; j < total; ++j) {
+      const bool j_large = j < nl2;
+      const std::size_t rs = j_large ? j : j - nl2;
+      const std::size_t r = rs / (j_large ? nl_ : ns_), s = rs % (j_large ? nl_ : ns_);
+      if (threshold_ > 0.0 && sqrt_diag_i * sqrtDiag(j_large, r, s) < threshold_) {
+        out[j] = 0.0;
+        continue;
+      }
+      out[j] = twoElectronQuadruplet(fp, fq, basisFn(j_large, r), basisFn(j_large, s));
+    }
+  }
+
+ private:
+  const BasisFunction& basisFn(bool is_large, std::size_t idx) const {
+    return is_large ? large_[idx] : small_[idx];
+  }
+  double sqrtDiag(bool is_large, std::size_t p, std::size_t q) const {
+    if (threshold_ <= 0.0) return 0.0;
+    const std::size_t lo = p < q ? p : q, hi = p < q ? q : p;
+    const std::vector<double>& table = is_large ? sqrt_diag_ll_ : sqrt_diag_ss_;
+    return table[hi * (hi + 1) / 2 + lo];
+  }
+
+  const std::vector<BasisFunction>& large_;
+  const std::vector<BasisFunction>& small_;
+  std::size_t nl_, ns_;
+  double threshold_;
+  std::vector<double> sqrt_diag_ll_, sqrt_diag_ss_;
+};
+
 void zgemm(bool conj_trans_a, int m, int n, int k, const C* a, int lda, const C* b, int ldb, double beta, C* c,
            int ldc) {
   const C alpha(1.0, 0.0), bt(beta, 0.0);
@@ -75,29 +165,42 @@ Matrix<C> promote(const Matrix<double>& m) {
 RkbCholesky RkbCholesky::build(const std::vector<BasisFunction>& large_basis,
                                const std::vector<BasisFunction>& small_basis,
                                const Matrix<C>& rkb_coefficients, const Matrix<double>& large_transform,
-                               double threshold, CholeskyCheckReport* report) {
+                               double threshold, bool on_demand, CholeskyCheckReport* report) {
   const std::size_t nl = large_basis.size(), ns = small_basis.size();
   const std::size_t nl_sph = large_transform.cols();
   FlatVectors<double> flat;
   {
-    // The three real AO tensors (transient: released as soon as the decomposition is done): (LL|LL) and (SS|SS)
-    // 8-fold packed, the (LL|SS) cross block 4-fold packed (see CrossPackedTwoElectronTensor) --
-    // about a 4x reduction over the dense nl^2 x ns^2 array, since the decomposition itself only
-    // ever reads individual elements/rows (PairMatrixSource), never needs the dense layout.
-    progress("RKB Cholesky: real AO integrals (LL|LL), (LL|SS), (SS|SS)");
-    // Schwarz-prescreened at the SAME threshold the decomposition itself targets: an element
-    // this build drops was already going to contribute at most `threshold` of error to the
-    // reconstruction, which is exactly the accuracy the pivoted decomposition's own stopping
-    // rule (dmax < threshold) already budgets for -- see Cholesky_Decomposition.h's own comment
-    // on why the largest diagonal residual bounds every off-diagonal one.
-    const PackedTwoElectronTensor ll_ll = twoElectronIntegralsPacked(large_basis, threshold);
-    const CrossPackedTwoElectronTensor ll_ss =
-        twoElectronIntegralsCrossPacked(large_basis, small_basis, threshold);
-    const PackedTwoElectronTensor ss_ss = twoElectronIntegralsPacked(small_basis, threshold);
-    ProgressLine() << "RKB Cholesky: AO integrals done; decomposing the {LL} u {SS} pair matrix (dimension "
-                   << large_basis.size() * large_basis.size() + small_basis.size() * small_basis.size() << ")";
-    const UnionCoulombPairs pairs(ll_ll, ll_ss, ss_ss);
-    flat = choleskyDecomposePairsChecked<double>(pairs, threshold, report);
+    // ON_DEMAND_ERI (Input.h) selects between the fast path (UnionCoulombPairs: every quadruplet
+    // evaluated exactly once, into packed (LL|LL)/(LL|SS)/(SS|SS) tensors, but O(n_small^4/8) memory
+    // for (SS|SS)) and the on-demand one (OnDemandUnionCoulombPairs: no AO tensor ever materialized,
+    // but slower -- see its own comment). Default TRUE (on-demand): makes the std::bad_alloc this
+    // basis once hit (Xe/dyall.v2z's (SS|SS) alone needs ~85 GB) structurally impossible by default.
+    if (!on_demand) {
+      // Transient: released as soon as the decomposition is done. About a 4-8x reduction over the
+      // dense nl^2 x ns^2 array either way (PackedTwoElectronTensor/CrossPackedTwoElectronTensor),
+      // since the decomposition itself only ever reads individual elements/rows (PairMatrixSource),
+      // never needs the dense layout.
+      progress("RKB Cholesky: real AO integrals (LL|LL), (LL|SS), (SS|SS)");
+      // Schwarz-prescreened at the SAME threshold the decomposition itself targets: an element
+      // this build drops was already going to contribute at most `threshold` of error to the
+      // reconstruction, which is exactly the accuracy the pivoted decomposition's own stopping
+      // rule (dmax < threshold) already budgets for -- see Cholesky_Decomposition.h's own comment
+      // on why the largest diagonal residual bounds every off-diagonal one.
+      const PackedTwoElectronTensor ll_ll = twoElectronIntegralsPacked(large_basis, threshold);
+      const CrossPackedTwoElectronTensor ll_ss =
+          twoElectronIntegralsCrossPacked(large_basis, small_basis, threshold);
+      const PackedTwoElectronTensor ss_ss = twoElectronIntegralsPacked(small_basis, threshold);
+      ProgressLine() << "RKB Cholesky: AO integrals done; decomposing the {LL} u {SS} pair matrix (dimension "
+                     << nl * nl + ns * ns << ")";
+      const UnionCoulombPairs pairs(ll_ll, ll_ss, ss_ss);
+      flat = choleskyDecomposePairsChecked<double>(pairs, threshold, report);
+    } else {
+      ProgressLine() << "RKB Cholesky: ON_DEMAND_ERI TRUE -- decomposing the {LL} u {SS} pair matrix "
+                        "(dimension "
+                     << nl * nl + ns * ns << ") on demand, with no AO tensor ever built";
+      const OnDemandUnionCoulombPairs pairs(large_basis, small_basis, threshold);
+      flat = choleskyDecomposePairsChecked<double>(pairs, threshold, report);
+    }
   }
   ProgressLine() << "RKB Cholesky: " << flat.count << " vectors; projecting them into the RKB basis";
   RkbCholesky out;

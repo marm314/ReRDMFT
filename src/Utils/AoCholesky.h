@@ -7,6 +7,7 @@
 
 #include "CholeskyEri.h"
 #include "Cholesky_Decomposition.h"
+#include "MolecularBasis.h"
 #include "Matrix.h"
 
 namespace rerdmft {
@@ -28,6 +29,15 @@ struct AoCholesky {
   // reconstruction check against `eri`).
   static AoCholesky fromPacked(const PackedTwoElectronTensor& eri, double threshold,
                                CholeskyCheckReport* report = nullptr);
+  // Same decomposition, but reading (pq|rs) ON DEMAND (ElectronRepulsion.h's twoElectronQuadruplet,
+  // Schwarz-prescreened at `threshold`) instead of from a pre-built PackedTwoElectronTensor -- no
+  // n^2(n^2+1)/2-element dense array is ever materialized. The single-basis analogue of
+  // C4_DHF/RkbCholesky.cpp's OnDemandUnionCoulombPairs, for NON_RELATIVISTIC/X2C's own (Large,Large|
+  // Large,Large) integrals (Input.h's ON_DEMAND_ERI). Slower than fromPacked whenever the packed
+  // tensor would have fit in memory (every quadruplet can be recomputed across different pivots),
+  // but needs only O(n^2) memory (the Schwarz diagonal) regardless of basis size.
+  static AoCholesky fromOnDemand(const std::vector<BasisFunction>& basis, double threshold,
+                                 CholeskyCheckReport* report = nullptr);
 };
 
 // Fock matrices from the vectors (same definitions as NonRelHartreeFock.h's nonRelFockMatrix and

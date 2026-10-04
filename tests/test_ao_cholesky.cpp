@@ -10,7 +10,9 @@
 
 #include "AoCholesky.h"
 #include "ElectronRepulsion.h"
+#include "Integrals.h"
 #include "Matrix.h"
+#include "MolecularBasis.h"
 
 using namespace rerdmft;
 using C = std::complex<double>;
@@ -116,6 +118,40 @@ int main() {
     worst = std::max(worst, std::abs(mo_sp(a, b, c, d) - ref));
   }
   check(worst < 1e-9, "X2C spinor MO vectors reproduce the dense MO transform, max err " + std::to_string(worst));
+
+  // ---- fromOnDemand (Input.h's ON_DEMAND_ERI) matches fromPacked exactly, on a real basis ----
+  {
+    std::vector<BasisFunction> basis;
+    BasisFunction s;
+    s.element = "X"; s.x = 0; s.y = 0; s.z = 0; s.l = 0; s.cartesian = {0, 0, 0};
+    s.exponents = {1.2, 0.4}; s.coefficients = {0.5, 0.6};
+    basis.push_back(s);
+    for (const CartesianExponents& c : cartesianComponents(2)) {
+      BasisFunction d;
+      d.element = "X"; d.x = 0.3; d.y = -0.2; d.z = 1.1; d.l = 2; d.cartesian = c;
+      d.exponents = {0.55}; d.coefficients = {1.0};
+      basis.push_back(d);
+    }
+    normalizeCartesianBasis(basis);
+    const double threshold = 1e-10;
+    const PackedTwoElectronTensor packed = twoElectronIntegralsPacked(basis, threshold);
+    CholeskyCheckReport rep_packed, rep_on_demand;
+    const AoCholesky ao_packed = AoCholesky::fromPacked(packed, threshold, &rep_packed);
+    const AoCholesky ao_on_demand = AoCholesky::fromOnDemand(basis, threshold, &rep_on_demand);
+    check(ao_packed.nVectors() == ao_on_demand.nVectors(),
+          "fromOnDemand finds the same vector count as fromPacked (" + std::to_string(ao_packed.nVectors()) +
+              " vs " + std::to_string(ao_on_demand.nVectors()) + ")");
+    double worst_fock = 0;
+    Matrix<double> h2(basis.size(), basis.size(), 0.0), p2(basis.size(), basis.size(), 0.0);
+    for (std::size_t i = 0; i < basis.size(); ++i)
+      for (std::size_t j = i; j < basis.size(); ++j) {
+        h2(i, j) = h2(j, i) = rng.next();
+        p2(i, j) = p2(j, i) = rng.next();
+      }
+    worst_fock = maxDiff(nonRelFockMatrix(h2, ao_packed, p2), nonRelFockMatrix(h2, ao_on_demand, p2));
+    check(worst_fock < 1e-9,
+          "fromOnDemand's Fock matrix matches fromPacked's, max err " + std::to_string(worst_fock));
+  }
 
   std::cout << "\n" << g_checks - g_failures << " / " << g_checks << " checks passed\n";
   return g_failures == 0 ? 0 : 1;

@@ -18,6 +18,7 @@ X2C TRUE
 FUNCTIONAL PCCD
 FULL_OPTIMIZATION TRUE
 CHOLESKY TRUE
+ON_DEMAND_ERI FALSE  # off here to keep this example's historical fast runtime (the whole packed AO tensor already fits in memory); default is TRUE, see lih_gnof_c4_full_optimization_cholesky.inp for the on-demand path demonstrated explicitly.
 
 GEOMETRY
 Ne  0.000000   0.000000   0.000000

@@ -12,8 +12,6 @@ extern "C" {
 
 namespace rerdmft {
 
-namespace {
-
 // (pq|rs) for one specific quadruplet of individually-normalized cartesian
 // AOs, each placed at its own real atomic center. Built as a minimal,
 // independent 4-shell/4-atom libcint system per quadruplet (rather than a
@@ -107,8 +105,6 @@ std::vector<double> sqrtPairDiagonal(const std::vector<BasisFunction>& basis) {
   }
   return sqrt_diag;
 }
-
-}  // namespace
 
 Tensor4<double> twoElectronIntegrals(const std::vector<BasisFunction>& basis, double screening_threshold) {
   const std::size_t n = basis.size();

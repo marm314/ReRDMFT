@@ -11,6 +11,24 @@
 
 namespace rerdmft {
 
+// (pq|rs) for one specific quadruplet of individually-normalized cartesian AOs, each placed at its
+// own real atomic center -- a minimal, independent 4-shell/4-atom libcint system per call (not
+// shell-batched), so it is just as cheap to call this directly for ONE quadruplet at a time as it
+// is to loop over many of them building a full tensor. Exposed (out of ElectronRepulsion.cpp's own
+// anonymous namespace) specifically so a PairMatrixSource (Utils/Cholesky_Decomposition.h) can
+// compute rows of a Coulomb pair matrix ON DEMAND -- see C4_DHF/RkbCholesky.cpp -- without ever
+// materializing the full (pq|rs) tensor the ordinary builders below do, for cases where even the
+// packed storage of that full tensor (O(n^4/8)) would be too large to hold at once.
+double twoElectronQuadruplet(const BasisFunction& p, const BasisFunction& q, const BasisFunction& r,
+                              const BasisFunction& s);
+
+// sqrt((pq|pq)) for every unordered pair {p,q} of `basis`, in the standard symmetric-matrix
+// triangular index (hi*(hi+1)/2+lo) -- the per-pair "diagonal" the Schwarz prescreen bounds
+// |(pq|rs)| <= sqrt_diag[pq] * sqrt_diag[rs] against (see twoElectronIntegralsPacked's own
+// comment). O(n^2) quadruplets, cheap enough to precompute once even for a large `basis`. Exposed
+// for the same on-demand-PairMatrixSource use as twoElectronQuadruplet above.
+std::vector<double> sqrtPairDiagonal(const std::vector<BasisFunction>& basis);
+
 // Computes the full (real) electron-repulsion tensor in chemist's notation,
 //   (pq|rs) = integral integral p(1) q(1) (1/r12) r(2) s(2) dr1 dr2,
 // for a single already-normalized cartesian AO basis used on all four

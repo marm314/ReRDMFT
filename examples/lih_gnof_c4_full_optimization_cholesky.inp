@@ -13,6 +13,17 @@
 # ~1e-12-1e-15 reconstruction accuracy as the other two paths, at roughly half as many vectors as
 # decomposing the untouched full tensor would need. Compare the converged energy against
 # lih_gnof_c4_full_optimization.inp's own dense-integral result (they agree to ~1e-9 Hartree).
+#
+# ON_DEMAND_ERI TRUE (the default; kept explicit here to document it): this example demonstrates
+# the on-demand Coulomb-pair-matrix path (C4_DHF/RkbCholesky.cpp's OnDemandUnionCoulombPairs) --
+# every (LL|LL)/(LL|SS)/(SS|SS) quadruplet is evaluated as the pivoted decomposition needs it, no
+# packed/dense AO tensor is ever built. This is the architecture that made the Xe/dyall.v2z
+# std::bad_alloc crash (the packed (SS|SS) tensor alone needed ~85 GB) structurally impossible --
+# validated end to end here (bit-identical converged energy to the FALSE/packed path) because this
+# system is small enough to also run the classic packed path for comparison; every other CHOLESKY
+# TRUE example in this directory sets ON_DEMAND_ERI FALSE instead, purely to keep its historical,
+# faster runtime (its own packed tensor already fits comfortably in memory).
+ON_DEMAND_ERI TRUE
 NELEC 4
 BASIS lih-6-31g.gbs
 NON_RELATIVISTIC TRUE

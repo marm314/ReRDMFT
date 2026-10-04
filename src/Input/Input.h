@@ -196,6 +196,21 @@ class Input {
   // tighten it (more vectors, slower, closer to exact) without a rebuild.
   // Only meaningful when CHOLESKY is TRUE.
   double cholesky_threshold() const { return cholesky_threshold_; }
+  // Optional; defaults to TRUE. Only meaningful when CHOLESKY is TRUE: selects how the pivoted
+  // Cholesky decomposition reads its Coulomb pair matrix (Utils/Cholesky_Decomposition.h's
+  // PairMatrixSource). TRUE: every quadruplet is evaluated ON DEMAND, as the decomposition needs
+  // it (C4_DHF/RkbCholesky.cpp's OnDemandUnionCoulombPairs; Utils/AoCholesky.cpp's analogous
+  // single-basis class for NON_RELATIVISTIC/X2C) -- no packed/dense AO tensor is EVER
+  // materialized, trading speed (each quadruplet can be recomputed across different pivots) for a
+  // memory footprint of O(n^2) (the Schwarz diagonals) instead of O(n^4). FALSE: the classic
+  // route -- build the full packed (LL|LL)/(LL|SS)/(SS|SS) (or single-basis) AO tensor once, then
+  // decompose it; faster whenever that tensor actually fits in memory, which is every basis in
+  // examples/ except Xe/dyall.v2z (whose own (SS|SS) alone needs ~85 GB and crashed with
+  // std::bad_alloc before this on-demand path existed). Defaulting to TRUE makes that crash
+  // structurally impossible by default; examples/ sets this FALSE explicitly wherever CHOLESKY
+  // TRUE is used, to keep the existing fast runtimes, except one small worked example that keeps
+  // the default to demonstrate the on-demand path itself.
+  bool on_demand_eri() const { return on_demand_eri_; }
   // Optional; defaults to FALSE. TRUE: the HF/DHF SCF of every requested method (NON_RELATIVISTIC, X2C,
   // C4_SPINOR) is skipped; RESTART.NON_REL / RESTART.X2C_HF / RESTART.4C (written by an earlier run, possibly
   // at another geometry -- a potential-energy-curve scan) supply the MO coefficients and the occupation numbers
@@ -446,6 +461,7 @@ class Input {
   double density_tolerance_ = 1e-6;
   bool cholesky_ = false;
   double cholesky_threshold_ = 1e-10;
+  bool on_demand_eri_ = true;
   bool read_restart_ = false;
   std::string functional_ = "SD";
   bool has_functional_ = false;

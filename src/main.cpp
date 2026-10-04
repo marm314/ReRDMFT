@@ -3109,7 +3109,37 @@ int main(int argc, char** argv) {
     // Builds (or loads) the packed AO integrals. With CHOLESKY TRUE they are decomposed once into AO Cholesky
     // vectors (checked and, if needed, retried with a smaller batch -- Utils/Cholesky_Decomposition.h) and the
     // packed tensor is released unless DEBUG will compare against it.
+    //
+    // ON_DEMAND_ERI (Input.h, default TRUE): when CHOLESKY is also TRUE and DEBUG is not requesting the
+    // dense-vs-Cholesky comparison, the packed tensor is never built at all -- AoCholesky::fromOnDemand reads
+    // (pq|rs) straight from ElectronRepulsion.h's twoElectronQuadruplet, the same architecture as
+    // C4_DHF/RkbCholesky.cpp's OnDemandUnionCoulombPairs, trading speed for an O(n^2)-only memory footprint.
     const auto prepareNonRelEri = [&](const std::string& what) {
+      if (input.cholesky() && input.on_demand_eri() && !input.debug() && !ao_cholesky_ready) {
+        rerdmft::CholeskyCheckReport check;
+        ao_cholesky = rerdmft::AoCholesky::fromOnDemand(large_basis.functions(), input.cholesky_threshold(), &check);
+        // Same basis choice as the packed path below: NON_REL's own CARTESIAN keyword is applied to
+        // ao_cholesky directly (transformAoCholeskyToSpherical mirrors transformPackedChemist's effect on a
+        // packed tensor); X2C_HF's call always wants the untransformed Cartesian build.
+        if (what == "NON_REL" && !input.cartesian()) {
+          ao_cholesky = rerdmft::transformAoCholeskyToSpherical(ao_cholesky, nonrel_transform);
+        }
+        ao_cholesky_ready = true;
+        nonrel_eri_dim = ao_cholesky.n;
+        nonrel_eri_stored = 0;
+        logTiming("Two-electron integrals built (" + what + ", on demand)", t_start, t_checkpoint, timing_records);
+        std::ostringstream report;
+        report << std::scientific << std::setprecision(2)
+               << "  AO integrals held as " << ao_cholesky.nVectors() << " Cholesky vectors (threshold "
+               << input.cholesky_threshold() << ", batch " << check.batch_used << (check.retried ? ", retried" : "")
+               << "; max |reconstruction - on-demand AO| on the sampled elements = " << check.max_error
+               << ", tolerance " << check.tolerance << ")\n"
+               << "  NON_REL and X2C SCF Fock matrices and all MO-basis integrals are built from these vectors;\n"
+               << "  ON_DEMAND_ERI TRUE: no packed/dense AO tensor was ever built.\n";
+        ao_cholesky_report = report.str();
+        logTiming("AO Cholesky decomposition complete", t_start, t_checkpoint, timing_records);
+        return;
+      }
       nonrel_eri = buildNonRelEri(large_basis.functions());
       // NON_RELATIVISTIC's own basis choice (Input.h's CARTESIAN keyword) applies HERE, before the
       // Cholesky decomposition below -- so ao_cholesky comes out already in whichever basis was
@@ -3331,7 +3361,8 @@ int main(int argc, char** argv) {
         if (input.cholesky()) {
           rerdmft::CholeskyCheckReport check;
           rkb_cholesky = rerdmft::RkbCholesky::build(large_basis.functions(), small_basis.functions(), rkb_coefficients,
-                                                      large_transform_final, input.cholesky_threshold(), &check);
+                                                      large_transform_final, input.cholesky_threshold(),
+                                                      input.on_demand_eri(), &check);
           logTiming("Two-electron integrals built (C4_DHF, Cholesky vectors, READ_RESTART)", t_start, t_checkpoint, timing_records);
         } else {
           c4_spinor_eri = buildC4SpinorEri(input, large_basis.functions(), small_basis.functions(), rkb_coefficients,
@@ -4005,7 +4036,7 @@ int main(int argc, char** argv) {
         rerdmft::CholeskyCheckReport check;
         rkb_cholesky = rerdmft::RkbCholesky::build(large_basis.functions(), small_basis.functions(),
                                                     rkb_coefficients, large_transform_final,
-                                                    input.cholesky_threshold(), &check);
+                                                    input.cholesky_threshold(), input.on_demand_eri(), &check);
         std::ostringstream report;
         report << std::scientific << std::setprecision(2) << "  RKB integrals held as " << rkb_cholesky.nVectors()
                << " Cholesky vectors from one decomposition of the AO {LL} u {SS} Coulomb matrix (threshold "

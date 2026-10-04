@@ -16,6 +16,7 @@ FULL_OPTIMIZATION TRUE
 MACRO_ENERGY_TOLERANCE 1e-10
 DIIS FALSE
 CHOLESKY TRUE
+ON_DEMAND_ERI FALSE  # off here to keep this example's historical fast runtime (the whole packed AO tensor already fits in memory); default is TRUE, see lih_gnof_c4_full_optimization_cholesky.inp for the on-demand path demonstrated explicitly.
 
 GEOMETRY
 Li  0.000000   0.000000   0.000000
