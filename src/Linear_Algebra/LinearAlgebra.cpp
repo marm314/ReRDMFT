@@ -293,6 +293,19 @@ Matrix<double> canonicalOrthogonalize(const Matrix<double>& s, double threshold,
     report->smallest_kept = smallest_kept;
     report->largest_dropped = largest_dropped;
   }
+  // Nothing actually dropped: X = U diag(1/sqrt(w)) alone is Loewdin's CANONICAL orthogonalization
+  // -- valid (X^T S X = I) but NOT symmetric, unlike inverseSqrt's own U diag(1/sqrt(w)) U^T. Both
+  // are equally correct S^-1/2-equivalent choices, but they pick different (arbitrary, LAPACK-
+  // eigenvector-ordering-dependent) representatives inside an exactly-degenerate eigenspace -- an
+  // atom with full p/d/f shells has several -- and switching between them with NOTHING actually
+  // reduced has already been observed to flip an already-borderline downstream numerical check
+  // (FULL_OPTIMIZATION's gradient-vs-finite-difference test) from pass to fail for no accuracy gain
+  // (see inverseSqrt's own comment on the same phenomenon; confirmed directly on NON_REL/Kr/
+  // dyall.v2z/CARTESIAN FALSE: canonicalOrthogonalize's bare form failed that check at 1.47e-6 vs
+  // its 1e-6 threshold, this symmetrized one passes). So: symmetrize back to inverseSqrt's own exact
+  // result whenever n_eff == un (the only case "symmetric" is even well-defined for -- a genuinely
+  // reduced X is n x n_eff with n_eff < n, not square, so this multiplication is skipped then).
+  if (n_eff == un) return x * transpose(u);
   return x;
 }
 

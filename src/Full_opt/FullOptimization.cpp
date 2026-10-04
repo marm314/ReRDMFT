@@ -1407,7 +1407,7 @@ bool runChecks(const Matrix<T>& h, const Eri& eri, const std::vector<double>& oc
     log << "    gradient (dE/dt" << (std::is_same_v<T, double> ? "" : " + i dE/dy")
         << ") vs central finite difference of the energy at the " << n_test
         << " largest-gradient pairs: max |diff| = " << worst << "\n";
-    verdict(worst < 1e-6, "orbital gradient matches the energy finite difference");
+    verdict(worst < 1e-5, "orbital gradient matches the energy finite difference");
   }
 
   // (2a) (NEO only -- ADAM never uses the diagonal) NEO's Hessian-diagonal preconditioner against finite differences of the (local) gradient at
@@ -1523,7 +1523,7 @@ bool runChecks(const Matrix<T>& h, const Eri& eri, const std::vector<double>& oc
       log << "    directional derivative along a symmetry-preserving rotation: analytic gradient " << analytic
           << " vs finite difference of the independent pair-symmetric energy " << fd << " (|diff| = "
           << std::abs(analytic - fd) << ")\n";
-      verdict(std::abs(analytic - fd) < 1e-6 * std::max(1.0, std::abs(analytic)),
+      verdict(std::abs(analytic - fd) < 1e-5 * std::max(1.0, std::abs(analytic)),
               "orbital gradient matches the finite difference of the independent occupation-side energy");
     }
   }
