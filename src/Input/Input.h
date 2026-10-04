@@ -211,6 +211,20 @@ class Input {
   // TRUE is used, to keep the existing fast runtimes, except one small worked example that keeps
   // the default to demonstrate the on-demand path itself.
   bool on_demand_eri() const { return on_demand_eri_; }
+  // Optional; defaults to 1e-6 (DIRAC's own STOL(1)). The large-component LOWGEN safety net's
+  // threshold (Utils/LinearAlgebra.h's canonicalOrthogonalize): below this eigenvalue, a direction
+  // in the large-component overlap is genuinely DROPPED rather than kept-and-inverted, catching
+  // residual linear dependence beyond whatever deterministic reduction (X2C/C4_SPINOR's spherical
+  // one; NON_RELATIVISTIC's own, only with CARTESIAN FALSE) already removes. Used identically by
+  // NON_RELATIVISTIC (on s_large_cart, CARTESIAN TRUE or FALSE), X2C and C4_SPINOR (on their own
+  // spherical large-component overlap) -- the SAME value, one keyword, all three call sites.
+  double x_lin_dep_thrs_l() const { return x_lin_dep_thrs_l_; }
+  // Optional; defaults to 1e-8 (DIRAC's own STOL(2)). The RKB small-component overlap's own LOWGEN
+  // threshold (canonicalOrthogonalizeHermitian) -- only meaningful for X2C/C4_SPINOR, which are the
+  // only methods with a small component. Tighter than X_LIN_DEP_THRS_L by convention (DIRAC's own
+  // choice): the small-component overlap is generally better-conditioned once the large side's own
+  // reduction is already in effect (see doc/RKB.tex's own empirical note on this).
+  double x_lin_dep_thrs_s() const { return x_lin_dep_thrs_s_; }
   // Optional; defaults to FALSE. TRUE: the HF/DHF SCF of every requested method (NON_RELATIVISTIC, X2C,
   // C4_SPINOR) is skipped; RESTART.NON_REL / RESTART.X2C_HF / RESTART.4C (written by an earlier run, possibly
   // at another geometry -- a potential-energy-curve scan) supply the MO coefficients and the occupation numbers
@@ -462,6 +476,8 @@ class Input {
   bool cholesky_ = false;
   double cholesky_threshold_ = 1e-10;
   bool on_demand_eri_ = true;
+  double x_lin_dep_thrs_l_ = 1e-6;
+  double x_lin_dep_thrs_s_ = 1e-8;
   bool read_restart_ = false;
   std::string functional_ = "SD";
   bool has_functional_ = false;

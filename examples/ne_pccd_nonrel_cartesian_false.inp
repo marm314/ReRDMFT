@@ -1,0 +1,32 @@
+# Example ReRDMFT input file: Ne, cc-pVDZ, FUNCTIONAL PCCD, FULL_OPTIMIZATION, CARTESIAN FALSE --
+# the CARTESIAN FALSE counterpart of ne_pccd_full_optimization.inp, same system, same functional.
+#
+# NON_RELATIVISTIC's own large-component basis defaults to Cartesian (CARTESIAN TRUE); CARTESIAN
+# FALSE instead reduces it to real spherical harmonics first (Utils/SphericalTransform.h, the same
+# reduction X2C/C4_SPINOR always use), with a LOWGEN safety net (main.cpp's own canonicalOrthogonalize
+# call on s_large_cart, threshold 1e-6) catching any further residual linear dependence -- same
+# architecture as X2C/C4_SPINOR's own large-component treatment, now also available for NON_REL.
+#
+# Converged total energies here are NOT expected to match ne_pccd_full_optimization.inp's own
+# (CARTESIAN TRUE) values exactly -- this is a real, well-known Cartesian-vs-spherical Gaussian
+# basis difference, not a bug: a Cartesian d-shell (6 components: xx,yy,zz,xy,xz,yz) spans one more
+# dimension than the 5 real spherical harmonics it reduces to, and the "extra" (xx+yy+zz) trace
+# combination is itself an s-like radial function -- genuinely variationally useful whenever the
+# basis has no explicit s-function at that same exponent, exactly cc-pVDZ's case for Ne. Removing it
+# (going spherical) can only raise the energy, never lower it:
+#   HF:               -128.4887756 Hartree (CARTESIAN TRUE: -128.4888662 Hartree, ~9.1e-5 lower)
+#   FULL_OPTIMIZATION: -128.5578703 Hartree (CARTESIAN TRUE: -128.5596739 Hartree, ~1.8e-3 lower)
+# (ne_pccd_full_optimization.inp's own CARTESIAN TRUE result matches the literature oo-pCCD/cc-pVDZ
+# reference for Ne, -128.559674 Hartree, to ~1e-7 Hartree -- confirming CARTESIAN TRUE, not
+# CARTESIAN FALSE, is the convention that reference value itself used).
+NELEC 10
+BASIS ne-cc-pvdz.gbs
+NON_RELATIVISTIC TRUE
+CARTESIAN FALSE
+FUNCTIONAL PCCD
+FULL_OPTIMIZATION TRUE
+CHOLESKY FALSE
+
+GEOMETRY
+Ne  0.000000   0.000000   0.000000
+END

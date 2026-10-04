@@ -72,6 +72,20 @@ inline Matrix<std::complex<double>> dagger(const Matrix<std::complex<double>>& a
   return result;
 }
 
+// Real transpose -- dagger()'s real-matrix counterpart. Needed explicitly (not just relied on via
+// a symmetric X) once a real X (e.g. NON_RELATIVISTIC's own Loewdin matrix) can come back
+// RECTANGULAR from a rank-reducing canonical orthogonalization: X^T F X then needs the transpose
+// written out, since X is no longer square and "symmetric" stops being a well-formed shortcut.
+inline Matrix<double> transpose(const Matrix<double>& a) {
+  Matrix<double> result(a.cols(), a.rows());
+  for (std::size_t i = 0; i < a.rows(); ++i) {
+    for (std::size_t j = 0; j < a.cols(); ++j) {
+      result(j, i) = a(i, j);
+    }
+  }
+  return result;
+}
+
 }  // namespace rerdmft
 
 #endif  // RERDMFT_MATRIX_H

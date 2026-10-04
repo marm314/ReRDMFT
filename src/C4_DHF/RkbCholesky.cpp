@@ -308,13 +308,19 @@ CholeskyEri<C> rkbCholeskyToMo(const RkbCholesky& ao, const Matrix<C>& c, std::s
   // heavy element's large RKB dimension. nn = 0 (the untrimmed FULL_OPTIMIZATION_4C_NEG factory call) makes
   // m = nmo, reducing exactly to the old unrestricted transform.
   const std::size_t nn = n_negative, m = nmo - nn;
-  std::vector<Matrix<C>> out(ao.nVectors());
+  const std::size_t nchol = ao.nVectors();
+  // Flat (nchol x m*m) buffer: row l IS W_L's m x m entries, reshaped. Built directly here (instead of a
+  // `vector<Matrix<C>>` of per-vector W_L matrices that the nn>0 branch below used to then COPY again into
+  // a separate `a` for the Gram-matrix GEMM) so the nn>0 (compression) path never holds two copies of the
+  // single largest allocation in this function at once -- real memory at a heavy element's N_chol scale
+  // (Xe/dyall.v2z: N_chol in the tens of thousands, m=264, so each copy is tens of GB).
+  Matrix<C> a(nchol, m * m);
   const SerialBlasScope serial_blas_guard;
 #pragma omp parallel
   {
-    Matrix<C> bc, tmp(nl, m), bp(m, m);
+    Matrix<C> tmp(nl, m), bp(m, m);
 #pragma omp for schedule(dynamic)
-    for (std::size_t l = 0; l < ao.nVectors(); ++l) {
+    for (std::size_t l = 0; l < nchol; ++l) {
       for (int f = 0; f < 4; ++f) {
         const Matrix<C>* bf;
         Matrix<C> large_c;
@@ -330,23 +336,24 @@ CholeskyEri<C> rkbCholeskyToMo(const RkbCholesky& ao, const Matrix<C>& c, std::s
         zgemm(true, static_cast<int>(m), static_cast<int>(m), static_cast<int>(nl), cf, static_cast<int>(nmo),
               tmp.data(), static_cast<int>(m), f == 0 ? 0.0 : 1.0, bp.data(), static_cast<int>(m));   // += C_f(:,nn:)^+ B^f C_f(:,nn:)
       }
-      Matrix<C> w(m, m);
       for (std::size_t x = 0; x < m; ++x)
-        for (std::size_t y = 0; y < m; ++y) w(x, y) = bp(y, x);  // W = B'^T
-      out[l] = std::move(w);
+        for (std::size_t y = 0; y < m; ++y) a(l, x * m + y) = bp(y, x);  // W_L = B'^T, flattened into row l
     }
   }
-  if (nn == 0) return CholeskyEri<C>::fromVectors(out);
+  if (nn == 0) {
+    std::vector<Matrix<C>> out(nchol);
+    for (std::size_t l = 0; l < nchol; ++l) {
+      Matrix<C> w(m, m);
+      std::copy(a.data() + l * m * m, a.data() + (l + 1) * m * m, w.data());
+      out[l] = std::move(w);
+    }
+    return CholeskyEri<C>::fromVectors(out);
+  }
 
   // Recompress: rows A_L = the m^2 entries of W_L (already the positive-energy block, nothing left to slice);
   // M = A^T conj(A) is unchanged by any unitary mixing of the rows, so diagonalize the Gram matrix
   // G = A A^dagger (G u_k = lambda_k u_k) and keep A'_k = sum_L conj(u_k(L)) A_L for lambda_k > tau:
   // dropping the others changes every element of M by at most the sum of their eigenvalues.
-  const std::size_t nchol = out.size();
-  Matrix<C> a(nchol, m * m);
-  for (std::size_t l = 0; l < nchol; ++l)
-    for (std::size_t x = 0; x < m; ++x)
-      for (std::size_t y = 0; y < m; ++y) a(l, x * m + y) = out[l](x, y);
   Matrix<C> gram(nchol, nchol);
   {
     const C alpha(1.0, 0.0), beta(0.0, 0.0);

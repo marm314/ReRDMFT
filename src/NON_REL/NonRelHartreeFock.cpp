@@ -131,8 +131,11 @@ NonRelHartreeFockResult nonRelScfImpl(
     // DIIS: extrapolate F (the first iteration has a single pair and returns F unchanged).
     const Matrix<double> fock_scf =
         use_diis ? diis.extrapolate(scfCommutatorError(fock, p_current, overlap), fock) : fock;
-    // X_large is symmetric (S_Large^-1/2), so this is X^dagger F X exactly.
-    const Matrix<double> fock_ortho = x_large * (fock_scf * x_large);
+    // X^T F X: written explicitly (not X * F * X relying on X being square-symmetric) so this
+    // still works when X comes back genuinely RECTANGULAR (main.cpp's LOWGEN safety net on
+    // s_large_cart actually drops a direction) -- a no-op change whenever X is square, since
+    // X^T == X for a symmetric square X.
+    const Matrix<double> fock_ortho = transpose(x_large) * (fock_scf * x_large);
     const SymmetricEigenResult eig = diagonalizeSymmetric(fock_ortho);
     const Matrix<double> c_matrix = x_large * eig.eigenvectors;
     const Matrix<double> p_new = nonRelDensityMatrix(c_matrix, n_electrons);

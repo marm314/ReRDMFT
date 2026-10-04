@@ -2531,7 +2531,11 @@ void writeNonRelFcidump(const rerdmft::Input& input, const rerdmft::Matrix<doubl
                         const rerdmft::PackedTwoElectronTensor& eri_ao, const rerdmft::AoCholesky& ao_cholesky,
                         const rerdmft::RestartCapture& capture, double nuclear_repulsion_energy, std::ostream& log) {
   if (!input.fcidump()) return;
-  const std::size_t n = h_core_nonrel.rows();
+  // c_base.cols(), NOT h_core_nonrel.rows(): the two only differ if the LOWGEN safety net on
+  // s_large_cart (main.cpp's own canonicalOrthogonalize call) actually drops a direction, making
+  // the achieved MO count smaller than the AO one -- norb must track the former (what c_base/h_mo
+  // actually are), or writeFcidump's own dimension check throws.
+  const std::size_t n = c_base.cols();
   const auto c_final = c_base * nonrelSpatialRotation(capture, n);
   const auto h_mo = rerdmft::moOneElectronTransform(h_core_nonrel, c_final);
   if (input.cholesky()) {
@@ -2964,7 +2968,26 @@ int main(int argc, char** argv) {
       nonrel_transform = nonrel_spherical.transform;
       s_large_cart = rerdmft::transformToSpherical(s_large_cart, nonrel_transform);
     }
-    x_large_cart = rerdmft::inverseSqrt(s_large_cart);
+    // DIRAC-style LOWGEN safety net (same STOL(1)-style threshold, Input.h's X_LIN_DEP_THRS_L, as
+    // X2C/C4_SPINOR's own large-component treatment, see the X2C/C4_SPINOR construction block
+    // below) -- catches genuine residual linear dependence in s_large_cart (CARTESIAN TRUE: the
+    // raw Cartesian overlap itself; CARTESIAN FALSE: whatever survives the deterministic spherical
+    // reduction above) that plain inverseSqrt would otherwise throw on instead of handling
+    // gracefully. x_large_cart becomes genuinely RECTANGULAR (fewer columns than rows) only if this
+    // actually finds something to drop -- every basis in examples/ keeps it square at the default
+    // threshold, bit-identical to inverseSqrt's own result, since canonicalOrthogonalize reduces to
+    // the exact same symmetric-orthogonalization matrix when nothing crosses the threshold. The
+    // one-electron Hamiltonian/two-electron integrals themselves stay at the FULL s_large_cart
+    // dimension either way -- only this orthonormalizing/SCF-basis matrix shrinks, the same pattern
+    // X2C/C4_SPINOR's own small-component LOWGEN already uses.
+    rerdmft::RankReductionReport nonrel_lowdin_report;
+    x_large_cart = rerdmft::canonicalOrthogonalize(s_large_cart, input.x_lin_dep_thrs_l(), &nonrel_lowdin_report);
+    if (nonrel_lowdin_report.n_dropped > 0) {
+      std::cout << "  Note: NON_REL large-component LOWGEN safety net (X_LIN_DEP_THRS_L = "
+                << input.x_lin_dep_thrs_l() << ") dropped " << nonrel_lowdin_report.n_dropped
+                << " near-linearly-dependent direction(s) (largest dropped eigenvalue "
+                << nonrel_lowdin_report.largest_dropped << ").\n";
+    }
 
     // The small-component basis and every RKB/relativistic quantity built from it are only ever
     // read by X2C's own report/SCF and by C4_SPINOR below -- NON_RELATIVISTIC builds its own
@@ -3003,8 +3026,8 @@ int main(int argc, char** argv) {
       large_spherical = rerdmft::buildSphericalTransform(large_basis.functions());
       large_spherical_active = large_spherical.n_spherical != large_basis.functions().size();
 
-      // DIRAC's own LOWGEN safety net (Utils/LinearAlgebra.h's canonicalOrthogonalize, STOL(1)=1e-6
-      // threshold, matching dirrdn.F): catches GENUINE residual linear dependence in the spherical
+      // DIRAC's own LOWGEN safety net (Utils/LinearAlgebra.h's canonicalOrthogonalize, STOL(1)-style
+      // threshold, Input.h's X_LIN_DEP_THRS_L, matching dirrdn.F): catches GENUINE residual linear dependence in the spherical
       // large-component overlap (e.g. near-duplicate exponents across different shells) that the
       // exact, deterministic spherical reduction above does not remove. Only actually applied (and
       // only then does the orthonormal basis stop matching today's plain-Loewdin one) when it finds
@@ -3020,10 +3043,10 @@ int main(int argc, char** argv) {
             rerdmft::transformToSpherical(s_large_cart, large_spherical.transform);
         rerdmft::RankReductionReport large_lowdin_report;
         const rerdmft::Matrix<double> large_lowdin =
-            rerdmft::canonicalOrthogonalize(s_large_spherical_only, 1e-6, &large_lowdin_report);
+            rerdmft::canonicalOrthogonalize(s_large_spherical_only, input.x_lin_dep_thrs_l(), &large_lowdin_report);
         if (large_lowdin_report.n_dropped > 0) {
-          std::cout << "  Note: large-component LOWGEN safety net (DIRAC STOL(1)-style, threshold "
-                        "1e-6) dropped "
+          std::cout << "  Note: large-component LOWGEN safety net (X_LIN_DEP_THRS_L = "
+                     << input.x_lin_dep_thrs_l() << ") dropped "
                      << large_lowdin_report.n_dropped
                      << " near-linearly-dependent direction(s) beyond the spherical reduction "
                         "(largest dropped eigenvalue "
@@ -3047,20 +3070,22 @@ int main(int argc, char** argv) {
 
       s_small_ukb = rerdmft::overlapMatrix(small_basis.functions());
       s_small = rerdmft::rkbSmallOverlapMatrix(small_basis.functions(), rkb_coefficients);
-      // Same LOWGEN safety net, small/RKB side (DIRAC STOL(2)-style threshold 1e-8): only actually
-      // consulted (and only then does x_small stop matching today's plain inverseSqrtHermitian
-      // result bit-for-bit) if it finds something to drop. Unlike the large side above, a genuine
-      // drop HERE cannot be silently absorbed by re-projecting something upstream -- it would mean
-      // n_small_RKB < n_large (DIRAC's accepted NESH != NPSH), which this project does not yet
-      // thread through xFullMatrix/sFullMatrix/RkbCholesky/FullOptimization's no-pair logic/Kramers
-      // utilities/RESTART -- so this throws a clear, actionable error instead of proceeding unsafely.
+      // Same LOWGEN safety net, small/RKB side (DIRAC STOL(2)-style threshold, Input.h's
+      // X_LIN_DEP_THRS_S): only actually consulted (and only then does x_small stop matching
+      // today's plain inverseSqrtHermitian result bit-for-bit) if it finds something to drop.
+      // Unlike the large side above, a genuine drop HERE cannot be silently absorbed by
+      // re-projecting something upstream -- it would mean n_small_RKB < n_large (DIRAC's accepted
+      // NESH != NPSH), which this project does not yet thread through xFullMatrix/sFullMatrix/
+      // RkbCholesky/FullOptimization's no-pair logic/Kramers utilities/RESTART -- so this throws a
+      // clear, actionable error instead of proceeding unsafely.
       {
         rerdmft::RankReductionReport small_lowdin_report;
-        rerdmft::canonicalOrthogonalizeHermitian(s_small, 1e-8, &small_lowdin_report);
+        rerdmft::canonicalOrthogonalizeHermitian(s_small, input.x_lin_dep_thrs_s(), &small_lowdin_report);
         if (small_lowdin_report.n_dropped > 0) {
           throw std::runtime_error(
               "RKB small-component overlap has " + std::to_string(small_lowdin_report.n_dropped) +
-              " near-linearly-dependent direction(s) (DIRAC STOL(2)-style threshold 1e-8, largest "
+              " near-linearly-dependent direction(s) (X_LIN_DEP_THRS_S = " +
+              std::to_string(input.x_lin_dep_thrs_s()) + ", largest "
               "dropped eigenvalue " + std::to_string(small_lowdin_report.largest_dropped) +
               ") beyond what the large-component side's own reduction already accounts for -- this "
               "is the genuine asymmetric-dimension case (DIRAC's NESH != NPSH) that this project "
@@ -3492,7 +3517,9 @@ int main(int argc, char** argv) {
           rerdmft::nuclearAttractionMatrix(large_basis.functions(), input.geometry());
       auto h_core_nonrel = schrodinger_kinetic + vext_large;
       if (!input.cartesian()) h_core_nonrel = rerdmft::transformToSpherical(h_core_nonrel, nonrel_transform);
-      h_core_nonrel_ortho = x_large_cart * (h_core_nonrel * x_large_cart);
+      // X^T h X, written explicitly (see NonRelHartreeFock.cpp's own identical comment) so this still
+      // works if x_large_cart comes back rectangular from the LOWGEN safety net below.
+      h_core_nonrel_ortho = rerdmft::transpose(x_large_cart) * (h_core_nonrel * x_large_cart);
       h_core_nonrel_eig = rerdmft::diagonalizeSymmetric(h_core_nonrel_ortho);
 
       const auto nonrel_c_initial = x_large_cart * h_core_nonrel_eig.eigenvectors;

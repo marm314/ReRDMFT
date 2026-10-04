@@ -185,6 +185,18 @@ void Input::read(const std::string& filename) {
       cholesky_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "ON_DEMAND_ERI") {
       on_demand_eri_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "X_LIN_DEP_THRS_L") {
+      x_lin_dep_thrs_l_ = parseDouble(iss, line_number, keyword);
+      if (!(x_lin_dep_thrs_l_ > 0.0)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": X_LIN_DEP_THRS_L must be positive");
+      }
+    } else if (keyword == "X_LIN_DEP_THRS_S") {
+      x_lin_dep_thrs_s_ = parseDouble(iss, line_number, keyword);
+      if (!(x_lin_dep_thrs_s_ > 0.0)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": X_LIN_DEP_THRS_S must be positive");
+      }
     } else if (keyword == "CARTESIAN") {
       cartesian_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "PRECONDITION_SMALL_OVERLAP") {
@@ -427,6 +439,8 @@ void Input::print(std::ostream& out) const {
   line("DENSITY_TOLERANCE") << density_tolerance_ << "\n";
   line("CHOLESKY") << flag(cholesky_) << "\n";
   line("ON_DEMAND_ERI") << flag(on_demand_eri_) << "\n";
+  line("X_LIN_DEP_THRS_L") << x_lin_dep_thrs_l_ << "\n";
+  line("X_LIN_DEP_THRS_S") << x_lin_dep_thrs_s_ << "\n";
   line("CARTESIAN") << flag(cartesian_) << "\n";
   line("PRECONDITION_SMALL_OVERLAP") << flag(precondition_small_overlap_) << "\n";
   line("CHOLESKY_THRESHOLD") << cholesky_threshold_ << "\n";
