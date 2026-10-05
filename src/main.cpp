@@ -74,6 +74,7 @@
 #include "SpinorBasis.h"
 #include "SpinorRotation.h"
 #include "SQP.h"
+#include "UkbFockMatrixDirect.h"
 #include "UkbHamiltonian.h"
 #include "X2C_decoupling.h"
 #include "X2C_DensityMatrix.h"
@@ -2835,6 +2836,11 @@ int main(int argc, char** argv) {
   rerdmft::Matrix<std::complex<double>> h_ukb;
   rerdmft::Matrix<std::complex<double>> rkb_coefficients;
   rerdmft::Matrix<std::complex<double>> h_rkb;
+  // SCF_DIRECT_4C only: embeds an RKB-basis density into the raw Cartesian-Large/elementary-Small
+  // UKB basis UkbFockMatrixDirect.h's ukbFockTwoElectronDirect operates in (and projects its raw
+  // output back) -- built once, right after rkb_coefficients is row-projected to its final
+  // spherical dimension, below. Left empty (unused) otherwise.
+  rerdmft::Matrix<std::complex<double>> v_total;
   // s_large_cart/x_large_cart: NON_RELATIVISTIC's own large-component overlap/Loewdin matrix, built
   // once from large_basis.functions() and used EXCLUSIVELY by NON_RELATIVISTIC -- Cartesian by
   // default (CARTESIAN TRUE, Input.h), or spherically transformed (via nonrel_transform below) when
@@ -3063,6 +3069,9 @@ int main(int argc, char** argv) {
         h_ukb = rerdmft::dagger(v_sph) * (h_ukb * v_sph);
         rkb_coefficients =
             rerdmft::dagger(rerdmft::spinDuplicateComplex(large_transform_final)) * rkb_coefficients;
+        if (input.scf_direct_4c()) {
+          v_total = v_sph * rerdmft::rkbEmbeddingMatrix(rkb_coefficients);
+        }
       }
 
       h_rkb = rerdmft::rkbHamiltonianMatrix(h_ukb, rkb_coefficients);
@@ -4056,7 +4065,15 @@ int main(int argc, char** argv) {
       density_matrix = rerdmft::rkbDensityMatrix(c_dhf, input.n_electrons());
 
       c4_eri_dim = 4 * x_large.rows();
-      if (input.cholesky()) {
+      // SCF_DIRECT_4C: the DHF SCF iterations build their Fock matrices fully integral-direct
+      // (UkbDirectEriSource below), never holding a two-electron representation during the SCF --
+      // but FUNCTIONAL/FULL_OPTIMIZATION still needs actual MO-basis integrals afterward, built the
+      // SAME way CHOLESKY TRUE already builds them (RkbCholesky::build once, then rkbCholeskyToMo).
+      // So SCF_DIRECT_4C implies the Cholesky (not dense) branch for everything below EXCEPT the
+      // SCF-loop dispatch itself, which takes the direct kernel regardless of this flag.
+      const bool use_cholesky_integrals = input.cholesky() || input.scf_direct_4c();
+      const rerdmft::UkbDirectEriSource ukb_direct_source{large_basis.functions(), small_basis.functions(), v_total};
+      if (use_cholesky_integrals) {
         // ONE decomposition of the real AO Coulomb matrix over {LL} u {SS} pairs; everything else (SCF Fock
         // matrices, MO-basis vectors) follows from the vectors. The packed RKB tensor is built only under
         // DEBUG, exactly (no Cholesky), as the dense reference for the dense-vs-Cholesky checks.
@@ -4088,8 +4105,9 @@ int main(int argc, char** argv) {
         logTiming("Two-electron integrals built (C4_DHF)", t_start, t_checkpoint, timing_records);
       }
 
-      fock_matrix = input.cholesky() ? rerdmft::rkbFockMatrix(h_rkb, rkb_cholesky, density_matrix)
-                                     : rerdmft::rkbFockMatrix(h_rkb, c4_spinor_eri, density_matrix);
+      fock_matrix = input.scf_direct_4c() ? rerdmft::rkbFockMatrix(h_rkb, ukb_direct_source, density_matrix)
+                    : input.cholesky()    ? rerdmft::rkbFockMatrix(h_rkb, rkb_cholesky, density_matrix)
+                                          : rerdmft::rkbFockMatrix(h_rkb, c4_spinor_eri, density_matrix);
 
       {
         // The Kramers-restricted SCF below projects the density onto its time-reversal-even part
@@ -4111,7 +4129,9 @@ int main(int argc, char** argv) {
             input.mixing(), s_full, input.scf_diis_size(), input.max_iterations(),
             input.energy_tolerance(), input.density_tolerance());
       };
-      dhf_result = input.cholesky() ? run_dhf_scf(rkb_cholesky) : run_dhf_scf(c4_spinor_eri);
+      dhf_result = input.scf_direct_4c() ? run_dhf_scf(ukb_direct_source)
+                   : input.cholesky()    ? run_dhf_scf(rkb_cholesky)
+                                         : run_dhf_scf(c4_spinor_eri);
       logTiming("SCF loop complete", t_start, t_checkpoint, timing_records);
 
       // Canonicalize each converged Kramers pair's relative phase
@@ -4156,10 +4176,10 @@ int main(int argc, char** argv) {
         // builds the FULL (positive+negative-energy) n_mo x n_mo vector per Cholesky vector before trimming
         // to the positive-energy block, i.e. 4x the final size, times N_chol -- for a heavy element this is
         // easily several GB of pure waste when nothing downstream reads c4_mo_chol at all.
-        if (input.cholesky() && (c4_dense || input.has_functional())) {
+        if (use_cholesky_integrals && (c4_dense || input.has_functional())) {
           c4_mo_chol = rerdmft::rkbCholeskyToMo(rkb_cholesky, dhf_result.c_dhf, h_mo.rows() / 2, input.cholesky_threshold());
         }
-        if (!input.cholesky() || input.debug()) {
+        if (!use_cholesky_integrals || input.debug()) {
           c4_mo_sym = rerdmft::rkbMoTwoElectronSymmetric(c4_spinor_eri, dhf_result.c_dhf);
         } else if (input.hessian_mean_field()) {
           c4_mo_sym = rerdmft::symmetricFromCholesky(c4_mo_chol);
@@ -4375,7 +4395,7 @@ int main(int argc, char** argv) {
               input.full_optimization_4c_neg(), t_start, t_checkpoint,
               timing_records, &c4_restart, eri_full_factory, nullptr, occ_in);
         };
-        if (input.cholesky()) {
+        if (use_cholesky_integrals) {
           // FULL_OPTIMIZATION_4C_NEG needs the negative-energy block too: the trimmed vector above
           // has it zeroed and recompressed away, so the full-block vectors are built separately --
           // LAZILY, via this factory, so the no-pair FULL_OPTIMIZATION loop inside dhf_functional()

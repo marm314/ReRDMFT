@@ -36,6 +36,21 @@ class MolecularBasis {
   std::vector<BasisFunction> functions_;
 };
 
+// One contracted shell's location within a flat BasisFunction list: `first` is the index of its
+// first Cartesian component, `count` (== cartesianComponents(l).size()) how many consecutive
+// entries belong to it. MolecularBasis::build's own construction loop guarantees shells appear as
+// consecutive runs of exactly this many entries sharing the same center/l/exponents/coefficients
+// (differing only in `.cartesian`) -- the same layout invariant SphericalTransform.h's own
+// per-shell block-diagonal transform already relies on. Exposed so integral code can evaluate a
+// whole shell quartet in ONE libcint call (any one member of the group works identically as the
+// "representative" BasisFunction, since atm/bas/env never reference `.cartesian` -- see
+// ElectronRepulsion.h's twoElectronShellQuartet) instead of once per individual AO quadruplet.
+struct ShellInfo {
+  std::size_t first = 0;
+  std::size_t count = 0;
+};
+std::vector<ShellInfo> groupIntoShells(const std::vector<BasisFunction>& basis);
+
 }  // namespace rerdmft
 
 #endif  // RERDMFT_MOLECULARBASIS_H

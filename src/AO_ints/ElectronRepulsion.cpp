@@ -87,6 +87,99 @@ double twoElectronQuadruplet(const BasisFunction& p, const BasisFunction& q,
   return buf[entry];
 }
 
+ShellQuartetBlock twoElectronShellQuartet(const std::vector<BasisFunction>& basis, const ShellInfo& shell_p,
+                                           const ShellInfo& shell_q, const ShellInfo& shell_r,
+                                           const ShellInfo& shell_s) {
+  const ShellInfo* shells[4] = {&shell_p, &shell_q, &shell_r, &shell_s};
+  // Shell-level libcint setup, using each shell's FIRST member as the representative -- any member
+  // would give the identical atm/bas/env (none of it ever reads .cartesian), since all share the
+  // same center/l/exponents, differing only in the per-component coefficient rescaling this
+  // function corrects for afterward.
+  const BasisFunction* reps[4];
+  for (int i = 0; i < 4; ++i) reps[i] = &basis[shells[i]->first];
+
+  FINT atm[4 * ATM_SLOTS] = {0};
+  FINT bas[4 * BAS_SLOTS] = {0};
+  FINT n_prim[4];
+  for (int i = 0; i < 4; ++i) {
+    n_prim[i] = static_cast<FINT>(reps[i]->exponents.size());
+    atm[i * ATM_SLOTS + CHARGE_OF] = 0;
+    atm[i * ATM_SLOTS + PTR_COORD] = PTR_ENV_START + 3 * i;
+    bas[i * BAS_SLOTS + ATOM_OF] = i;
+    bas[i * BAS_SLOTS + ANG_OF] = reps[i]->l;
+    bas[i * BAS_SLOTS + NPRIM_OF] = n_prim[i];
+    bas[i * BAS_SLOTS + NCTR_OF] = 1;
+  }
+
+  FINT env_offset = PTR_ENV_START + 3 * 4;
+  for (int i = 0; i < 4; ++i) {
+    bas[i * BAS_SLOTS + PTR_EXP] = env_offset;
+    env_offset += n_prim[i];
+    bas[i * BAS_SLOTS + PTR_COEFF] = env_offset;
+    env_offset += n_prim[i];
+  }
+
+  std::vector<double> env(static_cast<std::size_t>(env_offset), 0.0);
+  for (int i = 0; i < 4; ++i) {
+    const std::size_t coord = static_cast<std::size_t>(atm[i * ATM_SLOTS + PTR_COORD]);
+    env[coord + 0] = reps[i]->x;
+    env[coord + 1] = reps[i]->y;
+    env[coord + 2] = reps[i]->z;
+    for (FINT k = 0; k < n_prim[i]; ++k) {
+      env[static_cast<std::size_t>(bas[i * BAS_SLOTS + PTR_EXP] + k)] =
+          reps[i]->exponents[static_cast<std::size_t>(k)];
+      env[static_cast<std::size_t>(bas[i * BAS_SLOTS + PTR_COEFF] + k)] =
+          reps[i]->coefficients[static_cast<std::size_t>(k)];
+    }
+  }
+
+  FINT shls[4] = {0, 1, 2, 3};
+  ShellQuartetBlock out;
+  out.ni = CINTcgto_cart(0, bas);
+  out.nj = CINTcgto_cart(1, bas);
+  out.nk = CINTcgto_cart(2, bas);
+  out.nl = CINTcgto_cart(3, bas);
+  out.data.assign(static_cast<std::size_t>(out.ni) * static_cast<std::size_t>(out.nj) *
+                       static_cast<std::size_t>(out.nk) * static_cast<std::size_t>(out.nl),
+                   0.0);
+  cint2e_cart(out.data.data(), shls, atm, 4, bas, 4, env.data(), nullptr);
+
+  // Per-component relative scale (relative to each shell's own representative, index 0 within the
+  // shell): coefficients[0]/representative.coefficients[0], the same ratio for every primitive
+  // since normalizeCartesianBasis's rescaling is a single uniform scalar per component.
+  auto relativeScales = [&](const ShellInfo& shell) {
+    std::vector<double> scale(shell.count, 1.0);
+    const double ref = basis[shell.first].coefficients[0];
+    for (std::size_t k = 0; k < shell.count; ++k) {
+      scale[k] = basis[shell.first + k].coefficients[0] / ref;
+    }
+    return scale;
+  };
+  const std::vector<double> scale_p = relativeScales(shell_p);
+  const std::vector<double> scale_q = relativeScales(shell_q);
+  const std::vector<double> scale_r = relativeScales(shell_r);
+  const std::vector<double> scale_s = relativeScales(shell_s);
+
+  for (int l = 0; l < out.nl; ++l) {
+    for (int k = 0; k < out.nk; ++k) {
+      const double sk_sl = scale_r[static_cast<std::size_t>(k)] * scale_s[static_cast<std::size_t>(l)];
+      for (int j = 0; j < out.nj; ++j) {
+        const double sj_sk_sl = scale_q[static_cast<std::size_t>(j)] * sk_sl;
+        for (int i = 0; i < out.ni; ++i) {
+          const std::size_t idx = static_cast<std::size_t>(i) +
+                                   static_cast<std::size_t>(out.ni) *
+                                       (static_cast<std::size_t>(j) +
+                                        static_cast<std::size_t>(out.nj) *
+                                            (static_cast<std::size_t>(k) +
+                                             static_cast<std::size_t>(out.nk) * static_cast<std::size_t>(l)));
+          out.data[idx] *= scale_p[static_cast<std::size_t>(i)] * sj_sk_sl;
+        }
+      }
+    }
+  }
+  return out;
+}
+
 // sqrt((pq|pq)) for every unordered pair {p,q} of `basis`, in PackedTwoElectronTensor's own
 // triangular index (hi*(hi+1)/2 + lo) -- the per-pair "diagonal" the Schwarz prescreen bounds
 // |(pq|rs)| <= sqrt_diag[pq] * sqrt_diag[rs] against. O(n^2) quadruplets, cheap relative to the

@@ -1,0 +1,15 @@
+# Example ReRDMFT input file: H2 at its experimental equilibrium bond length
+# (r_e = 0.7414 Angstrom), minimal STO-3G basis, C4_DHF only. Validates
+# SCF_DIRECT_4C TRUE (the DHF SCF iterations build their Fock matrices fully
+# integral-direct, UKB/UkbFockMatrixDirect.h's ukbFockTwoElectronDirect, never
+# holding a two-electron tensor during the SCF) against the ordinary dense
+# C4_DHF path on the same geometry/basis -- the converged energy must match.
+NELEC 2
+BASIS water-sto-3g.gbs
+C4_SPINOR TRUE
+SCF_DIRECT_4C TRUE
+
+GEOMETRY
+H   0.000000   0.000000   0.000000
+H   0.000000   0.000000   0.741400
+END

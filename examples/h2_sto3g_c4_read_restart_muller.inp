@@ -1,0 +1,16 @@
+# Confirms the pre-existing READ_RESTART+FUNCTIONAL path (skips the DHF SCF entirely, loads
+# orbitals from RESTART.4C, goes straight into functional evaluation) is unaffected by the
+# SCF_DIRECT_4C changes -- this code path is untouched (SCF_DIRECT_4C TRUE + READ_RESTART TRUE is
+# explicitly rejected by Input.cpp's validation; this input intentionally omits SCF_DIRECT_4C).
+# Reads the RESTART.4C written by examples/h2_sto3g_c4_scf_direct_muller.inp (or the dense
+# reference) -- same geometry/basis/functional, result should match both of those runs' energies.
+NELEC 2
+BASIS water-sto-3g.gbs
+C4_SPINOR TRUE
+FUNCTIONAL MULLER
+READ_RESTART TRUE
+
+GEOMETRY
+H   0.000000   0.000000   0.000000
+H   0.000000   0.000000   0.741400
+END

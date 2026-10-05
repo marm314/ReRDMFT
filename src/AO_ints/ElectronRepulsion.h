@@ -29,6 +29,45 @@ double twoElectronQuadruplet(const BasisFunction& p, const BasisFunction& q, con
 // for the same on-demand-PairMatrixSource use as twoElectronQuadruplet above.
 std::vector<double> sqrtPairDiagonal(const std::vector<BasisFunction>& basis);
 
+// A full (ni,nj,nk,nl) block of (pq|rs) AO integrals for one SHELL quartet, already fully
+// per-component-normalized (same convention as twoElectronQuadruplet), computed via ONE libcint
+// call instead of one call per individual AO quadruplet within it. Motivation: cint2e_cart already
+// computes an entire shell's worth of components in a single call -- twoElectronQuadruplet
+// extracts exactly one entry from exactly that same computation and is called once per AO
+// quadruplet, so for e.g. a d-shell quartet (6 components each) that repeats the identical
+// underlying libcint call up to 6^4=1296 times instead of once. This is the prerequisite
+// infrastructure for an integral-direct Fock build (SCF_DIRECT_4C), which needs to recompute AO
+// contributions every SCF iteration cheaply enough to be worthwhile.
+//
+// Correctness note (why this isn't just "call cint2e_cart on raw shells"): normalizeCartesianBasis
+// rescales each Cartesian COMPONENT of a shell by its own scalar factor (1/sqrt(self-overlap_kk)),
+// uniformly across that component's primitives -- so different components of the same shell no
+// longer share one coefficient set the way libcint's native shell model assumes (see
+// twoElectronQuadruplet's own comment on this). But because that per-component rescaling is a
+// single UNIFORM scalar multiplying every primitive of that component, and the two-electron
+// integral is linear in each leg's own coefficient vector, the integral for a specific component
+// equals (that component's own scalar, relative to whichever representative was used to build the
+// libcint call) times the "raw" shell-quartet block -- recoverable directly from the
+// already-normalized BasisFunction data as coefficients[0]/representative.coefficients[0] (same
+// ratio for every primitive index, since the scaling is uniform), with no need to touch
+// normalization internals again. This function applies that rescaling before returning, so every
+// entry is already the correctly normalized (pq|rs) value, matching twoElectronQuadruplet exactly
+// (validated bit-for-bit in tests/test_shell_quartet.cpp).
+struct ShellQuartetBlock {
+  int ni = 0, nj = 0, nk = 0, nl = 0;
+  std::vector<double> data;  // (ni,nj,nk,nl), i fastest -- libcint's own convention
+  double operator()(int i, int j, int k, int l) const {
+    return data[static_cast<std::size_t>(i) +
+                static_cast<std::size_t>(ni) *
+                    (static_cast<std::size_t>(j) +
+                     static_cast<std::size_t>(nj) *
+                         (static_cast<std::size_t>(k) + static_cast<std::size_t>(nk) * static_cast<std::size_t>(l)))];
+  }
+};
+ShellQuartetBlock twoElectronShellQuartet(const std::vector<BasisFunction>& basis, const ShellInfo& shell_p,
+                                           const ShellInfo& shell_q, const ShellInfo& shell_r,
+                                           const ShellInfo& shell_s);
+
 // Computes the full (real) electron-repulsion tensor in chemist's notation,
 //   (pq|rs) = integral integral p(1) q(1) (1/r12) r(2) s(2) dr1 dr2,
 // for a single already-normalized cartesian AO basis used on all four

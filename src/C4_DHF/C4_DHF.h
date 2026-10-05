@@ -8,6 +8,7 @@
 #include "Matrix.h"
 #include "RkbCholesky.h"
 #include "RkbTwoElectron.h"
+#include "UkbFockMatrixDirect.h"
 
 namespace rerdmft {
 
@@ -93,6 +94,17 @@ DiracHartreeFockResult runDiracHartreeFockScf(
 // RKB tensor is ever formed (CHOLESKY TRUE).
 DiracHartreeFockResult runDiracHartreeFockScf(
     const Matrix<std::complex<double>>& h_rkb, const RkbCholesky& eri,
+    const Matrix<std::complex<double>>& x_full,
+    const Matrix<std::complex<double>>& initial_density, int n_electrons,
+    const std::vector<Atom>& geometry, double mixing, const Matrix<std::complex<double>>& overlap,
+    int diis_size, int max_iterations = 100, double energy_tolerance = 1e-8,
+    double density_tolerance = 1e-6, bool kramers_restricted = true);
+
+// SCF_DIRECT_4C: the same SCF with the Fock matrices built fully integral-direct (UKB/
+// UkbFockMatrixDirect.h's ukbFockTwoElectronDirect, via UkbDirectEriSource's own rkbFockMatrix
+// overload) -- no two-electron representation (dense, packed, or Cholesky) is ever held at all.
+DiracHartreeFockResult runDiracHartreeFockScf(
+    const Matrix<std::complex<double>>& h_rkb, const UkbDirectEriSource& eri,
     const Matrix<std::complex<double>>& x_full,
     const Matrix<std::complex<double>>& initial_density, int n_electrons,
     const std::vector<Atom>& geometry, double mixing, const Matrix<std::complex<double>>& overlap,

@@ -1,0 +1,12 @@
+# Reference for examples/h2_sto3g_c4_scf_direct.inp: SAME geometry/basis, ordinary dense C4_DHF
+# (no SCF_DIRECT_4C) -- the converged energy must match to confirm SCF_DIRECT_4C's integral-direct
+# SCF loop is correct, not just ukbFockTwoElectronDirect's own kernel (already unit-tested in
+# tests/test_ukb_fock_direct.cpp).
+NELEC 2
+BASIS water-sto-3g.gbs
+C4_SPINOR TRUE
+
+GEOMETRY
+H   0.000000   0.000000   0.000000
+H   0.000000   0.000000   0.741400
+END

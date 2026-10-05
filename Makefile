@@ -241,6 +241,46 @@ test_symmetric_transform: $(BUILD_DIR)/test_symmetric_transform
 $(BUILD_DIR)/test_symmetric_transform: tests/test_symmetric_transform.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
+# Unit test of AO_ints/ElectronRepulsion.h's twoElectronShellQuartet (shell-batched AO integrals,
+# SCF_DIRECT_4C's Phase 0 prerequisite).
+.PHONY: test_shell_quartet
+test_shell_quartet: $(BUILD_DIR)/test_shell_quartet
+	./$(BUILD_DIR)/test_shell_quartet
+
+$(BUILD_DIR)/test_shell_quartet: tests/test_shell_quartet.cpp $(BUILD_DIR)/ElectronRepulsion.o $(BUILD_DIR)/Integrals.o $(BUILD_DIR)/MolecularBasis.o $(BUILD_DIR)/Shell.o $(BUILD_DIR)/BasisSet.o $(BUILD_DIR)/Element.o $(BUILD_DIR)/StringUtils.o | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
+# Unit test of UKB/UkbFockMatrixDirect.h's ukbFockTwoElectronDirect (SCF_DIRECT_4C's Phase 1:
+# integral-direct RKB Fock build), validated against the existing dense RkbTwoElectronTensor-based
+# rkbFockMatrix on LiH/6-31G, CO/STO-3G and a hand-built d-shell toy basis. Needs the RKB/UKB
+# construction chain (rkbCoefficients, rkbHamiltonianMatrix, SphericalTransform, ...), so links every
+# object the main binary does except main.o itself -- same reasoning as test_pccd_hessian above.
+.PHONY: test_ukb_fock_direct
+test_ukb_fock_direct: $(BUILD_DIR)/test_ukb_fock_direct
+	./$(BUILD_DIR)/test_ukb_fock_direct
+
+$(BUILD_DIR)/test_ukb_fock_direct: tests/test_ukb_fock_direct.cpp $(filter-out $(BUILD_DIR)/main.o,$(OBJS)) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
+# Validates the cross-RKB-flavor J fix (RkbCholesky.cpp's small_cross/jm_cross/rkbCholeskyToMo
+# additions) against the already-fixed dense RkbTwoElectronTensor path, on LiH/6-31G.
+.PHONY: test_rkb_cholesky_cross_flavor
+test_rkb_cholesky_cross_flavor: $(BUILD_DIR)/test_rkb_cholesky_cross_flavor
+	./$(BUILD_DIR)/test_rkb_cholesky_cross_flavor
+
+$(BUILD_DIR)/test_rkb_cholesky_cross_flavor: tests/test_rkb_cholesky_cross_flavor.cpp $(filter-out $(BUILD_DIR)/main.o,$(OBJS)) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
+# Fast, focused cross-check of RkbTransformation.cpp's analytic rkb_coefficients against the earlier
+# M*S^-1 numerical construction (see the file's own header comment) -- no two-electron integrals, so a
+# small, specific object list instead of the whole binary's OBJS for a quick build/run.
+.PHONY: test_rkb_coefficients_cross_check
+test_rkb_coefficients_cross_check: $(BUILD_DIR)/test_rkb_coefficients_cross_check
+	./$(BUILD_DIR)/test_rkb_coefficients_cross_check
+
+$(BUILD_DIR)/test_rkb_coefficients_cross_check: tests/test_rkb_coefficients_cross_check.cpp $(BUILD_DIR)/BasisSet.o $(BUILD_DIR)/MolecularBasis.o $(BUILD_DIR)/Shell.o $(BUILD_DIR)/Element.o $(BUILD_DIR)/StringUtils.o $(BUILD_DIR)/SmallComponentBasis.o $(BUILD_DIR)/RkbDerivativeTerms.o $(BUILD_DIR)/RkbTransformation.o $(BUILD_DIR)/Integrals.o $(BUILD_DIR)/NablaIntegrals.o $(BUILD_DIR)/LinearAlgebra.o | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
 clean:
 	rm -rf $(BUILD_DIR) $(BIN) $(GIT_VERSION_HEADER)
 # ($(BUILD_DIR) already holds the .d files alongside their .o's, so the

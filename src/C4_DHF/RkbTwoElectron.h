@@ -85,6 +85,17 @@ Matrix<std::complex<double>> rkbProjectSmallVector(const Matrix<double>& v,
                                                     const Matrix<std::complex<double>>& rkb_coefficients,
                                                     std::size_t y, std::size_t n_large, std::size_t n_small);
 
+// Generalization of rkbProjectSmallVector allowing the bra and ket to be projected onto DIFFERENT
+// RKB-Small partner flavors (y_bra != y_ket): W(p,q) = sum over spin blocks of conj(c_bra(p,a)) v(a,b)
+// c_ket(q,b). Needed because RKB-Small(0) and RKB-Small(1) are NOT spinor-orthogonal to each other
+// (sigma.p mixes both elementary spin blocks into each partner), so <RKBSmall(0)...|RKBSmall(1)...>
+// is generally nonzero and must be projected too -- see rkbTwoElectronIntegrals's own cross-term
+// comment. Exposed for C4_DHF/RkbCholesky.h's own independent Cholesky-vector pipeline.
+Matrix<std::complex<double>> rkbProjectSmallVectorCross(const Matrix<double>& v,
+                                                          const Matrix<std::complex<double>>& rkb_coefficients,
+                                                          std::size_t y_bra, std::size_t y_ket,
+                                                          std::size_t n_large, std::size_t n_small);
+
 }  // namespace rerdmft
 
 #endif  // RERDMFT_RKBTWOELECTRON_H

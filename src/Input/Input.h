@@ -211,6 +211,15 @@ class Input {
   // TRUE is used, to keep the existing fast runtimes, except one small worked example that keeps
   // the default to demonstrate the on-demand path itself.
   bool on_demand_eri() const { return on_demand_eri_; }
+  // Optional; defaults to FALSE. C4_DHF/C4_SPINOR only: the DHF SCF iterations build the Fock
+  // matrix fully integral-direct (UKB/UkbFockMatrixDirect.h's ukbFockTwoElectronDirect) -- no
+  // two-electron representation (dense, packed, or Cholesky vectors) is ever held during the SCF.
+  // After convergence, if FUNCTIONAL/FULL_OPTIMIZATION needs MO-basis integrals, the existing RKB
+  // Cholesky vectors (C4_DHF/RkbCholesky.h) are still built once and fed through the existing
+  // rkbCholeskyToMo pipeline, exactly as CHOLESKY TRUE already does -- SCF_DIRECT_4C only changes
+  // how the SCF loop itself gets its Fock matrices. Mutually exclusive with READ_RESTART, DEBUG,
+  // and HESSIAN_MEAN_FIELD for now (see Input.cpp's validation).
+  bool scf_direct_4c() const { return scf_direct_4c_; }
   // Optional; defaults to 1e-6 (DIRAC's own STOL(1)). The large-component LOWGEN safety net's
   // threshold (Utils/LinearAlgebra.h's canonicalOrthogonalize): below this eigenvalue, a direction
   // in the large-component overlap is genuinely DROPPED rather than kept-and-inverted, catching
@@ -476,6 +485,7 @@ class Input {
   bool cholesky_ = false;
   double cholesky_threshold_ = 1e-10;
   bool on_demand_eri_ = true;
+  bool scf_direct_4c_ = false;
   double x_lin_dep_thrs_l_ = 1e-6;
   double x_lin_dep_thrs_s_ = 1e-8;
   bool read_restart_ = false;

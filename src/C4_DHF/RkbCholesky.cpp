@@ -208,6 +208,8 @@ RkbCholesky RkbCholesky::build(const std::vector<BasisFunction>& large_basis,
   out.large.resize(flat.count);
   out.small[0].resize(flat.count);
   out.small[1].resize(flat.count);
+  out.small_cross[0].resize(flat.count);
+  out.small_cross[1].resize(flat.count);
 #pragma omp parallel for schedule(dynamic)
   for (std::size_t l = 0; l < flat.count; ++l) {
     const double* row = flat.data.data() + l * flat.pair_dim;
@@ -219,6 +221,8 @@ RkbCholesky RkbCholesky::build(const std::vector<BasisFunction>& large_basis,
     out.large[l] = transformToSpherical(b, large_transform);
     for (std::size_t y = 0; y < 2; ++y)
       out.small[y][l] = rkbProjectSmallVector(s, rkb_coefficients, y, nl_sph, ns);
+    out.small_cross[0][l] = rkbProjectSmallVectorCross(s, rkb_coefficients, 0, 1, nl_sph, ns);
+    out.small_cross[1][l] = rkbProjectSmallVectorCross(s, rkb_coefficients, 1, 0, nl_sph, ns);
   }
   return out;
 }
@@ -241,8 +245,12 @@ Matrix<C> rkbFockMatrix(const Matrix<C>& h_rkb, const RkbCholesky& ao, const Mat
     jm[f] = Matrix<C>(nl, nl, C{});
     for (int g = 0; g < 4; ++g) km[f][g] = Matrix<C>(nl, nl, C{});
   }
+  // Cross-flavor J output (RKB-Small(0)/(1) are not spinor-orthogonal, see RkbCholesky.h's
+  // small_cross comment): jm_cross[0] feeds the (Sa,Sb) output block, jm_cross[1] feeds (Sb,Sa).
+  Matrix<C> jm_cross[2] = {Matrix<C>(nl, nl, C{}), Matrix<C>(nl, nl, C{})};
   struct Part {
     Matrix<C> j[4];
+    Matrix<C> j_cross[2];
     Matrix<C> k[4][4];
   };
   const int max_threads = omp_get_max_threads();
@@ -256,18 +264,31 @@ Matrix<C> rkbFockMatrix(const Matrix<C>& h_rkb, const RkbCholesky& ao, const Mat
       part.j[f] = Matrix<C>(nl, nl, C{});
       for (int g = 0; g < 4; ++g) part.k[f][g] = Matrix<C>(nl, nl, C{});
     }
+    part.j_cross[0] = Matrix<C>(nl, nl, C{});
+    part.j_cross[1] = Matrix<C>(nl, nl, C{});
 #pragma omp for schedule(static)
     for (std::size_t l = 0; l < ao.nVectors(); ++l) {
       bf[0] = promote(ao.large[l]);
       bf[1] = bf[0];
       bf[2] = ao.small[0][l];
       bf[3] = ao.small[1][l];
-      C t{};  // tr( sum_f B^f P_ff )
+      const Matrix<C>& bf_cross_fwd = ao.small_cross[0][l];  // bra:Sa, ket:Sb
+      const Matrix<C>& bf_cross_bwd = ao.small_cross[1][l];  // bra:Sb, ket:Sa
+      C t{};  // tr( B_L * P ) = tr( sum_f B^f P_ff ) + the two new cross-block contributions.
       for (int f = 0; f < 4; ++f)
         for (std::size_t q = 0; q < nl; ++q)
           for (std::size_t s = 0; s < nl; ++s) t += bf[f](q, s) * pb[f][f](s, q);
+      for (std::size_t q = 0; q < nl; ++q)
+        for (std::size_t s = 0; s < nl; ++s) {
+          t += bf_cross_fwd(q, s) * pb[3][2](s, q);  // B^{Sa,Sb}_L * P_{Sb,Sa}
+          t += bf_cross_bwd(q, s) * pb[2][3](s, q);  // B^{Sb,Sa}_L * P_{Sa,Sb}
+        }
       for (int f = 0; f < 4; ++f)
         for (std::size_t i = 0; i < nl * nl; ++i) part.j[f].data()[i] += t * bf[f].data()[i];
+      for (std::size_t i = 0; i < nl * nl; ++i) {
+        part.j_cross[0].data()[i] += t * bf_cross_fwd.data()[i];
+        part.j_cross[1].data()[i] += t * bf_cross_bwd.data()[i];
+      }
       for (int f = 0; f < 4; ++f)
         for (int g = 0; g < 4; ++g) {
           zgemm(false, static_cast<int>(nl), static_cast<int>(nl), static_cast<int>(nl), pb[f][g].data(),
@@ -284,6 +305,10 @@ Matrix<C> rkbFockMatrix(const Matrix<C>& h_rkb, const RkbCholesky& ao, const Mat
       for (int g = 0; g < 4; ++g)
         for (std::size_t i = 0; i < nl * nl; ++i) km[f][g].data()[i] += part.k[f][g].data()[i];
     }
+    for (std::size_t i = 0; i < nl * nl; ++i) {
+      jm_cross[0].data()[i] += part.j_cross[0].data()[i];
+      jm_cross[1].data()[i] += part.j_cross[1].data()[i];
+    }
   }
   Matrix<C> fock = h_rkb;
   for (int f = 0; f < 4; ++f)
@@ -292,6 +317,11 @@ Matrix<C> rkbFockMatrix(const Matrix<C>& h_rkb, const RkbCholesky& ao, const Mat
         fock(f * nl + a, f * nl + b) += jm[f](a, b);
         for (int g = 0; g < 4; ++g) fock(f * nl + a, g * nl + b) -= km[f][g](a, b);
       }
+  for (std::size_t a = 0; a < nl; ++a)
+    for (std::size_t b = 0; b < nl; ++b) {
+      fock(2 * nl + a, 3 * nl + b) += jm_cross[0](a, b);  // (Sa,Sb)
+      fock(3 * nl + a, 2 * nl + b) += jm_cross[1](a, b);  // (Sb,Sa)
+    }
   return fock;
 }
 
@@ -335,6 +365,23 @@ CholeskyEri<C> rkbCholeskyToMo(const RkbCholesky& ao, const Matrix<C>& c, std::s
               cf, static_cast<int>(nmo), 0.0, tmp.data(), static_cast<int>(m));                          // B^f C_f(:,nn:)
         zgemm(true, static_cast<int>(m), static_cast<int>(m), static_cast<int>(nl), cf, static_cast<int>(nmo),
               tmp.data(), static_cast<int>(m), f == 0 ? 0.0 : 1.0, bp.data(), static_cast<int>(m));   // += C_f(:,nn:)^+ B^f C_f(:,nn:)
+      }
+      // Cross-flavor contributions (RKB-Small(0)/(1) are not spinor-orthogonal -- see
+      // RkbCholesky.h's small_cross comment): the above loop only ever contracts flavor f against
+      // ITSELF (f=g); a genuine spinor MO orbital's Small(0) and Small(1) components are coupled
+      // through these off-diagonal AO blocks too.
+      {
+        const C* c_sa = c.data() + 2 * nl * nmo + nn;
+        const C* c_sb = c.data() + 3 * nl * nmo + nn;
+        zgemm(false, static_cast<int>(nl), static_cast<int>(m), static_cast<int>(nl), ao.small_cross[0][l].data(),
+              static_cast<int>(nl), c_sb, static_cast<int>(nmo), 0.0, tmp.data(), static_cast<int>(m));  // B^{Sa,Sb}_L C_Sb
+        zgemm(true, static_cast<int>(m), static_cast<int>(m), static_cast<int>(nl), c_sa, static_cast<int>(nmo),
+              tmp.data(), static_cast<int>(m), 1.0, bp.data(), static_cast<int>(m));  // += C_Sa^+ B^{Sa,Sb}_L C_Sb
+
+        zgemm(false, static_cast<int>(nl), static_cast<int>(m), static_cast<int>(nl), ao.small_cross[1][l].data(),
+              static_cast<int>(nl), c_sa, static_cast<int>(nmo), 0.0, tmp.data(), static_cast<int>(m));  // B^{Sb,Sa}_L C_Sa
+        zgemm(true, static_cast<int>(m), static_cast<int>(m), static_cast<int>(nl), c_sb, static_cast<int>(nmo),
+              tmp.data(), static_cast<int>(m), 1.0, bp.data(), static_cast<int>(m));  // += C_Sb^+ B^{Sb,Sa}_L C_Sa
       }
       for (std::size_t x = 0; x < m; ++x)
         for (std::size_t y = 0; y < m; ++y) a(l, x * m + y) = bp(y, x);  // W_L = B'^T, flattened into row l

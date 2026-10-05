@@ -1,0 +1,15 @@
+# Companion to examples/h2_sto3g_c4_scf_direct.inp: validates the OTHER half of SCF_DIRECT_4C's
+# recipe -- after the integral-direct DHF SCF converges, FUNCTIONAL still needs real MO-basis
+# integrals, built via the existing RkbCholesky::build + rkbCholeskyToMo pipeline (same as CHOLESKY
+# TRUE already does). Compare the MULLER functional energy against
+# examples/h2_sto3g_c4_dense_reference_muller.inp (dense path, same geometry/basis/functional).
+NELEC 2
+BASIS water-sto-3g.gbs
+C4_SPINOR TRUE
+SCF_DIRECT_4C TRUE
+FUNCTIONAL MULLER
+
+GEOMETRY
+H   0.000000   0.000000   0.000000
+H   0.000000   0.000000   0.741400
+END

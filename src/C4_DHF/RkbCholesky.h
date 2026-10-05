@@ -29,6 +29,14 @@ struct RkbCholesky {
   std::size_t n_large = 0;
   std::vector<Matrix<double>> large;                  // B^LL_L
   std::vector<Matrix<std::complex<double>>> small[2]; // W^0_L, W^1_L
+  // Cross-flavor projections W^cross_L, needed because RKB-Small(0) and RKB-Small(1) are NOT
+  // spinor-orthogonal (sigma.p mixes both elementary spin blocks into each partner), so
+  // <RKBSmall(0)...|RKBSmall(1)...> is generally nonzero -- small_cross[0] = bra:partner(0),
+  // ket:partner(1) (forward); small_cross[1] = bra:partner(1), ket:partner(0) (backward). See
+  // RkbTwoElectron.h's rkbProjectSmallVectorCross and rkbTwoElectronIntegrals's own cross-term
+  // comment for the derivation; this is the SAME fix applied to this struct's independent
+  // Cholesky-vector pipeline.
+  std::vector<Matrix<std::complex<double>>> small_cross[2];
   std::size_t nVectors() const { return large.size(); }
   std::size_t dim() const { return 4 * n_large; }
 

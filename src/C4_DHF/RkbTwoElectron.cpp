@@ -162,20 +162,30 @@ void addInPlace(Tensor4<std::complex<double>>& total, const Tensor4<std::complex
 // internally over the Small basis's own alpha/beta spin block (columns
 // [0,nSmall) and [nSmall,2*nSmall) of rkb_coefficients), since a genuine
 // RKB-Small spinor mixes both -- see RkbTwoElectron.h.
+// Generalization of transformPairToRkbSmall allowing the bra and ket members of the SAME electron's
+// leg pair to be projected onto DIFFERENT RKB-small partner flavors (row_offset_bra != row_offset_ket)
+// -- needed for the cross term <RKBSmall(0) ... | RKBSmall(1) ...> (and its reverse), which is NOT
+// structurally zero: unlike the elementary UKB Small-alpha/Small-beta basis functions (disjoint
+// spinor components 3,4), a genuine RKB-Small(y) partner mixes BOTH elementary spin blocks (sigma.p
+// has spin-flip terms), so RKB-Small(0) and RKB-Small(1) are NOT spinor-orthogonal to each other --
+// see doc/RKB.tex and this file's own header comment on why both elementary spin blocks are summed
+// even for the y1==y2 (pure) case. transformPairToRkbSmall (same row_offset for both) is the special
+// case row_offset_bra == row_offset_ket.
 template <typename SrcT>
-Tensor4<std::complex<double>> transformPairToRkbSmall(
+Tensor4<std::complex<double>> transformPairToRkbSmallGen(
     const Tensor4<SrcT>& src, int leg_bra, int leg_ket,
-    const Matrix<std::complex<double>>& rkb_coefficients, std::size_t row_offset,
-    std::size_t n_large, std::size_t n_small) {
+    const Matrix<std::complex<double>>& rkb_coefficients, std::size_t row_offset_bra,
+    std::size_t row_offset_ket, std::size_t n_large, std::size_t n_small) {
   Tensor4<std::complex<double>> total;
   bool have_total = false;
   for (std::size_t spin_offset : {std::size_t{0}, n_small}) {
-    const Matrix<std::complex<double>> c_spin =
-        subBlock(rkb_coefficients, row_offset, n_large, spin_offset, n_small);
-    const Matrix<std::complex<double>> c_spin_conj = conjMatrix(c_spin);
+    const Matrix<std::complex<double>> c_bra_conj =
+        conjMatrix(subBlock(rkb_coefficients, row_offset_bra, n_large, spin_offset, n_small));
+    const Matrix<std::complex<double>> c_ket =
+        subBlock(rkb_coefficients, row_offset_ket, n_large, spin_offset, n_small);
 
     Tensor4<std::complex<double>> transformed =
-        transformLeg(transformLeg(src, leg_bra, c_spin_conj), leg_ket, c_spin);
+        transformLeg(transformLeg(src, leg_bra, c_bra_conj), leg_ket, c_ket);
     if (!have_total) {
       total = std::move(transformed);
       have_total = true;
@@ -184,6 +194,15 @@ Tensor4<std::complex<double>> transformPairToRkbSmall(
     }
   }
   return total;
+}
+
+template <typename SrcT>
+Tensor4<std::complex<double>> transformPairToRkbSmall(
+    const Tensor4<SrcT>& src, int leg_bra, int leg_ket,
+    const Matrix<std::complex<double>>& rkb_coefficients, std::size_t row_offset,
+    std::size_t n_large, std::size_t n_small) {
+  return transformPairToRkbSmallGen(src, leg_bra, leg_ket, rkb_coefficients, row_offset, row_offset,
+                                     n_large, n_small);
 }
 
 // The RKB-Small(y1),RKB-Small(y2) blocks of the two-electron tensor,
@@ -324,22 +343,25 @@ Matrix<std::complex<double>> transposePromote(const Matrix<double>& m) {
 // matrix products), vs. transformPairToRkbSmall's O(n_small^2 * n_large *
 // n_small^2) when applied directly to ss_ss's own two electron-pair legs
 // (both legs still n_small before this transform touches them).
-Matrix<std::complex<double>> projectCholeskyVectorToRkbSmall(
+// Generalization allowing the bra and ket to be projected onto DIFFERENT RKB-small partner flavors
+// (row_offset_bra != row_offset_ket) -- the Cholesky-path counterpart of transformPairToRkbSmallGen's
+// cross-term generalization, same physical justification (RKB-Small(0)/(1) are not spinor-orthogonal).
+Matrix<std::complex<double>> projectCholeskyVectorToRkbSmallGen(
     const Matrix<double>& v, const Matrix<std::complex<double>>& rkb_coefficients,
-    std::size_t row_offset, std::size_t n_large, std::size_t n_small) {
+    std::size_t row_offset_bra, std::size_t row_offset_ket, std::size_t n_large, std::size_t n_small) {
   const Matrix<std::complex<double>> v_complex = promoteToComplex(v);
   Matrix<std::complex<double>> total(n_large, n_large, std::complex<double>(0.0, 0.0));
   bool have_total = false;
   for (std::size_t spin_offset : {std::size_t{0}, n_small}) {
-    const Matrix<std::complex<double>> c_spin =
-        subBlock(rkb_coefficients, row_offset, n_large, spin_offset, n_small);
-    const Matrix<std::complex<double>> c_spin_conj = conjMatrix(c_spin);
-    // W(p,q) = sum_{a,b} conj(c_spin(p,a)) * v(a,b) * c_spin(q,b)
-    //        = c_spin_conj * v_complex * transpose(c_spin), and
-    // transpose(c_spin) == dagger(c_spin_conj) (dagger conjugates AND
-    // transposes, and c_spin_conj is already conjugated once, so
-    // conjugating it again cancels out, leaving a plain transpose).
-    Matrix<std::complex<double>> contrib = c_spin_conj * (v_complex * dagger(c_spin_conj));
+    const Matrix<std::complex<double>> c_bra_conj =
+        conjMatrix(subBlock(rkb_coefficients, row_offset_bra, n_large, spin_offset, n_small));
+    const Matrix<std::complex<double>> c_ket =
+        subBlock(rkb_coefficients, row_offset_ket, n_large, spin_offset, n_small);
+    // W(p,q) = sum_{a,b} conj(c_bra(p,a)) * v(a,b) * c_ket(q,b) = c_bra_conj * v_complex * transpose(c_ket).
+    Matrix<std::complex<double>> c_ket_t(n_small, n_large);
+    for (std::size_t i = 0; i < n_large; ++i)
+      for (std::size_t j = 0; j < n_small; ++j) c_ket_t(j, i) = c_ket(i, j);
+    Matrix<std::complex<double>> contrib = c_bra_conj * (v_complex * c_ket_t);
     if (!have_total) {
       total = std::move(contrib);
       have_total = true;
@@ -351,6 +373,12 @@ Matrix<std::complex<double>> projectCholeskyVectorToRkbSmall(
     }
   }
   return total;
+}
+
+Matrix<std::complex<double>> projectCholeskyVectorToRkbSmall(
+    const Matrix<double>& v, const Matrix<std::complex<double>>& rkb_coefficients,
+    std::size_t row_offset, std::size_t n_large, std::size_t n_small) {
+  return projectCholeskyVectorToRkbSmallGen(v, rkb_coefficients, row_offset, row_offset, n_large, n_small);
 }
 
 // Builds a dense Tensor4 as a sum of outer products of two equal-length
@@ -389,6 +417,14 @@ Matrix<std::complex<double>> rkbProjectSmallVector(const Matrix<double>& v,
                                                     const Matrix<std::complex<double>>& rkb_coefficients,
                                                     std::size_t y, std::size_t n_large, std::size_t n_small) {
   return projectCholeskyVectorToRkbSmall(v, rkb_coefficients, y * n_large, n_large, n_small);
+}
+
+Matrix<std::complex<double>> rkbProjectSmallVectorCross(const Matrix<double>& v,
+                                                          const Matrix<std::complex<double>>& rkb_coefficients,
+                                                          std::size_t y_bra, std::size_t y_ket,
+                                                          std::size_t n_large, std::size_t n_small) {
+  return projectCholeskyVectorToRkbSmallGen(v, rkb_coefficients, y_bra * n_large, y_ket * n_large, n_large,
+                                             n_small);
 }
 
 RkbTwoElectronTensor rkbTwoElectronIntegrals(const std::vector<BasisFunction>& large_basis,
@@ -478,6 +514,78 @@ RkbTwoElectronTensor rkbTwoElectronIntegrals(const std::vector<BasisFunction>& l
     smallSmallBlocksSlab(ss_ss, rkb_coefficients, n_large, n_small, ss_Y1Y2);
   }
 
+  // Cross-RKB-flavor Small-Small terms: RKB-Small(0) and RKB-Small(1) partners are NOT
+  // spinor-orthogonal to each other (unlike the elementary Small-alpha/Small-beta basis they are
+  // built from -- sigma.p has spin-flip terms mixing both elementary spin blocks into EACH partner),
+  // so <RKBSmall(0)...|RKBSmall(1)...>-type chemist pairs are generally nonzero and must be computed;
+  // previously every such slot was simply never set (defaulting to zero in RkbTwoElectronTensor),
+  // which is exactly right for the elementary UKB basis but not after RKB projection.
+  // ll_sCross[c]: electron-1 = Large (PURE, both legs same copy), electron-2 = RKB-Small CROSS
+  // (c=0: bra=partner(0), ket=partner(1); c=1: bra=partner(1), ket=partner(0)).
+  Tensor4<std::complex<double>> ll_sCross[2];
+  for (std::size_t cx = 0; cx < 2; ++cx) {
+    const std::size_t bra_y = (cx == 0) ? 0 : 1, ket_y = (cx == 0) ? 1 : 0;
+    ll_sCross[cx] = transformPairToRkbSmallGen(ll_ss, 2, 3, rkb_coefficients, bra_y * n_large,
+                                                ket_y * n_large, n_large, n_small);
+  }
+
+  // ss_e1cross_e2pure[c][y2]: electron-1 = RKB-Small CROSS(c), electron-2 = RKB-Small(y2) PURE.
+  // ss_e1cross_e2cross[c1][c2]: BOTH electron-1 and electron-2 RKB-Small CROSS.
+  Tensor4<std::complex<double>> ss_e1cross_e2pure[2][2];
+  Tensor4<std::complex<double>> ss_e1cross_e2cross[2][2];
+  if (use_cholesky) {
+    const auto vectors = choleskyDecomposeEriChecked(ss_ss, cholesky_threshold);
+    std::vector<Matrix<std::complex<double>>> w[2];
+    for (std::size_t y = 0; y < 2; ++y) {
+      w[y].reserve(vectors.size());
+      for (const auto& v : vectors) {
+        w[y].push_back(projectCholeskyVectorToRkbSmall(v, rkb_coefficients, y * n_large, n_large, n_small));
+      }
+    }
+    std::vector<Matrix<std::complex<double>>> w_cross[2];
+    for (std::size_t cx = 0; cx < 2; ++cx) {
+      const std::size_t bra_y = (cx == 0) ? 0 : 1, ket_y = (cx == 0) ? 1 : 0;
+      w_cross[cx].reserve(vectors.size());
+      for (const auto& v : vectors) {
+        w_cross[cx].push_back(
+            projectCholeskyVectorToRkbSmallGen(v, rkb_coefficients, bra_y * n_large, ket_y * n_large, n_large, n_small));
+      }
+    }
+    for (std::size_t cx = 0; cx < 2; ++cx) {
+      for (std::size_t y2 = 0; y2 < 2; ++y2) ss_e1cross_e2pure[cx][y2] = outerSumTensor(w_cross[cx], w[y2]);
+      for (std::size_t cx2 = 0; cx2 < 2; ++cx2) ss_e1cross_e2cross[cx][cx2] = outerSumTensor(w_cross[cx], w_cross[cx2]);
+    }
+  } else {
+    // Dense materialization of (SS|SS): smallSmallBlocksSlab's packed-tensor slab algorithm is too
+    // specialized to its own same-flavor (y1==y1') projection to generalize here without real risk of
+    // introducing a regression in that already-validated code; this mirrors the use_cholesky=false
+    // path's own documented scope ("intended for small test systems" -- RkbTwoElectron.h).
+    Tensor4<double> ss_ss_dense(n_small, n_small, n_small, n_small, 0.0);
+#pragma omp parallel for collapse(2)
+    for (std::size_t p = 0; p < n_small; ++p)
+      for (std::size_t q = 0; q < n_small; ++q)
+        for (std::size_t r = 0; r < n_small; ++r)
+          for (std::size_t s = 0; s < n_small; ++s) ss_ss_dense(p, q, r, s) = ss_ss(p, q, r, s);
+
+    Tensor4<std::complex<double>> ss_cross_half[2];
+    for (std::size_t cx = 0; cx < 2; ++cx) {
+      const std::size_t bra_y = (cx == 0) ? 0 : 1, ket_y = (cx == 0) ? 1 : 0;
+      ss_cross_half[cx] = transformPairToRkbSmallGen(ss_ss_dense, 0, 1, rkb_coefficients, bra_y * n_large,
+                                                      ket_y * n_large, n_large, n_small);
+    }
+    for (std::size_t cx = 0; cx < 2; ++cx) {
+      for (std::size_t y2 = 0; y2 < 2; ++y2) {
+        ss_e1cross_e2pure[cx][y2] =
+            transformPairToRkbSmall(ss_cross_half[cx], 2, 3, rkb_coefficients, y2 * n_large, n_large, n_small);
+      }
+      for (std::size_t cx2 = 0; cx2 < 2; ++cx2) {
+        const std::size_t bra_y2 = (cx2 == 0) ? 0 : 1, ket_y2 = (cx2 == 0) ? 1 : 0;
+        ss_e1cross_e2cross[cx][cx2] = transformPairToRkbSmallGen(ss_cross_half[cx], 2, 3, rkb_coefficients,
+                                                                  bra_y2 * n_large, ket_y2 * n_large, n_large, n_small);
+      }
+    }
+  }
+
   // Assemble the full (4*nLarge)^4 physics-notation tensor <A B|C D> (only
   // the electron-exchange-unique half is actually stored -- see
   // RkbTwoElectronTensor). The spinor index ranges over [Large-alpha,
@@ -541,6 +649,39 @@ RkbTwoElectronTensor rkbTwoElectronIntegrals(const std::vector<BasisFunction>& l
               const std::size_t off_e2 = off_small[y2];
               result.set(off_e1 + a, off_e2 + b, off_e1 + c, off_e2 + d,
                          ss_Y1Y2[y1][y2](a, c, b, d));
+            }
+          }
+
+          // --- Cross-RKB-flavor terms (see this function's comment above ss_e1cross_e2pure). ---
+          for (std::size_t cx = 0; cx < 2; ++cx) {
+            const std::size_t bra_off1 = off_small[cx == 0 ? 0 : 1];
+            const std::size_t ket_off1 = off_small[cx == 0 ? 1 : 0];
+
+            // electron-1 = Large PURE, electron-2 = RKB-Small CROSS(cx); and its electron-swap
+            // mirror, electron-1 = RKB-Small CROSS(cx), electron-2 = Large PURE.
+            const std::complex<double> ls_cross_val = ll_sCross[cx](a, c, b, d);
+            result.set(off_large_alpha + a, bra_off1 + b, off_large_alpha + c, ket_off1 + d, ls_cross_val);
+            result.set(off_large_beta + a, bra_off1 + b, off_large_beta + c, ket_off1 + d, ls_cross_val);
+            const std::complex<double> sl_cross_val = ll_sCross[cx](b, d, a, c);
+            result.set(bra_off1 + a, off_large_alpha + b, ket_off1 + c, off_large_alpha + d, sl_cross_val);
+            result.set(bra_off1 + a, off_large_beta + b, ket_off1 + c, off_large_beta + d, sl_cross_val);
+
+            // electron-1 = RKB-Small CROSS(cx), electron-2 = RKB-Small(y2) PURE; and its mirror.
+            for (std::size_t y2 = 0; y2 < 2; ++y2) {
+              const std::size_t off_e2 = off_small[y2];
+              result.set(bra_off1 + a, off_e2 + b, ket_off1 + c, off_e2 + d, ss_e1cross_e2pure[cx][y2](a, c, b, d));
+              result.set(off_e2 + a, bra_off1 + b, off_e2 + c, ket_off1 + d, ss_e1cross_e2pure[cx][y2](b, d, a, c));
+            }
+
+            // electron-1 = RKB-Small CROSS(cx), electron-2 = RKB-Small CROSS(cx2) (both cx,cx2 loop
+            // over {0,1} independently, so all 4 combinations -- including the Sa,Sb/Sb,Sa output
+            // paired with either cross direction on electron-2 -- are covered without needing a
+            // separate mirror: swapping cx<->cx2 together with relabeling a<->b,c<->d IS this same
+            // double loop's (cx2,cx) iteration, already included).
+            for (std::size_t cx2 = 0; cx2 < 2; ++cx2) {
+              const std::size_t bra_off2 = off_small[cx2 == 0 ? 0 : 1];
+              const std::size_t ket_off2 = off_small[cx2 == 0 ? 1 : 0];
+              result.set(bra_off1 + a, bra_off2 + b, ket_off1 + c, ket_off2 + d, ss_e1cross_e2cross[cx][cx2](a, c, b, d));
             }
           }
         }

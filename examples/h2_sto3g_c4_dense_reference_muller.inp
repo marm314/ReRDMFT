@@ -1,0 +1,11 @@
+# Reference for examples/h2_sto3g_c4_scf_direct_muller.inp: SAME geometry/basis/functional,
+# ordinary dense C4_DHF (no SCF_DIRECT_4C).
+NELEC 2
+BASIS water-sto-3g.gbs
+C4_SPINOR TRUE
+FUNCTIONAL MULLER
+
+GEOMETRY
+H   0.000000   0.000000   0.000000
+H   0.000000   0.000000   0.741400
+END
