@@ -3466,12 +3466,26 @@ int main(int argc, char** argv) {
         kramersStructureTestOneBody(c4_structure_log, "C4_DHF (READ_RESTART)", h_mo_restart, /*repairs_if_failed=*/false);
         rerdmft::SymmetricEri<std::complex<double>> c4_mo_sym_r;
         rerdmft::CholeskyEri<std::complex<double>> c4_mo_chol_r;
-        if (input.cholesky()) {
+        if (input.cholesky() && input.functional_direct_4c() && !input.debug()) {
+          // FUNCTIONAL_DIRECT_4C: built directly from `c_dhf_restart` -- i.e. AFTER the
+          // Löwdin-orthonormalization/Kramers-pairing/positive-energy-space-at-this-geometry
+          // repair above, exactly as required (a geometry change between the restart file and
+          // this run is already reflected in `c_dhf_restart` by this point).
+          c4_mo_chol_r = rerdmft::rkbCholeskyToMoFused(large_basis.functions(), small_basis.functions(),
+                                                        rkb_coefficients, large_transform_final, c_dhf_restart,
+                                                        dim / 2, input.cholesky_threshold(), input.on_demand_eri());
+        } else if (input.cholesky()) {
           c4_mo_chol_r = rerdmft::rkbCholeskyToMo(rkb_cholesky, c_dhf_restart, dim / 2, input.cholesky_threshold());
         } else {
           c4_mo_sym_r = rerdmft::rkbMoTwoElectronSymmetric(c4_spinor_eri, c_dhf_restart);
         }
         logTiming("C4_DHF MO integral transform complete (READ_RESTART)", t_start, t_checkpoint, timing_records);
+        // Same early release as the non-restart C4_DHF path: only keep the big AO-basis RKB
+        // vectors alive if the min-max (FULL_OPTIMIZATION_4C_NEG) stage might still need them
+        // below, via full_chol_factory_r's lazy untrimmed transform.
+        if (input.cholesky() && !(input.full_optimization_4c_neg() && fullOptSettings(input).enabled)) {
+          rkb_cholesky = rerdmft::RkbCholesky();
+        }
         const std::size_t n_negative_r = dim / 2;
         rerdmft::RestartCapture c4_restart;
         const auto dhf_functional_r = [&](const auto& eri_any, const auto& eri_full_factory) {
@@ -4068,29 +4082,51 @@ int main(int argc, char** argv) {
       // SCF_DIRECT_4C: the DHF SCF iterations build their Fock matrices fully integral-direct
       // (UkbDirectEriSource below), never holding a two-electron representation during the SCF --
       // but FUNCTIONAL/FULL_OPTIMIZATION still needs actual MO-basis integrals afterward, built the
-      // SAME way CHOLESKY TRUE already builds them (RkbCholesky::build once, then rkbCholeskyToMo).
-      // So SCF_DIRECT_4C implies the Cholesky (not dense) branch for everything below EXCEPT the
+      // SAME way CHOLESKY TRUE already builds them (RkbCholesky::build once, then rkbCholeskyToMo)
+      // -- UNLESS FUNCTIONAL_DIRECT_4C is also set, see c4_need_rkb_cholesky_vectors below. So
+      // SCF_DIRECT_4C implies the Cholesky (not dense) branch for everything below EXCEPT the
       // SCF-loop dispatch itself, which takes the direct kernel regardless of this flag.
       const bool use_cholesky_integrals = input.cholesky() || input.scf_direct_4c();
       const rerdmft::UkbDirectEriSource ukb_direct_source{large_basis.functions(), small_basis.functions(), v_total};
+      // Hoisted (pure functions of `input`, needed before the RkbCholesky build decision below --
+      // see each one's own, later definition for the full comment/context).
+      const bool c4_dense = input.debug() || input.hessian_mean_field();
+      const bool c4_minmax_may_run = input.full_optimization_4c_neg() && fullOptSettings(input).enabled;
+      // Who actually needs the big AO-basis RkbCholesky vectors built at all: the SCF loop itself
+      // (CHOLESKY TRUE, unless SCF_DIRECT_4C overrides it), the DEBUG dense-vs-Cholesky Fock check
+      // below, the DEBUG/HESSIAN_MEAN_FIELD dense MO path (needs c4_mo_chol via symmetricFromCholesky),
+      // the untrimmed MINMAX transform (always, when it might run) -- or the ORDINARY (non-DEBUG)
+      // FUNCTIONAL path UNLESS FUNCTIONAL_DIRECT_4C replaces it with rkbCholeskyToMoFused below
+      // (C4_DHF/RkbCholesky.h), which runs its own AO-pair decomposition and never materializes
+      // the full RkbCholesky struct.
+      const bool c4_need_rkb_cholesky_vectors =
+          (input.cholesky() && !input.scf_direct_4c()) || (input.cholesky() && input.debug()) ||
+          (use_cholesky_integrals && c4_dense) ||
+          (use_cholesky_integrals && input.has_functional() && !input.functional_direct_4c()) || c4_minmax_may_run;
       if (use_cholesky_integrals) {
         // ONE decomposition of the real AO Coulomb matrix over {LL} u {SS} pairs; everything else (SCF Fock
         // matrices, MO-basis vectors) follows from the vectors. The packed RKB tensor is built only under
         // DEBUG, exactly (no Cholesky), as the dense reference for the dense-vs-Cholesky checks.
-        rerdmft::CholeskyCheckReport check;
-        rkb_cholesky = rerdmft::RkbCholesky::build(large_basis.functions(), small_basis.functions(),
-                                                    rkb_coefficients, large_transform_final,
-                                                    input.cholesky_threshold(), input.on_demand_eri(), &check);
-        std::ostringstream report;
-        report << std::scientific << std::setprecision(2) << "  RKB integrals held as " << rkb_cholesky.nVectors()
-               << " Cholesky vectors from one decomposition of the AO {LL} u {SS} Coulomb matrix (threshold "
-               << input.cholesky_threshold() << ", batch " << check.batch_used << (check.retried ? ", retried" : "")
-               << "; max |reconstruction - AO| on the sampled elements = " << check.max_error << ", tolerance "
-               << check.tolerance << ")\n  the SCF Fock matrices and all MO-basis integrals are built from these vectors"
-               << (input.debug() ? "; the packed RKB tensor is built only for the DEBUG checks.\n"
-                                 : "; no packed RKB tensor is formed.\n");
-        rkb_cholesky_report = report.str();
-        logTiming("Two-electron integrals built (C4_DHF, Cholesky vectors)", t_start, t_checkpoint, timing_records);
+        if (c4_need_rkb_cholesky_vectors) {
+          rerdmft::CholeskyCheckReport check;
+          rkb_cholesky = rerdmft::RkbCholesky::build(large_basis.functions(), small_basis.functions(),
+                                                      rkb_coefficients, large_transform_final,
+                                                      input.cholesky_threshold(), input.on_demand_eri(), &check);
+          std::ostringstream report;
+          report << std::scientific << std::setprecision(2) << "  RKB integrals held as " << rkb_cholesky.nVectors()
+                 << " Cholesky vectors from one decomposition of the AO {LL} u {SS} Coulomb matrix (threshold "
+                 << input.cholesky_threshold() << ", batch " << check.batch_used << (check.retried ? ", retried" : "")
+                 << "; max |reconstruction - AO| on the sampled elements = " << check.max_error << ", tolerance "
+                 << check.tolerance << ")\n  the SCF Fock matrices and all MO-basis integrals are built from these vectors"
+                 << (input.debug() ? "; the packed RKB tensor is built only for the DEBUG checks.\n"
+                                   : "; no packed RKB tensor is formed.\n");
+          rkb_cholesky_report = report.str();
+          logTiming("Two-electron integrals built (C4_DHF, Cholesky vectors)", t_start, t_checkpoint, timing_records);
+        } else {
+          rkb_cholesky_report =
+              "  RKB AO-basis Cholesky vectors skipped entirely (FUNCTIONAL_DIRECT_4C TRUE and MINMAX will not run): "
+              "the positive-energy MO Cholesky vectors are built directly instead, see below.\n";
+        }
         if (input.debug()) {
           c4_spinor_eri = buildC4SpinorEri(input, large_basis.functions(), small_basis.functions(),
                                                   rkb_coefficients, large_transform_final, /*use_cholesky=*/false);
@@ -4163,8 +4199,7 @@ int main(int argc, char** argv) {
       rerdmft::Matrix<std::complex<double>> h_mo;
       // MO integrals as a unique-element store (no CHOLESKY, or DEBUG as the exact reference, or expanded from the
       // vectors for HESSIAN_MEAN_FIELD) and/or Cholesky vectors (CHOLESKY TRUE); a DENSE Tensor4 only for the DEBUG suites
-      // and HESSIAN_MEAN_FIELD (see the NON_REL/X2C comments).
-      const bool c4_dense = input.debug() || input.hessian_mean_field();
+      // and HESSIAN_MEAN_FIELD (see the NON_REL/X2C comments). (c4_dense hoisted above, before the RkbCholesky build decision.)
       rerdmft::Tensor4<std::complex<double>> eri_mo;
       rerdmft::SymmetricEri<std::complex<double>> c4_mo_sym;
       rerdmft::CholeskyEri<std::complex<double>> c4_mo_chol;
@@ -4176,7 +4211,15 @@ int main(int argc, char** argv) {
         // builds the FULL (positive+negative-energy) n_mo x n_mo vector per Cholesky vector before trimming
         // to the positive-energy block, i.e. 4x the final size, times N_chol -- for a heavy element this is
         // easily several GB of pure waste when nothing downstream reads c4_mo_chol at all.
-        if (use_cholesky_integrals && (c4_dense || input.has_functional())) {
+        if (use_cholesky_integrals && input.functional_direct_4c() && !c4_dense) {
+          // FUNCTIONAL_DIRECT_4C: RkbCholesky::build + rkbCholeskyToMo fused into one pass (same
+          // AO-pair decomposition, but the RKB AO-basis vectors are never all held at once) --
+          // C4_DHF/RkbCholesky.h's rkbCholeskyToMoFused.
+          c4_mo_chol = rerdmft::rkbCholeskyToMoFused(large_basis.functions(), small_basis.functions(),
+                                                      rkb_coefficients, large_transform_final, dhf_result.c_dhf,
+                                                      h_mo.rows() / 2, input.cholesky_threshold(),
+                                                      input.on_demand_eri());
+        } else if (use_cholesky_integrals && (c4_dense || input.has_functional())) {
           c4_mo_chol = rerdmft::rkbCholeskyToMo(rkb_cholesky, dhf_result.c_dhf, h_mo.rows() / 2, input.cholesky_threshold());
         }
         if (!use_cholesky_integrals || input.debug()) {
@@ -4247,6 +4290,19 @@ int main(int argc, char** argv) {
         repairC4Kramers();
       }
       logTiming("C4_DHF MO integral transform complete", t_start, t_checkpoint, timing_records);
+
+      // Release the big AO-basis RKB vectors as soon as the MO-basis ones (c4_mo_chol, trimmed to
+      // the positive-energy block above) are the only thing FUNCTIONAL OPTIMIZATION below will
+      // read: O(N_chol * n_large^2) of memory, vs. the MUCH smaller O(N_chol * n_mo^2) of the
+      // trimmed MO vectors -- the actual memory bottleneck for a heavy element (Kr/Xe) that
+      // SCF_DIRECT_4C's own on-the-fly SCF was built to sidestep for the SCF step. Only safe when
+      // the min-max (FULL_OPTIMIZATION_4C_NEG) stage will NOT run: that stage's lazy
+      // `full_chol_factory` below still needs rkb_cholesky to build the untrimmed (n_negative=0)
+      // transform at the exact point it runs, so this is skipped then (unchanged behavior, freed
+      // after dhf_functional() returns, as before).
+      if (use_cholesky_integrals && !(input.full_optimization_4c_neg() && fullOptSettings(input).enabled)) {
+        rkb_cholesky = rerdmft::RkbCholesky();
+      }
 
       const std::size_t rkb_dim = h_mo.rows();
 

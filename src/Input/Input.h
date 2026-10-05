@@ -220,6 +220,17 @@ class Input {
   // how the SCF loop itself gets its Fock matrices. Mutually exclusive with READ_RESTART, DEBUG,
   // and HESSIAN_MEAN_FIELD for now (see Input.cpp's validation).
   bool scf_direct_4c() const { return scf_direct_4c_; }
+  // FUNCTIONAL/FULL_OPTIMIZATION's positive-energy-only MO Cholesky vectors are built via
+  // C4_DHF/RkbCholesky.h's rkbCholeskyToMoFused: the SAME AO-pair decomposition
+  // RkbCholesky::build runs, but each accepted AO-pair vector is RKB-projected and MO-transformed
+  // immediately (as a local temporary) instead of ever materializing the full RkbCholesky struct
+  // (O(N_chol_AO * n_large^2), the remaining memory bottleneck for a heavy element's functional
+  // optimization) -- same validated math as RkbCholesky::build + rkbCholeskyToMo, just a
+  // different lifetime for the intermediate AO-basis vectors. Only applies when
+  // FULL_OPTIMIZATION_4C_NEG will NOT run (that stage still needs the untrimmed, negative+positive
+  // transform, which still goes through RkbCholesky unchanged) -- harmless but has no effect if
+  // combined with it. Requires C4_SPINOR TRUE (see Input.cpp).
+  bool functional_direct_4c() const { return functional_direct_4c_; }
   // Optional; defaults to 1e-6 (DIRAC's own STOL(1)). The large-component LOWGEN safety net's
   // threshold (Utils/LinearAlgebra.h's canonicalOrthogonalize): below this eigenvalue, a direction
   // in the large-component overlap is genuinely DROPPED rather than kept-and-inverted, catching
@@ -486,6 +497,7 @@ class Input {
   double cholesky_threshold_ = 1e-10;
   bool on_demand_eri_ = true;
   bool scf_direct_4c_ = false;
+  bool functional_direct_4c_ = false;
   double x_lin_dep_thrs_l_ = 1e-6;
   double x_lin_dep_thrs_s_ = 1e-8;
   bool read_restart_ = false;

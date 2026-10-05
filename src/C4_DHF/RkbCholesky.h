@@ -80,6 +80,23 @@ CholeskyEri<std::complex<double>> rkbCholeskyToMo(const RkbCholesky& eri,
                                                    const Matrix<std::complex<double>>& c_dhf,
                                                    std::size_t n_negative = 0, double threshold = 1e-10);
 
+// FUNCTIONAL_DIRECT_4C: RkbCholesky::build + rkbCholeskyToMo fused into one pass, for the
+// trimmed (n_negative > 0, i.e. non-MINMAX) case only -- runs the SAME AO-pair decomposition
+// (same pair matrix, same on_demand choice) but RKB-projects and MO-transforms each accepted
+// AO-pair vector immediately (as a local temporary) instead of ever materializing the full
+// RkbCholesky struct (O(N_chol_AO * n_large^2), the memory this exists to avoid). Same inputs as
+// RkbCholesky::build plus the DHF spinor coefficients `c_dhf` and the number of negative-energy
+// columns to skip (`n_negative`, must be > 0). The MINMAX (FULL_OPTIMIZATION_4C_NEG) stage still
+// needs the untrimmed (n_negative = 0) transform, which still goes through
+// RkbCholesky::build + rkbCholeskyToMo, unchanged.
+CholeskyEri<std::complex<double>> rkbCholeskyToMoFused(const std::vector<BasisFunction>& large_basis,
+                                                        const std::vector<BasisFunction>& small_basis,
+                                                        const Matrix<std::complex<double>>& rkb_coefficients,
+                                                        const Matrix<double>& large_transform,
+                                                        const Matrix<std::complex<double>>& c_dhf,
+                                                        std::size_t n_negative, double threshold, bool on_demand,
+                                                        CholeskyCheckReport* report = nullptr);
+
 }  // namespace rerdmft
 
 #endif  // RERDMFT_C4_DHF_RKBCHOLESKY_H

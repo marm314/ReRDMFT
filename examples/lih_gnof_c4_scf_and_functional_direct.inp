@@ -1,0 +1,23 @@
+# Validation example: LiH, 6-31G, GNOF, FULL_OPTIMIZATION TRUE with SCF_DIRECT_4C TRUE +
+# FUNCTIONAL_DIRECT_4C TRUE together -- the combination that matters: the SCF loop never holds a
+# two-electron representation (UkbFockMatrixDirect.h), and FUNCTIONAL OPTIMIZATION's positive-
+# energy MO Cholesky vectors are built via rkbCholeskyToMoFused, which also never materializes the
+# full RkbCholesky AO-basis struct. RkbCholesky::build should be skipped entirely (watch the log
+# for "RKB AO-basis Cholesky vectors skipped entirely"). Compare the converged energy against
+# lih_gnof_c4_full_optimization_cholesky.inp's own result -- must match exactly.
+ON_DEMAND_ERI TRUE
+NELEC 4
+BASIS lih-6-31g.gbs
+C4_SPINOR TRUE
+FUNCTIONAL GNOF
+PNOF_SUBSPACES 2
+PNOF_COUPLING 2
+FULL_OPTIMIZATION TRUE
+CHOLESKY TRUE
+SCF_DIRECT_4C TRUE
+FUNCTIONAL_DIRECT_4C TRUE
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.594900
+END

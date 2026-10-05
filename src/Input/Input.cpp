@@ -187,6 +187,8 @@ void Input::read(const std::string& filename) {
       on_demand_eri_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "SCF_DIRECT_4C") {
       scf_direct_4c_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "FUNCTIONAL_DIRECT_4C") {
+      functional_direct_4c_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "X_LIN_DEP_THRS_L") {
       x_lin_dep_thrs_l_ = parseDouble(iss, line_number, keyword);
       if (!(x_lin_dep_thrs_l_ > 0.0)) {
@@ -421,6 +423,22 @@ void Input::read(const std::string& filename) {
         "SCF_DIRECT_4C TRUE with HESSIAN_MEAN_FIELD TRUE is not supported (HESSIAN_MEAN_FIELD needs an actual dense "
         "two-electron tensor, which SCF_DIRECT_4C never builds)");
   }
+  if (functional_direct_4c_ && !c4_spinor_) {
+    throw std::runtime_error(
+        "FUNCTIONAL_DIRECT_4C TRUE requires C4_SPINOR TRUE (it only replaces the C4_DHF/C4_SPINOR "
+        "FUNCTIONAL OPTIMIZATION's positive-energy MO Cholesky-vector build)");
+  }
+  if (functional_direct_4c_ && !has_functional_) {
+    throw std::runtime_error(
+        "FUNCTIONAL_DIRECT_4C TRUE requires FUNCTIONAL (there is otherwise no FUNCTIONAL OPTIMIZATION step "
+        "to build positive-energy MO Cholesky vectors for)");
+  }
+  if (functional_direct_4c_ && !cholesky_ && !scf_direct_4c_) {
+    throw std::runtime_error(
+        "FUNCTIONAL_DIRECT_4C TRUE requires CHOLESKY TRUE or SCF_DIRECT_4C TRUE (with both FALSE, the SCF loop "
+        "already builds a dense two-electron tensor it needs anyway, so there is nothing for this keyword to "
+        "avoid building -- it would silently have no effect)");
+  }
   // Applied here, after the whole file is parsed, so UNIT_LENGTH may appear before or after
   // GEOMETRY: "BOHR"/"AU" coordinates are already atomic units, no conversion needed.
   if (unit_length_ == "ANGS") {
@@ -460,6 +478,7 @@ void Input::print(std::ostream& out) const {
   line("CHOLESKY") << flag(cholesky_) << "\n";
   line("ON_DEMAND_ERI") << flag(on_demand_eri_) << "\n";
   line("SCF_DIRECT_4C") << flag(scf_direct_4c_) << "\n";
+  line("FUNCTIONAL_DIRECT_4C") << flag(functional_direct_4c_) << "\n";
   line("X_LIN_DEP_THRS_L") << x_lin_dep_thrs_l_ << "\n";
   line("X_LIN_DEP_THRS_S") << x_lin_dep_thrs_s_ << "\n";
   line("CARTESIAN") << flag(cartesian_) << "\n";

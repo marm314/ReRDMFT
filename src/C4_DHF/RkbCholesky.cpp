@@ -160,6 +160,51 @@ Matrix<C> promote(const Matrix<double>& m) {
   return out;
 }
 
+// Shared by rkbCholeskyToMo's nn>0 branch and rkbCholeskyToMoFused: `a` is nchol x m*m, row l the
+// flattened m x m W_L matrix for Cholesky vector l (W_L = B'_L^T, already the positive-energy
+// block). Recompresses via the Gram matrix (see this function's own call sites for the math
+// comment) and zero-pads back to nmo x nmo (the negative branch keeps its zero rows/columns).
+CholeskyEri<C> recompressMoVectors(const Matrix<C>& a, std::size_t nchol, std::size_t m, std::size_t nn,
+                                    std::size_t nmo, double threshold) {
+  // Recompress: rows A_L = the m^2 entries of W_L (already the positive-energy block, nothing left to slice);
+  // M = A^T conj(A) is unchanged by any unitary mixing of the rows, so diagonalize the Gram matrix
+  // G = A A^dagger (G u_k = lambda_k u_k) and keep A'_k = sum_L conj(u_k(L)) A_L for lambda_k > tau:
+  // dropping the others changes every element of M by at most the sum of their eigenvalues.
+  Matrix<C> gram(nchol, nchol);
+  {
+    const C alpha(1.0, 0.0), beta(0.0, 0.0);
+    // G = A A^dagger via zgemm (A: nchol x m^2)
+    cblas_zgemm(CblasRowMajor, CblasNoTrans, CblasConjTrans, static_cast<int>(nchol), static_cast<int>(nchol),
+                static_cast<int>(m * m), &alpha, a.data(), static_cast<int>(m * m), a.data(), static_cast<int>(m * m),
+                &beta, gram.data(), static_cast<int>(nchol));
+  }
+  const HermitianEigenResult eig = diagonalizeHermitian(gram);
+  const double tau = threshold / static_cast<double>(std::max<std::size_t>(1, nchol));
+  std::vector<std::size_t> keep;
+  for (std::size_t k = 0; k < nchol; ++k)
+    if (eig.eigenvalues[k] > tau) keep.push_back(k);
+  if (keep.empty()) throw std::runtime_error("recompressMoVectors: no Cholesky direction survives the compression");
+  std::vector<Matrix<C>> compressed(keep.size());
+  const int nk = static_cast<int>(keep.size());
+  // A'(k,:) = sum_L conj(u_k(L)) A(L,:)  ==  (conj(U)^T A) with U = eigenvectors (columns u_k)
+  Matrix<C> uc(nchol, keep.size());
+  for (std::size_t l = 0; l < nchol; ++l)
+    for (std::size_t k = 0; k < keep.size(); ++k) uc(l, k) = std::conj(eig.eigenvectors(l, keep[k]));
+  Matrix<C> ap(keep.size(), m * m);
+  {
+    const C alpha(1.0, 0.0), beta(0.0, 0.0);
+    cblas_zgemm(CblasRowMajor, CblasTrans, CblasNoTrans, nk, static_cast<int>(m * m), static_cast<int>(nchol), &alpha,
+                uc.data(), nk, a.data(), static_cast<int>(m * m), &beta, ap.data(), static_cast<int>(m * m));
+  }
+  for (std::size_t k = 0; k < keep.size(); ++k) {
+    Matrix<C> w(nmo, nmo, C{});  // zero-padded: the negative branch keeps its (zero) rows/columns
+    for (std::size_t x = 0; x < m; ++x)
+      for (std::size_t y = 0; y < m; ++y) w(nn + x, nn + y) = ap(k, x * m + y);
+    compressed[k] = std::move(w);
+  }
+  return CholeskyEri<C>::fromVectors(compressed);
+}
+
 }  // namespace
 
 RkbCholesky RkbCholesky::build(const std::vector<BasisFunction>& large_basis,
@@ -397,43 +442,89 @@ CholeskyEri<C> rkbCholeskyToMo(const RkbCholesky& ao, const Matrix<C>& c, std::s
     return CholeskyEri<C>::fromVectors(out);
   }
 
-  // Recompress: rows A_L = the m^2 entries of W_L (already the positive-energy block, nothing left to slice);
-  // M = A^T conj(A) is unchanged by any unitary mixing of the rows, so diagonalize the Gram matrix
-  // G = A A^dagger (G u_k = lambda_k u_k) and keep A'_k = sum_L conj(u_k(L)) A_L for lambda_k > tau:
-  // dropping the others changes every element of M by at most the sum of their eigenvalues.
-  Matrix<C> gram(nchol, nchol);
+  return recompressMoVectors(a, nchol, m, nn, nmo, threshold);
+}
+
+CholeskyEri<C> rkbCholeskyToMoFused(const std::vector<BasisFunction>& large_basis,
+                                     const std::vector<BasisFunction>& small_basis,
+                                     const Matrix<C>& rkb_coefficients, const Matrix<double>& large_transform,
+                                     const Matrix<C>& c_dhf, std::size_t n_negative, double threshold,
+                                     bool on_demand, CholeskyCheckReport* report) {
+  // Same AO-pair decomposition RkbCholesky::build runs (identical pair matrix, identical
+  // threshold/on_demand choice) -- the part that touches raw AO integrals, already as fast as
+  // this project's batched-pivot decomposition makes it. What's fused away is everything AFTER
+  // that: instead of RKB-projecting EVERY accepted AO-pair vector into its own (n_large x
+  // n_large) flavor-block matrices and keeping ALL of them (RkbCholesky's own struct, O(N_chol_AO
+  // * n_large^2) -- the memory this function exists to avoid), each vector's flavor blocks are
+  // computed as LOCAL temporaries and immediately MO-transformed into its own row of the (much
+  // smaller) `a` buffer below, then discarded -- never materializing the intermediate RkbCholesky
+  // struct at all. The MO-transform math itself (W_L = C^dagger B_L C, zero-flavor-cross-term
+  // handling) and the final Gram-matrix recompression are EXACTLY rkbCholeskyToMo's own (shared
+  // via recompressMoVectors above) -- only the AO-basis vectors' *lifetime* changes, not any of
+  // the validated math. Only ever used for the trimmed (n_negative > 0, non-MINMAX) case; the
+  // untrimmed (n_negative = 0) transform FULL_OPTIMIZATION_4C_NEG needs still goes through
+  // RkbCholesky::build + rkbCholeskyToMo, unchanged.
+  const std::size_t nl = large_basis.size(), ns = small_basis.size();
+  const std::size_t nl_sph = large_transform.cols();
+  const std::size_t nmo = c_dhf.cols(), nn = n_negative, m = nmo - nn;
+  if (c_dhf.rows() != 4 * nl_sph) throw std::runtime_error("rkbCholeskyToMoFused: c_dhf must have 4*n_large rows");
+
+  FlatVectors<double> flat;
   {
-    const C alpha(1.0, 0.0), beta(0.0, 0.0);
-    // G = A A^dagger via zgemm (A: nchol x m^2)
-    cblas_zgemm(CblasRowMajor, CblasNoTrans, CblasConjTrans, static_cast<int>(nchol), static_cast<int>(nchol),
-                static_cast<int>(m * m), &alpha, a.data(), static_cast<int>(m * m), a.data(), static_cast<int>(m * m),
-                &beta, gram.data(), static_cast<int>(nchol));
+    if (!on_demand) {
+      const PackedTwoElectronTensor ll_ll = twoElectronIntegralsPacked(large_basis, threshold);
+      const CrossPackedTwoElectronTensor ll_ss = twoElectronIntegralsCrossPacked(large_basis, small_basis, threshold);
+      const PackedTwoElectronTensor ss_ss = twoElectronIntegralsPacked(small_basis, threshold);
+      const UnionCoulombPairs pairs(ll_ll, ll_ss, ss_ss);
+      flat = choleskyDecomposePairsChecked<double>(pairs, threshold, report);
+    } else {
+      const OnDemandUnionCoulombPairs pairs(large_basis, small_basis, threshold);
+      flat = choleskyDecomposePairsChecked<double>(pairs, threshold, report);
+    }
   }
-  const HermitianEigenResult eig = diagonalizeHermitian(gram);
-  const double tau = threshold / static_cast<double>(std::max<std::size_t>(1, nchol));
-  std::vector<std::size_t> keep;
-  for (std::size_t k = 0; k < nchol; ++k)
-    if (eig.eigenvalues[k] > tau) keep.push_back(k);
-  if (keep.empty()) throw std::runtime_error("rkbCholeskyToMo: no Cholesky direction survives the compression");
-  std::vector<Matrix<C>> compressed(keep.size());
-  const int nk = static_cast<int>(keep.size());
-  // A'(k,:) = sum_L conj(u_k(L)) A(L,:)  ==  (conj(U)^T A) with U = eigenvectors (columns u_k)
-  Matrix<C> uc(nchol, keep.size());
-  for (std::size_t l = 0; l < nchol; ++l)
-    for (std::size_t k = 0; k < keep.size(); ++k) uc(l, k) = std::conj(eig.eigenvectors(l, keep[k]));
-  Matrix<C> ap(keep.size(), m * m);
+  const std::size_t nchol = flat.count;
+  Matrix<C> a(nchol, m * m);
+  const SerialBlasScope serial_blas_guard;
+#pragma omp parallel
   {
-    const C alpha(1.0, 0.0), beta(0.0, 0.0);
-    cblas_zgemm(CblasRowMajor, CblasTrans, CblasNoTrans, nk, static_cast<int>(m * m), static_cast<int>(nchol), &alpha,
-                uc.data(), nk, a.data(), static_cast<int>(m * m), &beta, ap.data(), static_cast<int>(m * m));
+    Matrix<C> tmp(nl_sph, m), bp(m, m);
+#pragma omp for schedule(dynamic)
+    for (std::size_t l = 0; l < nchol; ++l) {
+      const double* row_data = flat.data.data() + l * flat.pair_dim;
+      Matrix<double> b(nl, nl), s(ns, ns);
+      std::copy(row_data, row_data + nl * nl, b.data());
+      std::copy(row_data + nl * nl, row_data + nl * nl + ns * ns, s.data());
+      const Matrix<C> b_large = promote(transformToSpherical(b, large_transform));
+      Matrix<C> flavor[4] = {b_large, b_large, rkbProjectSmallVector(s, rkb_coefficients, 0, nl_sph, ns),
+                              rkbProjectSmallVector(s, rkb_coefficients, 1, nl_sph, ns)};
+      const Matrix<C> cross_fwd = rkbProjectSmallVectorCross(s, rkb_coefficients, 0, 1, nl_sph, ns);
+      const Matrix<C> cross_bwd = rkbProjectSmallVectorCross(s, rkb_coefficients, 1, 0, nl_sph, ns);
+
+      for (int f = 0; f < 4; ++f) {
+        const C* cf = c_dhf.data() + static_cast<std::size_t>(f) * nl_sph * nmo + nn;  // columns [nn, nmo), ld=nmo
+        zgemm(false, static_cast<int>(nl_sph), static_cast<int>(m), static_cast<int>(nl_sph), flavor[f].data(),
+              static_cast<int>(nl_sph), cf, static_cast<int>(nmo), 0.0, tmp.data(), static_cast<int>(m));
+        zgemm(true, static_cast<int>(m), static_cast<int>(m), static_cast<int>(nl_sph), cf, static_cast<int>(nmo),
+              tmp.data(), static_cast<int>(m), f == 0 ? 0.0 : 1.0, bp.data(), static_cast<int>(m));
+      }
+      {
+        const C* c_sa = c_dhf.data() + 2 * nl_sph * nmo + nn;
+        const C* c_sb = c_dhf.data() + 3 * nl_sph * nmo + nn;
+        zgemm(false, static_cast<int>(nl_sph), static_cast<int>(m), static_cast<int>(nl_sph), cross_fwd.data(),
+              static_cast<int>(nl_sph), c_sb, static_cast<int>(nmo), 0.0, tmp.data(), static_cast<int>(m));
+        zgemm(true, static_cast<int>(m), static_cast<int>(m), static_cast<int>(nl_sph), c_sa, static_cast<int>(nmo),
+              tmp.data(), static_cast<int>(m), 1.0, bp.data(), static_cast<int>(m));
+
+        zgemm(false, static_cast<int>(nl_sph), static_cast<int>(m), static_cast<int>(nl_sph), cross_bwd.data(),
+              static_cast<int>(nl_sph), c_sa, static_cast<int>(nmo), 0.0, tmp.data(), static_cast<int>(m));
+        zgemm(true, static_cast<int>(m), static_cast<int>(m), static_cast<int>(nl_sph), c_sb, static_cast<int>(nmo),
+              tmp.data(), static_cast<int>(m), 1.0, bp.data(), static_cast<int>(m));
+      }
+      for (std::size_t x = 0; x < m; ++x)
+        for (std::size_t y = 0; y < m; ++y) a(l, x * m + y) = bp(y, x);
+    }
   }
-  for (std::size_t k = 0; k < keep.size(); ++k) {
-    Matrix<C> w(nmo, nmo, C{});  // zero-padded: the negative branch keeps its (zero) rows/columns
-    for (std::size_t x = 0; x < m; ++x)
-      for (std::size_t y = 0; y < m; ++y) w(nn + x, nn + y) = ap(k, x * m + y);
-    compressed[k] = std::move(w);
-  }
-  return CholeskyEri<C>::fromVectors(compressed);
+  return recompressMoVectors(a, nchol, m, nn, nmo, threshold);
 }
 
 }  // namespace rerdmft
