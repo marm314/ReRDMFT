@@ -52,6 +52,17 @@ Matrix<C> ukbFockTwoElectronDirect(const std::vector<BasisFunction>& large_basis
   // smallSmallBlocksSlab parallelizes). Still O(1) persistent memory either way (nothing this
   // function builds is cached across Fock builds) -- genuine shell-batching for the Small-touching
   // sectors is deferred to a later performance pass.
+  //
+  // All three sectors below DO exploit the full real-orbital permutational symmetry of (pq|rs)
+  // within a single build, though: each one only evaluates one representative integral per
+  // symmetry-equivalence class (shell-level for the batched LL|LL sector, AO-level for the other
+  // two) and scatters that single computed value into every Fock contribution its orbit covers,
+  // instead of calling libcint again for a quartet that is numerically identical to one already
+  // computed earlier in the same loop. See each sector's own comment for the exact scatter.
+  // Nothing here reduces the PER-ITERATION-to-PER-ITERATION redundancy (every SCF iteration still
+  // recomputes the full symmetry-reduced integral set from scratch, by design -- that is the
+  // O(1)-memory/recompute tradeoff this kernel exists for); it only removes the within-one-build
+  // redundancy of evaluating the same (pq|rs) value multiple times under different index orders.
   constexpr double kScreeningThreshold = 1e-10;
   const std::vector<ShellInfo> large_shells = groupIntoShells(large_basis);
   const std::vector<double> sqrt_diag_large = sqrtPairDiagonal(large_basis);
@@ -97,45 +108,93 @@ Matrix<C> ukbFockTwoElectronDirect(const std::vector<BasisFunction>& large_basis
     for (int u = 0; u < 4; ++u) km[f][u] = Matrix<C>(fsize[static_cast<std::size_t>(f)], fsize[static_cast<std::size_t>(u)], C{});
 
   // --- (Large,Large | Large,Large): shell-quartet batched (Phase 0, ElectronRepulsion.h). ---
+  //
+  // Exploits the full real-orbital 8-fold permutational symmetry (p<->q, r<->s, (pq)<->(rs)): the
+  // outer shell loop below only visits one canonical representative per symmetry-equivalence
+  // class of shell quartets (sa<=sb, sc<=sd, and shell-pair-compound(sa,sb)<=shell-pair-compound
+  // (sc,sd), same triangular-restriction idea as twoElectronIntegralsPacked's own AO-level loop,
+  // just lifted to shell granularity so it actually saves libcint CALLS, not merely storage) --
+  // up to 8x fewer twoElectronShellQuartet/libcint calls for a generic, non-degenerate quartet.
+  //
+  // The computed block is then read under every DISTINCT shell-level role assignment in its orbit
+  // {(sa,sb,sc,sd),(sb,sa,sc,sd),(sa,sb,sd,sc),(sb,sa,sd,sc),(sc,sd,sa,sb),(sd,sc,sa,sb),
+  // (sc,sd,sb,sa),(sd,sc,sb,sa)}, deduped AT THE SHELL LEVEL (collapsing whenever two shells in the
+  // quartet coincide, e.g. sa==sb, so a role assignment that is shell-identical to one already
+  // counted is not read again) -- NOT deduped per AO quadruplet inside the block: a per-entry dedup
+  // would independently rediscover and rescatter the SAME orbit from several different (ia,ib,ic,
+  // id) entries of one block (e.g. entries (ia,ib,ic,id) and (ib,ia,id,ic) both mapping onto the
+  // SAME physical AO quadruplet's orbit), overcounting by up to 8x -- caught by a standalone
+  // cross-check against the unrestricted form on p/d toy bases before this landed. For each
+  // surviving role assignment, every (ia,ib,ic,id) in the FULL block contributes J(p1,p2) +=
+  // v*P(p4,p3) and, for both Large flavors f,u in {0,1}, K_fu(p1,p3) += v*P_fu(p2,p4), with
+  // (p1,p2,p3,p4) read off that assignment's shell offsets -- exactly reproducing the former fully
+  // unrestricted sa,sb,sc,sd loop (every unrestricted AO quadruplet belongs to exactly one such
+  // orbit, visited by exactly one (role assignment, block entry) pair), without ever recomputing a
+  // symmetry-equivalent integral via a second libcint call. Validated bit-for-bit against the
+  // prior unrestricted form in tests/test_ukb_fock_direct.cpp.
   for (std::size_t sa = 0; sa < large_shells.size(); ++sa) {
-    for (std::size_t sb = 0; sb < large_shells.size(); ++sb) {
+    for (std::size_t sb = sa; sb < large_shells.size(); ++sb) {
+      const std::size_t pq_shell = sa * large_shells.size() + sb;
       for (std::size_t sc = 0; sc < large_shells.size(); ++sc) {
-        for (std::size_t sd = 0; sd < large_shells.size(); ++sd) {
+        for (std::size_t sd = sc; sd < large_shells.size(); ++sd) {
+          const std::size_t rs_shell = sc * large_shells.size() + sd;
+          if (rs_shell < pq_shell) continue;  // (ab|cd) == (cd|ab); only need pq_shell<=rs_shell.
+
           const ShellQuartetBlock blk =
               twoElectronShellQuartet(large_basis, large_shells[sa], large_shells[sb], large_shells[sc], large_shells[sd]);
-          const std::size_t a0 = large_shells[sa].first;
-          const std::size_t b0 = large_shells[sb].first;
-          const std::size_t c0 = large_shells[sc].first;
-          const std::size_t d0 = large_shells[sd].first;
+          // off[k]/dim index slot k (0=a/sa, 1=b/sb, 2=c/sc, 3=d/sd) -- slot, not role: a role
+          // assignment below picks, for each of its 4 ROLES, which SLOT's offset and block
+          // dimension to read.
+          const std::size_t off[4] = {large_shells[sa].first, large_shells[sb].first, large_shells[sc].first,
+                                       large_shells[sd].first};
+          const std::size_t shell_of_slot[4] = {sa, sb, sc, sd};
 
-          // J(a,b) = sum_{q,s} (ab|qs) P(s,q) (RkbFockMatrix.h's own convention, physics <pq|rs> =
-          // chemist (pr|qs) applied to J(p,r)=sum P(s,q)<pq|rs>) -- q is the integral's 3rd index,
-          // s its 4th, so the density read is P(s,q) = p_total_large(d0+id, c0+ic), NOT (c0+ic,
-          // d0+id): for a genuinely complex Hermitian density these differ by complex conjugation,
-          // not just a relabeling, so getting this backwards is a real (not cosmetic) bug -- caught
-          // by tests/test_ukb_fock_direct.cpp using a non-real P_RKB specifically to expose it.
-          for (int ia = 0; ia < blk.ni; ++ia)
-            for (int ib = 0; ib < blk.nj; ++ib) {
-              C j_sum{};
-              for (int ic = 0; ic < blk.nk; ++ic)
-                for (int id = 0; id < blk.nl; ++id)
-                  j_sum += blk(ia, ib, ic, id) * p_total_large(d0 + static_cast<std::size_t>(id), c0 + static_cast<std::size_t>(ic));
-              jm_large(a0 + static_cast<std::size_t>(ia), b0 + static_cast<std::size_t>(ib)) += j_sum;
+          // J(p1,p2) = sum (p1 p2|p3 p4) P(p4,p3) (RkbFockMatrix.h's own convention, physics
+          // <pq|rs> = chemist (pr|qs) applied to J(p,r)=sum P(s,q)<pq|rs>) -- the density read is
+          // P(p4,p3), NOT (p3,p4): for a genuinely complex Hermitian density these differ by
+          // complex conjugation, not just a relabeling, so getting this backwards is a real (not
+          // cosmetic) bug -- caught by tests/test_ukb_fock_direct.cpp using a non-real P_RKB
+          // specifically to expose it.
+          const std::array<std::array<int, 4>, 8> slot_cand = {
+              {{0, 1, 2, 3}, {1, 0, 2, 3}, {0, 1, 3, 2}, {1, 0, 3, 2},
+               {2, 3, 0, 1}, {3, 2, 0, 1}, {2, 3, 1, 0}, {3, 2, 1, 0}}};
+          std::array<std::array<int, 4>, 8> patterns{};
+          std::size_t n_patterns = 0;
+          for (const auto& sp : slot_cand) {
+            const std::array<std::size_t, 4> shell_tuple = {shell_of_slot[sp[0]], shell_of_slot[sp[1]],
+                                                              shell_of_slot[sp[2]], shell_of_slot[sp[3]]};
+            bool dup = false;
+            for (std::size_t j = 0; j < n_patterns; ++j) {
+              const auto& ep = patterns[j];
+              const std::array<std::size_t, 4> existing_tuple = {shell_of_slot[ep[0]], shell_of_slot[ep[1]],
+                                                                   shell_of_slot[ep[2]], shell_of_slot[ep[3]]};
+              if (existing_tuple == shell_tuple) { dup = true; break; }
             }
+            if (!dup) patterns[n_patterns++] = sp;
+          }
 
-          // K_fu(a,c) += sum_{b,d} (ab|cd) P_fu(b,d), for the 4 (f,u) in {0,1}x{0,1} (both Large).
-          for (int f : {0, 1}) {
-            for (int u : {0, 1}) {
-              Matrix<C>& km_fu = km[f][u];
-              const Matrix<C>& p = p_fu[f][u];
-              for (int ia = 0; ia < blk.ni; ++ia)
+          for (std::size_t pi = 0; pi < n_patterns; ++pi) {
+            const std::array<int, 4>& pat = patterns[pi];
+            for (int ia = 0; ia < blk.ni; ++ia) {
+              for (int ib = 0; ib < blk.nj; ++ib) {
                 for (int ic = 0; ic < blk.nk; ++ic) {
-                  C k_sum{};
-                  for (int ib = 0; ib < blk.nj; ++ib)
-                    for (int id = 0; id < blk.nl; ++id)
-                      k_sum += blk(ia, ib, ic, id) * p(b0 + static_cast<std::size_t>(ib), d0 + static_cast<std::size_t>(id));
-                  km_fu(a0 + static_cast<std::size_t>(ia), c0 + static_cast<std::size_t>(ic)) += k_sum;
+                  for (int id = 0; id < blk.nl; ++id) {
+                    const double v = blk(ia, ib, ic, id);
+                    if (v == 0.0) continue;
+                    const int idx[4] = {ia, ib, ic, id};
+                    const std::size_t p1 = off[pat[0]] + static_cast<std::size_t>(idx[pat[0]]);
+                    const std::size_t p2 = off[pat[1]] + static_cast<std::size_t>(idx[pat[1]]);
+                    const std::size_t p3 = off[pat[2]] + static_cast<std::size_t>(idx[pat[2]]);
+                    const std::size_t p4 = off[pat[3]] + static_cast<std::size_t>(idx[pat[3]]);
+                    jm_large(p1, p2) += v * p_total_large(p4, p3);
+                    for (int f : {0, 1}) {
+                      for (int u : {0, 1}) {
+                        km[f][u](p1, p3) += v * p_fu[f][u](p2, p4);
+                      }
+                    }
+                  }
                 }
+              }
             }
           }
         }
@@ -164,25 +223,46 @@ Matrix<C> ukbFockTwoElectronDirect(const std::vector<BasisFunction>& large_basis
       Matrix<C>& jm_large_t = jm_large_part[static_cast<std::size_t>(tid)];
       Matrix<C>& jm_small_t = jm_small_part[static_cast<std::size_t>(tid)];
       auto& km_t = km_part[static_cast<std::size_t>(tid)];
-      for (std::size_t b = 0; b < nl; ++b) {
+      for (std::size_t b = a; b < nl; ++b) {
         const double sqrt_lab = sqrt_diag_large[triIndex(a, b)];
         for (std::size_t c = 0; c < ns; ++c) {
-          for (std::size_t d = 0; d < ns; ++d) {
+          for (std::size_t d = c; d < ns; ++d) {
             if (sqrt_lab * sqrt_diag_small[triIndex(c, d)] < kScreeningThreshold) continue;
             const double v = twoElectronQuadruplet(large_basis[a], large_basis[b], small_basis[c], small_basis[d]);
             if (v == 0.0) continue;
 
-            // J: jm_large(a,b) += v * P_total_small(d,c); jm_small(c,d) += v * P_total_large(b,a).
-            jm_large_t(a, b) += v * p_total_small(d, c);
-            jm_small_t(c, d) += v * p_total_large(b, a);
+            // a<->b (within Large) and c<->d (within Small) are both exact real-integral
+            // symmetries not yet exploited by the a<=b, c<=d restriction above (that restriction
+            // only avoids recomputing them via a second twoElectronQuadruplet call -- it does not
+            // by itself apply their Fock contributions). Apply each distinct (p1,p2,p3,p4) role
+            // assignment from {(a,b,c,d),(b,a,c,d),(a,b,d,c),(b,a,d,c)} exactly once (deduped so
+            // a==b or c==d is not double counted); each one, via the SAME v, gets both the direct
+            // J/K contribution and the already-known (ab|cd)=(cd|ab) mirror -- together
+            // reproducing the full unrestricted a,b,c,d quadruple sum exactly.
+            const std::array<std::array<std::size_t, 4>, 4> cand = {
+                {{a, b, c, d}, {b, a, c, d}, {a, b, d, c}, {b, a, d, c}}};
+            for (std::size_t i = 0; i < cand.size(); ++i) {
+              bool dup = false;
+              for (std::size_t j = 0; j < i; ++j) {
+                if (cand[j] == cand[i]) { dup = true; break; }
+              }
+              if (dup) continue;
+              const std::size_t p1 = cand[i][0], p2 = cand[i][1], p3 = cand[i][2], p4 = cand[i][3];
 
-            // K: K_{Lf,Su}(a,c) += v * P_{Lf,Su}(b,d), f in {0,1}, u in {2,3} (4 combos); and its
-            // mirror K_{Su,Lf}(c,a) += v * P_{Su,Lf}(d,b) (generally a DIFFERENT density block, not
-            // simply the conjugate/transpose of the first -- see this file's header derivation).
-            for (int f : {0, 1}) {
-              for (int u : {2, 3}) {
-                km_t[static_cast<std::size_t>(f)][static_cast<std::size_t>(u)](a, c) += v * p_fu[f][u](b, d);
-                km_t[static_cast<std::size_t>(u)][static_cast<std::size_t>(f)](c, a) += v * p_fu[u][f](d, b);
+              // J: jm_large(p1,p2) += v * P_total_small(p4,p3); mirror jm_small(p3,p4) += v *
+              // P_total_large(p2,p1).
+              jm_large_t(p1, p2) += v * p_total_small(p4, p3);
+              jm_small_t(p3, p4) += v * p_total_large(p2, p1);
+
+              // K: K_{Lf,Su}(p1,p3) += v * P_{Lf,Su}(p2,p4), f in {0,1}, u in {2,3} (4 combos); and
+              // its mirror K_{Su,Lf}(p3,p1) += v * P_{Su,Lf}(p4,p2) (generally a DIFFERENT density
+              // block, not simply the conjugate/transpose of the first -- see this file's header
+              // derivation).
+              for (int f : {0, 1}) {
+                for (int u : {2, 3}) {
+                  km_t[static_cast<std::size_t>(f)][static_cast<std::size_t>(u)](p1, p3) += v * p_fu[f][u](p2, p4);
+                  km_t[static_cast<std::size_t>(u)][static_cast<std::size_t>(f)](p3, p1) += v * p_fu[u][f](p4, p2);
+                }
               }
             }
           }
@@ -213,19 +293,36 @@ Matrix<C> ukbFockTwoElectronDirect(const std::vector<BasisFunction>& large_basis
       const int tid = omp_get_thread_num();
       Matrix<C>& jm_small_t = jm_small_part[static_cast<std::size_t>(tid)];
       auto& km_t = km_part[static_cast<std::size_t>(tid)];
-      for (std::size_t b = 0; b < ns; ++b) {
+      for (std::size_t b = a; b < ns; ++b) {
         const double sqrt_ab = sqrt_diag_small[triIndex(a, b)];
+        const std::size_t pq = a * ns + b;
         for (std::size_t c = 0; c < ns; ++c) {
-          for (std::size_t d = 0; d < ns; ++d) {
+          for (std::size_t d = c; d < ns; ++d) {
+            const std::size_t rs = c * ns + d;
+            if (rs < pq) continue;  // (ab|cd) == (cd|ab); only need the pq<=rs half.
             if (sqrt_ab * sqrt_diag_small[triIndex(c, d)] < kScreeningThreshold) continue;
             const double v = twoElectronQuadruplet(small_basis[a], small_basis[b], small_basis[c], small_basis[d]);
             if (v == 0.0) continue;
-            // Same J(a,b) = sum (ab|qs) P(s,q) convention as the LL|LL sector above: q=c (3rd
-            // integral index), s=d (4th), so the density read is P(d,c), not P(c,d).
-            jm_small_t(a, b) += v * p_total_small(d, c);
-            for (int f : {0, 1}) {
-              for (int u : {0, 1}) {
-                km_t[static_cast<std::size_t>(f)][static_cast<std::size_t>(u)](a, c) += v * p_fu[f + 2][u + 2](b, d);
+
+            // Full real-orbital 8-fold symmetry (p<->q, r<->s, (pq)<->(rs)) -- same orbit-scatter
+            // pattern as the (Large,Large|Large,Large) sector above (see its own comment): deduped
+            // so degenerate a==b, c==d or (ab)==(cd) cases are not double counted.
+            const std::array<std::array<std::size_t, 4>, 8> cand = {
+                {{a, b, c, d}, {b, a, c, d}, {a, b, d, c}, {b, a, d, c},
+                 {c, d, a, b}, {d, c, a, b}, {c, d, b, a}, {d, c, b, a}}};
+            for (std::size_t i = 0; i < cand.size(); ++i) {
+              bool dup = false;
+              for (std::size_t j = 0; j < i; ++j) {
+                if (cand[j] == cand[i]) { dup = true; break; }
+              }
+              if (dup) continue;
+              const std::size_t p1 = cand[i][0], p2 = cand[i][1], p3 = cand[i][2], p4 = cand[i][3];
+              // Same J(p1,p2) = sum (p1 p2|p3 p4) P(p4,p3) convention as the LL|LL sector above.
+              jm_small_t(p1, p2) += v * p_total_small(p4, p3);
+              for (int f : {0, 1}) {
+                for (int u : {0, 1}) {
+                  km_t[static_cast<std::size_t>(f)][static_cast<std::size_t>(u)](p1, p3) += v * p_fu[f + 2][u + 2](p2, p4);
+                }
               }
             }
           }

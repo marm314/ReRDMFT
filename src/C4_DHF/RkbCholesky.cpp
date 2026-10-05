@@ -65,33 +65,47 @@ class UnionCoulombPairs : public PairMatrixSource<double> {
 
 // Same pair matrix as UnionCoulombPairs above, but with NEITHER the dense nor the packed
 // representation of (LL|LL)/(LL|SS)/(SS|SS) EVER materialized: every (pq|rs) quadruplet is instead
-// evaluated lazily, via twoElectronQuadruplet (ElectronRepulsion.h), each time the decomposition
-// asks for it. Needed because the raw analytic RKB small basis (RkbDerivativeTerms.h) is NOT
-// deduplicated across large functions the way the old unrestricted-kinetic-balance basis was, so
-// n_small can run into the hundreds even for a single heavy atom -- (SS|SS)'s packed storage alone
-// would already be tens of GB there (confirmed: 540 small functions for Xe/dyall.v2z, ~85 GB),
-// long before the O(n_small) Cholesky-vector storage the decomposition itself actually needs.
-// Schwarz screening still applies (same sqrt-diagonal bound as before), precomputed once up front
-// (O(n^2), trivial memory either way). The real cost of avoiding the upfront build: nothing here is
-// cached between calls, so a quadruplet needed by several different `row()` calls (one per pivot)
-// is re-evaluated from scratch every time -- measurably slower than UnionCoulombPairs for any case
-// that could have afforded the fast path instead, which is exactly why RkbCholesky::build only
-// reaches for this when the fast path's own memory estimate says it would not fit.
+// evaluated lazily, via twoElectronQuadruplet (ElectronRepulsion.h) or, for the (LL|LL) part of a
+// row, via the shell-batched twoElectronShellQuartet (see row()'s own comment), each time the
+// decomposition asks for it. Needed because the raw analytic RKB small basis (RkbDerivativeTerms.h)
+// is NOT deduplicated across large functions the way the old unrestricted-kinetic-balance basis
+// was, so n_small can run into the hundreds even for a single heavy atom -- (SS|SS)'s packed
+// storage alone would already be tens of GB there (confirmed: 540 small functions for Xe/dyall.v2z,
+// ~85 GB), long before the O(n_small) Cholesky-vector storage the decomposition itself actually
+// needs. Schwarz screening still applies (same sqrt-diagonal bound as before), precomputed once up
+// front (O(n^2), trivial memory either way). The real cost of avoiding the upfront build: nothing
+// here is cached BETWEEN row() calls, so a quadruplet needed by several different pivots is
+// re-evaluated from scratch each time -- still measurably slower than UnionCoulombPairs for any
+// case that could have afforded the fast path instead, which is why RkbCholesky::build only reaches
+// for this when ON_DEMAND_ERI is set. But WITHIN one row() call, row()'s own real-integral
+// symmetries are now fully exploited (see row()'s comment) -- this does not touch memory use at all
+// (the whole point of this class), only how many times libcint is asked for the same number.
 class OnDemandUnionCoulombPairs : public PairMatrixSource<double> {
  public:
   OnDemandUnionCoulombPairs(const std::vector<BasisFunction>& large_basis,
                             const std::vector<BasisFunction>& small_basis, double threshold)
       : large_(large_basis),
         small_(small_basis),
+        large_shells_(groupIntoShells(large_basis)),
         nl_(large_basis.size()),
         ns_(small_basis.size()),
         threshold_(threshold),
         sqrt_diag_ll_(threshold > 0.0 ? sqrtPairDiagonal(large_basis) : std::vector<double>()),
-        sqrt_diag_ss_(threshold > 0.0 ? sqrtPairDiagonal(small_basis) : std::vector<double>()) {}
+        sqrt_diag_ss_(threshold > 0.0 ? sqrtPairDiagonal(small_basis) : std::vector<double>()),
+        shell_of_large_(nl_), local_of_large_(nl_) {
+    for (std::size_t si = 0; si < large_shells_.size(); ++si)
+      for (std::size_t k = 0; k < large_shells_[si].count; ++k) {
+        shell_of_large_[large_shells_[si].first + k] = si;
+        local_of_large_[large_shells_[si].first + k] = k;
+      }
+  }
 
   std::size_t size() const override { return nl_ * nl_ + ns_ * ns_; }
   double diagonal(std::size_t i) const override { return at(i, i); }
 
+  // Single-element access -- only ever used for the (sampled) reconstruction check, never in the
+  // decomposition's own per-pivot hot path (that is row() below), so left as a plain, unbatched
+  // evaluation.
   double at(std::size_t i, std::size_t j) const override {
     const std::size_t nl2 = nl_ * nl_;
     const bool i_large = i < nl2;
@@ -108,24 +122,85 @@ class OnDemandUnionCoulombPairs : public PairMatrixSource<double> {
                                   basisFn(j_large, s));
   }
 
+  // One pivot's row, M(i, :) = (fp fq | r s) for every (r,s) -- the decomposition's actual hot
+  // path (called once per candidate pivot). The bra pair (fp,fq) is FIXED here, never looped over
+  // (unlike UkbFockMatrixDirect.cpp's own shell-quartet sector, which loops bra shells too and
+  // therefore needs a per-block orbit dedup to avoid overcounting -- no such risk here, since a
+  // single row() call only ever contributes its own output array once). Two real-integral
+  // symmetries are exploited, at no memory cost:
+  //  1. The ket pair's own swap, (fp fq|r s) = (fp fq|s r): computed once for the canonical r<=s
+  //     and written to BOTH (r,s) and (s,r) -- applies uniformly to every (bra,ket) combination
+  //     below, roughly halving the number of two-electron evaluations either way.
+  //  2. When the ket range is the Large basis (shell-groupable, unlike the analytic RKB Small
+  //     basis -- see this file's own header comment), the fixed bra pair (fp,fq) is read as ONE
+  //     (local_p,local_q) slice of a shell-quartet block that is batched over the ket's shell pair
+  //     (sc<=sd): one twoElectronShellQuartet/libcint call covers an entire ket shell pair's worth
+  //     of (r,s) at once, instead of one twoElectronQuadruplet call per individual (r,s) AO pair --
+  //     the SAME shell-batching twoElectronShellQuartet exists for (ElectronRepulsion.h's own
+  //     comment: up to shell_size^4 fewer libcint calls for a high-angular-momentum shell pair).
+  //     This is only possible because the bra here is a single FIXED pair, not a shell range being
+  //     looped over -- a cross-basis shell quartet (Small bra against Large ket shells) is not
+  //     supported by twoElectronShellQuartet's single-basis signature, so that corner (the `else`
+  //     branch below) still falls back to twoElectronQuadruplet, just with symmetry 1 applied.
+  //  Validated bit-for-bit against the prior fully-unrestricted-per-AO form (standalone sandbox
+  //  comparison on a mixed p/d toy basis) before this landed.
   void row(std::size_t i, double* out) const override {
-    const std::size_t nl2 = nl_ * nl_, total = nl2 + ns_ * ns_;
+    const std::size_t nl2 = nl_ * nl_;
     const bool i_large = i < nl2;
     const std::size_t pq = i_large ? i : i - nl2;
     const std::size_t p = pq / (i_large ? nl_ : ns_), q = pq % (i_large ? nl_ : ns_);
     const BasisFunction& fp = basisFn(i_large, p);
     const BasisFunction& fq = basisFn(i_large, q);
     const double sqrt_diag_i = sqrtDiag(i_large, p, q);
+
+    // --- Large-pair (ket) columns: r,s both index into the Large basis. ---
+    if (i_large) {
+      const std::size_t shell_p = shell_of_large_[p], local_p = local_of_large_[p];
+      const std::size_t shell_q = shell_of_large_[q], local_q = local_of_large_[q];
+      const std::size_t n_large_shells = large_shells_.size();
 #pragma omp parallel for schedule(dynamic)
-    for (std::size_t j = 0; j < total; ++j) {
-      const bool j_large = j < nl2;
-      const std::size_t rs = j_large ? j : j - nl2;
-      const std::size_t r = rs / (j_large ? nl_ : ns_), s = rs % (j_large ? nl_ : ns_);
-      if (threshold_ > 0.0 && sqrt_diag_i * sqrtDiag(j_large, r, s) < threshold_) {
-        out[j] = 0.0;
-        continue;
+      for (std::size_t sc = 0; sc < n_large_shells; ++sc) {
+        for (std::size_t sd = sc; sd < n_large_shells; ++sd) {
+          const ShellQuartetBlock blk = twoElectronShellQuartet(
+              large_, large_shells_[shell_p], large_shells_[shell_q], large_shells_[sc], large_shells_[sd]);
+          const std::size_t c0 = large_shells_[sc].first, d0 = large_shells_[sd].first;
+          for (int ic = 0; ic < blk.nk; ++ic) {
+            for (int id = 0; id < blk.nl; ++id) {
+              const std::size_t r = c0 + static_cast<std::size_t>(ic);
+              const std::size_t s = d0 + static_cast<std::size_t>(id);
+              const bool keep = !(threshold_ > 0.0 && sqrt_diag_i * sqrtDiag(true, r, s) < threshold_);
+              const double v = keep ? blk(static_cast<int>(local_p), static_cast<int>(local_q), ic, id) : 0.0;
+              out[r * nl_ + s] = v;
+              if (r != s) out[s * nl_ + r] = v;
+            }
+          }
+        }
       }
-      out[j] = twoElectronQuadruplet(fp, fq, basisFn(j_large, r), basisFn(j_large, s));
+    } else {
+      // Small bra against the Large ket range: no shell batching available (cross-basis), but
+      // still exploit the ket's own r<=s swap.
+#pragma omp parallel for schedule(dynamic)
+      for (std::size_t r = 0; r < nl_; ++r) {
+        for (std::size_t s = r; s < nl_; ++s) {
+          const bool keep = !(threshold_ > 0.0 && sqrt_diag_i * sqrtDiag(true, r, s) < threshold_);
+          const double v = keep ? twoElectronQuadruplet(fp, fq, large_[r], large_[s]) : 0.0;
+          out[r * nl_ + s] = v;
+          if (r != s) out[s * nl_ + r] = v;
+        }
+      }
+    }
+
+    // --- Small-pair (ket) columns: r,s both index into the Small basis -- never shell-batchable
+    // regardless of what the bra is, but the r<=s ket swap still halves the call count.
+    double* const small_out = out + nl2;
+#pragma omp parallel for schedule(dynamic)
+    for (std::size_t r = 0; r < ns_; ++r) {
+      for (std::size_t s = r; s < ns_; ++s) {
+        const bool keep = !(threshold_ > 0.0 && sqrt_diag_i * sqrtDiag(false, r, s) < threshold_);
+        const double v = keep ? twoElectronQuadruplet(fp, fq, small_[r], small_[s]) : 0.0;
+        small_out[r * ns_ + s] = v;
+        if (r != s) small_out[s * ns_ + r] = v;
+      }
     }
   }
 
@@ -142,9 +217,11 @@ class OnDemandUnionCoulombPairs : public PairMatrixSource<double> {
 
   const std::vector<BasisFunction>& large_;
   const std::vector<BasisFunction>& small_;
+  std::vector<ShellInfo> large_shells_;
   std::size_t nl_, ns_;
   double threshold_;
   std::vector<double> sqrt_diag_ll_, sqrt_diag_ss_;
+  std::vector<std::size_t> shell_of_large_, local_of_large_;
 };
 
 void zgemm(bool conj_trans_a, int m, int n, int k, const C* a, int lda, const C* b, int ldb, double beta, C* c,
