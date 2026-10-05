@@ -83,8 +83,8 @@ are comments.
 | `CHOLESKY` | bool | `FALSE` | Hold the two-electron integrals as Cholesky vectors instead of a dense/packed tensor -- SCF, MO integrals, and `FULL_OPTIMIZATION` all work from the vectors. |
 | `CHOLESKY_THRESHOLD` | double (> 0) | `1e-10` | Residual-diagonal cutoff for the decomposition; looser = fewer vectors (faster, less accurate). |
 | `ON_DEMAND_ERI` | bool | `TRUE` | With `CHOLESKY TRUE`: evaluate each AO quadruplet on demand during decomposition (memory O(n^2)) instead of building the full packed tensor first. |
-| `SCF_DIRECT_4C` | bool | `FALSE` | `C4_SPINOR` only: run the SCF fully integral-direct (no two-electron representation held during SCF, O(n^2) memory). Implies the Cholesky route downstream. Not yet with `READ_RESTART`/`DEBUG`/`HESSIAN_MEAN_FIELD`. |
-| `FUNCTIONAL_DIRECT_4C` | bool | `FALSE` | `C4_SPINOR` + (`CHOLESKY TRUE` or `SCF_DIRECT_4C TRUE`): build `FUNCTIONAL`/`FULL_OPTIMIZATION`'s positive-energy MO Cholesky vectors in one fused pass, without ever holding the full AO-basis RKB vector set. No effect on `FULL_OPTIMIZATION_4C_NEG`. Memory benefit confirmed on small systems only so far -- not yet validated at heavy-element scale. |
+| `SCF_DIRECT_4C` | bool | `TRUE` if `C4_SPINOR TRUE` and none of `READ_RESTART`/`DEBUG`/`HESSIAN_MEAN_FIELD`; else `FALSE` | `C4_SPINOR` only: run the SCF fully integral-direct (no two-electron representation held during SCF, O(n^2) memory). Only affects the SCF loop itself -- the post-SCF representation for `FUNCTIONAL`/`FULL_OPTIMIZATION` still follows `CHOLESKY` alone (dense if `CHOLESKY FALSE`, including for `FULL_OPTIMIZATION_4C_NEG`). An explicit `TRUE` against `READ_RESTART`/`DEBUG`/`HESSIAN_MEAN_FIELD` still throws; the smart default just silently stays `FALSE` instead. |
+| `FUNCTIONAL_DIRECT_4C` | bool | `TRUE` if `C4_SPINOR TRUE` and `FUNCTIONAL` is given; else `FALSE` | `C4_SPINOR` only: with `CHOLESKY TRUE` (works with `READ_RESTART` too), build `FUNCTIONAL`/`FULL_OPTIMIZATION`'s positive-energy MO Cholesky vectors in one fused pass, without ever holding the full AO-basis RKB vector set. Only takes effect when that vector set genuinely wouldn't otherwise be built (see *Keyword compatibility* below for the exact conditions) -- otherwise a harmless no-op, reusing whatever was already built rather than redundantly rebuilding it. Memory benefit confirmed on small systems only so far -- not yet validated at heavy-element scale. |
 | `X_LIN_DEP_THRS_L` | double (> 0) | `1e-6` | Large-component linear-dependence threshold (LOWGEN-style safety net). |
 | `X_LIN_DEP_THRS_S` | double (> 0) | `1e-8` | Small-component linear-dependence threshold (`X2C`/`C4_SPINOR` only). |
 | `FUNCTIONAL` | string | *(none)* | Selects the RDMFT functional: JK-only (`SD`, `MULLER`/`MBB`, `BBC2`, `CA`, `CGA`, `ML`, `MLSIC`, `GU`, `POWER`), PNOF (`PNOF5`, `PNOF7`, `PNOF7S`, `GNOF`), or `PCCD`. Unset skips the whole RDMFT step. |
@@ -111,6 +111,41 @@ are comments.
 | `READ_RESTART` | bool | `FALSE` | Skip the SCF and start the functional calculation from a previous run's `RESTART.*` file (see *Restart file* below). |
 | `FULL_OPTIMIZATION_4C_NEG` | bool | `FALSE` | `C4_SPINOR` + `FULL_OPTIMIZATION`: after the positive-energy-only minimum converges, run the genuine relativistic min-max stage (see below). |
 | `X2C` | bool | `FALSE` | Run the approximate X2C-HF SCF alongside `NON_RELATIVISTIC`/`C4_SPINOR` (see below). |
+
+## Keyword compatibility
+
+`SCF_DIRECT_4C` and `FUNCTIONAL_DIRECT_4C` both have smart-conditional defaults (see their own
+table rows above): they default to `TRUE` only when applicable and non-conflicting, so most
+inputs never need to mention them at all. Existing examples that are specifically meant to
+exercise the *other* path (dense, or the plain Cholesky-vector one) set them explicitly to
+`FALSE` to keep doing that.
+
+Hard errors (incompatible, Input.cpp throws at parse time):
+
+| Combination | Why |
+| --- | --- |
+| `SCF_DIRECT_4C TRUE` + `READ_RESTART TRUE` | The restart branch has its own, separate Fock-build logic, not wired to the integral-direct kernel. |
+| `SCF_DIRECT_4C TRUE` + `DEBUG TRUE` | DEBUG's dense-vs-Cholesky comparison needs an actual dense tensor, which `SCF_DIRECT_4C` never builds. |
+| `SCF_DIRECT_4C TRUE` + `HESSIAN_MEAN_FIELD TRUE` | Same -- needs a dense tensor. |
+| `FCIDUMP TRUE` without `NON_RELATIVISTIC TRUE`, or without `FUNCTIONAL` | Only NON_REL is supported; needs an RDMFT orbital order to write. |
+| `READ_OCCUPANCIES TRUE` without `FUNCTIONAL` | Nothing to read occupations into. |
+
+Everything else combines freely; the ones below are worth knowing exactly what they do (mostly
+harmless no-ops, not errors):
+
+| Combination | Effect |
+| --- | --- |
+| `SCF_DIRECT_4C TRUE` + `CHOLESKY` (either) | Independent: the post-SCF representation for `FUNCTIONAL`/`FULL_OPTIMIZATION` follows `CHOLESKY` alone, including for `FULL_OPTIMIZATION_4C_NEG` (dense fallback when `CHOLESKY FALSE`). |
+| `FUNCTIONAL_DIRECT_4C TRUE` + `CHOLESKY FALSE` | No-op -- the dense path never touches `RkbCholesky` anyway. |
+| `FUNCTIONAL_DIRECT_4C TRUE` + `CHOLESKY TRUE` + `SCF_DIRECT_4C FALSE` (no restart) | No-op -- `rkb_cholesky` is already needed by the ordinary Cholesky SCF loop; reused, not rebuilt. |
+| `FUNCTIONAL_DIRECT_4C TRUE` + `CHOLESKY TRUE` + `SCF_DIRECT_4C TRUE` | **Full effect** -- `RkbCholesky`'s AO-basis vectors are never built at all for the whole run. The intended use case. |
+| `FUNCTIONAL_DIRECT_4C TRUE` + `FULL_OPTIMIZATION_4C_NEG TRUE` | No-op -- MINMAX needs the untrimmed transform, which still goes through `RkbCholesky`. |
+| `FUNCTIONAL_DIRECT_4C TRUE` + `READ_RESTART TRUE` + `CHOLESKY TRUE`, MINMAX not running, restart geometry unchanged | **Full effect** -- the AO-basis build is deferred and skipped entirely. |
+| `FUNCTIONAL_DIRECT_4C TRUE` + `READ_RESTART TRUE` + `CHOLESKY TRUE`, geometry changed from the restart file | No-op -- `rkb_cholesky` is needed anyway for the one-shot Fock rebuild that re-establishes the positive-energy space; built once, reused. |
+| `FUNCTIONAL_DIRECT_4C TRUE` + `DEBUG`/`HESSIAN_MEAN_FIELD TRUE` | No-op -- falls back to the dense-tensor path those need. |
+| `ON_DEMAND_ERI`/`CHOLESKY_THRESHOLD` + `CHOLESKY FALSE` | No-op -- neither is read unless `CHOLESKY TRUE`. |
+| `CARTESIAN` + `C4_SPINOR`/`X2C` | No-op -- those always use the spherical basis regardless. |
+| `CHECK_HESS_NEO TRUE` + `ORBITAL_OPTIMIZER ADAM` | No-op -- needs NEO capability (`NEO` or `ADAM_NEO`). |
 
 ## X2C decoupling and X2C-HF
 

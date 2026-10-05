@@ -3392,12 +3392,23 @@ int main(int argc, char** argv) {
       if (input.c4_spinor()) {
         const std::size_t dim = 4 * x_large.rows();
         c4_eri_dim = dim;
-        if (input.cholesky()) {
+        const bool c4_minmax_may_run_r = input.full_optimization_4c_neg() && fullOptSettings(input).enabled;
+        bool rkb_cholesky_built_r = false;
+        const auto buildRkbCholeskyR = [&]() {
           rerdmft::CholeskyCheckReport check;
           rkb_cholesky = rerdmft::RkbCholesky::build(large_basis.functions(), small_basis.functions(), rkb_coefficients,
                                                       large_transform_final, input.cholesky_threshold(),
                                                       input.on_demand_eri(), &check);
+          rkb_cholesky_built_r = true;
           logTiming("Two-electron integrals built (C4_DHF, Cholesky vectors, READ_RESTART)", t_start, t_checkpoint, timing_records);
+        };
+        // With CHOLESKY TRUE + FUNCTIONAL_DIRECT_4C TRUE + MINMAX not running, whether
+        // rkb_cholesky is needed at all depends on `ro.lowdin_applied` below (only known after
+        // reading the restart file) -- defer the build until then instead of paying for it
+        // upfront unconditionally. Every other CHOLESKY TRUE case needs it regardless (the
+        // ordinary rkbCholeskyToMo path, or MINMAX's own untrimmed transform), so build it now.
+        if (input.cholesky()) {
+          if (c4_minmax_may_run_r || !input.functional_direct_4c()) buildRkbCholeskyR();
         } else {
           c4_spinor_eri = buildC4SpinorEri(input, large_basis.functions(), small_basis.functions(), rkb_coefficients,
                                            large_transform_final, /*use_cholesky=*/false);
@@ -3410,6 +3421,8 @@ int main(int argc, char** argv) {
         auto u_ortho = rerdmft::dagger(x_full) * (s_full * ro.c);
         std::vector<double> kramers_energies = pseudoKramersEnergies(dim);
         if (ro.lowdin_applied) {
+          // Needed now for fock_restart below but deferred above -- build it.
+          if (input.cholesky() && !rkb_cholesky_built_r) buildRkbCholeskyR();
           // The no-pair positive-energy space must be the one of THIS geometry: the positive-energy spinors read from
           // the file span the OLD geometry's space, whose negative-energy admixture here (through the geometry-dependent
           // small components) would lower the energy of the positive-only calculation and put a large
@@ -3466,15 +3479,19 @@ int main(int argc, char** argv) {
         kramersStructureTestOneBody(c4_structure_log, "C4_DHF (READ_RESTART)", h_mo_restart, /*repairs_if_failed=*/false);
         rerdmft::SymmetricEri<std::complex<double>> c4_mo_sym_r;
         rerdmft::CholeskyEri<std::complex<double>> c4_mo_chol_r;
-        if (input.cholesky() && input.functional_direct_4c() && !input.debug()) {
-          // FUNCTIONAL_DIRECT_4C: built directly from `c_dhf_restart` -- i.e. AFTER the
-          // Löwdin-orthonormalization/Kramers-pairing/positive-energy-space-at-this-geometry
-          // repair above, exactly as required (a geometry change between the restart file and
-          // this run is already reflected in `c_dhf_restart` by this point).
+        if (input.cholesky() && input.functional_direct_4c() && !rkb_cholesky_built_r) {
+          // rkb_cholesky was genuinely never built above (CHOLESKY TRUE, FUNCTIONAL_DIRECT_4C
+          // TRUE, MINMAX not running, geometry unchanged) -- build the positive-energy MO
+          // Cholesky vectors directly, built from `c_dhf_restart` AFTER the Löwdin-
+          // orthonormalization/Kramers-pairing/positive-energy-space repair above, exactly as
+          // required (a geometry change, if any, is already reflected in `c_dhf_restart`).
           c4_mo_chol_r = rerdmft::rkbCholeskyToMoFused(large_basis.functions(), small_basis.functions(),
                                                         rkb_coefficients, large_transform_final, c_dhf_restart,
                                                         dim / 2, input.cholesky_threshold(), input.on_demand_eri());
         } else if (input.cholesky()) {
+          // rkb_cholesky was already built above for some other reason (MINMAX may run, or
+          // FUNCTIONAL_DIRECT_4C is off, or the geometry changed) -- reuse it rather than
+          // redundantly re-decomposing.
           c4_mo_chol_r = rerdmft::rkbCholeskyToMo(rkb_cholesky, c_dhf_restart, dim / 2, input.cholesky_threshold());
         } else {
           c4_mo_sym_r = rerdmft::rkbMoTwoElectronSymmetric(c4_spinor_eri, c_dhf_restart);
@@ -4079,26 +4096,29 @@ int main(int argc, char** argv) {
       density_matrix = rerdmft::rkbDensityMatrix(c_dhf, input.n_electrons());
 
       c4_eri_dim = 4 * x_large.rows();
-      // SCF_DIRECT_4C: the DHF SCF iterations build their Fock matrices fully integral-direct
-      // (UkbDirectEriSource below), never holding a two-electron representation during the SCF --
-      // but FUNCTIONAL/FULL_OPTIMIZATION still needs actual MO-basis integrals afterward, built the
-      // SAME way CHOLESKY TRUE already builds them (RkbCholesky::build once, then rkbCholeskyToMo)
-      // -- UNLESS FUNCTIONAL_DIRECT_4C is also set, see c4_need_rkb_cholesky_vectors below. So
-      // SCF_DIRECT_4C implies the Cholesky (not dense) branch for everything below EXCEPT the
-      // SCF-loop dispatch itself, which takes the direct kernel regardless of this flag.
-      const bool use_cholesky_integrals = input.cholesky() || input.scf_direct_4c();
+      // SCF_DIRECT_4C only changes how the SCF loop itself gets its Fock matrices (the dispatch
+      // ternaries below always take the integral-direct kernel first, regardless of what's built
+      // here) -- it does NOT force anything about the representation used for FUNCTIONAL/
+      // FULL_OPTIMIZATION afterward. That choice follows CHOLESKY alone, exactly as it would
+      // without SCF_DIRECT_4C: CHOLESKY TRUE builds RkbCholesky (or, with FUNCTIONAL_DIRECT_4C,
+      // the fused rkbCholeskyToMoFused instead); CHOLESKY FALSE builds the dense c4_spinor_eri +
+      // rkbMoTwoElectronSymmetric path below, same as any non-SCF_DIRECT_4C run -- so
+      // `SCF_DIRECT_4C TRUE` + `CHOLESKY FALSE` is a valid, supported combination (including for
+      // FULL_OPTIMIZATION_4C_NEG, which already has its own dense MINMAX fallback).
+      const bool use_cholesky_integrals = input.cholesky();
       const rerdmft::UkbDirectEriSource ukb_direct_source{large_basis.functions(), small_basis.functions(), v_total};
       // Hoisted (pure functions of `input`, needed before the RkbCholesky build decision below --
       // see each one's own, later definition for the full comment/context).
       const bool c4_dense = input.debug() || input.hessian_mean_field();
       const bool c4_minmax_may_run = input.full_optimization_4c_neg() && fullOptSettings(input).enabled;
-      // Who actually needs the big AO-basis RkbCholesky vectors built at all: the SCF loop itself
-      // (CHOLESKY TRUE, unless SCF_DIRECT_4C overrides it), the DEBUG dense-vs-Cholesky Fock check
-      // below, the DEBUG/HESSIAN_MEAN_FIELD dense MO path (needs c4_mo_chol via symmetricFromCholesky),
-      // the untrimmed MINMAX transform (always, when it might run) -- or the ORDINARY (non-DEBUG)
-      // FUNCTIONAL path UNLESS FUNCTIONAL_DIRECT_4C replaces it with rkbCholeskyToMoFused below
-      // (C4_DHF/RkbCholesky.h), which runs its own AO-pair decomposition and never materializes
-      // the full RkbCholesky struct.
+      // Who actually needs the big AO-basis RkbCholesky vectors built at all (all gated on
+      // CHOLESKY TRUE; CHOLESKY FALSE never needs them regardless of SCF_DIRECT_4C): the SCF loop
+      // itself (unless SCF_DIRECT_4C overrides it with the integral-direct kernel), the DEBUG
+      // dense-vs-Cholesky Fock check below, the DEBUG/HESSIAN_MEAN_FIELD dense MO path (needs
+      // c4_mo_chol via symmetricFromCholesky), the untrimmed MINMAX transform (always, when it
+      // might run) -- or the ORDINARY (non-DEBUG) FUNCTIONAL path UNLESS FUNCTIONAL_DIRECT_4C
+      // replaces it with rkbCholeskyToMoFused below (C4_DHF/RkbCholesky.h), which runs its own
+      // AO-pair decomposition and never materializes the full RkbCholesky struct.
       const bool c4_need_rkb_cholesky_vectors =
           (input.cholesky() && !input.scf_direct_4c()) || (input.cholesky() && input.debug()) ||
           (use_cholesky_integrals && c4_dense) ||
@@ -4211,10 +4231,15 @@ int main(int argc, char** argv) {
         // builds the FULL (positive+negative-energy) n_mo x n_mo vector per Cholesky vector before trimming
         // to the positive-energy block, i.e. 4x the final size, times N_chol -- for a heavy element this is
         // easily several GB of pure waste when nothing downstream reads c4_mo_chol at all.
-        if (use_cholesky_integrals && input.functional_direct_4c() && !c4_dense) {
+        if (use_cholesky_integrals && input.functional_direct_4c() && !c4_dense && !c4_need_rkb_cholesky_vectors) {
           // FUNCTIONAL_DIRECT_4C: RkbCholesky::build + rkbCholeskyToMo fused into one pass (same
           // AO-pair decomposition, but the RKB AO-basis vectors are never all held at once) --
-          // C4_DHF/RkbCholesky.h's rkbCholeskyToMoFused.
+          // C4_DHF/RkbCholesky.h's rkbCholeskyToMoFused. Only worth it when rkb_cholesky genuinely
+          // would NOT otherwise be built (!c4_need_rkb_cholesky_vectors, e.g. SCF_DIRECT_4C TRUE):
+          // if the SCF loop itself already needs rkb_cholesky (CHOLESKY TRUE, SCF_DIRECT_4C
+          // FALSE), it is already going to be built and resident, so running a SEPARATE AO-pair
+          // decomposition here from scratch would be pure duplicated work for zero memory
+          // benefit -- reuse the already-built rkb_cholesky via the ordinary path below instead.
           c4_mo_chol = rerdmft::rkbCholeskyToMoFused(large_basis.functions(), small_basis.functions(),
                                                       rkb_coefficients, large_transform_final, dhf_result.c_dhf,
                                                       h_mo.rows() / 2, input.cholesky_threshold(),

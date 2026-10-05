@@ -1,0 +1,18 @@
+# Validation example: LiH, 6-31G, GNOF, SCF_DIRECT_4C TRUE + CHOLESKY FALSE (dense) +
+# FUNCTIONAL_DIRECT_4C TRUE, no MINMAX -- confirms the dense post-SCF path works with
+# SCF_DIRECT_4C's integral-direct SCF loop. Compare against lih_gnof_c4_full_optimization.inp's
+# own dense C4_DHF result -- must match exactly.
+NELEC 4
+BASIS lih-6-31g.gbs
+C4_SPINOR TRUE
+FUNCTIONAL GNOF
+PNOF_SUBSPACES 2
+PNOF_COUPLING 2
+FULL_OPTIMIZATION TRUE
+SCF_DIRECT_4C TRUE
+FUNCTIONAL_DIRECT_4C TRUE
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.594900
+END

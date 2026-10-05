@@ -211,17 +211,28 @@ class Input {
   // TRUE is used, to keep the existing fast runtimes, except one small worked example that keeps
   // the default to demonstrate the on-demand path itself.
   bool on_demand_eri() const { return on_demand_eri_; }
-  // Optional; defaults to FALSE. C4_DHF/C4_SPINOR only: the DHF SCF iterations build the Fock
-  // matrix fully integral-direct (UKB/UkbFockMatrixDirect.h's ukbFockTwoElectronDirect) -- no
-  // two-electron representation (dense, packed, or Cholesky vectors) is ever held during the SCF.
-  // After convergence, if FUNCTIONAL/FULL_OPTIMIZATION needs MO-basis integrals, the existing RKB
-  // Cholesky vectors (C4_DHF/RkbCholesky.h) are still built once and fed through the existing
-  // rkbCholeskyToMo pipeline, exactly as CHOLESKY TRUE already does -- SCF_DIRECT_4C only changes
-  // how the SCF loop itself gets its Fock matrices. Mutually exclusive with READ_RESTART, DEBUG,
-  // and HESSIAN_MEAN_FIELD for now (see Input.cpp's validation).
+  // Smart-conditional default (Input.cpp, applied after the whole file is parsed): TRUE whenever
+  // C4_SPINOR TRUE and none of READ_RESTART/DEBUG/HESSIAN_MEAN_FIELD are set (the combinations
+  // this is mutually exclusive with -- see below); FALSE otherwise, silently -- a plain
+  // NON_REL/X2C-only input, or a C4_SPINOR + READ_RESTART/DEBUG/HESSIAN_MEAN_FIELD one, needs no
+  // explicit override to keep working. An EXPLICIT `SCF_DIRECT_4C TRUE` against one of those
+  // conflicts still throws (Input.cpp), same safety net as before this keyword had a smart
+  // default; an explicit `SCF_DIRECT_4C FALSE` always just works, same as always.
+  //
+  // C4_DHF/C4_SPINOR only: the DHF SCF iterations build the Fock matrix fully integral-direct
+  // (UKB/UkbFockMatrixDirect.h's ukbFockTwoElectronDirect) -- no two-electron representation
+  // (dense, packed, or Cholesky vectors) is ever held during the SCF. After convergence, if
+  // FUNCTIONAL/FULL_OPTIMIZATION needs MO-basis integrals, the post-SCF representation follows
+  // CHOLESKY alone (dense if CHOLESKY FALSE, RkbCholesky-based if TRUE) -- SCF_DIRECT_4C only
+  // changes how the SCF loop itself gets its Fock matrices.
   bool scf_direct_4c() const { return scf_direct_4c_; }
-  // FUNCTIONAL/FULL_OPTIMIZATION's positive-energy-only MO Cholesky vectors are built via
-  // C4_DHF/RkbCholesky.h's rkbCholeskyToMoFused: the SAME AO-pair decomposition
+  // Smart-conditional default (Input.cpp): TRUE whenever C4_SPINOR TRUE and FUNCTIONAL is given
+  // (the two conditions an explicit TRUE would otherwise need, see below); FALSE otherwise,
+  // silently. An explicit `FUNCTIONAL_DIRECT_4C TRUE` without one of those still throws
+  // (Input.cpp); an explicit FALSE always just works.
+  //
+  // With CHOLESKY TRUE: FUNCTIONAL/FULL_OPTIMIZATION's positive-energy-only MO Cholesky vectors
+  // are built via C4_DHF/RkbCholesky.h's rkbCholeskyToMoFused -- the SAME AO-pair decomposition
   // RkbCholesky::build runs, but each accepted AO-pair vector is RKB-projected and MO-transformed
   // immediately (as a local temporary) instead of ever materializing the full RkbCholesky struct
   // (O(N_chol_AO * n_large^2), the remaining memory bottleneck for a heavy element's functional
@@ -229,7 +240,9 @@ class Input {
   // different lifetime for the intermediate AO-basis vectors. Only applies when
   // FULL_OPTIMIZATION_4C_NEG will NOT run (that stage still needs the untrimmed, negative+positive
   // transform, which still goes through RkbCholesky unchanged) -- harmless but has no effect if
-  // combined with it. Requires C4_SPINOR TRUE (see Input.cpp).
+  // combined with it. With CHOLESKY FALSE this keyword has no effect either way (the dense
+  // two-electron path, main.cpp's buildC4SpinorEri + rkbMoTwoElectronSymmetric, already never
+  // touches RkbCholesky's AO-basis vectors, for FULL_OPTIMIZATION_4C_NEG too).
   bool functional_direct_4c() const { return functional_direct_4c_; }
   // Optional; defaults to 1e-6 (DIRAC's own STOL(1)). The large-component LOWGEN safety net's
   // threshold (Utils/LinearAlgebra.h's canonicalOrthogonalize): below this eigenvalue, a direction
@@ -497,7 +510,9 @@ class Input {
   double cholesky_threshold_ = 1e-10;
   bool on_demand_eri_ = true;
   bool scf_direct_4c_ = false;
+  bool scf_direct_4c_explicit_ = false;        // TRUE iff the keyword literally appeared in the input
   bool functional_direct_4c_ = false;
+  bool functional_direct_4c_explicit_ = false;  // TRUE iff the keyword literally appeared in the input
   double x_lin_dep_thrs_l_ = 1e-6;
   double x_lin_dep_thrs_s_ = 1e-8;
   bool read_restart_ = false;

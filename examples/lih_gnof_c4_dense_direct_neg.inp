@@ -1,0 +1,23 @@
+# Validation example: LiH, 6-31G, GNOF, SCF_DIRECT_4C TRUE + CHOLESKY FALSE (dense) +
+# FUNCTIONAL_DIRECT_4C TRUE + FULL_OPTIMIZATION_4C_NEG TRUE -- confirms SCF_DIRECT_4C no longer
+# forces the Cholesky route downstream: the SCF loop is integral-direct, but the post-SCF
+# positive-energy AND untrimmed (MINMAX) MO integrals come from the dense path
+# (buildC4SpinorEri + rkbMoTwoElectronSymmetric), exactly as CHOLESKY FALSE alone would build
+# them. FUNCTIONAL_DIRECT_4C TRUE is a harmless no-op here (dense already avoids RkbCholesky).
+# Compare the converged energy against lih_gnof_c4_neg_full_optimization.inp's own dense result
+# -- must match exactly (same dense construction either way).
+NELEC 4
+BASIS lih-6-31g.gbs
+C4_SPINOR TRUE
+FUNCTIONAL GNOF
+PNOF_SUBSPACES 2
+PNOF_COUPLING 2
+FULL_OPTIMIZATION TRUE
+FULL_OPTIMIZATION_4C_NEG TRUE
+SCF_DIRECT_4C TRUE
+FUNCTIONAL_DIRECT_4C TRUE
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.594900
+END

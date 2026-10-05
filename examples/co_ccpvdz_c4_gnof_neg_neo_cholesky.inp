@@ -13,6 +13,7 @@
 NELEC 14
 BASIS co-cc-pvdz.gbs
 C4_SPINOR TRUE
+SCF_DIRECT_4C FALSE  # preserve this example's pre-existing SCF path (SCF_DIRECT_4C now defaults TRUE for plain C4_SPINOR runs)
 FUNCTIONAL GNOF
 PNOF_SUBSPACES 3
 PNOF_COUPLING 2

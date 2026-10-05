@@ -187,8 +187,10 @@ void Input::read(const std::string& filename) {
       on_demand_eri_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "SCF_DIRECT_4C") {
       scf_direct_4c_ = parseBool(iss, line_number, keyword);
+      scf_direct_4c_explicit_ = true;
     } else if (keyword == "FUNCTIONAL_DIRECT_4C") {
       functional_direct_4c_ = parseBool(iss, line_number, keyword);
+      functional_direct_4c_explicit_ = true;
     } else if (keyword == "X_LIN_DEP_THRS_L") {
       x_lin_dep_thrs_l_ = parseDouble(iss, line_number, keyword);
       if (!(x_lin_dep_thrs_l_ > 0.0)) {
@@ -405,6 +407,19 @@ void Input::read(const std::string& filename) {
   if (read_occupancies_ && !has_functional_) {
     throw std::runtime_error("READ_OCCUPANCIES TRUE requires FUNCTIONAL (there are otherwise no occupations to read into)");
   }
+  // Smart-conditional defaults: SCF_DIRECT_4C/FUNCTIONAL_DIRECT_4C default to TRUE, but only in
+  // the specific cases where they're actually applicable and non-conflicting -- an input that
+  // never mentions either keyword at all (the overwhelming majority: every NON_REL/X2C-only run,
+  // and every C4_SPINOR run combined with READ_RESTART/DEBUG/HESSIAN_MEAN_FIELD or no FUNCTIONAL)
+  // keeps working exactly as before, with no explicit override needed. An EXPLICIT TRUE against
+  // one of those conflicts still hits the throws right below, unchanged -- this only changes what
+  // happens when the keyword is left unset.
+  if (!scf_direct_4c_explicit_) {
+    scf_direct_4c_ = c4_spinor_ && !read_restart_ && !debug_ && !hessian_mean_field_;
+  }
+  if (!functional_direct_4c_explicit_) {
+    functional_direct_4c_ = c4_spinor_ && has_functional_;
+  }
   if (scf_direct_4c_ && !c4_spinor_) {
     throw std::runtime_error("SCF_DIRECT_4C TRUE requires C4_SPINOR TRUE (it only replaces the C4_DHF/C4_SPINOR Fock build)");
   }
@@ -433,12 +448,11 @@ void Input::read(const std::string& filename) {
         "FUNCTIONAL_DIRECT_4C TRUE requires FUNCTIONAL (there is otherwise no FUNCTIONAL OPTIMIZATION step "
         "to build positive-energy MO Cholesky vectors for)");
   }
-  if (functional_direct_4c_ && !cholesky_ && !scf_direct_4c_) {
-    throw std::runtime_error(
-        "FUNCTIONAL_DIRECT_4C TRUE requires CHOLESKY TRUE or SCF_DIRECT_4C TRUE (with both FALSE, the SCF loop "
-        "already builds a dense two-electron tensor it needs anyway, so there is nothing for this keyword to "
-        "avoid building -- it would silently have no effect)");
-  }
+  // No CHOLESKY requirement: with CHOLESKY TRUE, FUNCTIONAL_DIRECT_4C fuses RkbCholesky::build +
+  // rkbCholeskyToMo (see main.cpp); with CHOLESKY FALSE it is a harmless no-op -- the dense
+  // two-electron tensor path (buildC4SpinorEri + rkbMoTwoElectronSymmetric) already never touches
+  // RkbCholesky's AO-basis vectors at all, including for FULL_OPTIMIZATION_4C_NEG (its own dense
+  // MINMAX fallback, c4_mo_sym/full_sym_factory in main.cpp).
   // Applied here, after the whole file is parsed, so UNIT_LENGTH may appear before or after
   // GEOMETRY: "BOHR"/"AU" coordinates are already atomic units, no conversion needed.
   if (unit_length_ == "ANGS") {

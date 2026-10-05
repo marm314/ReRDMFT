@@ -1,0 +1,19 @@
+# Validation example: READ_RESTART TRUE + CHOLESKY TRUE + FUNCTIONAL_DIRECT_4C TRUE, SAME geometry
+# as the RESTART.4C writer (lih_gnof_c4_functional_direct.inp) -- ro.lowdin_applied should be
+# FALSE here, so rkb_cholesky is never built at all: the positive-energy MO Cholesky vectors come
+# directly from rkbCholeskyToMoFused. Compare the converged energy against
+# lih_gnof_c4_functional_direct.inp's own result -- must match exactly (same orbitals read back).
+NELEC 4
+BASIS lih-6-31g.gbs
+C4_SPINOR TRUE
+FUNCTIONAL GNOF
+PNOF_SUBSPACES 2
+PNOF_COUPLING 2
+CHOLESKY TRUE
+FUNCTIONAL_DIRECT_4C TRUE
+READ_RESTART TRUE
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.594900
+END

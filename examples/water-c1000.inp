@@ -8,6 +8,7 @@ SPEED_OF_LIGHT = 1000
 NELEC 10
 BASIS water-sto-3g.gbs
 C4_SPINOR TRUE
+SCF_DIRECT_4C FALSE  # preserve this example's pre-existing SCF path (SCF_DIRECT_4C now defaults TRUE for plain C4_SPINOR runs)
 NON_RELATIVISTIC TRUE
 
 GEOMETRY
