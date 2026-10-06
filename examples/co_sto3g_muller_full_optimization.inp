@@ -15,6 +15,7 @@ NON_RELATIVISTIC TRUE
 X2C TRUE
 FUNCTIONAL MULLER
 FULL_OPTIMIZATION TRUE
+USE_RI FALSE  # preserve this example's pre-existing dense/Cholesky path (USE_RI now defaults TRUE)
 
 GEOMETRY
 C   0.000000   0.000000   0.000000

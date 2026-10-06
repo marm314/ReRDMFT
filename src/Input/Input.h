@@ -266,6 +266,57 @@ class Input {
   // TRUE, FUNCTIONAL and FULL_OPTIMIZATION TRUE (there is otherwise no ADAM orbital-rotation
   // sub-loop for this to change).
   bool functional_direct_4c() const { return functional_direct_4c_; }
+  // Optional; defaults to "PAUTO". Selects which automatic resolution-of-identity (RI) auxiliary
+  // basis construction recipe USE_RI uses (Yang, Rendell, Frisch, J. Chem. Phys. 127, 074102
+  // (2007); MOLGW's own `init_auxil_basis_set_auto`, m_basis_set.f90): "AUTO" doubles each orbital
+  // shell's own exponent/angular momentum (self-products only); "PAUTO" additionally considers
+  // every PAIR of orbital shells (including a shell with itself), i.e. the full set of
+  // exponents/angular momenta that genuine orbital PRODUCTS phi_i*phi_j produce, not just
+  // self-products -- a richer candidate set, validated (project memory
+  // project-ri-pauto-kr-validation) to give ~4e-5 Hartree RI accuracy for Kr/dyall-v2z, both
+  // Large-only and Small-component-only sectors, with MOLGW's own default f_sam=1.5/lmaxinc=1
+  // (not yet exposed as separate keywords here). Only meaningful when USE_RI is TRUE (the aux
+  // basis this selects is built only then, internally, for whichever method(s) are active -- no
+  // separate report-only mode exists any more; the earlier AUX_BASIS keyword was removed once
+  // USE_RI actually started consuming the aux basis instead of merely reporting it).
+  const std::string& aux_basis_type() const { return aux_basis_type_; }
+  // Optional; defaults to FALSE, explicit opt-in only (no smart default -- every existing input
+  // keeps doing exactly what it did before unless this is explicitly turned on). Valid for any of
+  // NON_RELATIVISTIC/X2C/C4_SPINOR (independently -- set for ALL of whichever are active in the
+  // same run); incompatible with READ_RESTART/DEBUG/HESSIAN_MEAN_FIELD (same reasons as
+  // SCF_DIRECT_4C -- see Input.cpp). When TRUE, that method's own SCF loop builds its Fock
+  // matrices from a pre-built RI (resolution-of-identity) 3-center tensor (AO_ints/
+  // ThreeCenterIntegrals.h; NON_REL/X2C: NON_REL/NonRelFockMatrixRi.h/X2C_DHF/X2C_FockMatrixRi.h,
+  // a single real Large-AO-only sector, no small component at all; C4_SPINOR: UKB/
+  // UkbFockMatrixRi.h, UKB/AO basis, (LL|Q)/(SS|Q) only) instead of the dense/packed/Cholesky
+  // two-electron representation -- for C4_SPINOR specifically, also instead of SCF_DIRECT_4C's
+  // fully integral-direct kernel. The aux basis used is built internally from AUX_BASIS_TYPE's
+  // recipe (independently per method: NON_REL/X2C from the Large-component orbital basis alone;
+  // C4_SPINOR from the full UKB basis, Large AND Small components together). Mutually exclusive
+  // with SCF_DIRECT_4C (C4_SPINOR only): an explicit `SCF_DIRECT_4C TRUE` alongside `USE_RI TRUE`
+  // throws; SCF_DIRECT_4C's own smart default is silently overridden to FALSE instead. See project
+  // memory project-ri-pauto-kr-validation for the derivation (no (LS|Q) 3-center integral type is
+  // ever needed for C4_SPINOR; the RI tensors are built in UKB/AO basis, never RKB, to avoid the
+  // UKB->RKB transform's own cost -- see project-ukb-direct-genfock-scheme).
+  //
+  // ALSO extends automatically to FUNCTIONAL + FULL_OPTIMIZATION's ADAM orbital-rotation sub-loop,
+  // for every active method, covering all three RDMFT functional families (PNOF, JK_only, pCCD --
+  // no separate keyword needed): the sub-loop's generalized Fock is built from the SAME RI
+  // 3-center tensor transformed into the CURRENT orbital basis fresh every ADAM step
+  // (Hessian_opt/RiPnofFock.h/RiJkOnlyFock.h/RiPccdFock.h, via UKB/RiMoEri.h for C4_SPINOR and its
+  // NON_REL/X2C counterparts), instead of either a stored MO-basis tensor re-expressed in the
+  // rotated basis every step (O(n^5)) or (C4_SPINOR only) FUNCTIONAL_DIRECT_4C's on-demand AO
+  // integrals (O(n^4)-shaped). Mutually exclusive with an explicit FUNCTIONAL_DIRECT_4C TRUE (two
+  // different strategies for the same C4_SPINOR sub-loop); same FULL_OPTIMIZATION_4C_NEG/
+  // ORBITAL_OPTIMIZER NEO restriction as FUNCTIONAL_DIRECT_4C (no RI-based orbital-rotation
+  // Hessian exists yet either). Validated on LiH/6-31G (C4_SPINOR DHF, PNOF/GNOF, JK_only/MULLER)
+  // and Ne/cc-pVDZ (C4_SPINOR DHF, pCCD) against the dense FULL_OPTIMIZATION result -- see project
+  // memory project-ri-pauto-kr-validation.
+  //
+  // Does not change anything about the two-electron representation used for anything ELSE
+  // (post-convergence MO transforms, the occupation-only optimizer, etc.) -- those still follow
+  // CHOLESKY alone, same as SCF_DIRECT_4C/FUNCTIONAL_DIRECT_4C.
+  bool use_ri() const { return use_ri_; }
   // Optional; defaults to 1e-6 (DIRAC's own STOL(1)). The large-component LOWGEN safety net's
   // threshold (Utils/LinearAlgebra.h's canonicalOrthogonalize): below this eigenvalue, a direction
   // in the large-component overlap is genuinely DROPPED rather than kept-and-inverted, catching
@@ -529,6 +580,7 @@ class Input {
   double energy_tolerance_ = 1e-8;
   double density_tolerance_ = 1e-6;
   bool cholesky_ = false;
+  bool cholesky_explicit_ = false;  // TRUE iff the keyword literally appeared in the input
   double cholesky_threshold_ = 1e-10;
   bool on_demand_eri_ = true;
   bool scf_direct_4c_ = false;
@@ -536,6 +588,9 @@ class Input {
   bool functional_pos_cho_4c_ = false;
   bool functional_pos_cho_4c_explicit_ = false;  // TRUE iff the keyword literally appeared in the input
   bool functional_direct_4c_ = false;
+  std::string aux_basis_type_ = "PAUTO";
+  bool use_ri_ = false;
+  bool use_ri_explicit_ = false;  // TRUE iff the keyword literally appeared in the input
   double x_lin_dep_thrs_l_ = 1e-6;
   double x_lin_dep_thrs_s_ = 1e-8;
   bool read_restart_ = false;

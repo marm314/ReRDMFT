@@ -10,6 +10,7 @@ SCF_DIRECT_4C FALSE  # preserve this example's pre-existing SCF path (SCF_DIRECT
 NON_RELATIVISTIC TRUE
 FUNCTIONAL GNOF
 PNOF_COUPLING 2
+USE_RI FALSE  # preserve this example's pre-existing dense/Cholesky path (USE_RI now defaults TRUE)
 
 GEOMETRY
 C   0.000000   0.000000   0.000000

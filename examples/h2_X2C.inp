@@ -6,6 +6,7 @@ NON_RELATIVISTIC TRUE
 X2C TRUE
 NELEC 2
 BASIS h2-cc-pvtz.gbs
+USE_RI FALSE  # preserve this example's pre-existing dense/Cholesky path (USE_RI now defaults TRUE)
 
 GEOMETRY
 H   0.000000   0.000000   0.000000

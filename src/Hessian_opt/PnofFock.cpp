@@ -1,4 +1,6 @@
 #include "CholeskyEri.h"
+#include "NonRelSpinRiMoEri.h"
+#include "RiMoEri.h"
 #include "SymmetricEri.h"
 #include "PnofFock.h"
 
@@ -174,5 +176,11 @@ template Matrix<std::complex<double>> pnofFockMatrix(
 template Matrix<std::complex<double>> pnofFockMatrix(
     PnofFunctional, const Matrix<std::complex<double>>&, const SymmetricEri<std::complex<double>>&,
     const std::vector<PnofGeminal>&, const std::vector<double>&, bool);
+template Matrix<std::complex<double>> pnofFockMatrix(
+    PnofFunctional, const Matrix<std::complex<double>>&, const RiMoEri&,
+    const std::vector<PnofGeminal>&, const std::vector<double>&, bool);
+template Matrix<double> pnofFockMatrix(PnofFunctional, const Matrix<double>&,
+                                        const RiNonRelSpinMoEri&, const std::vector<PnofGeminal>&,
+                                        const std::vector<double>&, bool);
 
 }  // namespace rerdmft

@@ -1,4 +1,6 @@
 #include "CholeskyEri.h"
+#include "NonRelSpinRiMoEri.h"
+#include "RiMoEri.h"
 #include "SymmetricEri.h"
 #include "JkOnlyFock.h"
 
@@ -14,8 +16,8 @@ namespace rerdmft {
 // copy (not a shared helper) so future work building/testing a
 // generalized Fock for JK_only cannot touch PNOF's already-validated
 // formula.
-template <typename T>
-Matrix<T> jkOnlyFockMatrix(const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri>
+Matrix<T> jkOnlyFockMatrix(const Matrix<T>& h, const Eri& eri,
                             const std::vector<double>& occupations,
                             const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x) {
   const std::size_t n = h.rows();
@@ -106,6 +108,12 @@ template Matrix<std::complex<double>> jkOnlyOrbitalGradient(
 template Matrix<std::complex<double>> jkOnlyOrbitalGradient(
     const Matrix<std::complex<double>>&, const SymmetricEri<std::complex<double>>&,
     const std::vector<double>&, const Matrix<double>&, const Matrix<double>&);
+template Matrix<double> jkOnlyOrbitalGradient(const Matrix<double>&, const RiNonRelSpinMoEri&,
+                                               const std::vector<double>&, const Matrix<double>&,
+                                               const Matrix<double>&);
+template Matrix<std::complex<double>> jkOnlyOrbitalGradient(
+    const Matrix<std::complex<double>>&, const RiMoEri&,
+    const std::vector<double>&, const Matrix<double>&, const Matrix<double>&);
 
 template <typename T, typename Eri>
 double jkOnlyEnergy(const Matrix<T>& h, const Eri& eri,
@@ -191,6 +199,12 @@ template double jkOnlyEnergy(const Matrix<std::complex<double>>& h,
                               const Tensor4<std::complex<double>>& eri,
                               const std::vector<double>& occupations,
                               const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x);
+template double jkOnlyEnergy(const Matrix<double>& h, const RiNonRelSpinMoEri& eri,
+                              const std::vector<double>& occupations,
+                              const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x);
+template double jkOnlyEnergy(const Matrix<std::complex<double>>& h, const RiMoEri& eri,
+                              const std::vector<double>& occupations,
+                              const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x);
 
 template Matrix<double> jkOnlyFockMatrix(const Matrix<double>& h, const Tensor4<double>& eri,
                                           const std::vector<double>& occupations,
@@ -201,5 +215,14 @@ template Matrix<std::complex<double>> jkOnlyFockMatrix(const Matrix<std::complex
                                                          const std::vector<double>& occupations,
                                                          const Matrix<double>& two_rdm_h,
                                                          const Matrix<double>& two_rdm_x);
+template Matrix<std::complex<double>> jkOnlyFockMatrix(const Matrix<std::complex<double>>& h,
+                                                         const RiMoEri& eri,
+                                                         const std::vector<double>& occupations,
+                                                         const Matrix<double>& two_rdm_h,
+                                                         const Matrix<double>& two_rdm_x);
+template Matrix<double> jkOnlyFockMatrix(const Matrix<double>& h, const RiNonRelSpinMoEri& eri,
+                                          const std::vector<double>& occupations,
+                                          const Matrix<double>& two_rdm_h,
+                                          const Matrix<double>& two_rdm_x);
 
 }  // namespace rerdmft

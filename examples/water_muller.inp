@@ -16,6 +16,7 @@ C4_SPINOR TRUE
 SCF_DIRECT_4C FALSE  # preserve this example's pre-existing SCF path (SCF_DIRECT_4C now defaults TRUE for plain C4_SPINOR runs)
 NON_RELATIVISTIC TRUE
 FUNCTIONAL MULLER
+USE_RI FALSE  # preserve this example's pre-existing dense/Cholesky path (USE_RI now defaults TRUE)
 
 GEOMETRY
 O   0.000000   0.000000   0.000000

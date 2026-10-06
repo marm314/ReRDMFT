@@ -1,4 +1,6 @@
 #include "CholeskyEri.h"
+#include "NonRelSpinRiMoEri.h"
+#include "RiMoEri.h"
 #include "SymmetricEri.h"
 #include "HartreeExchangeGradient.h"
 
@@ -222,6 +224,20 @@ template double hartreeExchangeEnergy(const Matrix<std::complex<double>>& h,
                                        const std::vector<std::size_t>& pair_of,
                                        const Matrix<double>& two_rdm_l1,
                                        const Matrix<double>& two_rdm_l2);
+template double hartreeExchangeEnergy(const Matrix<double>& h, const RiNonRelSpinMoEri& eri,
+                                       const std::vector<double>& occupations,
+                                       const Matrix<double>& two_rdm_h,
+                                       const Matrix<double>& two_rdm_x,
+                                       const std::vector<std::size_t>& pair_of,
+                                       const Matrix<double>& two_rdm_l1,
+                                       const Matrix<double>& two_rdm_l2);
+template double hartreeExchangeEnergy(const Matrix<std::complex<double>>& h, const RiMoEri& eri,
+                                       const std::vector<double>& occupations,
+                                       const Matrix<double>& two_rdm_h,
+                                       const Matrix<double>& two_rdm_x,
+                                       const std::vector<std::size_t>& pair_of,
+                                       const Matrix<double>& two_rdm_l1,
+                                       const Matrix<double>& two_rdm_l2);
 
 template Matrix<double> hartreeExchangeFockMatrix(const Matrix<double>& h,
                                                     const Tensor4<double>& eri,
@@ -262,5 +278,18 @@ template Matrix<std::complex<double>> hartreeExchangeFockMatrix(
     const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
     const Matrix<double>& two_rdm_x, const std::vector<std::size_t>& pair_of,
     const Matrix<double>& two_rdm_l1, const Matrix<double>& two_rdm_l2);
+template Matrix<double> hartreeExchangeFockMatrix(const Matrix<double>& h,
+                                                    const RiNonRelSpinMoEri& eri,
+                                                    const std::vector<double>& occupations,
+                                                    const Matrix<double>& two_rdm_h,
+                                                    const Matrix<double>& two_rdm_x,
+                                                    const std::vector<std::size_t>& pair_of,
+                                                    const Matrix<double>& two_rdm_l1,
+                                                    const Matrix<double>& two_rdm_l2);
+template Matrix<std::complex<double>> hartreeExchangeFockMatrix(
+    const Matrix<std::complex<double>>& h, const RiMoEri& eri, const std::vector<double>& occupations,
+    const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x,
+    const std::vector<std::size_t>& pair_of, const Matrix<double>& two_rdm_l1,
+    const Matrix<double>& two_rdm_l2);
 
 }  // namespace rerdmft

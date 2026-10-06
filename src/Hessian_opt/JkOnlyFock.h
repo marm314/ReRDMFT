@@ -37,8 +37,8 @@ namespace rerdmft {
 // `two_rdm_x` follow HartreeExchangeGradient.h's own conventions. Works
 // for either a real (T=double) or complex (T=std::complex<double>)
 // orbital basis.
-template <typename T>
-Matrix<T> jkOnlyFockMatrix(const Matrix<T>& h, const Tensor4<T>& eri,
+template <typename T, typename Eri = Tensor4<T>>
+Matrix<T> jkOnlyFockMatrix(const Matrix<T>& h, const Eri& eri,
                             const std::vector<double>& occupations,
                             const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x);
 

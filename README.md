@@ -83,9 +83,11 @@ are comments.
 | `CHOLESKY` | bool | `FALSE` | Hold the two-electron integrals as Cholesky vectors instead of a dense/packed tensor -- SCF, MO integrals, and `FULL_OPTIMIZATION` all work from the vectors. |
 | `CHOLESKY_THRESHOLD` | double (> 0) | `1e-10` | Residual-diagonal cutoff for the decomposition; looser = fewer vectors (faster, less accurate). |
 | `ON_DEMAND_ERI` | bool | `TRUE` | With `CHOLESKY TRUE`: evaluate each AO quadruplet on demand during decomposition (memory O(n^2)) instead of building the full packed tensor first. |
-| `SCF_DIRECT_4C` | bool | `TRUE` if `C4_SPINOR TRUE` and none of `READ_RESTART`/`DEBUG`/`HESSIAN_MEAN_FIELD`; else `FALSE` | `C4_SPINOR` only: run the SCF fully integral-direct (no two-electron representation held during SCF, O(n^2) memory). Only affects the SCF loop itself -- the post-SCF representation for `FUNCTIONAL`/`FULL_OPTIMIZATION` still follows `CHOLESKY` alone (dense if `CHOLESKY FALSE`, including for `FULL_OPTIMIZATION_4C_NEG`). An explicit `TRUE` against `READ_RESTART`/`DEBUG`/`HESSIAN_MEAN_FIELD` still throws; the smart default just silently stays `FALSE` instead. |
+| `SCF_DIRECT_4C` | bool | `TRUE` if `C4_SPINOR TRUE`, none of `READ_RESTART`/`DEBUG`/`HESSIAN_MEAN_FIELD`, and `USE_RI` didn't already take over; else `FALSE` | `C4_SPINOR` only: run the SCF fully integral-direct (no two-electron representation held during SCF, O(n^2) memory). Only affects the SCF loop itself -- the post-SCF representation for `FUNCTIONAL`/`FULL_OPTIMIZATION` still follows `CHOLESKY` alone (dense if `CHOLESKY FALSE`, including for `FULL_OPTIMIZATION_4C_NEG`). An explicit `TRUE` against `READ_RESTART`/`DEBUG`/`HESSIAN_MEAN_FIELD` still throws; the smart default just silently stays `FALSE` instead. |
 | `FUNCTIONAL_POS_CHO_4C` | bool | `TRUE` if `C4_SPINOR TRUE` and `FUNCTIONAL` is given; else `FALSE` | `C4_SPINOR` only: with `CHOLESKY TRUE` (works with `READ_RESTART` too), build `FUNCTIONAL`/`FULL_OPTIMIZATION`'s positive-energy MO Cholesky vectors in one fused pass, without ever holding the full AO-basis RKB vector set. Only takes effect when that vector set genuinely wouldn't otherwise be built (see *Keyword compatibility* below for the exact conditions) -- otherwise a harmless no-op, reusing whatever was already built rather than redundantly rebuilding it. Memory benefit confirmed on small systems only so far -- not yet validated at heavy-element scale. |
 | `FUNCTIONAL_DIRECT_4C` | bool | `FALSE` | `C4_SPINOR` + `FULL_OPTIMIZATION` only: the ADAM orbital-rotation sub-loop builds its generalized Fock (and, via a double-counting trace identity, its energy) directly from UKB AO integrals at the current orbitals, instead of a stored MO-basis two-electron tensor that the ordinary path re-expresses in the rotated basis on every ADAM step. That per-step re-expression is skipped while ADAM drives and resynced once, right after each ADAM run -- same final numbers, far fewer O(n^5)/O(n_chol n^2) integral rotations. Requires `FUNCTIONAL`; incompatible with `ORBITAL_OPTIMIZER NEO`/`ADAM_NEO` and `FULL_OPTIMIZATION_4C_NEG` (no UKB-direct orbital-rotation Hessian exists yet). |
+| `USE_RI` | bool | `TRUE` if `NON_RELATIVISTIC`/`X2C`/`C4_SPINOR` is active and nothing else already picked a kernel (explicit `CHOLESKY`, explicit `SCF_DIRECT_4C`/`FUNCTIONAL_DIRECT_4C TRUE`, or `READ_RESTART`/`DEBUG`/`HESSIAN_MEAN_FIELD`/`FULL_OPTIMIZATION_4C_NEG`/`ORBITAL_OPTIMIZER NEO`/`ADAM_NEO`); else `FALSE` | Builds the SCF Fock matrices, and (for `FUNCTIONAL` + `FULL_OPTIMIZATION`) the ADAM sub-loop's generalized Fock and the occupation/amplitude optimizer, from a resolution-of-identity (RI) 3-center tensor instead of a dense or Cholesky two-electron representation -- for all three methods and all three functional families (PNOF, JK_only, pCCD). Typical accuracy vs. the exact/dense result is ~1e-7-1e-4 Ha, basis-dependent (a crude/minimal basis can reach ~1e-3 Ha). Set `USE_RI FALSE` explicitly to force the classic dense/Cholesky path. See project memory `project-ri-pauto-kr-validation` for the implementation. |
+| `AUX_BASIS_TYPE` | string | `PAUTO` | Auxiliary basis recipe `USE_RI` builds internally (Yang, Rendell, Frisch, *J. Chem. Phys.* 127, 074102 (2007); MOLGW's `init_auxil_basis_set_auto`). `PAUTO` (default) considers every pair of orbital shells; `AUTO` only self-products (cruder, rarely needed). Only meaningful when `USE_RI` is active. |
 | `X_LIN_DEP_THRS_L` | double (> 0) | `1e-6` | Large-component linear-dependence threshold (LOWGEN-style safety net). |
 | `X_LIN_DEP_THRS_S` | double (> 0) | `1e-8` | Small-component linear-dependence threshold (`X2C`/`C4_SPINOR` only). |
 | `FUNCTIONAL` | string | *(none)* | Selects the RDMFT functional: JK-only (`SD`, `MULLER`/`MBB`, `BBC2`, `CA`, `CGA`, `ML`, `MLSIC`, `GU`, `POWER`), PNOF (`PNOF5`, `PNOF7`, `PNOF7S`, `GNOF`), or `PCCD`. Unset skips the whole RDMFT step. |
@@ -121,13 +123,20 @@ inputs never need to mention them at all. Existing examples that are specificall
 exercise the *other* path (dense, or the plain Cholesky-vector one) set them explicitly to
 `FALSE` to keep doing that.
 
-Hard errors (incompatible, Input.cpp throws at parse time):
+Hard errors (incompatible, Input.cpp throws at parse time) -- for the `USE_RI` rows below, this
+only fires when `USE_RI TRUE` is written explicitly; left unset, `USE_RI`'s own smart default
+quietly becomes `FALSE` instead:
 
 | Combination | Why |
 | --- | --- |
 | `SCF_DIRECT_4C TRUE` + `READ_RESTART TRUE` | The restart branch has its own, separate Fock-build logic, not wired to the integral-direct kernel. |
 | `SCF_DIRECT_4C TRUE` + `DEBUG TRUE` | DEBUG's dense-vs-Cholesky comparison needs an actual dense tensor, which `SCF_DIRECT_4C` never builds. |
 | `SCF_DIRECT_4C TRUE` + `HESSIAN_MEAN_FIELD TRUE` | Same -- needs a dense tensor. |
+| `USE_RI TRUE` without any of `NON_RELATIVISTIC`/`X2C`/`C4_SPINOR TRUE` | Nothing for it to change -- there is no SCF loop for it to affect. |
+| `USE_RI TRUE` + `READ_RESTART`/`DEBUG`/`HESSIAN_MEAN_FIELD TRUE` | Same reasons as the matching `SCF_DIRECT_4C` rows above. |
+| `USE_RI TRUE` + an explicit `SCF_DIRECT_4C TRUE` | Two different, mutually exclusive SCF kernels for the same thing -- ambiguous. |
+| `USE_RI TRUE` + an explicit `FUNCTIONAL_DIRECT_4C TRUE` | Two different, mutually exclusive strategies for the same ADAM orbital-rotation sub-loop -- ambiguous. |
+| `USE_RI TRUE` + `FULL_OPTIMIZATION_4C_NEG TRUE`, or + `ORBITAL_OPTIMIZER NEO`/`ADAM_NEO` | Same reason as the matching `FUNCTIONAL_DIRECT_4C` row above -- no RI-based orbital-rotation Hessian exists yet either. |
 | `FCIDUMP TRUE` without `NON_RELATIVISTIC TRUE`, or without `FUNCTIONAL` | Only NON_REL is supported; needs an RDMFT orbital order to write. |
 | `READ_OCCUPANCIES TRUE` without `FUNCTIONAL` | Nothing to read occupations into. |
 | `FUNCTIONAL_DIRECT_4C TRUE` without `C4_SPINOR TRUE`, `FUNCTIONAL`, or `FULL_OPTIMIZATION TRUE` | Nothing for it to change -- it only replaces `C4_SPINOR`'s own ADAM orbital-rotation sub-loop. |
@@ -139,6 +148,7 @@ harmless no-ops, not errors):
 | Combination | Effect |
 | --- | --- |
 | `SCF_DIRECT_4C TRUE` + `CHOLESKY` (either) | Independent: the post-SCF representation for `FUNCTIONAL`/`FULL_OPTIMIZATION` follows `CHOLESKY` alone, including for `FULL_OPTIMIZATION_4C_NEG` (dense fallback when `CHOLESKY FALSE`). |
+| Explicit `USE_RI TRUE` + explicit `CHOLESKY` (either) | Independent and both honored -- `USE_RI` only changes the two-electron representation; `CHOLESKY`'s own vectors, if anything downstream still needs them, are unaffected. |
 | `FUNCTIONAL_POS_CHO_4C TRUE` + `CHOLESKY FALSE` | No-op -- the dense path never touches `RkbCholesky` anyway. |
 | `FUNCTIONAL_POS_CHO_4C TRUE` + `CHOLESKY TRUE` + `SCF_DIRECT_4C FALSE` (no restart) | No-op -- `rkb_cholesky` is already needed by the ordinary Cholesky SCF loop; reused, not rebuilt. |
 | `FUNCTIONAL_POS_CHO_4C TRUE` + `CHOLESKY TRUE` + `SCF_DIRECT_4C TRUE` | **Full effect** -- `RkbCholesky`'s AO-basis vectors are never built at all for the whole run. The intended use case. |

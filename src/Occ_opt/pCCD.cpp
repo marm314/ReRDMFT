@@ -8,6 +8,8 @@
 #include "CholeskyEri.h"
 #include "LBFGS.h"
 #include "LinearAlgebra.h"
+#include "NonRelSpinRiMoEri.h"
+#include "RiMoEri.h"
 #include "SymmetricEri.h"
 #include "Tensor4.h"
 
@@ -582,6 +584,17 @@ template PccdCoefficients buildPccdCoefficients(const Matrix<std::complex<double
                                                 std::size_t, std::size_t);
 template PccdCoefficients buildPccdCoefficients(const Matrix<std::complex<double>>&,
                                                 const SymmetricEri<std::complex<double>>&,
+                                                const std::vector<std::size_t>&,
+                                                const std::vector<std::size_t>&, std::size_t,
+                                                std::size_t, std::size_t);
+// USE_RI's own FULL_OPTIMIZATION occupation-optimizer extension: the amplitude solve's own
+// MO-integral read (model.optimize_occupations, Full_opt/FullOptimization.cpp's makePccdModel)
+// is not skippable, so this needs real instantiations too.
+template PccdCoefficients buildPccdCoefficients(const Matrix<double>&, const RiNonRelSpinMoEri&,
+                                                const std::vector<std::size_t>&,
+                                                const std::vector<std::size_t>&, std::size_t,
+                                                std::size_t, std::size_t);
+template PccdCoefficients buildPccdCoefficients(const Matrix<std::complex<double>>&, const RiMoEri&,
                                                 const std::vector<std::size_t>&,
                                                 const std::vector<std::size_t>&, std::size_t,
                                                 std::size_t, std::size_t);

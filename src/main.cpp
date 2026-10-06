@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <complex>
@@ -16,6 +17,7 @@
 #include <vector>
 
 #include "AoCholesky.h"
+#include "AuxiliaryBasis.h"
 #include "BasisSet.h"
 #include "C4_DHF.h"
 #include "ClosedShellSpinOrbitals.h"
@@ -75,7 +77,10 @@
 #include "SpinorBasis.h"
 #include "SpinorRotation.h"
 #include "SQP.h"
+#include "RiNonRelFullOptFock.h"
+#include "ThreeCenterIntegrals.h"
 #include "UkbFockMatrixDirect.h"
+#include "UkbFockMatrixRi.h"
 #include "UkbHamiltonian.h"
 #include "X2C_decoupling.h"
 #include "X2C_DensityMatrix.h"
@@ -861,6 +866,70 @@ inline rerdmft::FullOptSettings fullOptSettings(const rerdmft::Input& input) {
   return settings;
 }
 
+// USE_RI (Input.h): builds the automatic RI auxiliary basis (AuxiliaryBasis.h) and its metric
+// orthogonalization for one SCF method's own orbital basis -- NON_REL/X2C pass the
+// Large-component basis alone; C4_SPINOR passes the full UKB basis, Large AND Small together
+// (AuxiliaryBasis.h's own header comment explains why). Shared by every method's own RI Fock
+// build below, so the aux basis/metric is built exactly once per method, never per SCF iteration.
+struct AuxBasisBuild {
+  std::vector<rerdmft::BasisFunction> aux_basis;
+  rerdmft::Matrix<double> metric_x;
+};
+inline AuxBasisBuild buildAuxBasisAndMetric(const std::string& label,
+                                             const std::vector<rerdmft::BasisFunction>& orbital_basis,
+                                             const rerdmft::Input& input) {
+  const rerdmft::AuxBasisType type =
+      input.aux_basis_type() == "AUTO" ? rerdmft::AuxBasisType::kAuto : rerdmft::AuxBasisType::kPauto;
+  std::vector<rerdmft::BasisFunction> aux_basis = rerdmft::buildAutoAuxiliaryBasis(orbital_basis, type);
+  rerdmft::normalizeCartesianBasis(aux_basis);
+  rerdmft::RankReductionReport metric_report;
+  rerdmft::Matrix<double> metric_x = rerdmft::auxMetricOrthogonalization(aux_basis, 1e-10, &metric_report);
+  std::cout << "  USE_RI (" << label << ", " << input.aux_basis_type() << "): " << aux_basis.size()
+            << " cartesian auxiliary functions, " << metric_x.cols() << " kept after the metric's own"
+            << " LOWGEN safety net (" << metric_report.n_dropped << " near-singular direction(s) dropped).\n";
+  return AuxBasisBuild{std::move(aux_basis), std::move(metric_x)};
+}
+
+// NON_REL and X2C both build their RI aux basis from the SAME large_basis.functions() input, the
+// SAME AUX_BASIS_TYPE recipe, and so the SAME raw Cartesian (LL|Q) tensor -- only each method's
+// OWN subsequent transformRiThreeCenterAoLegs step (nonrel_transform vs large_transform_final)
+// differs. Built at most ONCE per run (whichever of the two runs first) and reused by the other,
+// instead of redundantly repeating the PAUTO/AUTO candidate generation, metric orthogonalization,
+// and libcint 3-center evaluation. C4_SPINOR's own aux basis (UKB-combined, Large+Small) is a
+// DIFFERENT construction and never shares this cache.
+struct LargeAuxRiCache {
+  AuxBasisBuild aux;
+  rerdmft::Matrix<double> eri3_cart;  // raw Cartesian (LL|Q)
+};
+inline const LargeAuxRiCache& getOrBuildLargeAuxRiCache(std::optional<LargeAuxRiCache>& cache,
+                                                         const std::vector<rerdmft::BasisFunction>& large_basis_fns,
+                                                         const rerdmft::Input& input) {
+  if (!cache) {
+    AuxBasisBuild aux = buildAuxBasisAndMetric("NON_REL/X2C", large_basis_fns, input);
+    rerdmft::Matrix<double> eri3_cart = rerdmft::riThreeCenterTensor(large_basis_fns, aux.aux_basis, aux.metric_x);
+    cache = LargeAuxRiCache{std::move(aux), std::move(eri3_cart)};
+  }
+  return *cache;
+}
+
+// USE_RI + FULL_OPTIMIZATION for NON_REL (T=double) only: the raw ingredients
+// buildFunctionalReport/buildPnofFunctionalReport/buildPccdFunctionalReport need to build their
+// own `extra_direct_fock`/`extra_direct_pccd_fock` closure (Hessian_opt/RiNonRelFullOptFock.h's
+// riJkOnlyFockMatrixNonRel/riPnofFockMatrixNonRel/riPccdFockMatrixNonRel) -- unlike X2C_HF/C4_DHF,
+// which reuse the EXISTING UkbDirectSource mechanism directly (T=std::complex<double>, built once
+// by the caller with the functional-agnostic h/eri/c0 alone), NON_REL's `geminals`/`functional`
+// are only known INSIDE those three functions (built from their own arguments), so the closure
+// itself has to be assembled there, not at the call site.
+struct RiNonRelDirectSource {
+  rerdmft::Matrix<double> eri3_L;  // (n_aux, n_spatial*n_spatial), AO_ints/ThreeCenterIntegrals.h's convention
+  std::size_t n_spatial = 0;
+  rerdmft::Matrix<double> c0;  // n_spatial x n_total (n_total = 2*n_spatial), spin-orbital-expanded SCF coefficients
+  // The FIXED, bare spatial AO one-electron Hamiltonian (main.cpp's own h_core_nonrel) --
+  // NEVER the already spin-orbital-expanded h_spin passed as this function's own `h` argument
+  // (see Hessian_opt/RiNonRelFullOptFock.h's own comment for why that distinction matters).
+  rerdmft::Matrix<double> h_core_ao;
+};
+
 // `Eri` is the dense Tensor4<T> or Cholesky vectors (rerdmft::CholeskyEri<T>): the energy/gradient/Hessian
 // code below only needs element access, so it takes either; the DEBUG-only validation blocks that need a
 // dense tensor take a dense view (denseOf) of it.
@@ -882,7 +951,8 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
                                    const std::function<Eri()>& eri_full_block_factory = std::function<Eri()>(),
                                    const std::vector<double>* initial_occupations = nullptr,
                                    const std::vector<OccInLine>* occ_in = nullptr,
-                                   const rerdmft::UkbDirectSource* ukb_direct = nullptr) {
+                                   const rerdmft::UkbDirectSource* ukb_direct = nullptr,
+                                   const RiNonRelDirectSource* ri_nonrel_direct = nullptr) {
   // Generic (element-access) view of the integrals, used by the production code below; the DEBUG /
   // validation blocks that need a dense Tensor4 re-bind `eri` to a dense view of `eri_in`.
   const Eri& eri = eri_in;
@@ -1405,6 +1475,22 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
     // comment. Kramers-restricted like X2C, since the positive-energy branch is itself
     // Kramers-paired the same way.
     rerdmft::FullOptResult full_result;
+    // USE_RI + FULL_OPTIMIZATION (NON_REL only): see RiNonRelDirectSource's own comment -- the
+    // closure is built HERE (not by the caller) because it needs `functional`/`f_l`, only known
+    // inside this function.
+    std::function<rerdmft::Matrix<T>(const rerdmft::Matrix<T>&, const std::vector<double>&)> extra_direct_fock;
+    rerdmft::Matrix<T> extra_direct_c0;
+    if constexpr (std::is_same_v<T, double>) {
+      if (ri_nonrel_direct != nullptr) {
+        extra_direct_fock = [functional, f_l, h_core_ao = ri_nonrel_direct->h_core_ao,
+                              eri3_L = ri_nonrel_direct->eri3_L,
+                              n_spatial = ri_nonrel_direct->n_spatial](
+                                 const rerdmft::Matrix<T>& c_current, const std::vector<double>& occ) {
+          return rerdmft::riJkOnlyFockMatrixNonRel(h_core_ao, eri3_L, n_spatial, c_current, occ, functional, f_l);
+        };
+        extra_direct_c0 = ri_nonrel_direct->c0;
+      }
+    }
     if (full_opt.enabled) {
       try {
         full_result = rerdmft::runFullOptimizationJk<T>(h, eri, embed(sqp_result.x), sqp_result.x, functional, f_l,
@@ -1414,7 +1500,8 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
                                           nuclear_repulsion_energy, out,
                                           label == "NON_REL" ? blockSpinPartner(n_total)
                                                              : std::vector<std::size_t>{},
-                                          /*n_negative=*/frozen_base, ukb_direct);
+                                          /*n_negative=*/frozen_base, ukb_direct, extra_direct_fock,
+                                          extra_direct_c0);
       } catch (const std::exception& e) {
         out << "\n  FULL_OPTIMIZATION FAILED: " << e.what() << "\n";
       }
@@ -1522,7 +1609,8 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
                                        const std::function<Eri()>& eri_full_block_factory = std::function<Eri()>(),
                                        const std::vector<double>* initial_occupations = nullptr,
                                        const std::vector<OccInLine>* occ_in = nullptr,
-                                       const rerdmft::UkbDirectSource* ukb_direct = nullptr) {
+                                       const rerdmft::UkbDirectSource* ukb_direct = nullptr,
+                                       const RiNonRelDirectSource* ri_nonrel_direct = nullptr) {
   // See buildFunctionalReport: generic view here, dense re-binding in the DEBUG blocks.
   const Eri& eri = eri_in;
   rerdmft::progressContext() = label;  // live progress lines (stderr) are prefixed with the method
@@ -2108,6 +2196,22 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
   // touching that branch is excluded from the parameter space entirely, keeping the no-pair
   // approximation exact -- see runFullOptimization's/main.cpp's JK_only call site's own comment.
   rerdmft::FullOptResult full_result;
+  // USE_RI + FULL_OPTIMIZATION (NON_REL only): see RiNonRelDirectSource's own comment -- the
+  // closure is built HERE (not by the caller) because it needs `functional`/`geminals`, only
+  // known inside this function.
+  std::function<rerdmft::Matrix<T>(const rerdmft::Matrix<T>&, const std::vector<double>&)> extra_direct_fock;
+  rerdmft::Matrix<T> extra_direct_c0;
+  if constexpr (std::is_same_v<T, double>) {
+    if (ri_nonrel_direct != nullptr) {
+      extra_direct_fock = [functional, geminals, h_core_ao = ri_nonrel_direct->h_core_ao,
+                            eri3_L = ri_nonrel_direct->eri3_L,
+                            n_spatial = ri_nonrel_direct->n_spatial](
+                               const rerdmft::Matrix<T>& c_current, const std::vector<double>& occ) {
+        return rerdmft::riPnofFockMatrixNonRel(functional, h_core_ao, eri3_L, n_spatial, c_current, geminals, occ);
+      };
+      extra_direct_c0 = ri_nonrel_direct->c0;
+    }
+  }
   if (full_opt.enabled) {
     if (!occupations_optimized) {
       out << "\n  FULL_OPTIMIZATION skipped: the occupation optimization did not succeed.\n";
@@ -2120,7 +2224,8 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
                                             nuclear_repulsion_energy, out,
                                             label == "NON_REL" ? blockSpinPartner(n_total)
                                                                : std::vector<std::size_t>{},
-                                            /*n_negative=*/n_inactive_below, ukb_direct);
+                                            /*n_negative=*/n_inactive_below, ukb_direct,
+                                            extra_direct_fock, extra_direct_c0);
       } catch (const std::exception& e) {
         out << "\n  FULL_OPTIMIZATION FAILED: " << e.what() << "\n";
       }
@@ -2274,7 +2379,8 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
                                        rerdmft::RestartCapture* restart = nullptr,
                                        const std::function<Eri()>& eri_full_block_factory = std::function<Eri()>(),
                                        const std::vector<double>* restart_amplitudes = nullptr,
-                                       const rerdmft::UkbDirectSource* ukb_direct = nullptr) {
+                                       const rerdmft::UkbDirectSource* ukb_direct = nullptr,
+                                       const RiNonRelDirectSource* ri_nonrel_direct = nullptr) {
   rerdmft::progressContext() = label;
   const std::size_t n_total = h.rows();
   const std::size_t n_spatial = n_active / 2;
@@ -2415,12 +2521,34 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
       }
     }
     const bool kramers_restricted = (label == "X2C_HF" || label == "C4_DHF");
+    // USE_RI + FULL_OPTIMIZATION (NON_REL only): see RiNonRelDirectSource's own comment -- the
+    // closure is built HERE (not by the caller) because it needs `reps`/`bar`/`n_core`/`n_occ`/
+    // `n_vir`, only known inside this function. Unlike PNOF/JK_only, the 3rd argument (`rdm`) is
+    // supplied FRESH by makePccdModel's own cache wrapper at every call (see Full_opt/
+    // FullOptimization.h's own comment on why pCCD's Fock is not a pure function of
+    // (c_current, occ) alone) -- not captured here.
+    std::function<rerdmft::Matrix<T>(const rerdmft::Matrix<T>&, const std::vector<double>&, const rerdmft::PccdRdm&)>
+        extra_direct_pccd_fock;
+    rerdmft::Matrix<T> extra_direct_c0;
+    if constexpr (std::is_same_v<T, double>) {
+      if (ri_nonrel_direct != nullptr) {
+        extra_direct_pccd_fock = [h_core_ao = ri_nonrel_direct->h_core_ao, eri3_L = ri_nonrel_direct->eri3_L,
+                                   ao_n_spatial = ri_nonrel_direct->n_spatial,
+                                   reps, bar, n_core, n_occ, n_vir](
+                                      const rerdmft::Matrix<T>& c_current, const std::vector<double>& occ,
+                                      const rerdmft::PccdRdm& rdm) {
+          return rerdmft::riPccdFockMatrixNonRel(h_core_ao, eri3_L, ao_n_spatial, c_current, reps, bar, n_core, n_occ,
+                                                  n_vir, rdm, occ);
+        };
+        extra_direct_c0 = ri_nonrel_direct->c0;
+      }
+    }
     try {
       full_result = rerdmft::runFullOptimizationPccd<T, Eri>(
           h, eri, occupations, state, reps, bar, n_core, n_occ, n_vir, n_total, amp_settings,
           full_opt, kramers_restricted, nuclear_repulsion_energy, out,
           label == "NON_REL" ? blockSpinPartner(n_total) : std::vector<std::size_t>{},
-          /*n_negative=*/n_inactive_below, ukb_direct);
+          /*n_negative=*/n_inactive_below, ukb_direct, extra_direct_pccd_fock, extra_direct_c0);
       out << "\n  FULL_OPTIMIZATION " << (full_result.checks_passed && full_result.converged ? "converged" : "did NOT converge")
           << " after " << full_result.iterations << " macro-iteration(s): total energy "
           << std::setprecision(10) << full_result.electronic_energy + nuclear_repulsion_energy
@@ -2845,6 +2973,12 @@ int main(int argc, char** argv) {
   // output back) -- built once, right after rkb_coefficients is row-projected to its final
   // spherical dimension, below. Left empty (unused) otherwise.
   rerdmft::Matrix<std::complex<double>> v_total;
+  // USE_RI: each method's own RI 3-center tensor + occupied-orbital-recovery objects, built once
+  // (see buildAuxBasisAndMetric) and left default-empty unless that method's USE_RI path actually
+  // runs.
+  rerdmft::RiNonRelEriSource ri_nonrel_source;
+  rerdmft::RiX2cEriSource ri_x2c_source;
+  std::optional<LargeAuxRiCache> large_aux_ri_cache;  // shared by NON_REL/X2C -- see its own comment
   // s_large_cart/x_large_cart: NON_RELATIVISTIC's own large-component overlap/Loewdin matrix, built
   // once from large_basis.functions() and used EXCLUSIVELY by NON_RELATIVISTIC -- Cartesian by
   // default (CARTESIAN TRUE, Input.h), or spherically transformed (via nonrel_transform below) when
@@ -3000,7 +3134,7 @@ int main(int argc, char** argv) {
     }
 
     // The small-component basis and every RKB/relativistic quantity built from it are only ever
-    // read by X2C's own report/SCF and by C4_SPINOR below -- NON_RELATIVISTIC builds its own
+    // read by X2C's own SCF and by C4_SPINOR below -- NON_RELATIVISTIC builds its own
     // one-electron Hamiltonian (schrodingerKineticMatrix/nuclearAttractionMatrix) and two-electron
     // integrals (buildNonRelEri) independently of all of this, so skip it entirely when neither is
     // requested: this is otherwise an O(n^3) generalized-eigenproblem diagonalization (the X2C
@@ -3073,7 +3207,7 @@ int main(int argc, char** argv) {
         h_ukb = rerdmft::dagger(v_sph) * (h_ukb * v_sph);
         rkb_coefficients =
             rerdmft::dagger(rerdmft::spinDuplicateComplex(large_transform_final)) * rkb_coefficients;
-        if (input.scf_direct_4c()) {
+        if (input.scf_direct_4c() || input.use_ri()) {
           v_total = v_sph * rerdmft::rkbEmbeddingMatrix(rkb_coefficients);
         }
       }
@@ -3570,13 +3704,26 @@ int main(int argc, char** argv) {
       const auto nonrel_density_initial =
           rerdmft::nonRelDensityMatrix(nonrel_c_initial, input.n_electrons());
       prepareNonRelEri("NON_REL");
+      if (input.use_ri()) {
+        const LargeAuxRiCache& cache =
+            getOrBuildLargeAuxRiCache(large_aux_ri_cache, large_basis.functions(), input);
+        ri_nonrel_source.nl = h_core_nonrel.rows();
+        ri_nonrel_source.eri3_L = input.cartesian()
+                                       ? cache.eri3_cart
+                                       : rerdmft::transformRiThreeCenterAoLegs(
+                                             cache.eri3_cart, large_basis.functions().size(), nonrel_transform);
+        ri_nonrel_source.x_large = x_large_cart;
+        ri_nonrel_source.overlap = s_large_cart;
+      }
       const auto run_nonrel_scf = [&](const auto& eri_source) {
         return rerdmft::runNonRelativisticHartreeFock(
             eri_source, h_core_nonrel, x_large_cart, nonrel_density_initial,
             input.n_electrons(), input.geometry(), input.mixing(), s_large_cart, input.scf_diis_size(),
             input.max_iterations(), input.energy_tolerance(), input.density_tolerance());
       };
-      nonrel_hf_result = input.cholesky() ? run_nonrel_scf(ao_cholesky) : run_nonrel_scf(nonrel_eri);
+      nonrel_hf_result = input.use_ri()  ? run_nonrel_scf(ri_nonrel_source)
+                         : input.cholesky() ? run_nonrel_scf(ao_cholesky)
+                                            : run_nonrel_scf(nonrel_eri);
       logTiming("Nonrelativistic HF SCF complete", t_start, t_checkpoint, timing_records);
 
       // Transform h and the ERIs into the converged natural (canonical
@@ -3600,7 +3747,11 @@ int main(int argc, char** argv) {
       // Only actually consumed below under DEBUG (the dense-vs-Cholesky check), HESSIAN_MEAN_FIELD (expanded
       // into eri_spin_sym), or FUNCTIONAL (the RDMFT evaluation) -- skip the transform entirely for a bare
       // HF run, which otherwise pays its full O(N_chol * n^2) cost and memory for a result nothing reads.
-      if (input.cholesky() && (nonrel_dense || input.has_functional())) {
+      // USE_RI TRUE: skip this AO-vector-to-MO transform entirely (see ri_nonrel_mo_eri below,
+      // built straight from the already-RI-transformed AO tensor instead) -- DEBUG/HESSIAN_MEAN_FIELD
+      // are mutually exclusive with USE_RI (Input.cpp's own check), so `nonrel_dense` is always
+      // false here whenever USE_RI is active.
+      if (!input.use_ri() && input.cholesky() && (nonrel_dense || input.has_functional())) {
         eri_spin_chol = rerdmft::aoCholeskyToMoSpinOrbital(ao_cholesky, nonrel_hf_result.c_matrix);
       }
       logTiming("NON_REL MO integral transform complete", t_start, t_checkpoint, timing_records);
@@ -3609,11 +3760,20 @@ int main(int argc, char** argv) {
       const int n_occ_spatial = input.n_electrons() / 2;
       const auto h_spin = rerdmft::closedShellSpinOrbitalOneElectron(h_mo, n_spatial);
       rerdmft::SymmetricEri<double> eri_spin_sym;
-      if (!input.cholesky() || input.debug()) {
+      if (!input.use_ri() && (!input.cholesky() || input.debug())) {
         eri_spin_sym = rerdmft::closedShellSpinOrbitalTwoElectron(
             rerdmft::moTwoElectronSymmetric(nonrel_eri, nonrel_hf_result.c_matrix), n_spatial);
-      } else if (input.hessian_mean_field()) {
+      } else if (!input.use_ri() && input.hessian_mean_field()) {
         eri_spin_sym = rerdmft::symmetricFromCholesky(eri_spin_chol);
+      }
+      // USE_RI TRUE: the FULL_OPTIMIZATION occupation-optimizer extension's own RiNonRelSpinMoEri,
+      // built ONCE here (at the FIXED, converged SCF orbitals) straight from the AO-basis RI tensor
+      // already built for the SCF step (ri_nonrel_source.eri3_L) -- no Cholesky/dense AO-to-MO
+      // transform at all. Replaces eri_spin_chol/eri_spin_sym as `eri_in` for NON_REL's own
+      // buildFunctionalReport/buildPnofFunctionalReport/buildPccdFunctionalReport call below.
+      rerdmft::RiNonRelSpinMoEri ri_nonrel_mo_eri;
+      if (input.use_ri()) {
+        ri_nonrel_mo_eri = rerdmft::buildRiNonRelSpinMoEri(ri_nonrel_source.eri3_L, n_spatial, nonrel_hf_result.c_matrix);
       }
       rerdmft::Tensor4<double> eri_spin;
       if (nonrel_dense) eri_spin = rerdmft::denseOf(eri_spin_sym);
@@ -3773,6 +3933,26 @@ int main(int argc, char** argv) {
           nonrel_orbital_energies_spin[p] = nonrel_hf_result.orbital_energies[p % n_spatial];
         }
         rerdmft::RestartCapture nonrel_restart;
+        // USE_RI + FULL_OPTIMIZATION (NON_REL): the SAME eri3_L already built for the SCF above
+        // (ri_nonrel_source), paired with the spin-orbital-expanded SCF coefficient matrix
+        // [C_spatial | C_spatial] (NON_REL's own FULL_OPTIMIZATION always ties alpha and beta,
+        // see nonrelSpatialRotation's own comment, so a single spatial half suffices -- see
+        // RiNonRelDirectSource's own comment for why this is built HERE, passed down, rather than
+        // reusing UkbDirectSource directly like X2C_HF/C4_DHF).
+        std::optional<RiNonRelDirectSource> ri_nonrel_direct_storage;
+        const RiNonRelDirectSource* ri_nonrel_direct_ptr = nullptr;
+        if (input.use_ri()) {
+          rerdmft::Matrix<double> ri_nonrel_c0(n_spatial, 2 * n_spatial);
+          for (std::size_t mu = 0; mu < n_spatial; ++mu) {
+            for (std::size_t p = 0; p < n_spatial; ++p) {
+              ri_nonrel_c0(mu, p) = nonrel_hf_result.c_matrix(mu, p);
+              ri_nonrel_c0(mu, n_spatial + p) = nonrel_hf_result.c_matrix(mu, p);
+            }
+          }
+          ri_nonrel_direct_storage =
+              RiNonRelDirectSource{ri_nonrel_source.eri3_L, n_spatial, std::move(ri_nonrel_c0), h_core_nonrel};
+          ri_nonrel_direct_ptr = &*ri_nonrel_direct_storage;
+        }
         // The functional stage (occupation optimization, FULL_OPTIMIZATION) runs on the Cholesky vectors when
         // CHOLESKY TRUE, on the dense tensor otherwise.
         const auto nonrel_functional = [&](const auto& eri_any) {
@@ -3782,7 +3962,7 @@ int main(int argc, char** argv) {
                 nonrel_hf_result.nuclear_repulsion_energy, input.pccd_frozen_pairs(),
                 input.pccd_active_pairs(), input.pccd_amplitude_solver(), fullOptSettings(input),
                 input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records,
-                &nonrel_restart);
+                &nonrel_restart, {}, nullptr, nullptr, ri_nonrel_direct_ptr);
           }
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(
@@ -3791,7 +3971,7 @@ int main(int argc, char** argv) {
                 input.pnof_subspaces(), input.pnof_coupling(), /*relativistic=*/false,
                 input.sqp_pnof_occ(), input.debug(), fullOptSettings(input),
                 input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records,
-                &nonrel_restart, {}, nullptr, occ_in);
+                &nonrel_restart, {}, nullptr, occ_in, nullptr, ri_nonrel_direct_ptr);
           }
           return buildFunctionalReport(
               "NON_REL", h_spin, eri_any, nonrel_orbital_energies_spin, 0, input.n_electrons(),
@@ -3799,9 +3979,11 @@ int main(int argc, char** argv) {
               input.temperature(), input.functional(), input.occupation_init(),
               nonrel_hf_result.nuclear_repulsion_energy, input.debug(), fullOptSettings(input), input.full_optimization_4c_neg(),
               t_start, t_checkpoint, timing_records,
-              &nonrel_restart, {}, nullptr, occ_in);
+              &nonrel_restart, {}, nullptr, occ_in, nullptr, ri_nonrel_direct_ptr);
         };
-        nonrel_functional_report = input.cholesky() ? nonrel_functional(eri_spin_chol) : nonrel_functional(eri_spin_sym);
+        nonrel_functional_report = input.use_ri()     ? nonrel_functional(ri_nonrel_mo_eri)
+                                    : input.cholesky() ? nonrel_functional(eri_spin_chol)
+                                                        : nonrel_functional(eri_spin_sym);
         // RESTART file: spin-orbital coefficients [alpha; beta] x [alpha MOs, beta MOs] in the
         // spin-orbital AO basis, blockdiag(C, C) times the FULL_OPTIMIZATION rotation.
         const auto blockDiagTwice = [](const rerdmft::Matrix<double>& m) {
@@ -3882,15 +4064,31 @@ int main(int argc, char** argv) {
       const auto c_initial = x_large_block * initial_eig.eigenvectors;
       const auto p_initial = rerdmft::x2cDensityMatrix(c_initial, input.n_electrons());
 
+      const rerdmft::Matrix<std::complex<double>> x2c_overlap =
+          rerdmft::extractLargeComponentBlock(s_full, x_large_block.rows());
+      if (input.use_ri()) {
+        // X2C's own two-electron treatment uses the Large-component basis alone (same orbital
+        // basis NON_REL's own RI build above uses) -- built in the RAW Cartesian basis
+        // (AO_ints/ThreeCenterIntegrals.h, libcint-native), then its AO legs transformed into
+        // X2C's own spherical(+LOWGEN) dimension via `large_transform_final`, exactly mirroring
+        // how nonrel_eri_sph itself is built from nonrel_eri (transformPackedChemist).
+        const LargeAuxRiCache& cache =
+            getOrBuildLargeAuxRiCache(large_aux_ri_cache, large_basis.functions(), input);
+        ri_x2c_source.nl = large_transform_final.cols();
+        ri_x2c_source.eri3_L = rerdmft::transformRiThreeCenterAoLegs(cache.eri3_cart, large_basis.functions().size(),
+                                                                      large_transform_final);
+        ri_x2c_source.x_large = x_large_block;
+        ri_x2c_source.overlap = x2c_overlap;
+      }
       const auto run_x2c_scf = [&](const auto& eri_source) {
         return rerdmft::runX2CHartreeFockScf(
             x2c_hamiltonian.h_x2c, eri_source, x_large_block, p_initial, input.n_electrons(),
-            input.geometry(), input.mixing(),
-            rerdmft::extractLargeComponentBlock(s_full, x_large_block.rows()), input.scf_diis_size(),
+            input.geometry(), input.mixing(), x2c_overlap, input.scf_diis_size(),
             input.max_iterations(), input.energy_tolerance(), input.density_tolerance());
       };
-      x2c_hf_result = input.cholesky() ? run_x2c_scf(ao_cholesky_sph)
-                                       : run_x2c_scf(large_spherical_active ? nonrel_eri_sph : nonrel_eri);
+      x2c_hf_result = input.use_ri()       ? run_x2c_scf(ri_x2c_source)
+                      : input.cholesky()   ? run_x2c_scf(ao_cholesky_sph)
+                                           : run_x2c_scf(large_spherical_active ? nonrel_eri_sph : nonrel_eri);
       logTiming("X2C-HF SCF complete", t_start, t_checkpoint, timing_records);
 
       // Canonicalize each converged Kramers pair's relative phase
@@ -3913,16 +4111,34 @@ int main(int argc, char** argv) {
       rerdmft::Tensor4<std::complex<double>> eri_x2c_mo;                // dense: DEBUG / HESSIAN_MEAN_FIELD only
       rerdmft::SymmetricEri<std::complex<double>> x2c_mo_sym;           // unique elements (no CHOLESKY, or DEBUG)
       rerdmft::CholeskyEri<std::complex<double>> x2c_mo_chol;           // CHOLESKY TRUE: MO-basis vectors
+      rerdmft::RiMoEri ri_x2c_mo_eri;                                   // USE_RI TRUE: RI-MO tensor, no AO Cholesky/dense at all
       const auto transformX2cToMo = [&]() {
         h_x2c_mo = rerdmft::x2cMoOneElectronTransform(x2c_hamiltonian.h_x2c, x2c_hf_result.c_matrix);
         // Only actually consumed below under DEBUG/HESSIAN_MEAN_FIELD or FUNCTIONAL (see NON_REL's identical
-        // comment) -- skip it for a bare X2C-HF run.
-        if (input.cholesky() && (x2c_dense || input.has_functional()))
+        // comment) -- skip it for a bare X2C-HF run. USE_RI TRUE skips this AO-vector-to-MO transform
+        // entirely (DEBUG/HESSIAN_MEAN_FIELD are mutually exclusive with USE_RI, so x2c_dense is always
+        // false whenever USE_RI is active) -- see ri_x2c_mo_eri below instead.
+        if (input.use_ri()) {
+          // The SAME ns=0 shim already used for the ADAM-direct closure (see x2c_ukb_direct_storage
+          // below): X2C has no Small component at all, so buildRiMoEri's 4-block sum degenerates to
+          // exactly the 2 needed [Large-alpha, Large-beta] blocks.
+          rerdmft::RiDirectEriSource shim;
+          shim.nl = ri_x2c_source.nl;
+          shim.ns = 0;
+          shim.eri3_LL = ri_x2c_source.eri3_L;
+          shim.eri3_SS = rerdmft::Matrix<double>(shim.eri3_LL.rows(), 0);
+          const std::size_t n_ukb = 2 * ri_x2c_source.nl;
+          rerdmft::Matrix<std::complex<double>> v_identity(n_ukb, n_ukb, std::complex<double>(0.0));
+          for (std::size_t i = 0; i < n_ukb; ++i) v_identity(i, i) = 1.0;
+          shim.v_total = v_identity;
+          ri_x2c_mo_eri = rerdmft::buildRiMoEri(shim, x2c_hf_result.c_matrix);
+        } else if (input.cholesky() && (x2c_dense || input.has_functional())) {
           x2c_mo_chol = rerdmft::aoCholeskyToMoSpinor(ao_cholesky_sph, x2c_hf_result.c_matrix);
-        if (!input.cholesky() || input.debug()) {
+        }
+        if (!input.use_ri() && (!input.cholesky() || input.debug())) {
           x2c_mo_sym = rerdmft::x2cMoTwoElectronSymmetric(large_spherical_active ? nonrel_eri_sph : nonrel_eri,
                                                            x2c_hf_result.c_matrix);
-        } else if (input.hessian_mean_field()) {
+        } else if (!input.use_ri() && input.hessian_mean_field()) {
           x2c_mo_sym = rerdmft::symmetricFromCholesky(x2c_mo_chol);
         }
         if (x2c_dense) eri_x2c_mo = rerdmft::denseOf(x2c_mo_sym);
@@ -4058,6 +4274,40 @@ int main(int argc, char** argv) {
       // there is nothing left to hold at exactly zero.
       if (input.has_functional()) {
         rerdmft::RestartCapture x2c_restart;
+        // USE_RI + FULL_OPTIMIZATION (X2C_HF): unlike NON_REL (T=double, needs the spin-selection-
+        // aware RiNonRelDirectSource/RiNonRelFullOptFock.h path), X2C_HF is T=std::complex<double>
+        // and its PNOF 2-RDM uses the SAME general (h,x,l1,l2) unfold C4_DHF's own does
+        // (relativistic=true, no spin restriction) -- so it reuses the EXISTING UkbDirectSource/
+        // riPnofFockMatrix/riJkOnlyFockMatrix/riPccdFockMatrix mechanism directly, built once here
+        // (no new per-functional wrapper needed): a RiDirectEriSource "shim" with ns=0 (X2C has no
+        // Small component at all) makes UKB/RiMoEri.h's buildRiMoEri sum exactly the 2 Large
+        // blocks [alpha, beta], both off the SAME eri.eri3_L (see UkbFockMatrixRi.h's own
+        // RiDirectEriSource; the Small-block contribution is guarded to zero on n_phys==0 inside
+        // buildRiMoEri's own transformBlock helper).
+        std::optional<rerdmft::UkbDirectSource> x2c_ukb_direct_storage;
+        const rerdmft::UkbDirectSource* x2c_ukb_direct_ptr = nullptr;
+        if (input.use_ri()) {
+          rerdmft::RiDirectEriSource x2c_ri_shim;
+          x2c_ri_shim.nl = ri_x2c_source.nl;
+          x2c_ri_shim.ns = 0;
+          x2c_ri_shim.eri3_LL = ri_x2c_source.eri3_L;
+          // buildRiMoEri's own transformBlock reads its block's n_aux from the Small tensor's OWN
+          // row count before the n_phys==0 guard returns a (that many rows) x (n_total^2) zero
+          // matrix -- a default-constructed (0-row) eri3_SS would return a 0-row block, which
+          // buildRiMoEri's running sum (sized by eri3_LL.rows()) then reads out of bounds. Give it
+          // the right ROW count (columns are never read: the guard returns before that).
+          x2c_ri_shim.eri3_SS = rerdmft::Matrix<double>(x2c_ri_shim.eri3_LL.rows(), 0);
+          // buildRiMoEri transforms through `v_total` before the half-transform (C4_SPINOR's own
+          // RKB -> UKB map); X2C's c0/c_current is ALREADY in the "UKB-equivalent" [Large-alpha,
+          // Large-beta] AO basis the shim's eri3_LL lives in, so v_total is simply the identity.
+          const std::size_t x2c_n_ukb = 2 * ri_x2c_source.nl;
+          rerdmft::Matrix<std::complex<double>> x2c_v_total_identity(x2c_n_ukb, x2c_n_ukb, std::complex<double>(0.0));
+          for (std::size_t i = 0; i < x2c_n_ukb; ++i) x2c_v_total_identity(i, i) = 1.0;
+          x2c_ri_shim.v_total = x2c_v_total_identity;
+          x2c_ukb_direct_storage =
+              rerdmft::UkbDirectSource{x2c_hamiltonian.h_x2c, {}, x2c_hf_result.c_matrix, true, x2c_ri_shim};
+          x2c_ukb_direct_ptr = &*x2c_ukb_direct_storage;
+        }
         const auto x2c_functional = [&](const auto& eri_any) {
           if (isPccdFunctionalName(input.functional())) {
             return buildPccdFunctionalReport(
@@ -4065,7 +4315,7 @@ int main(int argc, char** argv) {
                 x2c_hf_result.nuclear_repulsion_energy, input.pccd_frozen_pairs(),
                 input.pccd_active_pairs(), input.pccd_amplitude_solver(), fullOptSettings(input),
                 input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records,
-                &x2c_restart, {});
+                &x2c_restart, {}, nullptr, x2c_ukb_direct_ptr);
           }
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(
@@ -4074,7 +4324,7 @@ int main(int argc, char** argv) {
                 input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
                 fullOptSettings(input),
                 input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records,
-                &x2c_restart, {}, nullptr, occ_in);
+                &x2c_restart, {}, nullptr, occ_in, x2c_ukb_direct_ptr);
           }
           return buildFunctionalReport(
               "X2C_HF", h_x2c_mo, eri_any, x2c_hf_result.orbital_energies, 0,
@@ -4083,9 +4333,11 @@ int main(int argc, char** argv) {
               input.occupation_init(), x2c_hf_result.nuclear_repulsion_energy, input.debug(),
               fullOptSettings(input),
               input.full_optimization_4c_neg(), t_start, t_checkpoint,
-              timing_records, &x2c_restart, {}, nullptr, occ_in);
+              timing_records, &x2c_restart, {}, nullptr, occ_in, x2c_ukb_direct_ptr);
         };
-        x2c_functional_report = input.cholesky() ? x2c_functional(x2c_mo_chol) : x2c_functional(x2c_mo_sym);
+        x2c_functional_report = input.use_ri()       ? x2c_functional(ri_x2c_mo_eri)
+                                 : input.cholesky()   ? x2c_functional(x2c_mo_chol)
+                                                       : x2c_functional(x2c_mo_sym);
         // RESTART file: the (Kramers-fixed) X2C-HF spinor coefficients times the FULL_OPTIMIZATION
         // rotation, in the Large-component spin-orbital AO basis.
         writeRestartFile<std::complex<double>>(
@@ -4111,22 +4363,68 @@ int main(int argc, char** argv) {
       // FULL_OPTIMIZATION_4C_NEG, which already has its own dense MINMAX fallback).
       const bool use_cholesky_integrals = input.cholesky();
       const rerdmft::UkbDirectEriSource ukb_direct_source{large_basis.functions(), small_basis.functions(), v_total};
+      // RI_4C: build the (small -- see project memory project-ri-pauto-kr-validation) RI 3-center
+      // tensors ONCE, in UKB/AO basis (never RKB -- see project-ukb-direct-genfock-scheme on why
+      // that transform's cost is avoided), from an internally-built aux basis (AUX_BASIS_TYPE's
+      // recipe, independent of whether AUX_BASIS itself is set). Only (LL|Q) and (SS|Q) are built
+      // -- no (LS|Q) (ThreeCenterIntegrals.h).
+      rerdmft::RiDirectEriSource ri_direct_source;
+      if (input.use_ri()) {
+        const rerdmft::AuxBasisType aux_type =
+            input.aux_basis_type() == "AUTO" ? rerdmft::AuxBasisType::kAuto : rerdmft::AuxBasisType::kPauto;
+        std::vector<rerdmft::BasisFunction> ukb_basis_for_aux = large_basis.functions();
+        const auto& small_fns_for_aux = small_basis.functions();
+        ukb_basis_for_aux.insert(ukb_basis_for_aux.end(), small_fns_for_aux.begin(), small_fns_for_aux.end());
+        std::vector<rerdmft::BasisFunction> ri_aux_basis = rerdmft::buildAutoAuxiliaryBasis(ukb_basis_for_aux, aux_type);
+        rerdmft::normalizeCartesianBasis(ri_aux_basis);
+        rerdmft::RankReductionReport ri_metric_report;
+        const rerdmft::Matrix<double> ri_metric_x =
+            rerdmft::auxMetricOrthogonalization(ri_aux_basis, 1e-10, &ri_metric_report);
+        std::cout << "  RI_4C: " << ri_aux_basis.size() << " cartesian auxiliary functions ("
+                   << input.aux_basis_type() << "), " << ri_metric_x.cols() << " kept after the metric's own"
+                   << " LOWGEN safety net (" << ri_metric_report.n_dropped << " near-singular direction(s)"
+                   << " dropped).\n";
+        const std::size_t ri_nl = large_basis.functions().size();
+        const std::size_t ri_ns = small_basis.functions().size();
+        ri_direct_source.nl = ri_nl;
+        ri_direct_source.ns = ri_ns;
+        ri_direct_source.eri3_LL = rerdmft::riThreeCenterTensor(large_basis.functions(), ri_aux_basis, ri_metric_x);
+        ri_direct_source.eri3_SS = rerdmft::riThreeCenterTensor(small_basis.functions(), ri_aux_basis, ri_metric_x);
+        ri_direct_source.v_total = v_total;
+        // s_full/x_full: the SAME RKB-basis metric/canonical-orthogonalization the SCF loop
+        // itself already builds and uses every iteration to diagonalize the Fock matrix -- reused
+        // here (not a fresh orthogonalization of the rank-deficient UKB AO overlap) for
+        // riFockTwoElectronDirect's own occupied-orbital recovery. See UkbFockMatrixRi.h's header
+        // comment: an earlier version built its own UKB-overlap orthogonalization instead, which
+        // worked on LiH/6-31G and CO/6-31G but blew up (SCF energies reaching 1e+204) on an
+        // artificial SPEED_OF_LIGHT far from its physical value -- a from-scratch threshold
+        // sitting right at a badly-conditioned direction amplifies ordinary floating-point noise
+        // by orders of magnitude, and that noise then feeds back into the next iteration's
+        // density, growing geometrically. Reusing x_full/s_full (already validated, and already
+        // what density_matrix's own occupied orbitals were built from) avoids the problem
+        // entirely rather than retuning a threshold.
+        ri_direct_source.s_full = s_full;
+        ri_direct_source.x_full = x_full;
+        logTiming("RI 3-center tensors built (C4_DHF)", t_start, t_checkpoint, timing_records);
+      }
       // Hoisted (pure functions of `input`, needed before the RkbCholesky build decision below --
       // see each one's own, later definition for the full comment/context).
       const bool c4_dense = input.debug() || input.hessian_mean_field();
       const bool c4_minmax_may_run = input.full_optimization_4c_neg() && fullOptSettings(input).enabled;
       // Who actually needs the big AO-basis RkbCholesky vectors built at all (all gated on
-      // CHOLESKY TRUE; CHOLESKY FALSE never needs them regardless of SCF_DIRECT_4C): the SCF loop
-      // itself (unless SCF_DIRECT_4C overrides it with the integral-direct kernel), the DEBUG
-      // dense-vs-Cholesky Fock check below, the DEBUG/HESSIAN_MEAN_FIELD dense MO path (needs
-      // c4_mo_chol via symmetricFromCholesky), the untrimmed MINMAX transform (always, when it
-      // might run) -- or the ORDINARY (non-DEBUG) FUNCTIONAL path UNLESS FUNCTIONAL_POS_CHO_4C
-      // replaces it with rkbCholeskyToMoFused below (C4_DHF/RkbCholesky.h), which runs its own
-      // AO-pair decomposition and never materializes the full RkbCholesky struct.
+      // CHOLESKY TRUE; CHOLESKY FALSE never needs them regardless of SCF_DIRECT_4C/RI_4C): the SCF
+      // loop itself (unless SCF_DIRECT_4C or RI_4C overrides it with the integral-direct/RI
+      // kernel), the DEBUG dense-vs-Cholesky Fock check below, the DEBUG/HESSIAN_MEAN_FIELD dense
+      // MO path (needs c4_mo_chol via symmetricFromCholesky), the untrimmed MINMAX transform
+      // (always, when it might run) -- or the ORDINARY (non-DEBUG) FUNCTIONAL path UNLESS
+      // FUNCTIONAL_POS_CHO_4C replaces it with rkbCholeskyToMoFused below (C4_DHF/RkbCholesky.h),
+      // which runs its own AO-pair decomposition and never materializes the full RkbCholesky
+      // struct.
       const bool c4_need_rkb_cholesky_vectors =
-          (input.cholesky() && !input.scf_direct_4c()) || (input.cholesky() && input.debug()) ||
+          (input.cholesky() && !input.scf_direct_4c() && !input.use_ri()) || (input.cholesky() && input.debug()) ||
           (use_cholesky_integrals && c4_dense) ||
-          (use_cholesky_integrals && input.has_functional() && !input.functional_pos_cho_4c()) || c4_minmax_may_run;
+          (use_cholesky_integrals && input.has_functional() && !input.functional_pos_cho_4c() && !input.use_ri()) ||
+          c4_minmax_may_run;
       if (use_cholesky_integrals) {
         // ONE decomposition of the real AO Coulomb matrix over {LL} u {SS} pairs; everything else (SCF Fock
         // matrices, MO-basis vectors) follows from the vectors. The packed RKB tensor is built only under
@@ -4157,7 +4455,11 @@ int main(int argc, char** argv) {
           c4_eri_available = true;
           c4_eri_stored = c4_spinor_eri.storedCount();
         }
-      } else {
+      } else if (!input.use_ri()) {
+        // USE_RI TRUE + CHOLESKY FALSE: CHOLESKY no longer matters once USE_RI takes over the SCF
+        // Fock build (see the fock_matrix dispatch below) -- skip this dense packed-tensor build
+        // entirely too (the whole point of USE_RI is to never need an AO-level dense/Cholesky
+        // representation at all; see ri_dhf_mo_eri below for the FUNCTIONAL-stage replacement).
         c4_spinor_eri = buildC4SpinorEri(input, large_basis.functions(), small_basis.functions(),
                                                 rkb_coefficients, large_transform_final, /*use_cholesky=*/false);
         c4_eri_available = true;
@@ -4165,9 +4467,10 @@ int main(int argc, char** argv) {
         logTiming("Two-electron integrals built (C4_DHF)", t_start, t_checkpoint, timing_records);
       }
 
-      fock_matrix = input.scf_direct_4c() ? rerdmft::rkbFockMatrix(h_rkb, ukb_direct_source, density_matrix)
-                    : input.cholesky()    ? rerdmft::rkbFockMatrix(h_rkb, rkb_cholesky, density_matrix)
-                                          : rerdmft::rkbFockMatrix(h_rkb, c4_spinor_eri, density_matrix);
+      fock_matrix = input.use_ri()           ? rerdmft::rkbFockMatrix(h_rkb, ri_direct_source, density_matrix)
+                    : input.scf_direct_4c() ? rerdmft::rkbFockMatrix(h_rkb, ukb_direct_source, density_matrix)
+                    : input.cholesky()      ? rerdmft::rkbFockMatrix(h_rkb, rkb_cholesky, density_matrix)
+                                            : rerdmft::rkbFockMatrix(h_rkb, c4_spinor_eri, density_matrix);
 
       {
         // The Kramers-restricted SCF below projects the density onto its time-reversal-even part
@@ -4189,9 +4492,10 @@ int main(int argc, char** argv) {
             input.mixing(), s_full, input.scf_diis_size(), input.max_iterations(),
             input.energy_tolerance(), input.density_tolerance());
       };
-      dhf_result = input.scf_direct_4c() ? run_dhf_scf(ukb_direct_source)
-                   : input.cholesky()    ? run_dhf_scf(rkb_cholesky)
-                                         : run_dhf_scf(c4_spinor_eri);
+      dhf_result = input.use_ri()           ? run_dhf_scf(ri_direct_source)
+                   : input.scf_direct_4c() ? run_dhf_scf(ukb_direct_source)
+                   : input.cholesky()      ? run_dhf_scf(rkb_cholesky)
+                                           : run_dhf_scf(c4_spinor_eri);
       logTiming("SCF loop complete", t_start, t_checkpoint, timing_records);
 
       // Canonicalize each converged Kramers pair's relative phase
@@ -4227,6 +4531,7 @@ int main(int argc, char** argv) {
       rerdmft::Tensor4<std::complex<double>> eri_mo;
       rerdmft::SymmetricEri<std::complex<double>> c4_mo_sym;
       rerdmft::CholeskyEri<std::complex<double>> c4_mo_chol;
+      rerdmft::RiMoEri ri_dhf_mo_eri;  // USE_RI TRUE: RI-MO tensor, no AO Cholesky/dense at all
       const auto transformToMo = [&]() {
         h_mo = rerdmft::rkbMoOneElectronTransform(h_rkb, dhf_result.c_dhf);
         // No-pair: negative-energy block dropped, vectors recompressed (see rkbCholeskyToMo). Only actually
@@ -4235,7 +4540,15 @@ int main(int argc, char** argv) {
         // builds the FULL (positive+negative-energy) n_mo x n_mo vector per Cholesky vector before trimming
         // to the positive-energy block, i.e. 4x the final size, times N_chol -- for a heavy element this is
         // easily several GB of pure waste when nothing downstream reads c4_mo_chol at all.
-        if (use_cholesky_integrals && input.functional_pos_cho_4c() && !c4_dense && !c4_need_rkb_cholesky_vectors) {
+        // USE_RI TRUE: skip all of the above (DEBUG/HESSIAN_MEAN_FIELD/FULL_OPTIMIZATION_4C_NEG are all
+        // mutually exclusive with USE_RI already) -- build the RI-MO tensor straight from dhf_result.c_dhf
+        // (the FULL, untrimmed n_mo x n_mo RKB coefficients) using the SAME v_total embedding the SCF step
+        // already used; its negative-energy columns produce whatever values they produce, never read
+        // (runFullOptimizationJk/Pnof's own n_negative>0 branch extracts the true positive-only submatrix
+        // via RiMoEri::positiveBlock, same as it already does for Tensor4/CholeskyEri/SymmetricEri).
+        if (input.use_ri()) {
+          ri_dhf_mo_eri = rerdmft::buildRiMoEri(ri_direct_source, ri_direct_source.v_total * dhf_result.c_dhf);
+        } else if (use_cholesky_integrals && input.functional_pos_cho_4c() && !c4_dense && !c4_need_rkb_cholesky_vectors) {
           // FUNCTIONAL_POS_CHO_4C: RkbCholesky::build + rkbCholeskyToMo fused into one pass (same
           // AO-pair decomposition, but the RKB AO-basis vectors are never all held at once) --
           // C4_DHF/RkbCholesky.h's rkbCholeskyToMoFused. Only worth it when rkb_cholesky genuinely
@@ -4251,9 +4564,9 @@ int main(int argc, char** argv) {
         } else if (use_cholesky_integrals && (c4_dense || input.has_functional())) {
           c4_mo_chol = rerdmft::rkbCholeskyToMo(rkb_cholesky, dhf_result.c_dhf, h_mo.rows() / 2, input.cholesky_threshold());
         }
-        if (!use_cholesky_integrals || input.debug()) {
+        if (!input.use_ri() && (!use_cholesky_integrals || input.debug())) {
           c4_mo_sym = rerdmft::rkbMoTwoElectronSymmetric(c4_spinor_eri, dhf_result.c_dhf);
-        } else if (input.hessian_mean_field()) {
+        } else if (!input.use_ri() && input.hessian_mean_field()) {
           c4_mo_sym = rerdmft::symmetricFromCholesky(c4_mo_chol);
         }
         if (c4_dense) eri_mo = rerdmft::denseOf(c4_mo_sym);
@@ -4453,17 +4766,22 @@ int main(int argc, char** argv) {
                 static_cast<std::ptrdiff_t>(n_negative),
             dhf_result.orbital_energies.end());
         rerdmft::RestartCapture c4_restart;
-        // FUNCTIONAL_DIRECT_4C: the fixed UKB-basis data the ADAM orbital-rotation sub-loop needs
-        // to build its generalized Fock directly from UKB AO integrals instead of a stored
-        // MO-basis tensor (Full_opt/FullOptimization.h's own UkbDirectSource) -- `h_rkb` and
-        // `ukb_direct_source` (already built above for SCF_DIRECT_4C/FUNCTIONAL_POS_CHO_4C) are
-        // reused as-is; `c0` is `dhf_result.c_dhf`, the SAME full (both branches) RKB-basis
-        // coefficient matrix `h_mo`/`eri_any` below are themselves expressed in. Left unset (null)
-        // unless the keyword is on, so every other run is unaffected and pays no extra copy.
+        // FUNCTIONAL_DIRECT_4C / RI_4C: the fixed UKB-basis data the ADAM orbital-rotation
+        // sub-loop needs to build its generalized Fock directly from UKB AO integrals (AO-direct)
+        // or a pre-built RI 3-center tensor (RI_4C -- the SAME ri_direct_source already built
+        // above for the DHF SCF step, reused as-is, never rebuilt), instead of a stored MO-basis
+        // tensor rotated every ADAM step (Full_opt/FullOptimization.h's own UkbDirectSource) --
+        // `h_rkb` is reused either way; `c0` is `dhf_result.c_dhf`, the SAME full (both branches)
+        // RKB-basis coefficient matrix `h_mo`/`eri_any` below are themselves expressed in. Left
+        // unset (null) unless one of the two keywords is on (mutually exclusive, enforced in
+        // Input.cpp), so every other run is unaffected and pays no extra copy.
         std::optional<rerdmft::UkbDirectSource> ukb_direct_storage;
         const rerdmft::UkbDirectSource* ukb_direct_ptr = nullptr;
-        if (input.functional_direct_4c()) {
-          ukb_direct_storage = rerdmft::UkbDirectSource{h_rkb, ukb_direct_source, dhf_result.c_dhf};
+        if (input.use_ri()) {
+          ukb_direct_storage = rerdmft::UkbDirectSource{h_rkb, {}, dhf_result.c_dhf, true, ri_direct_source};
+          ukb_direct_ptr = &*ukb_direct_storage;
+        } else if (input.functional_direct_4c()) {
+          ukb_direct_storage = rerdmft::UkbDirectSource{h_rkb, ukb_direct_source, dhf_result.c_dhf, false, {}};
           ukb_direct_ptr = &*ukb_direct_storage;
         }
         const auto dhf_functional = [&](const auto& eri_any, const auto& eri_full_factory) {
@@ -4493,7 +4811,11 @@ int main(int argc, char** argv) {
               input.full_optimization_4c_neg(), t_start, t_checkpoint,
               timing_records, &c4_restart, eri_full_factory, nullptr, occ_in, ukb_direct_ptr);
         };
-        if (use_cholesky_integrals) {
+        if (input.use_ri()) {
+          // FULL_OPTIMIZATION_4C_NEG is mutually exclusive with USE_RI (Input.cpp's own check), so
+          // the MINMAX-only untrimmed-block factory is never needed here.
+          dhf_functional_report = dhf_functional(ri_dhf_mo_eri, std::function<rerdmft::RiMoEri()>());
+        } else if (use_cholesky_integrals) {
           // FULL_OPTIMIZATION_4C_NEG needs the negative-energy block too: the trimmed vector above
           // has it zeroed and recompressed away, so the full-block vectors are built separately --
           // LAZILY, via this factory, so the no-pair FULL_OPTIMIZATION loop inside dhf_functional()

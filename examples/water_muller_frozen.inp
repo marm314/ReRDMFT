@@ -16,6 +16,7 @@ NON_RELATIVISTIC TRUE
 FUNCTIONAL MULLER
 JK_FROZEN_PAIRS 1
 JK_ACTIVE_PAIRS 5
+USE_RI FALSE  # preserve this example's pre-existing dense/Cholesky path (USE_RI now defaults TRUE)
 
 GEOMETRY
 O   0.000000   0.000000   0.000000

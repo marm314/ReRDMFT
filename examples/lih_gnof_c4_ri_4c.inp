@@ -1,0 +1,22 @@
+# Validation example: LiH, 6-31G, GNOF, USE_RI TRUE + CHOLESKY FALSE (dense post-SCF) +
+# FUNCTIONAL_POS_CHO_4C TRUE, no MINMAX -- confirms the resolution-of-identity (RI) SCF kernel
+# works end to end with the rest of the pipeline (post-SCF MO transform, FUNCTIONAL, ADAM
+# FULL_OPTIMIZATION). Compare the DHF electronic energy against lih_gnof_c4_dense_direct.inp's own
+# (exact) C4_DHF result -- USE_RI's own approximation should land within ~1e-7 Hartree of it (see
+# project memory project-ri-pauto-kr-validation); the post-SCF FULL_OPTIMIZATION numbers then
+# follow from whichever (slightly different) converged DHF density/orbitals USE_RI handed it, so
+# they are close but not bit-for-bit identical to the dense/SCF_DIRECT_4C examples.
+NELEC 4
+BASIS lih-6-31g.gbs
+C4_SPINOR TRUE
+FUNCTIONAL GNOF
+PNOF_SUBSPACES 2
+PNOF_COUPLING 2
+FULL_OPTIMIZATION TRUE
+USE_RI TRUE
+FUNCTIONAL_POS_CHO_4C TRUE
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.594900
+END

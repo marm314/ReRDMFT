@@ -8,6 +8,7 @@
 #include "Input.h"
 #include "Matrix.h"
 #include "MolecularBasis.h"
+#include "NonRelFockMatrixRi.h"
 
 namespace rerdmft {
 
@@ -101,6 +102,14 @@ NonRelHartreeFockResult runNonRelativisticHartreeFock(
 // the packed AO tensor -- CHOLESKY TRUE: the AO integrals are never used again after the decomposition.
 NonRelHartreeFockResult runNonRelativisticHartreeFock(
     const AoCholesky& eri, const Matrix<double>& h_core,
+    const Matrix<double>& x_large, const Matrix<double>& initial_density, int n_electrons,
+    const std::vector<Atom>& geometry, double mixing, const Matrix<double>& overlap, int diis_size,
+    int max_iterations, double energy_tolerance, double density_tolerance);
+
+// USE_RI: the same SCF with the Fock matrices built from a pre-built RI 3-center tensor
+// (NonRelFockMatrixRi.h) instead of the dense/packed/Cholesky two-electron representation.
+NonRelHartreeFockResult runNonRelativisticHartreeFock(
+    const RiNonRelEriSource& eri, const Matrix<double>& h_core,
     const Matrix<double>& x_large, const Matrix<double>& initial_density, int n_electrons,
     const std::vector<Atom>& geometry, double mixing, const Matrix<double>& overlap, int diis_size,
     int max_iterations, double energy_tolerance, double density_tolerance);

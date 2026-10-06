@@ -175,4 +175,15 @@ DiracHartreeFockResult runDiracHartreeFockScf(
                     max_iterations, energy_tolerance, density_tolerance, kramers_restricted);
 }
 
+DiracHartreeFockResult runDiracHartreeFockScf(
+    const Matrix<std::complex<double>>& h_rkb, const RiDirectEriSource& eri,
+    const Matrix<std::complex<double>>& x_full,
+    const Matrix<std::complex<double>>& initial_density, int n_electrons,
+    const std::vector<Atom>& geometry, double mixing, const Matrix<std::complex<double>>& overlap,
+    int diis_size, int max_iterations, double energy_tolerance, double density_tolerance,
+    bool kramers_restricted) {
+  return dhfScfImpl(h_rkb, eri, x_full, initial_density, n_electrons, geometry, mixing, overlap, diis_size,
+                    max_iterations, energy_tolerance, density_tolerance, kramers_restricted);
+}
+
 }  // namespace rerdmft

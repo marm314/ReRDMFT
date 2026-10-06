@@ -1,4 +1,6 @@
 #include "CholeskyEri.h"
+#include "NonRelSpinRiMoEri.h"
+#include "RiMoEri.h"
 #include "SymmetricEri.h"
 #include "PNOFs.h"
 
@@ -764,6 +766,41 @@ template Matrix<double> pnofOccupationHessianFD(PnofFunctional,
 template Matrix<double> pnofOccupationHessianFD(PnofFunctional,
                                                  const Matrix<std::complex<double>>&,
                                                  const SymmetricEri<std::complex<double>>&,
+                                                 const std::vector<double>&,
+                                                 const std::vector<PnofGeminal>&, bool, double);
+// USE_RI's own FULL_OPTIMIZATION occupation-optimizer extension (see Full_opt/FullOptimization.
+// cpp's makePnofModel -- model.optimize_occupations is NOT skippable the way the orbital-rotation
+// Hessian closures are, so these four DO need real instantiations for the RI Eri types).
+template double pnofElectronicEnergy(PnofFunctional, const Matrix<double>&, const RiNonRelSpinMoEri&,
+                                      const std::vector<double>&,
+                                      const std::vector<PnofGeminal>&, const PnofTwoRdm&, bool);
+template double pnofElectronicEnergy(PnofFunctional, const Matrix<std::complex<double>>&,
+                                      const RiMoEri&,
+                                      const std::vector<double>&,
+                                      const std::vector<PnofGeminal>&, const PnofTwoRdm&, bool);
+template std::vector<double> pnofOccupationGradient(PnofFunctional, const Matrix<double>&,
+                                                     const RiNonRelSpinMoEri&,
+                                                     const std::vector<double>&,
+                                                     const std::vector<PnofGeminal>&, bool);
+template std::vector<double> pnofOccupationGradient(PnofFunctional,
+                                                     const Matrix<std::complex<double>>&,
+                                                     const RiMoEri&,
+                                                     const std::vector<double>&,
+                                                     const std::vector<PnofGeminal>&, bool);
+template Matrix<double> pnofOccupationHessian(PnofFunctional, const Matrix<double>&,
+                                               const RiNonRelSpinMoEri&, const std::vector<double>&,
+                                               const std::vector<PnofGeminal>&, bool);
+template Matrix<double> pnofOccupationHessian(PnofFunctional, const Matrix<std::complex<double>>&,
+                                               const RiMoEri&,
+                                               const std::vector<double>&,
+                                               const std::vector<PnofGeminal>&, bool);
+template Matrix<double> pnofOccupationHessianFD(PnofFunctional, const Matrix<double>&,
+                                                 const RiNonRelSpinMoEri&,
+                                                 const std::vector<double>&,
+                                                 const std::vector<PnofGeminal>&, bool, double);
+template Matrix<double> pnofOccupationHessianFD(PnofFunctional,
+                                                 const Matrix<std::complex<double>>&,
+                                                 const RiMoEri&,
                                                  const std::vector<double>&,
                                                  const std::vector<PnofGeminal>&, bool, double);
 

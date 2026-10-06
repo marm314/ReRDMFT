@@ -8,6 +8,7 @@ NELEC 2
 BASIS h2-cc-pvtz.gbs
 FUNCTIONAL GNOF
 PNOF_COUPLING 4
+USE_RI FALSE  # preserve this example's pre-existing dense/Cholesky path (USE_RI now defaults TRUE)
 
 GEOMETRY
 H   0.000000   0.000000   0.000000

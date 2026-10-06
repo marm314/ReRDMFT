@@ -5,6 +5,8 @@
 
 #include "CholeskyEri.h"
 #include "HartreeExchangeGradient.h"
+#include "NonRelSpinRiMoEri.h"
+#include "RiMoEri.h"
 #include "SymmetricEri.h"
 
 namespace rerdmft {
@@ -164,5 +166,14 @@ template Matrix<std::complex<double>> pccdFockMatrix(const Matrix<std::complex<d
                                                       const std::vector<std::size_t>&, std::size_t,
                                                       std::size_t, std::size_t, const PccdRdm&,
                                                       const std::vector<double>&);
+template Matrix<std::complex<double>> pccdFockMatrix(const Matrix<std::complex<double>>&, const RiMoEri&,
+                                                      const std::vector<std::size_t>&,
+                                                      const std::vector<std::size_t>&, std::size_t,
+                                                      std::size_t, std::size_t, const PccdRdm&,
+                                                      const std::vector<double>&);
+template Matrix<double> pccdFockMatrix(const Matrix<double>&, const RiNonRelSpinMoEri&,
+                                        const std::vector<std::size_t>&,
+                                        const std::vector<std::size_t>&, std::size_t, std::size_t,
+                                        std::size_t, const PccdRdm&, const std::vector<double>&);
 
 }  // namespace rerdmft

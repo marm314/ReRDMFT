@@ -14,6 +14,7 @@ X2C TRUE
 FUNCTIONAL GNOF
 PNOF_COUPLING 2
 FULL_OPTIMIZATION TRUE
+USE_RI FALSE  # preserve this example's pre-existing dense/Cholesky path (USE_RI now defaults TRUE)
 
 GEOMETRY
 O   0.000000   0.000000   0.000000

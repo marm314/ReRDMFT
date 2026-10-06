@@ -183,6 +183,7 @@ void Input::read(const std::string& filename) {
       }
     } else if (keyword == "CHOLESKY") {
       cholesky_ = parseBool(iss, line_number, keyword);
+      cholesky_explicit_ = true;
     } else if (keyword == "ON_DEMAND_ERI") {
       on_demand_eri_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "SCF_DIRECT_4C") {
@@ -193,6 +194,20 @@ void Input::read(const std::string& filename) {
       functional_pos_cho_4c_explicit_ = true;
     } else if (keyword == "FUNCTIONAL_DIRECT_4C") {
       functional_direct_4c_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "AUX_BASIS_TYPE") {
+      std::string token;
+      if (!(iss >> token)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": expected AUTO or PAUTO after AUX_BASIS_TYPE");
+      }
+      aux_basis_type_ = toUpper(token);
+      if (aux_basis_type_ != "AUTO" && aux_basis_type_ != "PAUTO") {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": AUX_BASIS_TYPE must be AUTO or PAUTO");
+      }
+    } else if (keyword == "USE_RI") {
+      use_ri_ = parseBool(iss, line_number, keyword);
+      use_ri_explicit_ = true;
     } else if (keyword == "X_LIN_DEP_THRS_L") {
       x_lin_dep_thrs_l_ = parseDouble(iss, line_number, keyword);
       if (!(x_lin_dep_thrs_l_ > 0.0)) {
@@ -422,6 +437,57 @@ void Input::read(const std::string& filename) {
   if (!functional_pos_cho_4c_explicit_) {
     functional_pos_cho_4c_ = c4_spinor_ && has_functional_;
   }
+  // USE_RI: smart default TRUE -- the project's own preferred kernel whenever it is actually
+  // applicable (at least one of NON_RELATIVISTIC/X2C/C4_SPINOR) and the user has not ALREADY
+  // expressed a preference for a different two-electron representation, explicitly, via any of
+  // CHOLESKY/SCF_DIRECT_4C/FUNCTIONAL_DIRECT_4C (an explicit TRUE for the latter two; CHOLESKY
+  // defers on either explicit value, since even an explicit CHOLESKY FALSE is a deliberate choice
+  // of the dense path) -- or via DEBUG/HESSIAN_MEAN_FIELD/READ_RESTART/FULL_OPTIMIZATION_4C_NEG/
+  // ORBITAL_OPTIMIZER NEO, none of which RI supports yet (same restrictions as before, just
+  // checked here too so the smart default never silently picks something that would throw right
+  // below). An EXPLICIT USE_RI TRUE against any of those unsupported combinations still hits the
+  // throws right below, unchanged -- this only changes what happens when USE_RI is left unset.
+  if (!use_ri_explicit_) {
+    use_ri_ = (non_relativistic_ || x2c_ || c4_spinor_) && !cholesky_explicit_ && !read_restart_ &&
+              !debug_ && !hessian_mean_field_ && !full_optimization_4c_neg_ && !functional_direct_4c_ &&
+              !(scf_direct_4c_explicit_ && scf_direct_4c_) &&
+              !(orbital_optimizer_ == "NEO" || orbital_optimizer_ == "ADAM_NEO");
+  }
+  // Valid for any of NON_RELATIVISTIC/X2C/C4_SPINOR (independently -- a run combining more than
+  // one, e.g. the common NON_RELATIVISTIC + X2C + C4_SPINOR comparison pattern, gets RI for ALL
+  // of the ones that are set). For C4_SPINOR specifically, it is a second, mutually exclusive
+  // alternative to SCF_DIRECT_4C for the SAME thing (how the C4_DHF SCF loop itself builds its
+  // Fock matrices) -- an explicit SCF_DIRECT_4C TRUE alongside it is an ambiguous request and
+  // throws; SCF_DIRECT_4C's own smart DEFAULT (not an explicit TRUE) is silently overridden
+  // instead, since USE_RI is the more specific, explicitly requested choice.
+  if (use_ri_ && !(non_relativistic_ || x2c_ || c4_spinor_)) {
+    throw std::runtime_error(
+        "USE_RI TRUE requires at least one of NON_RELATIVISTIC/X2C/C4_SPINOR TRUE (there is "
+        "otherwise no SCF loop for it to change)");
+  }
+  if (use_ri_ && read_restart_) {
+    throw std::runtime_error(
+        "USE_RI TRUE with READ_RESTART TRUE is not yet supported (the restart branch has its own, separate "
+        "dense/Cholesky Fock-build logic that USE_RI has not been wired into)");
+  }
+  if (use_ri_ && debug_) {
+    throw std::runtime_error(
+        "USE_RI TRUE with DEBUG TRUE is not supported (DEBUG's dense-vs-Cholesky/RI comparisons need an actual "
+        "dense two-electron tensor, which USE_RI never builds)");
+  }
+  if (use_ri_ && hessian_mean_field_) {
+    throw std::runtime_error(
+        "USE_RI TRUE with HESSIAN_MEAN_FIELD TRUE is not supported (HESSIAN_MEAN_FIELD needs an actual dense "
+        "two-electron tensor, which USE_RI never builds)");
+  }
+  if (use_ri_ && c4_spinor_ && scf_direct_4c_explicit_ && scf_direct_4c_) {
+    throw std::runtime_error(
+        "USE_RI TRUE and an explicit SCF_DIRECT_4C TRUE are two different, mutually exclusive SCF kernels -- set "
+        "SCF_DIRECT_4C FALSE explicitly (or leave it unset) to use USE_RI there");
+  }
+  if (use_ri_ && c4_spinor_) {
+    scf_direct_4c_ = false;  // USE_RI takes over the C4_DHF SCF loop's own Fock build instead (main.cpp's dispatch).
+  }
   if (scf_direct_4c_ && !c4_spinor_) {
     throw std::runtime_error("SCF_DIRECT_4C TRUE requires C4_SPINOR TRUE (it only replaces the C4_DHF/C4_SPINOR Fock build)");
   }
@@ -483,6 +549,29 @@ void Input::read(const std::string& filename) {
         " is not supported yet (no UKB-direct orbital-rotation Hessian exists for NEO to use) -- "
         "use ORBITAL_OPTIMIZER ADAM (the default) instead");
   }
+  // USE_RI automatically extends to FUNCTIONAL + FULL_OPTIMIZATION's ADAM orbital-rotation
+  // sub-loop too, for every active method (NON_RELATIVISTIC/X2C/C4_SPINOR), with NO separate
+  // keyword needed. Same restrictions as FUNCTIONAL_DIRECT_4C, for the identical reason (no
+  // RI-based orbital-rotation Hessian exists yet either), plus an explicit conflict check against
+  // FUNCTIONAL_DIRECT_4C itself (two different, mutually exclusive strategies for the SAME
+  // C4_SPINOR ADAM sub-loop).
+  if (use_ri_ && functional_direct_4c_) {
+    throw std::runtime_error(
+        "USE_RI TRUE and FUNCTIONAL_DIRECT_4C TRUE are two different, mutually exclusive strategies for "
+        "the SAME ADAM orbital-rotation sub-loop -- set FUNCTIONAL_DIRECT_4C FALSE (or leave it unset) "
+        "to use USE_RI there instead");
+  }
+  if (use_ri_ && full_optimization_4c_neg_) {
+    throw std::runtime_error(
+        "USE_RI TRUE with FULL_OPTIMIZATION_4C_NEG TRUE is not supported (the min-max stage always "
+        "needs NEO with a Hessian-vector callback, which the RI-based path does not have yet)");
+  }
+  if (use_ri_ && (orbital_optimizer_ == "NEO" || orbital_optimizer_ == "ADAM_NEO")) {
+    throw std::runtime_error(
+        "USE_RI TRUE with ORBITAL_OPTIMIZER " + orbital_optimizer_ +
+        " is not supported yet (no RI-based orbital-rotation Hessian exists for NEO to use) -- use "
+        "ORBITAL_OPTIMIZER ADAM (the default) instead");
+  }
   // Applied here, after the whole file is parsed, so UNIT_LENGTH may appear before or after
   // GEOMETRY: "BOHR"/"AU" coordinates are already atomic units, no conversion needed.
   if (unit_length_ == "ANGS") {
@@ -524,6 +613,8 @@ void Input::print(std::ostream& out) const {
   line("SCF_DIRECT_4C") << flag(scf_direct_4c_) << "\n";
   line("FUNCTIONAL_POS_CHO_4C") << flag(functional_pos_cho_4c_) << "\n";
   line("FUNCTIONAL_DIRECT_4C") << flag(functional_direct_4c_) << "\n";
+  line("AUX_BASIS_TYPE") << aux_basis_type_ << "\n";
+  line("USE_RI") << flag(use_ri_) << "\n";
   line("X_LIN_DEP_THRS_L") << x_lin_dep_thrs_l_ << "\n";
   line("X_LIN_DEP_THRS_S") << x_lin_dep_thrs_s_ << "\n";
   line("CARTESIAN") << flag(cartesian_) << "\n";

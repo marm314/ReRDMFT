@@ -1,4 +1,6 @@
 #include "CholeskyEri.h"
+#include "NonRelSpinRiMoEri.h"
+#include "RiMoEri.h"
 #include "SymmetricEri.h"
 #include "OccupationEnergy.h"
 
@@ -197,6 +199,34 @@ template Matrix<double> jkFunctionalHessian(const Matrix<std::complex<double>>& 
                                              double power_alpha);
 template Matrix<double> jkFunctionalHessian(const Matrix<std::complex<double>>& h,
                                              const SymmetricEri<std::complex<double>>& eri,
+                                             const std::vector<double>& occupations,
+                                             JkFunctional functional, std::size_t f_l,
+                                             double power_alpha);
+
+// USE_RI's own FULL_OPTIMIZATION occupation-optimizer extension -- see PNOFs.cpp's identical
+// comment: model.optimize_occupations is not skippable, so these need real instantiations.
+template double jkFunctionalEnergy(const Matrix<double>& h, const RiNonRelSpinMoEri& eri,
+                                    const std::vector<double>& occupations,
+                                    JkFunctional functional, std::size_t f_l, double power_alpha);
+template double jkFunctionalEnergy(const Matrix<std::complex<double>>& h, const RiMoEri& eri,
+                                    const std::vector<double>& occupations,
+                                    JkFunctional functional, std::size_t f_l, double power_alpha);
+template std::vector<double> jkFunctionalGradient(const Matrix<double>& h,
+                                                   const RiNonRelSpinMoEri& eri,
+                                                   const std::vector<double>& occupations,
+                                                   JkFunctional functional, std::size_t f_l,
+                                                   double power_alpha);
+template std::vector<double> jkFunctionalGradient(const Matrix<std::complex<double>>& h,
+                                                   const RiMoEri& eri,
+                                                   const std::vector<double>& occupations,
+                                                   JkFunctional functional, std::size_t f_l,
+                                                   double power_alpha);
+template Matrix<double> jkFunctionalHessian(const Matrix<double>& h, const RiNonRelSpinMoEri& eri,
+                                             const std::vector<double>& occupations,
+                                             JkFunctional functional, std::size_t f_l,
+                                             double power_alpha);
+template Matrix<double> jkFunctionalHessian(const Matrix<std::complex<double>>& h,
+                                             const RiMoEri& eri,
                                              const std::vector<double>& occupations,
                                              JkFunctional functional, std::size_t f_l,
                                              double power_alpha);
