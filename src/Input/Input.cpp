@@ -188,9 +188,11 @@ void Input::read(const std::string& filename) {
     } else if (keyword == "SCF_DIRECT_4C") {
       scf_direct_4c_ = parseBool(iss, line_number, keyword);
       scf_direct_4c_explicit_ = true;
+    } else if (keyword == "FUNCTIONAL_POS_CHO_4C") {
+      functional_pos_cho_4c_ = parseBool(iss, line_number, keyword);
+      functional_pos_cho_4c_explicit_ = true;
     } else if (keyword == "FUNCTIONAL_DIRECT_4C") {
       functional_direct_4c_ = parseBool(iss, line_number, keyword);
-      functional_direct_4c_explicit_ = true;
     } else if (keyword == "X_LIN_DEP_THRS_L") {
       x_lin_dep_thrs_l_ = parseDouble(iss, line_number, keyword);
       if (!(x_lin_dep_thrs_l_ > 0.0)) {
@@ -407,7 +409,7 @@ void Input::read(const std::string& filename) {
   if (read_occupancies_ && !has_functional_) {
     throw std::runtime_error("READ_OCCUPANCIES TRUE requires FUNCTIONAL (there are otherwise no occupations to read into)");
   }
-  // Smart-conditional defaults: SCF_DIRECT_4C/FUNCTIONAL_DIRECT_4C default to TRUE, but only in
+  // Smart-conditional defaults: SCF_DIRECT_4C/FUNCTIONAL_POS_CHO_4C default to TRUE, but only in
   // the specific cases where they're actually applicable and non-conflicting -- an input that
   // never mentions either keyword at all (the overwhelming majority: every NON_REL/X2C-only run,
   // and every C4_SPINOR run combined with READ_RESTART/DEBUG/HESSIAN_MEAN_FIELD or no FUNCTIONAL)
@@ -417,8 +419,8 @@ void Input::read(const std::string& filename) {
   if (!scf_direct_4c_explicit_) {
     scf_direct_4c_ = c4_spinor_ && !read_restart_ && !debug_ && !hessian_mean_field_;
   }
-  if (!functional_direct_4c_explicit_) {
-    functional_direct_4c_ = c4_spinor_ && has_functional_;
+  if (!functional_pos_cho_4c_explicit_) {
+    functional_pos_cho_4c_ = c4_spinor_ && has_functional_;
   }
   if (scf_direct_4c_ && !c4_spinor_) {
     throw std::runtime_error("SCF_DIRECT_4C TRUE requires C4_SPINOR TRUE (it only replaces the C4_DHF/C4_SPINOR Fock build)");
@@ -438,21 +440,49 @@ void Input::read(const std::string& filename) {
         "SCF_DIRECT_4C TRUE with HESSIAN_MEAN_FIELD TRUE is not supported (HESSIAN_MEAN_FIELD needs an actual dense "
         "two-electron tensor, which SCF_DIRECT_4C never builds)");
   }
-  if (functional_direct_4c_ && !c4_spinor_) {
+  if (functional_pos_cho_4c_ && !c4_spinor_) {
     throw std::runtime_error(
-        "FUNCTIONAL_DIRECT_4C TRUE requires C4_SPINOR TRUE (it only replaces the C4_DHF/C4_SPINOR "
+        "FUNCTIONAL_POS_CHO_4C TRUE requires C4_SPINOR TRUE (it only replaces the C4_DHF/C4_SPINOR "
         "FUNCTIONAL OPTIMIZATION's positive-energy MO Cholesky-vector build)");
   }
-  if (functional_direct_4c_ && !has_functional_) {
+  if (functional_pos_cho_4c_ && !has_functional_) {
     throw std::runtime_error(
-        "FUNCTIONAL_DIRECT_4C TRUE requires FUNCTIONAL (there is otherwise no FUNCTIONAL OPTIMIZATION step "
+        "FUNCTIONAL_POS_CHO_4C TRUE requires FUNCTIONAL (there is otherwise no FUNCTIONAL OPTIMIZATION step "
         "to build positive-energy MO Cholesky vectors for)");
   }
-  // No CHOLESKY requirement: with CHOLESKY TRUE, FUNCTIONAL_DIRECT_4C fuses RkbCholesky::build +
+  // No CHOLESKY requirement: with CHOLESKY TRUE, FUNCTIONAL_POS_CHO_4C fuses RkbCholesky::build +
   // rkbCholeskyToMo (see main.cpp); with CHOLESKY FALSE it is a harmless no-op -- the dense
   // two-electron tensor path (buildC4SpinorEri + rkbMoTwoElectronSymmetric) already never touches
   // RkbCholesky's AO-basis vectors at all, including for FULL_OPTIMIZATION_4C_NEG (its own dense
   // MINMAX fallback, c4_mo_sym/full_sym_factory in main.cpp).
+  if (functional_direct_4c_ && !c4_spinor_) {
+    throw std::runtime_error(
+        "FUNCTIONAL_DIRECT_4C TRUE requires C4_SPINOR TRUE (it only replaces the C4_DHF/C4_SPINOR "
+        "ADAM orbital-rotation sub-loop's gradient/energy source)");
+  }
+  if (functional_direct_4c_ && !has_functional_) {
+    throw std::runtime_error(
+        "FUNCTIONAL_DIRECT_4C TRUE requires FUNCTIONAL (there is otherwise no FUNCTIONAL "
+        "OPTIMIZATION/FULL_OPTIMIZATION step for it to change)");
+  }
+  if (functional_direct_4c_ && !full_optimization_) {
+    throw std::runtime_error(
+        "FUNCTIONAL_DIRECT_4C TRUE requires FULL_OPTIMIZATION TRUE (there is otherwise no ADAM "
+        "orbital-rotation sub-loop for it to change)");
+  }
+  if (functional_direct_4c_ && full_optimization_4c_neg_) {
+    throw std::runtime_error(
+        "FUNCTIONAL_DIRECT_4C TRUE with FULL_OPTIMIZATION_4C_NEG TRUE is not supported (the min-max "
+        "stage always needs NEO with a Hessian-vector callback, which the UKB-direct path does not "
+        "have yet)");
+  }
+  if (functional_direct_4c_ &&
+      (orbital_optimizer_ == "NEO" || orbital_optimizer_ == "ADAM_NEO")) {
+    throw std::runtime_error(
+        "FUNCTIONAL_DIRECT_4C TRUE with ORBITAL_OPTIMIZER " + orbital_optimizer_ +
+        " is not supported yet (no UKB-direct orbital-rotation Hessian exists for NEO to use) -- "
+        "use ORBITAL_OPTIMIZER ADAM (the default) instead");
+  }
   // Applied here, after the whole file is parsed, so UNIT_LENGTH may appear before or after
   // GEOMETRY: "BOHR"/"AU" coordinates are already atomic units, no conversion needed.
   if (unit_length_ == "ANGS") {
@@ -492,6 +522,7 @@ void Input::print(std::ostream& out) const {
   line("CHOLESKY") << flag(cholesky_) << "\n";
   line("ON_DEMAND_ERI") << flag(on_demand_eri_) << "\n";
   line("SCF_DIRECT_4C") << flag(scf_direct_4c_) << "\n";
+  line("FUNCTIONAL_POS_CHO_4C") << flag(functional_pos_cho_4c_) << "\n";
   line("FUNCTIONAL_DIRECT_4C") << flag(functional_direct_4c_) << "\n";
   line("X_LIN_DEP_THRS_L") << x_lin_dep_thrs_l_ << "\n";
   line("X_LIN_DEP_THRS_S") << x_lin_dep_thrs_s_ << "\n";

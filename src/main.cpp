@@ -9,6 +9,7 @@
 #include <iomanip>
 #include <functional>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <type_traits>
@@ -880,7 +881,8 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
                                    rerdmft::RestartCapture* restart = nullptr,
                                    const std::function<Eri()>& eri_full_block_factory = std::function<Eri()>(),
                                    const std::vector<double>* initial_occupations = nullptr,
-                                   const std::vector<OccInLine>* occ_in = nullptr) {
+                                   const std::vector<OccInLine>* occ_in = nullptr,
+                                   const rerdmft::UkbDirectSource* ukb_direct = nullptr) {
   // Generic (element-access) view of the integrals, used by the production code below; the DEBUG /
   // validation blocks that need a dense Tensor4 re-bind `eri` to a dense view of `eri_in`.
   const Eri& eri = eri_in;
@@ -1412,7 +1414,7 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
                                           nuclear_repulsion_energy, out,
                                           label == "NON_REL" ? blockSpinPartner(n_total)
                                                              : std::vector<std::size_t>{},
-                                          /*n_negative=*/frozen_base);
+                                          /*n_negative=*/frozen_base, ukb_direct);
       } catch (const std::exception& e) {
         out << "\n  FULL_OPTIMIZATION FAILED: " << e.what() << "\n";
       }
@@ -1519,7 +1521,8 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
                                        rerdmft::RestartCapture* restart = nullptr,
                                        const std::function<Eri()>& eri_full_block_factory = std::function<Eri()>(),
                                        const std::vector<double>* initial_occupations = nullptr,
-                                       const std::vector<OccInLine>* occ_in = nullptr) {
+                                       const std::vector<OccInLine>* occ_in = nullptr,
+                                       const rerdmft::UkbDirectSource* ukb_direct = nullptr) {
   // See buildFunctionalReport: generic view here, dense re-binding in the DEBUG blocks.
   const Eri& eri = eri_in;
   rerdmft::progressContext() = label;  // live progress lines (stderr) are prefixed with the method
@@ -2117,7 +2120,7 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
                                             nuclear_repulsion_energy, out,
                                             label == "NON_REL" ? blockSpinPartner(n_total)
                                                                : std::vector<std::size_t>{},
-                                            /*n_negative=*/n_inactive_below);
+                                            /*n_negative=*/n_inactive_below, ukb_direct);
       } catch (const std::exception& e) {
         out << "\n  FULL_OPTIMIZATION FAILED: " << e.what() << "\n";
       }
@@ -2270,7 +2273,8 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
                                        std::vector<TimingRecord>& timing_records,
                                        rerdmft::RestartCapture* restart = nullptr,
                                        const std::function<Eri()>& eri_full_block_factory = std::function<Eri()>(),
-                                       const std::vector<double>* restart_amplitudes = nullptr) {
+                                       const std::vector<double>* restart_amplitudes = nullptr,
+                                       const rerdmft::UkbDirectSource* ukb_direct = nullptr) {
   rerdmft::progressContext() = label;
   const std::size_t n_total = h.rows();
   const std::size_t n_spatial = n_active / 2;
@@ -2416,7 +2420,7 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
           h, eri, occupations, state, reps, bar, n_core, n_occ, n_vir, n_total, amp_settings,
           full_opt, kramers_restricted, nuclear_repulsion_energy, out,
           label == "NON_REL" ? blockSpinPartner(n_total) : std::vector<std::size_t>{},
-          /*n_negative=*/n_inactive_below);
+          /*n_negative=*/n_inactive_below, ukb_direct);
       out << "\n  FULL_OPTIMIZATION " << (full_result.checks_passed && full_result.converged ? "converged" : "did NOT converge")
           << " after " << full_result.iterations << " macro-iteration(s): total energy "
           << std::setprecision(10) << full_result.electronic_energy + nuclear_repulsion_energy
@@ -3402,13 +3406,13 @@ int main(int argc, char** argv) {
           rkb_cholesky_built_r = true;
           logTiming("Two-electron integrals built (C4_DHF, Cholesky vectors, READ_RESTART)", t_start, t_checkpoint, timing_records);
         };
-        // With CHOLESKY TRUE + FUNCTIONAL_DIRECT_4C TRUE + MINMAX not running, whether
+        // With CHOLESKY TRUE + FUNCTIONAL_POS_CHO_4C TRUE + MINMAX not running, whether
         // rkb_cholesky is needed at all depends on `ro.lowdin_applied` below (only known after
         // reading the restart file) -- defer the build until then instead of paying for it
         // upfront unconditionally. Every other CHOLESKY TRUE case needs it regardless (the
         // ordinary rkbCholeskyToMo path, or MINMAX's own untrimmed transform), so build it now.
         if (input.cholesky()) {
-          if (c4_minmax_may_run_r || !input.functional_direct_4c()) buildRkbCholeskyR();
+          if (c4_minmax_may_run_r || !input.functional_pos_cho_4c()) buildRkbCholeskyR();
         } else {
           c4_spinor_eri = buildC4SpinorEri(input, large_basis.functions(), small_basis.functions(), rkb_coefficients,
                                            large_transform_final, /*use_cholesky=*/false);
@@ -3479,8 +3483,8 @@ int main(int argc, char** argv) {
         kramersStructureTestOneBody(c4_structure_log, "C4_DHF (READ_RESTART)", h_mo_restart, /*repairs_if_failed=*/false);
         rerdmft::SymmetricEri<std::complex<double>> c4_mo_sym_r;
         rerdmft::CholeskyEri<std::complex<double>> c4_mo_chol_r;
-        if (input.cholesky() && input.functional_direct_4c() && !rkb_cholesky_built_r) {
-          // rkb_cholesky was genuinely never built above (CHOLESKY TRUE, FUNCTIONAL_DIRECT_4C
+        if (input.cholesky() && input.functional_pos_cho_4c() && !rkb_cholesky_built_r) {
+          // rkb_cholesky was genuinely never built above (CHOLESKY TRUE, FUNCTIONAL_POS_CHO_4C
           // TRUE, MINMAX not running, geometry unchanged) -- build the positive-energy MO
           // Cholesky vectors directly, built from `c_dhf_restart` AFTER the Löwdin-
           // orthonormalization/Kramers-pairing/positive-energy-space repair above, exactly as
@@ -3490,7 +3494,7 @@ int main(int argc, char** argv) {
                                                         dim / 2, input.cholesky_threshold(), input.on_demand_eri());
         } else if (input.cholesky()) {
           // rkb_cholesky was already built above for some other reason (MINMAX may run, or
-          // FUNCTIONAL_DIRECT_4C is off, or the geometry changed) -- reuse it rather than
+          // FUNCTIONAL_POS_CHO_4C is off, or the geometry changed) -- reuse it rather than
           // redundantly re-decomposing.
           c4_mo_chol_r = rerdmft::rkbCholeskyToMo(rkb_cholesky, c_dhf_restart, dim / 2, input.cholesky_threshold());
         } else {
@@ -4100,7 +4104,7 @@ int main(int argc, char** argv) {
       // ternaries below always take the integral-direct kernel first, regardless of what's built
       // here) -- it does NOT force anything about the representation used for FUNCTIONAL/
       // FULL_OPTIMIZATION afterward. That choice follows CHOLESKY alone, exactly as it would
-      // without SCF_DIRECT_4C: CHOLESKY TRUE builds RkbCholesky (or, with FUNCTIONAL_DIRECT_4C,
+      // without SCF_DIRECT_4C: CHOLESKY TRUE builds RkbCholesky (or, with FUNCTIONAL_POS_CHO_4C,
       // the fused rkbCholeskyToMoFused instead); CHOLESKY FALSE builds the dense c4_spinor_eri +
       // rkbMoTwoElectronSymmetric path below, same as any non-SCF_DIRECT_4C run -- so
       // `SCF_DIRECT_4C TRUE` + `CHOLESKY FALSE` is a valid, supported combination (including for
@@ -4116,13 +4120,13 @@ int main(int argc, char** argv) {
       // itself (unless SCF_DIRECT_4C overrides it with the integral-direct kernel), the DEBUG
       // dense-vs-Cholesky Fock check below, the DEBUG/HESSIAN_MEAN_FIELD dense MO path (needs
       // c4_mo_chol via symmetricFromCholesky), the untrimmed MINMAX transform (always, when it
-      // might run) -- or the ORDINARY (non-DEBUG) FUNCTIONAL path UNLESS FUNCTIONAL_DIRECT_4C
+      // might run) -- or the ORDINARY (non-DEBUG) FUNCTIONAL path UNLESS FUNCTIONAL_POS_CHO_4C
       // replaces it with rkbCholeskyToMoFused below (C4_DHF/RkbCholesky.h), which runs its own
       // AO-pair decomposition and never materializes the full RkbCholesky struct.
       const bool c4_need_rkb_cholesky_vectors =
           (input.cholesky() && !input.scf_direct_4c()) || (input.cholesky() && input.debug()) ||
           (use_cholesky_integrals && c4_dense) ||
-          (use_cholesky_integrals && input.has_functional() && !input.functional_direct_4c()) || c4_minmax_may_run;
+          (use_cholesky_integrals && input.has_functional() && !input.functional_pos_cho_4c()) || c4_minmax_may_run;
       if (use_cholesky_integrals) {
         // ONE decomposition of the real AO Coulomb matrix over {LL} u {SS} pairs; everything else (SCF Fock
         // matrices, MO-basis vectors) follows from the vectors. The packed RKB tensor is built only under
@@ -4144,7 +4148,7 @@ int main(int argc, char** argv) {
           logTiming("Two-electron integrals built (C4_DHF, Cholesky vectors)", t_start, t_checkpoint, timing_records);
         } else {
           rkb_cholesky_report =
-              "  RKB AO-basis Cholesky vectors skipped entirely (FUNCTIONAL_DIRECT_4C TRUE and MINMAX will not run): "
+              "  RKB AO-basis Cholesky vectors skipped entirely (FUNCTIONAL_POS_CHO_4C TRUE and MINMAX will not run): "
               "the positive-energy MO Cholesky vectors are built directly instead, see below.\n";
         }
         if (input.debug()) {
@@ -4231,8 +4235,8 @@ int main(int argc, char** argv) {
         // builds the FULL (positive+negative-energy) n_mo x n_mo vector per Cholesky vector before trimming
         // to the positive-energy block, i.e. 4x the final size, times N_chol -- for a heavy element this is
         // easily several GB of pure waste when nothing downstream reads c4_mo_chol at all.
-        if (use_cholesky_integrals && input.functional_direct_4c() && !c4_dense && !c4_need_rkb_cholesky_vectors) {
-          // FUNCTIONAL_DIRECT_4C: RkbCholesky::build + rkbCholeskyToMo fused into one pass (same
+        if (use_cholesky_integrals && input.functional_pos_cho_4c() && !c4_dense && !c4_need_rkb_cholesky_vectors) {
+          // FUNCTIONAL_POS_CHO_4C: RkbCholesky::build + rkbCholeskyToMo fused into one pass (same
           // AO-pair decomposition, but the RKB AO-basis vectors are never all held at once) --
           // C4_DHF/RkbCholesky.h's rkbCholeskyToMoFused. Only worth it when rkb_cholesky genuinely
           // would NOT otherwise be built (!c4_need_rkb_cholesky_vectors, e.g. SCF_DIRECT_4C TRUE):
@@ -4449,6 +4453,19 @@ int main(int argc, char** argv) {
                 static_cast<std::ptrdiff_t>(n_negative),
             dhf_result.orbital_energies.end());
         rerdmft::RestartCapture c4_restart;
+        // FUNCTIONAL_DIRECT_4C: the fixed UKB-basis data the ADAM orbital-rotation sub-loop needs
+        // to build its generalized Fock directly from UKB AO integrals instead of a stored
+        // MO-basis tensor (Full_opt/FullOptimization.h's own UkbDirectSource) -- `h_rkb` and
+        // `ukb_direct_source` (already built above for SCF_DIRECT_4C/FUNCTIONAL_POS_CHO_4C) are
+        // reused as-is; `c0` is `dhf_result.c_dhf`, the SAME full (both branches) RKB-basis
+        // coefficient matrix `h_mo`/`eri_any` below are themselves expressed in. Left unset (null)
+        // unless the keyword is on, so every other run is unaffected and pays no extra copy.
+        std::optional<rerdmft::UkbDirectSource> ukb_direct_storage;
+        const rerdmft::UkbDirectSource* ukb_direct_ptr = nullptr;
+        if (input.functional_direct_4c()) {
+          ukb_direct_storage = rerdmft::UkbDirectSource{h_rkb, ukb_direct_source, dhf_result.c_dhf};
+          ukb_direct_ptr = &*ukb_direct_storage;
+        }
         const auto dhf_functional = [&](const auto& eri_any, const auto& eri_full_factory) {
           if (isPccdFunctionalName(input.functional())) {
             return buildPccdFunctionalReport(
@@ -4456,7 +4473,7 @@ int main(int argc, char** argv) {
                 dhf_result.nuclear_repulsion_energy, input.pccd_frozen_pairs(),
                 input.pccd_active_pairs(), input.pccd_amplitude_solver(), fullOptSettings(input),
                 input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records,
-                &c4_restart, eri_full_factory);
+                &c4_restart, eri_full_factory, nullptr, ukb_direct_ptr);
           }
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(
@@ -4465,7 +4482,7 @@ int main(int argc, char** argv) {
                 input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
                 fullOptSettings(input),
                 input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &c4_restart, eri_full_factory,
-                nullptr, occ_in);
+                nullptr, occ_in, ukb_direct_ptr);
           }
           return buildFunctionalReport(
               "C4_DHF", h_mo, eri_any, dhf_orbital_energies_positive, n_negative,
@@ -4474,7 +4491,7 @@ int main(int argc, char** argv) {
               input.occupation_init(), dhf_result.nuclear_repulsion_energy, input.debug(),
               fullOptSettings(input),
               input.full_optimization_4c_neg(), t_start, t_checkpoint,
-              timing_records, &c4_restart, eri_full_factory, nullptr, occ_in);
+              timing_records, &c4_restart, eri_full_factory, nullptr, occ_in, ukb_direct_ptr);
         };
         if (use_cholesky_integrals) {
           // FULL_OPTIMIZATION_4C_NEG needs the negative-energy block too: the trimmed vector above

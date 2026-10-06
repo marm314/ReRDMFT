@@ -1,19 +1,19 @@
 # Minimal validation example for FUNCTIONAL_DIRECT_4C: LiH, 6-31G, GNOF, FULL_OPTIMIZATION TRUE
-# with CHOLESKY TRUE + FUNCTIONAL_DIRECT_4C TRUE -- the positive-energy MO Cholesky vectors are
-# built DIRECTLY (C4_DHF/RkbMoDirectCholesky.h), never building the RKB AO-basis Cholesky vectors
-# (RkbCholesky) at all. Compare the converged energy against
-# lih_gnof_c4_full_optimization_cholesky.inp's own result (same system, old RkbCholesky-based
-# path) -- must match exactly.
-ON_DEMAND_ERI TRUE
+# with FUNCTIONAL_DIRECT_4C TRUE -- the ADAM orbital-rotation sub-loop builds its generalized Fock
+# (and, via a double-counting trace identity, its energy) directly from UKB AO integrals at the
+# current orbitals, instead of a stored MO-basis two-electron tensor re-expressed in the rotated
+# basis on every ADAM step. Watch the log for the automatic start-up cross-check
+# ("FUNCTIONAL_DIRECT_4C: max |UKB-direct gradient - stored-tensor gradient| = ..."), which should
+# be ~machine precision. Compare the converged energy against
+# lih_gnof_c4_full_optimization.inp's own C4_DHF result -- must match (same system, same
+# functional, a different gradient/energy SOURCE for the orbital-rotation sub-loop only).
 NELEC 4
 BASIS lih-6-31g.gbs
 C4_SPINOR TRUE
-SCF_DIRECT_4C FALSE  # preserve this example's pre-existing SCF path (SCF_DIRECT_4C now defaults TRUE for plain C4_SPINOR runs)
 FUNCTIONAL GNOF
 PNOF_SUBSPACES 2
 PNOF_COUPLING 2
 FULL_OPTIMIZATION TRUE
-CHOLESKY TRUE
 FUNCTIONAL_DIRECT_4C TRUE
 
 GEOMETRY

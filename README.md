@@ -84,7 +84,8 @@ are comments.
 | `CHOLESKY_THRESHOLD` | double (> 0) | `1e-10` | Residual-diagonal cutoff for the decomposition; looser = fewer vectors (faster, less accurate). |
 | `ON_DEMAND_ERI` | bool | `TRUE` | With `CHOLESKY TRUE`: evaluate each AO quadruplet on demand during decomposition (memory O(n^2)) instead of building the full packed tensor first. |
 | `SCF_DIRECT_4C` | bool | `TRUE` if `C4_SPINOR TRUE` and none of `READ_RESTART`/`DEBUG`/`HESSIAN_MEAN_FIELD`; else `FALSE` | `C4_SPINOR` only: run the SCF fully integral-direct (no two-electron representation held during SCF, O(n^2) memory). Only affects the SCF loop itself -- the post-SCF representation for `FUNCTIONAL`/`FULL_OPTIMIZATION` still follows `CHOLESKY` alone (dense if `CHOLESKY FALSE`, including for `FULL_OPTIMIZATION_4C_NEG`). An explicit `TRUE` against `READ_RESTART`/`DEBUG`/`HESSIAN_MEAN_FIELD` still throws; the smart default just silently stays `FALSE` instead. |
-| `FUNCTIONAL_DIRECT_4C` | bool | `TRUE` if `C4_SPINOR TRUE` and `FUNCTIONAL` is given; else `FALSE` | `C4_SPINOR` only: with `CHOLESKY TRUE` (works with `READ_RESTART` too), build `FUNCTIONAL`/`FULL_OPTIMIZATION`'s positive-energy MO Cholesky vectors in one fused pass, without ever holding the full AO-basis RKB vector set. Only takes effect when that vector set genuinely wouldn't otherwise be built (see *Keyword compatibility* below for the exact conditions) -- otherwise a harmless no-op, reusing whatever was already built rather than redundantly rebuilding it. Memory benefit confirmed on small systems only so far -- not yet validated at heavy-element scale. |
+| `FUNCTIONAL_POS_CHO_4C` | bool | `TRUE` if `C4_SPINOR TRUE` and `FUNCTIONAL` is given; else `FALSE` | `C4_SPINOR` only: with `CHOLESKY TRUE` (works with `READ_RESTART` too), build `FUNCTIONAL`/`FULL_OPTIMIZATION`'s positive-energy MO Cholesky vectors in one fused pass, without ever holding the full AO-basis RKB vector set. Only takes effect when that vector set genuinely wouldn't otherwise be built (see *Keyword compatibility* below for the exact conditions) -- otherwise a harmless no-op, reusing whatever was already built rather than redundantly rebuilding it. Memory benefit confirmed on small systems only so far -- not yet validated at heavy-element scale. |
+| `FUNCTIONAL_DIRECT_4C` | bool | `FALSE` | `C4_SPINOR` + `FULL_OPTIMIZATION` only: the ADAM orbital-rotation sub-loop builds its generalized Fock (and, via a double-counting trace identity, its energy) directly from UKB AO integrals at the current orbitals, instead of a stored MO-basis two-electron tensor that the ordinary path re-expresses in the rotated basis on every ADAM step. That per-step re-expression is skipped while ADAM drives and resynced once, right after each ADAM run -- same final numbers, far fewer O(n^5)/O(n_chol n^2) integral rotations. Requires `FUNCTIONAL`; incompatible with `ORBITAL_OPTIMIZER NEO`/`ADAM_NEO` and `FULL_OPTIMIZATION_4C_NEG` (no UKB-direct orbital-rotation Hessian exists yet). |
 | `X_LIN_DEP_THRS_L` | double (> 0) | `1e-6` | Large-component linear-dependence threshold (LOWGEN-style safety net). |
 | `X_LIN_DEP_THRS_S` | double (> 0) | `1e-8` | Small-component linear-dependence threshold (`X2C`/`C4_SPINOR` only). |
 | `FUNCTIONAL` | string | *(none)* | Selects the RDMFT functional: JK-only (`SD`, `MULLER`/`MBB`, `BBC2`, `CA`, `CGA`, `ML`, `MLSIC`, `GU`, `POWER`), PNOF (`PNOF5`, `PNOF7`, `PNOF7S`, `GNOF`), or `PCCD`. Unset skips the whole RDMFT step. |
@@ -114,7 +115,7 @@ are comments.
 
 ## Keyword compatibility
 
-`SCF_DIRECT_4C` and `FUNCTIONAL_DIRECT_4C` both have smart-conditional defaults (see their own
+`SCF_DIRECT_4C` and `FUNCTIONAL_POS_CHO_4C` both have smart-conditional defaults (see their own
 table rows above): they default to `TRUE` only when applicable and non-conflicting, so most
 inputs never need to mention them at all. Existing examples that are specifically meant to
 exercise the *other* path (dense, or the plain Cholesky-vector one) set them explicitly to
@@ -129,6 +130,8 @@ Hard errors (incompatible, Input.cpp throws at parse time):
 | `SCF_DIRECT_4C TRUE` + `HESSIAN_MEAN_FIELD TRUE` | Same -- needs a dense tensor. |
 | `FCIDUMP TRUE` without `NON_RELATIVISTIC TRUE`, or without `FUNCTIONAL` | Only NON_REL is supported; needs an RDMFT orbital order to write. |
 | `READ_OCCUPANCIES TRUE` without `FUNCTIONAL` | Nothing to read occupations into. |
+| `FUNCTIONAL_DIRECT_4C TRUE` without `C4_SPINOR TRUE`, `FUNCTIONAL`, or `FULL_OPTIMIZATION TRUE` | Nothing for it to change -- it only replaces `C4_SPINOR`'s own ADAM orbital-rotation sub-loop. |
+| `FUNCTIONAL_DIRECT_4C TRUE` + `FULL_OPTIMIZATION_4C_NEG TRUE`, or + `ORBITAL_OPTIMIZER NEO`/`ADAM_NEO` | No UKB-direct orbital-rotation Hessian exists yet (NEO needs one); use `ORBITAL_OPTIMIZER ADAM` (the default). |
 
 Everything else combines freely; the ones below are worth knowing exactly what they do (mostly
 harmless no-ops, not errors):
@@ -136,13 +139,13 @@ harmless no-ops, not errors):
 | Combination | Effect |
 | --- | --- |
 | `SCF_DIRECT_4C TRUE` + `CHOLESKY` (either) | Independent: the post-SCF representation for `FUNCTIONAL`/`FULL_OPTIMIZATION` follows `CHOLESKY` alone, including for `FULL_OPTIMIZATION_4C_NEG` (dense fallback when `CHOLESKY FALSE`). |
-| `FUNCTIONAL_DIRECT_4C TRUE` + `CHOLESKY FALSE` | No-op -- the dense path never touches `RkbCholesky` anyway. |
-| `FUNCTIONAL_DIRECT_4C TRUE` + `CHOLESKY TRUE` + `SCF_DIRECT_4C FALSE` (no restart) | No-op -- `rkb_cholesky` is already needed by the ordinary Cholesky SCF loop; reused, not rebuilt. |
-| `FUNCTIONAL_DIRECT_4C TRUE` + `CHOLESKY TRUE` + `SCF_DIRECT_4C TRUE` | **Full effect** -- `RkbCholesky`'s AO-basis vectors are never built at all for the whole run. The intended use case. |
-| `FUNCTIONAL_DIRECT_4C TRUE` + `FULL_OPTIMIZATION_4C_NEG TRUE` | No-op -- MINMAX needs the untrimmed transform, which still goes through `RkbCholesky`. |
-| `FUNCTIONAL_DIRECT_4C TRUE` + `READ_RESTART TRUE` + `CHOLESKY TRUE`, MINMAX not running, restart geometry unchanged | **Full effect** -- the AO-basis build is deferred and skipped entirely. |
-| `FUNCTIONAL_DIRECT_4C TRUE` + `READ_RESTART TRUE` + `CHOLESKY TRUE`, geometry changed from the restart file | No-op -- `rkb_cholesky` is needed anyway for the one-shot Fock rebuild that re-establishes the positive-energy space; built once, reused. |
-| `FUNCTIONAL_DIRECT_4C TRUE` + `DEBUG`/`HESSIAN_MEAN_FIELD TRUE` | No-op -- falls back to the dense-tensor path those need. |
+| `FUNCTIONAL_POS_CHO_4C TRUE` + `CHOLESKY FALSE` | No-op -- the dense path never touches `RkbCholesky` anyway. |
+| `FUNCTIONAL_POS_CHO_4C TRUE` + `CHOLESKY TRUE` + `SCF_DIRECT_4C FALSE` (no restart) | No-op -- `rkb_cholesky` is already needed by the ordinary Cholesky SCF loop; reused, not rebuilt. |
+| `FUNCTIONAL_POS_CHO_4C TRUE` + `CHOLESKY TRUE` + `SCF_DIRECT_4C TRUE` | **Full effect** -- `RkbCholesky`'s AO-basis vectors are never built at all for the whole run. The intended use case. |
+| `FUNCTIONAL_POS_CHO_4C TRUE` + `FULL_OPTIMIZATION_4C_NEG TRUE` | No-op -- MINMAX needs the untrimmed transform, which still goes through `RkbCholesky`. |
+| `FUNCTIONAL_POS_CHO_4C TRUE` + `READ_RESTART TRUE` + `CHOLESKY TRUE`, MINMAX not running, restart geometry unchanged | **Full effect** -- the AO-basis build is deferred and skipped entirely. |
+| `FUNCTIONAL_POS_CHO_4C TRUE` + `READ_RESTART TRUE` + `CHOLESKY TRUE`, geometry changed from the restart file | No-op -- `rkb_cholesky` is needed anyway for the one-shot Fock rebuild that re-establishes the positive-energy space; built once, reused. |
+| `FUNCTIONAL_POS_CHO_4C TRUE` + `DEBUG`/`HESSIAN_MEAN_FIELD TRUE` | No-op -- falls back to the dense-tensor path those need. |
 | `ON_DEMAND_ERI`/`CHOLESKY_THRESHOLD` + `CHOLESKY FALSE` | No-op -- neither is read unless `CHOLESKY TRUE`. |
 | `CARTESIAN` + `C4_SPINOR`/`X2C` | No-op -- those always use the spherical basis regardless. |
 | `CHECK_HESS_NEO TRUE` + `ORBITAL_OPTIMIZER ADAM` | No-op -- needs NEO capability (`NEO` or `ADAM_NEO`). |
@@ -295,6 +298,42 @@ For light systems this moves the energy negligibly (~1e-10 Hartree) --
 it's primarily a check that the no-pair minimum is also the min-max
 point. See `examples/lih_gnof_c4_neg_full_optimization.inp` or
 `examples/lih_muller_c4_neg_full_optimization_cholesky.inp`.
+
+### `FUNCTIONAL_DIRECT_4C`: UKB-AO-integral-direct ADAM
+
+With `FUNCTIONAL_DIRECT_4C TRUE`, the ADAM orbital-rotation sub-loop builds the generalized Fock
+(and, via a double-counting trace identity, the energy ADAM's own accept/converge logic needs)
+directly from UKB AO integrals at the current orbitals (`Hessian_opt/UkbJkOnlyFock.h`/
+`UkbJkOnlyFockFast.h`/`UkbPnofFock.h`/`UkbPccdFock.h`), instead of reading a stored MO-basis
+two-electron tensor that the ordinary path re-expresses in the rotated basis on every ADAM step
+(`IntegralRotation.h`'s `rotateIntegralsExact`, O(n^5) dense or O(n_chol n^2) Cholesky). That
+per-step re-expression is skipped entirely while ADAM drives and resynced once, right after each
+ADAM run -- same final numbers (verified: converged energy and the orbital gradient both match the
+ordinary stored-tensor path to machine precision on every functional family, see below), far fewer
+expensive integral rotations per macro-iteration.
+
+Build cost is NOT uniform across functionals -- this keyword is most valuable for the systems
+`CHOLESKY`/dense storage cannot handle at all, not a universal speedup:
+- **JK_only, SD/MBB/CA/CGA/POWER/MULLER_AS**: genuinely O(1-2) UKB-AO densities per Fock build,
+  independent of system size -- runs at the same speed as the stored-tensor path (confirmed: LiH/
+  6-31G SD finishes in the same wall time either way, converged energies identical).
+- **JK_only, BBC2/GU/ML/MLSIC**: no finite separable decomposition exists (a diagonal special case
+  for BBC2/GU, a non-separable rational form for ML/MLSIC) -- O(n_mo) UKB-AO densities per build,
+  same order as PNOF/pCCD below.
+- **PNOF, pCCD**: the same-geminal/same-pair structure in their 2-RDM ansatz is NOT separable
+  (confirmed against DoNOF's own `orbopt.f90` `ELAGaor`, which pays the identical O(n_gem) cost via
+  its own `DO lg=1,NDOC` geminal loops) -- O(n_total) UKB-AO densities per build. Still faster than
+  the generic baseline (Hartree and exchange share one density here, not two, since
+  `two_rdm_h(s,q)==two_rdm_x(q,s)` identically for both), but not O(1).
+- For a heavy-element, large-basis system where `CHOLESKY`'s AO-pair decomposition does not
+  converge in any affordable vector count (e.g. a dense, near-degenerate diagonal spectrum from
+  high atomic symmetry) and the dense tensor is categorically too large to hold, `FUNCTIONAL_DIRECT_4C`
+  turns an otherwise infeasible (never-finishing, or `std::bad_alloc`) `FULL_OPTIMIZATION` into a
+  finite one -- but for PNOF/pCCD that is likely still "finite and slow" (plausibly days, extrapolated
+  from the O(n_total) build cost and how long a single UKB-AO-integral-direct Fock build already
+  takes for such a system via `SCF_DIRECT_4C`), not "fast." Only `ORBITAL_OPTIMIZER ADAM` is
+  supported (no UKB-AO-direct orbital-rotation Hessian exists yet, so `NEO`/`ADAM_NEO`/
+  `FULL_OPTIMIZATION_4C_NEG` are rejected together with this keyword).
 
 ## Restart file
 

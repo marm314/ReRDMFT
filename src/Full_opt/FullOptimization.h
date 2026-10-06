@@ -17,6 +17,7 @@
 #include "PNOFs.h"
 #include "pCCD.h"
 #include "Tensor4.h"
+#include "UkbFockMatrixDirect.h"
 
 namespace rerdmft {
 
@@ -119,6 +120,23 @@ struct FullOptSettings {
   } saddle;
 };
 
+// FUNCTIONAL_DIRECT_4C (C4_SPINOR only, Input.h): the fixed UKB-basis data an ADAM orbital-rotation
+// run needs to build the generalized Fock directly from UKB AO integrals (Hessian_opt/
+// UkbPnofFock.h/UkbJkOnlyFock.h/UkbPccdFock.h) instead of a stored MO-basis two-electron tensor --
+// see RdmftModel::ukb_direct_fock/ukb_direct_c0's own comment for how makeJkOnlyModel/
+// makePnofModel/makePccdModel turn this into those two fields, and UkbDirectRotationProblem
+// (FullOptimization.cpp) for how the ADAM sub-loop then uses them. Always std::complex<double>,
+// like UkbDirectEriSource itself -- this bundle is never meaningful for T = double (NON_REL).
+// `h_rkb`/`eri` are the UKB-basis one-electron Hamiltonian and AO integral source, NEVER rotated
+// (fixed for the whole calculation); `c0` is the natural-spinor coefficient matrix mapping that
+// UKB basis into the SAME basis the caller's `h`/`eri` (runFullOptimization*'s own MO-basis
+// arguments) are expressed in, AT THE POINT this call starts.
+struct UkbDirectSource {
+  Matrix<std::complex<double>> h_rkb;
+  UkbDirectEriSource eri;
+  Matrix<std::complex<double>> c0;
+};
+
 struct RdmftOccupationResult {
   std::vector<double> occupations;   // full (n_total) occupation vector
   double electronic_energy = 0.0;
@@ -190,6 +208,23 @@ struct RdmftModel {
   // (Hessian_opt's jkOnlyHessianMatrix / jkOnlyJointHessianMatrix / pnofHessianMatrix / pnofJointHessianMatrix). Used only
   // by the DEBUG saddle-type check of the min-max stage, which diagonalizes it exactly.
   std::function<Matrix<double>(const Matrix<T>&, const Tensor4<T>&, const std::vector<double>&)> hessian_matrix;
+  // FUNCTIONAL_DIRECT_4C (C4_SPINOR only): when set, runFullOptimization's ADAM orbital-rotation
+  // sub-loop (UkbDirectRotationProblem) builds the generalized Fock from `c_current` (the UKB-basis
+  // coefficient matrix AT THE CURRENT trial orbitals, c_current = ukb_direct_c0 * accumulated
+  // rotation) and `occupations` DIRECTLY via UKB AO integrals, instead of reading `gradient`/
+  // `energy` above (which need a stored, per-step-rotated MO-basis eri). Built by makeJkOnlyModel/
+  // makePnofModel/makePccdModel's own `ukb_direct` parameter (a UkbDirectSource, see its own
+  // comment); both fields stay default-empty (and runFullOptimization behaves EXACTLY as before)
+  // unless that parameter is passed. The energy ADAM needs is NOT read from a separate closure --
+  // UkbDirectRotationProblem derives it from the SAME Fock's diagonal via the classic
+  // double-counting trace identity E = 0.5 * sum_q [occupations[q]*Re(h_mo(q,q)) + Re(F(q,q))],
+  // verified this session against HartreeExchangeGradient.cpp's hartreeExchangeFockMatrix/
+  // hartreeExchangeEnergy on random, deliberately NON-symmetric two_rdm_h/x/l1/l2 data (which both
+  // PNOF's and pCCD's energy/Fock already go through unchanged, and JK_only's own jkOnlyFockMatrix/
+  // jkOnlyEnergy mirror verbatim) -- holds to float precision with or without the l1/l2 term, so no
+  // second UKB-direct integral pass is ever needed just to get the energy.
+  std::function<Matrix<T>(const Matrix<T>& c_current, const std::vector<double>& occupations)> ukb_direct_fock;
+  Matrix<T> ukb_direct_c0;
 };
 
 // JK_only functionals (Occ_opt/JK_only.h): SQP over the active occupations
@@ -205,22 +240,29 @@ struct RdmftModel {
 // n_negative runFullOptimization/RotationProblem is given -- it only affects which pair list the
 // Hessian-vector callbacks capture (via lowerPairs(n_total, n_negative), the SAME pairs()
 // RotationProblem/NeoOrbitalProblem then rotate over), not the occupation window itself.
+// `ukb_direct` (FUNCTIONAL_DIRECT_4C, C4_SPINOR only): when non-null, sets the returned model's
+// `ukb_direct_fock`/`ukb_direct_c0` (see RdmftModel's own comment) from the SAME `functional`/`f_l`
+// this call already builds the ordinary `gradient`/`energy` closures from. Default null: every
+// other caller is unaffected.
 template <typename T, typename Eri = Tensor4<T>>
 RdmftModel<T, Eri> makeJkOnlyModel(JkFunctional functional, std::size_t f_l, double n_electrons,
                               std::size_t n_total, std::size_t n_frozen,
                               std::size_t n_inactive_below,
                               std::size_t n_active, bool two_columns = false,
-                              std::size_t n_negative = 0);
+                              std::size_t n_negative = 0,
+                              const UkbDirectSource* ukb_direct = nullptr);
 
 // PNOF functionals (Occ_opt/PNOFs.h): `geminals`/`n_core` as built by
 // buildPnofGeminals (indices already converted to actual array indices);
 // `sqp_occupations` selects the SQP branch (SQP_PNOF_OCC TRUE), otherwise
 // L-BFGS over the unconstrained gamma angles. `n_negative`: see makeJkOnlyModel's own comment.
+// `ukb_direct`: see makeJkOnlyModel's own comment.
 template <typename T, typename Eri = Tensor4<T>>
 RdmftModel<T, Eri> makePnofModel(PnofFunctional functional, std::vector<PnofGeminal> geminals,
                             std::size_t n_core, int pnof_subspaces, int pnof_coupling,
                             bool relativistic, bool sqp_occupations, std::size_t n_total,
-                            std::size_t n_negative = 0);
+                            std::size_t n_negative = 0,
+                            const UkbDirectSource* ukb_direct = nullptr);
 
 // pCCD (Occ_opt/pCCD.h + Hessian_opt/PccdFock.h), NON_REL (T = double) ONLY for now: unlike
 // JK_only/PNOF, pCCD's 2-RDM (D_pq/Q_pq) is NOT a closed-form function of the occupations alone
@@ -239,10 +281,15 @@ RdmftModel<T, Eri> makePnofModel(PnofFunctional functional, std::vector<PnofGemi
 // runFullOptimization's own guards). `reps`/`bar`/`n_core`/`n_occ`/`n_vir` are the SAME combined
 // (core ++ active-occupied ++ active-virtual) pair lists `buildPccdCoefficients`/`buildPccdFullTwoRdm`
 // take, resolved to actual array indices by the caller exactly like PNOF's own geminals.
+// `ukb_direct`: see makeJkOnlyModel's own comment -- the closure built here additionally reads the
+// SAME shared amplitude cache `optimize_occupations` fills (`cache->rdm`), exactly like `gradient`/
+// `energy` above, so it always sees the amplitudes from the most recent occupation
+// re-optimization.
 template <typename T, typename Eri = Tensor4<T>>
 RdmftModel<T, Eri> makePccdModel(std::vector<std::size_t> reps, std::vector<std::size_t> bar,
                                   std::size_t n_core, std::size_t n_occ, std::size_t n_vir,
-                                  std::size_t n_total, PccdSettings amplitude_settings);
+                                  std::size_t n_total, PccdSettings amplitude_settings,
+                                  const UkbDirectSource* ukb_direct = nullptr);
 
 // Exact rotation of the MO integrals into the basis C_new = C_old * U:
 // h' = U^dagger h U, eri'(pqrs) = sum conj(U_ap) conj(U_bq) U_cr U_ds
@@ -322,7 +369,8 @@ FullOptResult runFullOptimizationJk(const Matrix<T>& h, const Tensor4<T>& eri,
                                     bool kramers_restricted, double nuclear_repulsion_energy,
                                     std::ostream& log,
                                     const std::vector<std::size_t>& spin_partner = {},
-                                    std::size_t n_negative = 0);
+                                    std::size_t n_negative = 0,
+                                    const UkbDirectSource* ukb_direct = nullptr);
 
 template <typename T>
 FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const Tensor4<T>& eri,
@@ -334,7 +382,8 @@ FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const Tensor4<T>& eri,
                                       const FullOptSettings& settings, bool kramers_restricted,
                                       double nuclear_repulsion_energy, std::ostream& log,
                                       const std::vector<std::size_t>& spin_partner = {},
-                                      std::size_t n_negative = 0);
+                                      std::size_t n_negative = 0,
+                                      const UkbDirectSource* ukb_direct = nullptr);
 
 // makePccdModel + runFullOptimization -- see makePccdModel's own header comment. Now covers
 // NON_REL (T = double), X2C_HF and C4_DHF (T = std::complex<double>) alike: `kramers_restricted`/
@@ -356,7 +405,8 @@ FullOptResult runFullOptimizationPccd(const Matrix<T>& h, const Eri& eri,
                                       const FullOptSettings& settings, bool kramers_restricted,
                                       double nuclear_repulsion_energy, std::ostream& log,
                                       const std::vector<std::size_t>& spin_partner = {},
-                                      std::size_t n_negative = 0);
+                                      std::size_t n_negative = 0,
+                                      const UkbDirectSource* ukb_direct = nullptr);
 
 // The same two entry points for integrals that ALREADY are Cholesky vectors (AO vectors transformed to the
 // MO basis, Utils/AoCholesky.h): no dense tensor is formed, decomposed or verified here.
@@ -371,7 +421,8 @@ FullOptResult runFullOptimizationJk(const Matrix<T>& h, const CholeskyEri<T>& er
                                     bool kramers_restricted, double nuclear_repulsion_energy,
                                     std::ostream& log,
                                     const std::vector<std::size_t>& spin_partner = {},
-                                    std::size_t n_negative = 0);
+                                    std::size_t n_negative = 0,
+                                      const UkbDirectSource* ukb_direct = nullptr);
 
 template <typename T>
 FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const CholeskyEri<T>& eri,
@@ -383,7 +434,8 @@ FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const CholeskyEri<T>& 
                                       const FullOptSettings& settings, bool kramers_restricted,
                                       double nuclear_repulsion_energy, std::ostream& log,
                                       const std::vector<std::size_t>& spin_partner = {},
-                                      std::size_t n_negative = 0);
+                                      std::size_t n_negative = 0,
+                                      const UkbDirectSource* ukb_direct = nullptr);
 
 // The same two entry points for integrals that are held as a unique-element store (Utils/SymmetricEri.h): no dense tensor is formed.
 template <typename T>
@@ -397,7 +449,8 @@ FullOptResult runFullOptimizationJk(const Matrix<T>& h, const SymmetricEri<T>& e
                                     bool kramers_restricted, double nuclear_repulsion_energy,
                                     std::ostream& log,
                                     const std::vector<std::size_t>& spin_partner = {},
-                                    std::size_t n_negative = 0);
+                                    std::size_t n_negative = 0,
+                                      const UkbDirectSource* ukb_direct = nullptr);
 
 template <typename T>
 FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const SymmetricEri<T>& eri,
@@ -409,7 +462,8 @@ FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const SymmetricEri<T>&
                                       const FullOptSettings& settings, bool kramers_restricted,
                                       double nuclear_repulsion_energy, std::ostream& log,
                                       const std::vector<std::size_t>& spin_partner = {},
-                                      std::size_t n_negative = 0);
+                                      std::size_t n_negative = 0,
+                                      const UkbDirectSource* ukb_direct = nullptr);
 
 }  // namespace rerdmft
 

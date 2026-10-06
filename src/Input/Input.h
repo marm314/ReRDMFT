@@ -228,7 +228,7 @@ class Input {
   bool scf_direct_4c() const { return scf_direct_4c_; }
   // Smart-conditional default (Input.cpp): TRUE whenever C4_SPINOR TRUE and FUNCTIONAL is given
   // (the two conditions an explicit TRUE would otherwise need, see below); FALSE otherwise,
-  // silently. An explicit `FUNCTIONAL_DIRECT_4C TRUE` without one of those still throws
+  // silently. An explicit `FUNCTIONAL_POS_CHO_4C TRUE` without one of those still throws
   // (Input.cpp); an explicit FALSE always just works.
   //
   // With CHOLESKY TRUE: FUNCTIONAL/FULL_OPTIMIZATION's positive-energy-only MO Cholesky vectors
@@ -243,6 +243,28 @@ class Input {
   // combined with it. With CHOLESKY FALSE this keyword has no effect either way (the dense
   // two-electron path, main.cpp's buildC4SpinorEri + rkbMoTwoElectronSymmetric, already never
   // touches RkbCholesky's AO-basis vectors, for FULL_OPTIMIZATION_4C_NEG too).
+  bool functional_pos_cho_4c() const { return functional_pos_cho_4c_; }
+  // Optional; defaults to FALSE (unlike FUNCTIONAL_POS_CHO_4C, no smart-conditional default --
+  // every existing input keeps doing EXACTLY what it did before unless this is explicitly turned
+  // on). C4_SPINOR + FULL_OPTIMIZATION only: the ADAM orbital-rotation sub-loop builds the
+  // generalized Fock (and, via the classic double-counting trace identity verified this session,
+  // the energy ADAM's own accept/converge logic needs) DIRECTLY from UKB AO integrals
+  // (Hessian_opt/UkbPnofFock.h/UkbJkOnlyFock.h/UkbPccdFock.h) at the CURRENT orbitals, instead of
+  // reading them off a stored (dense/Cholesky/SymmetricEri) MO-basis two-electron tensor that the
+  // old path re-expresses in the rotated basis on every single ADAM step
+  // (IntegralRotation.h's rotateIntegralsExact, O(n^5)). That per-step re-expression is skipped
+  // entirely while ADAM is driving (nothing reads it until the step right after ADAM finishes,
+  // occupation re-optimization) and resynced with ONE such call once ADAM's run ends -- same final
+  // numbers, far fewer O(n^5) rotations per macro-iteration (Full_opt/FullOptimization.cpp's
+  // UkbDirectRotationProblem). Occupation re-optimization, logging and every other part of the
+  // macro loop are completely unaffected -- see FULL_OPTIMIZATION's own existing stored-integral
+  // path, untouched.
+  //
+  // NEO is not yet supported with this set (no UKB-direct orbital-rotation Hessian exists yet):
+  // ORBITAL_OPTIMIZER NEO or ADAM_NEO together with FUNCTIONAL_DIRECT_4C TRUE throws (Input.cpp),
+  // as does FULL_OPTIMIZATION_4C_NEG TRUE (the min-max stage always needs NEO). Requires C4_SPINOR
+  // TRUE, FUNCTIONAL and FULL_OPTIMIZATION TRUE (there is otherwise no ADAM orbital-rotation
+  // sub-loop for this to change).
   bool functional_direct_4c() const { return functional_direct_4c_; }
   // Optional; defaults to 1e-6 (DIRAC's own STOL(1)). The large-component LOWGEN safety net's
   // threshold (Utils/LinearAlgebra.h's canonicalOrthogonalize): below this eigenvalue, a direction
@@ -511,8 +533,9 @@ class Input {
   bool on_demand_eri_ = true;
   bool scf_direct_4c_ = false;
   bool scf_direct_4c_explicit_ = false;        // TRUE iff the keyword literally appeared in the input
+  bool functional_pos_cho_4c_ = false;
+  bool functional_pos_cho_4c_explicit_ = false;  // TRUE iff the keyword literally appeared in the input
   bool functional_direct_4c_ = false;
-  bool functional_direct_4c_explicit_ = false;  // TRUE iff the keyword literally appeared in the input
   double x_lin_dep_thrs_l_ = 1e-6;
   double x_lin_dep_thrs_s_ = 1e-8;
   bool read_restart_ = false;
