@@ -73,6 +73,7 @@ are comments.
 | `DEBUG` | bool | `FALSE` | Extra diagnostics: internal gradient cross-checks, finite-difference tests, dense-vs-Cholesky comparisons. Builds the dense two-electron tensor on demand. |
 | `HESSIAN_MEAN_FIELD` | bool | `FALSE` | Build and fully diagonalize the dense orbital-rotation Hessian (minimum expected for `NON_REL`/`X2C`, saddle for `C4_SPINOR`). O(n^5)-O(n^6), needs the dense tensor. |
 | `FCIDUMP` | bool | `FALSE` | `NON_RELATIVISTIC` + `FUNCTIONAL` only: write an `FCIDUMP` file of the MO integrals for an external CI/DMRG/FCI code. |
+| `AIMPAC` | bool | `FALSE` | Requires `FUNCTIONAL`: write the converged 1-RDM's natural orbitals as an AIMPAC WFN file (`<input>.wfn`) over Cartesian Gaussian primitives. Works for `NON_RELATIVISTIC`/`X2C`/`C4_SPINOR` (Large/Small diagonalized independently); also writes `<input>_neg.wfn` if `FULL_OPTIMIZATION_4C_NEG` converges. |
 | `SPEED_OF_LIGHT` | double (> 0) | CODATA value | Override the speed of light (a.u.), to probe the nonrelativistic limit or exaggerate relativistic effects. |
 | `MIXING` | double, `(0,1]` | `0.4` | Linear density-mixing weight, used only with `DIIS FALSE`. |
 | `DIIS` | bool | `TRUE` | Pulay DIIS instead of linear mixing in every SCF loop. |
@@ -137,6 +138,7 @@ quietly becomes `FALSE` instead:
 | `USE_RI TRUE` + an explicit `SCF_DIRECT_4C TRUE` | Two different, mutually exclusive SCF kernels for the same thing -- ambiguous. |
 | `USE_RI TRUE` + an explicit `FUNCTIONAL_DIRECT_4C TRUE` | Two different, mutually exclusive strategies for the same ADAM orbital-rotation sub-loop -- ambiguous. |
 | `FCIDUMP TRUE` without `NON_RELATIVISTIC TRUE`, or without `FUNCTIONAL` | Only NON_REL is supported; needs an RDMFT orbital order to write. |
+| `AIMPAC TRUE` without `FUNCTIONAL` | Nothing to write -- there is no 1-RDM without an RDMFT functional. |
 | `READ_OCCUPANCIES TRUE` without `FUNCTIONAL` | Nothing to read occupations into. |
 | `FUNCTIONAL_DIRECT_4C TRUE` without `C4_SPINOR TRUE`, `FUNCTIONAL`, or `FULL_OPTIMIZATION TRUE` | Nothing for it to change -- it only replaces `C4_SPINOR`'s own ADAM orbital-rotation sub-loop. |
 | `FUNCTIONAL_DIRECT_4C TRUE` + `FULL_OPTIMIZATION_4C_NEG TRUE`, or + `ORBITAL_OPTIMIZER NEO`/`ADAM_NEO` | No UKB-direct orbital-rotation Hessian exists yet (NEO needs one); use `ORBITAL_OPTIMIZER ADAM` (the default). |

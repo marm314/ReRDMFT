@@ -149,6 +149,8 @@ void Input::read(const std::string& filename) {
       hessian_mean_field_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "FCIDUMP") {
       fcidump_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "AIMPAC") {
+      aimpac_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "MIXING") {
       mixing_ = parseDouble(iss, line_number, keyword);
       if (!(mixing_ > 0.0 && mixing_ <= 1.0)) {
@@ -424,6 +426,9 @@ void Input::read(const std::string& filename) {
   if (read_occupancies_ && !has_functional_) {
     throw std::runtime_error("READ_OCCUPANCIES TRUE requires FUNCTIONAL (there are otherwise no occupations to read into)");
   }
+  if (aimpac_ && !has_functional_) {
+    throw std::runtime_error("AIMPAC TRUE requires FUNCTIONAL (there is otherwise no 1-RDM to write)");
+  }
   // Smart-conditional defaults: SCF_DIRECT_4C/FUNCTIONAL_POS_CHO_4C default to TRUE, but only in
   // the specific cases where they're actually applicable and non-conflicting -- an input that
   // never mentions either keyword at all (the overwhelming majority: every NON_REL/X2C-only run,
@@ -607,6 +612,7 @@ void Input::print(std::ostream& out) const {
   line("X2C") << flag(x2c_) << "\n";
   line("HESSIAN_MEAN_FIELD") << flag(hessian_mean_field_) << "\n";
   line("FCIDUMP") << flag(fcidump_) << "\n";
+  line("AIMPAC") << flag(aimpac_) << "\n";
   line("MIXING") << mixing_ << "\n";
   line("DIIS") << flag(diis_) << "\n";
   line("DIIS_SIZE") << diis_size_ << "\n";

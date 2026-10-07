@@ -134,6 +134,13 @@ class Input {
   // (spin-restricted, so spin-down is identical) -- for handing off to an external CI/DMRG/FCI
   // code. Requires FUNCTIONAL (there is otherwise no RDMFT orbital order to speak of).
   bool fcidump() const { return fcidump_; }
+  // Optional; defaults to false when the AIMPAC keyword is absent. When true, after the RDMFT
+  // functional evaluation (occupation optimization, and FULL_OPTIMIZATION's orbital rotation if
+  // that ran too), writes an AIMPAC/AIMAll-style WFN file (Utils/AIMPAC.h) of the 1-RDM's natural
+  // orbitals, expressed over the molecule's normalized Cartesian Gaussian primitives: WFN.NON_REL,
+  // WFN.X2C or WFN.4C depending on which method produced it. Requires FUNCTIONAL (there is
+  // otherwise no 1-RDM to write).
+  bool aimpac() const { return aimpac_; }
   // Optional; defaults to 0.4 when the MIXING keyword is absent. Linear
   // density-matrix mixing weight for the C4_DHF SCF loop (C4_DHF/C4_DHF.h):
   // the density fed into the next iteration's Fock build is
@@ -573,6 +580,7 @@ class Input {
   bool x2c_ = false;
   bool hessian_mean_field_ = false;
   bool fcidump_ = false;
+  bool aimpac_ = false;
   double mixing_ = 0.4;
   bool diis_ = true;
   int diis_size_ = 5;

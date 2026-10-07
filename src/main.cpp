@@ -22,6 +22,7 @@
 #include "C4_DHF.h"
 #include "ClosedShellSpinOrbitals.h"
 #include "DiracKinetic.h"
+#include "AIMPAC.h"
 #include "Fcidump.h"
 #include "FermiDirac.h"
 #include "FullOptimization.h"
@@ -195,6 +196,79 @@ void printTimings(const std::vector<TimingRecord>& records) {
 void printEnergyLine(const std::string& label, double value) {
   std::cout << "  " << std::setw(35) << std::left << (label + ":") << std::right
              << std::setw(20) << value << " Hartree\n";
+}
+
+// Tr[D H] (real part, for complex D/H -- a physical energy expectation value is always real at
+// self-consistency; any imaginary remainder is numerical noise) -- the one-electron ("h-onebody")
+// piece of an SCF/RDMFT energy decomposition: electronic_energy = Tr[D h] + Vee, so printing
+// Tr[D h] and Vee = electronic_energy - Tr[D h] alongside the already-printed nuclear repulsion
+// ("N-N") breaks the total energy down into its three standard physical pieces.
+template <typename T>
+double traceDH(const rerdmft::Matrix<T>& d, const rerdmft::Matrix<T>& h) {
+  T sum{};
+  for (std::size_t i = 0; i < d.rows(); ++i) {
+    for (std::size_t j = 0; j < d.cols(); ++j) sum += d(i, j) * h(j, i);
+  }
+  if constexpr (std::is_same_v<T, std::complex<double>>) {
+    return sum.real();
+  } else {
+    return sum;
+  }
+}
+
+// h-onebody for an RDMFT functional's own report: `occupations` is diagonal in whatever orbital
+// basis `h_mo` itself is expressed in (the SCF MO/spinor basis) UNLESS `rotation` is non-empty
+// (FULL_OPTIMIZATION ran), in which case the occupations are diagonal in the ROTATED basis instead
+// (C_new = C_old * rotation), so h_mo must first be rotated the same way: h' = rotation^dagger h_mo
+// rotation, then h-onebody = sum_p occupations[p] * h'(p,p).
+template <typename T>
+double oneBodyEnergyFromOccupations(const rerdmft::Matrix<T>& h_mo, const std::vector<double>& occupations,
+                                     const rerdmft::Matrix<std::complex<double>>& rotation) {
+  const std::size_t n = h_mo.rows();
+  if (rotation.rows() == 0) {
+    T sum{};
+    for (std::size_t p = 0; p < occupations.size() && p < n; ++p) sum += occupations[p] * h_mo(p, p);
+    if constexpr (std::is_same_v<T, std::complex<double>>) {
+      return sum.real();
+    } else {
+      return static_cast<double>(sum);
+    }
+  }
+  rerdmft::Matrix<std::complex<double>> h_c(n, n);
+  for (std::size_t i = 0; i < n; ++i) {
+    for (std::size_t j = 0; j < n; ++j) h_c(i, j) = h_mo(i, j);
+  }
+  const auto h_rot = rerdmft::dagger(rotation) * (h_c * rotation);
+  double sum = 0.0;
+  for (std::size_t p = 0; p < occupations.size() && p < n; ++p) sum += occupations[p] * h_rot(p, p).real();
+  return sum;
+}
+
+// Same breakdown as printEnergyDecomposition, but written into an arbitrary ostream (the
+// functional-report builders below accumulate their report into a local std::ostringstream, not
+// std::cout directly) and from MO-basis (occupations, rotation) rather than an AO density matrix.
+template <typename T>
+void printEnergyDecompositionMo(std::ostream& out, const rerdmft::Matrix<T>& h_mo,
+                                 const std::vector<double>& occupations,
+                                 const rerdmft::Matrix<std::complex<double>>& rotation,
+                                 double electronic_energy, double nuclear_repulsion_energy) {
+  const double h_onebody = oneBodyEnergyFromOccupations(h_mo, occupations, rotation);
+  out << "    h-onebody: " << std::setprecision(10) << h_onebody << std::setprecision(6) << " Hartree\n";
+  out << "    Vee:       " << std::setprecision(10) << (electronic_energy - h_onebody) << std::setprecision(6)
+      << " Hartree\n";
+  out << "    N-N:       " << std::setprecision(10) << nuclear_repulsion_energy << std::setprecision(6)
+      << " Hartree\n";
+}
+
+// Prints the "h-onebody" / "Vee" / "N-N" breakdown right after a method's own Electronic/Nuclear
+// repulsion/Total energy lines -- see traceDH's own comment for the physics.
+template <typename T>
+void printEnergyDecomposition(const rerdmft::Matrix<T>& density, const rerdmft::Matrix<T>& h_one_body,
+                               double electronic_energy, double nuclear_repulsion_energy) {
+  const double h_onebody = traceDH(density, h_one_body);
+  printEnergyLine("h-onebody", h_onebody);
+  printEnergyLine("Vee", electronic_energy - h_onebody);
+  printEnergyLine("N-N", nuclear_repulsion_energy);
 }
 
 // Frobenius norm and max |element| of an orbital-gradient matrix `g`
@@ -952,7 +1026,8 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
                                    const std::vector<double>* initial_occupations = nullptr,
                                    const std::vector<OccInLine>* occ_in = nullptr,
                                    const rerdmft::UkbDirectSource* ukb_direct = nullptr,
-                                   const RiNonRelDirectSource* ri_nonrel_direct = nullptr) {
+                                   const RiNonRelDirectSource* ri_nonrel_direct = nullptr,
+                                   rerdmft::RestartCapture* restart_neg = nullptr) {
   // Generic (element-access) view of the integrals, used by the production code below; the DEBUG /
   // validation blocks that need a dense Tensor4 re-bind `eri` to a dense view of `eri_in`.
   const Eri& eri = eri_in;
@@ -1328,6 +1403,8 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
           << (optimized_total_energy <= total_energy ? "<=" : ">")
           << " the initial-occupations value above, as expected for a minimization)\n";
     }
+    printEnergyDecompositionMo(out, h, optimized_active, rerdmft::Matrix<std::complex<double>>(),
+                                sqp_result.objective_value, nuclear_repulsion_energy);
     // Rounds to the SAME 5 decimals actually printed below, so the
     // reported sum matches what a reader would get by adding up the
     // displayed digits themselves (rather than the full-precision
@@ -1536,6 +1613,20 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
                 << std::scientific << std::setprecision(3)
                 << saddle_result.electronic_energy - full_result.electronic_energy << std::defaultfloat << std::setprecision(6)
                 << " relative to the positive-energy-only minimum)\n";
+            printEnergyDecompositionMo(out, h, saddle_result.occupations, saddle_result.total_rotation,
+                                        saddle_result.electronic_energy, nuclear_repulsion_energy);
+            // AIMPAC WFN (<input>_neg.wfn): the saddle-stage result itself is NOT persisted into
+            // `restart` above (that stays the positive-energy-only minimum, see its own comment) --
+            // this is the only place the saddle-stage occupations/rotation/energy are available, so
+            // capture them here into a SEPARATE output for main.cpp's own AIMPAC wiring.
+            if (restart_neg != nullptr && saddle_result.checks_passed) {
+              restart_neg->valid = true;
+              restart_neg->occupations = saddle_result.occupations;
+              restart_neg->electronic_energy = saddle_result.electronic_energy;
+              restart_neg->converged = saddle_result.converged;
+              restart_neg->orbitals_optimized = true;
+              restart_neg->total_rotation = saddle_result.total_rotation;
+            }
           } catch (const std::exception& e) {
             out << "\n  FULL_OPTIMIZATION_4C_NEG FAILED: " << e.what() << "\n";
           }
@@ -1610,7 +1701,8 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
                                        const std::vector<double>* initial_occupations = nullptr,
                                        const std::vector<OccInLine>* occ_in = nullptr,
                                        const rerdmft::UkbDirectSource* ukb_direct = nullptr,
-                                       const RiNonRelDirectSource* ri_nonrel_direct = nullptr) {
+                                       const RiNonRelDirectSource* ri_nonrel_direct = nullptr,
+                                       rerdmft::RestartCapture* restart_neg = nullptr) {
   // See buildFunctionalReport: generic view here, dense re-binding in the DEBUG blocks.
   const Eri& eri = eri_in;
   rerdmft::progressContext() = label;  // live progress lines (stderr) are prefixed with the method
@@ -1836,6 +1928,8 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
     out << "    Optimized total " << functional_name << " energy: " << std::setprecision(10)
         << optimized_total_energy << std::setprecision(6)
         << " Hartree (READ_OCCUPANCIES: no occupation-number optimization performed)\n";
+    printEnergyDecompositionMo(out, h, optimized_occ, rerdmft::Matrix<std::complex<double>>(),
+                                optimized_electronic_energy, nuclear_repulsion_energy);
     out << "    Optimized geminal occupation numbers (n_p, both members of each Kramers/spin "
            "pair share this value; fixed 5 decimals):\n";
     out << std::fixed << std::setprecision(5);
@@ -1914,6 +2008,8 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
           << optimized_total_energy << std::setprecision(6) << " Hartree ("
           << (optimized_total_energy <= initial_total_energy ? "<=" : ">")
           << " the initial-occupations value above, as expected for a minimization)\n";
+      printEnergyDecompositionMo(out, h, embed(sqp_result.x), rerdmft::Matrix<std::complex<double>>(),
+                                  sqp_result.objective_value, nuclear_repulsion_energy);
       out << "    Optimized geminal occupation numbers (n_p, both members of each Kramers/spin "
              "pair share this value; fixed 5 decimals):\n";
       out << std::fixed << std::setprecision(5);
@@ -2039,6 +2135,8 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
           << (optimized_total_energy <= initial_total_energy ? "<=" : ">")
           << " the initial-occupations value above, as expected for a minimization)\n";
       const auto final_occ = embedGammas(lbfgs_result.x);
+      printEnergyDecompositionMo(out, h, final_occ, rerdmft::Matrix<std::complex<double>>(),
+                                  lbfgs_result.objective_value, nuclear_repulsion_energy);
       out << "    Optimized geminal occupation numbers (n_p, both members of each Kramers/spin "
              "pair share this value; fixed 5 decimals):\n";
       out << std::fixed << std::setprecision(5);
@@ -2257,6 +2355,18 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
                 << std::scientific << std::setprecision(3)
                 << saddle_result.electronic_energy - full_result.electronic_energy << std::defaultfloat << std::setprecision(6)
                 << " relative to the positive-energy-only minimum)\n";
+            printEnergyDecompositionMo(out, h, saddle_result.occupations, saddle_result.total_rotation,
+                                        saddle_result.electronic_energy, nuclear_repulsion_energy);
+            // AIMPAC WFN (<input>_neg.wfn): see buildFunctionalReport's own comment -- the
+            // saddle-stage result is only available here, so capture it separately for main.cpp.
+            if (restart_neg != nullptr && saddle_result.checks_passed) {
+              restart_neg->valid = true;
+              restart_neg->occupations = saddle_result.occupations;
+              restart_neg->electronic_energy = saddle_result.electronic_energy;
+              restart_neg->converged = saddle_result.converged;
+              restart_neg->orbitals_optimized = true;
+              restart_neg->total_rotation = saddle_result.total_rotation;
+            }
           } catch (const std::exception& e) {
             out << "\n  FULL_OPTIMIZATION_4C_NEG FAILED: " << e.what() << "\n";
           }
@@ -2380,7 +2490,8 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
                                        const std::function<Eri()>& eri_full_block_factory = std::function<Eri()>(),
                                        const std::vector<double>* restart_amplitudes = nullptr,
                                        const rerdmft::UkbDirectSource* ukb_direct = nullptr,
-                                       const RiNonRelDirectSource* ri_nonrel_direct = nullptr) {
+                                       const RiNonRelDirectSource* ri_nonrel_direct = nullptr,
+                                       rerdmft::RestartCapture* restart_neg = nullptr) {
   rerdmft::progressContext() = label;
   const std::size_t n_total = h.rows();
   const std::size_t n_spatial = n_active / 2;
@@ -2510,6 +2621,8 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
   printOcc(out, occupations);
   out << "  Total pCCD energy (fixed orbitals): " << std::setprecision(10) << total_energy
       << " Hartree (electronic " << electronic_energy << ")" << std::setprecision(6) << "\n";
+  printEnergyDecompositionMo(out, h, occupations, rerdmft::Matrix<std::complex<double>>(), electronic_energy,
+                              nuclear_repulsion_energy);
 
   rerdmft::FullOptResult full_result;
   if (full_opt.enabled) {
@@ -2595,6 +2708,18 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
               << std::scientific << std::setprecision(3)
               << saddle_result.electronic_energy - full_result.electronic_energy << std::defaultfloat << std::setprecision(6)
               << " relative to the positive-energy-only minimum)\n";
+          printEnergyDecompositionMo(out, h, saddle_result.occupations, saddle_result.total_rotation,
+                                      saddle_result.electronic_energy, nuclear_repulsion_energy);
+          // AIMPAC WFN (<input>_neg.wfn): see buildFunctionalReport's own comment -- the
+          // saddle-stage result is only available here, so capture it separately for main.cpp.
+          if (restart_neg != nullptr && saddle_result.checks_passed) {
+            restart_neg->valid = true;
+            restart_neg->occupations = saddle_result.occupations;
+            restart_neg->electronic_energy = saddle_result.electronic_energy;
+            restart_neg->converged = saddle_result.converged;
+            restart_neg->orbitals_optimized = true;
+            restart_neg->total_rotation = saddle_result.total_rotation;
+          }
         } catch (const std::exception& e) {
           out << "\n  FULL_OPTIMIZATION_4C_NEG FAILED: " << e.what() << "\n";
         }
@@ -2679,6 +2804,230 @@ void writeNonRelFcidump(const rerdmft::Input& input, const rerdmft::Matrix<doubl
     rerdmft::writeFcidump("FCIDUMP", n, input.n_electrons(), /*ms2=*/0, h_mo, eri_mo, nuclear_repulsion_energy);
   }
   log << "\nFCIDUMP written (NON_REL, spin-up channel, same MO order as used/optimized in the RDMFT): FCIDUMP\n";
+}
+
+// Derives the AIMPAC WFN output path from the input file's own name: "foo.inp" -> "foo.wfn" (same
+// directory, extension replaced); "_neg" is appended before the extension for the C4_DHF min-max
+// (FULL_OPTIMIZATION_4C_NEG) saddle-stage file, see writeC4Aimpac below.
+std::string wfnOutputPath(const std::string& input_path, bool is_neg) {
+  const auto slash = input_path.find_last_of("/\\");
+  const std::string dir = (slash == std::string::npos) ? std::string() : input_path.substr(0, slash + 1);
+  std::string name = (slash == std::string::npos) ? input_path : input_path.substr(slash + 1);
+  const auto dot = name.find_last_of('.');
+  if (dot != std::string::npos && dot != 0) name = name.substr(0, dot);
+  return dir + name + (is_neg ? "_neg.wfn" : ".wfn");
+}
+
+// Writes the AIMPAC/AIMAll WFN file (Utils/AIMPAC.h) of the converged NON_REL 1-RDM's natural
+// orbitals. No-op unless AIMPAC TRUE. `capture.occupations` is the FULL spin-orbital vector
+// (length 2*n_mo, [alpha MOs, beta MOs] -- see writeRestartFile's own blockDiagTwice): the
+// physical (spin-summed) spatial 1-RDM weights each spatial MO by occ_alpha + occ_beta.
+void writeNonRelAimpac(const rerdmft::Input& input, const std::string& input_path,
+                        const rerdmft::Matrix<double>& c_base, const rerdmft::RestartCapture& capture,
+                        const std::vector<rerdmft::BasisFunction>& large_basis_fns,
+                        const rerdmft::Matrix<double>& nonrel_transform, double nuclear_repulsion_energy,
+                        std::ostream& log) {
+  if (!input.aimpac()) return;
+  if (!capture.valid) {
+    log << "\nAIMPAC WFN file (NON_REL): not written -- no RDMFT result was produced.\n";
+    return;
+  }
+  const std::size_t n = c_base.cols();
+  const auto c_final = c_base * nonrelSpatialRotation(capture, n);
+  const rerdmft::Matrix<double> c_cart = input.cartesian() ? c_final : nonrel_transform * c_final;
+  const std::size_t n_mo = c_cart.cols();
+  if (capture.occupations.size() != 2 * n_mo) {
+    log << "\nAIMPAC WFN file (NON_REL): not written -- unexpected occupations vector size ("
+        << capture.occupations.size() << ", expected " << 2 * n_mo << ").\n";
+    return;
+  }
+  rerdmft::Matrix<double> occ_diag(n_mo, n_mo, 0.0);
+  for (std::size_t k = 0; k < n_mo; ++k) occ_diag(k, k) = capture.occupations[k] + capture.occupations[n_mo + k];
+  const rerdmft::Matrix<double> d_real = c_cart * occ_diag * rerdmft::transpose(c_cart);
+  rerdmft::Matrix<std::complex<double>> d_ao(d_real.rows(), d_real.cols());
+  for (std::size_t i = 0; i < d_real.rows(); ++i)
+    for (std::size_t j = 0; j < d_real.cols(); ++j) d_ao(i, j) = d_real(i, j);
+  const rerdmft::Matrix<double> s_cart = rerdmft::overlapMatrix(large_basis_fns);
+  const auto orbitals = rerdmft::naturalOrbitalsFromDensity(s_cart, d_ao, input.x_lin_dep_thrs_l());
+  const std::string path = wfnOutputPath(input_path, /*is_neg=*/false);
+  rerdmft::writeAimpacWfn(path, "RERDMFT NON_REL WFN FILE", input.geometry(), large_basis_fns, orbitals,
+                           capture.electronic_energy + nuclear_repulsion_energy, 0.0);
+  log << "\nAIMPAC WFN file written (NON_REL): " << path << "\n";
+}
+
+// Plain (non-conjugating) transpose of a complex matrix -- Matrix.h only provides `dagger`
+// (conjugate transpose, right for a bra-ket sandwich) and `transpose` (real only); the RKB
+// small-component recovery below needs the UNCONJUGATED transpose of `rkb_coefficients` (a
+// coefficient-expansion matrix, not an operator), see rkbComponentAimpacDensity's own comment.
+rerdmft::Matrix<std::complex<double>> complexTranspose(const rerdmft::Matrix<std::complex<double>>& m) {
+  rerdmft::Matrix<std::complex<double>> t(m.cols(), m.rows());
+  for (std::size_t i = 0; i < m.rows(); ++i)
+    for (std::size_t j = 0; j < m.cols(); ++j) t(j, i) = m(i, j);
+  return t;
+}
+
+// Builds the plain-Cartesian Large-AO-basis 1-RDM (spin-summed: alpha-alpha + beta-beta blocks)
+// from a weighted sum of outer products of `c_full`'s Large-alpha/beta columns (rows
+// [0, 2*n_large_final) of the [Large-alpha; Large-beta; ...] spinor coefficient matrix --
+// RkbDensityMatrix.h's own basis order), occupied columns starting at `occ_start`. X2C has no
+// Small component at all (eliminated by the decoupling transform before this point --
+// X2C_DHF/X2C_DensityMatrix.h); C4_DHF's own Small-component density is a SEPARATE, independent
+// 1-RDM over the Small component's OWN Cartesian basis (rkbComponentAimpacDensity below) -- see
+// the conversation this was designed in: rho(r) = rho_Large(r) + rho_Small(r) exactly, with NO
+// cross term (Large and Small occupy disjoint 4-spinor sectors), so their natural orbitals are
+// computed, and written to the WFN file, entirely independently; there is no single combined
+// "Large+Small" AO density matrix. Back-transforms through `large_transform_final` (ALWAYS the
+// genuine Cartesian<->spherical(+LOWGEN) transform for the relativistic path, independent of the
+// CARTESIAN keyword -- see its own construction in main.cpp) to the plain Cartesian Large AO basis
+// AIMPAC needs, then traces over spin (alpha-alpha + beta-beta) to get a single spin-summed
+// density over that one shared Gaussian basis.
+rerdmft::Matrix<std::complex<double>> largeComponentAimpacDensity(
+    const rerdmft::Matrix<std::complex<double>>& c_full, const std::vector<double>& occupations,
+    std::size_t occ_start, const rerdmft::Matrix<double>& large_transform_final) {
+  const std::size_t n_large_final = large_transform_final.cols();
+  const std::size_t n2 = 2 * n_large_final;
+  rerdmft::Matrix<std::complex<double>> d_spin(n2, n2, std::complex<double>(0.0, 0.0));
+  for (std::size_t k = 0; k < occupations.size(); ++k) {
+    const double w = occupations[k];
+    if (w == 0.0) continue;
+    const std::size_t col = occ_start + k;
+    for (std::size_t i = 0; i < n2; ++i) {
+      const auto c_ic = c_full(i, col);
+      if (c_ic == std::complex<double>(0.0, 0.0)) continue;
+      for (std::size_t j = 0; j < n2; ++j) d_spin(i, j) += w * c_ic * std::conj(c_full(j, col));
+    }
+  }
+  const rerdmft::Matrix<std::complex<double>> t_spin = rerdmft::spinDuplicateComplex(large_transform_final);
+  const rerdmft::Matrix<std::complex<double>> d_spin_cart = t_spin * d_spin * rerdmft::dagger(t_spin);
+  const std::size_t n_cart = d_spin_cart.rows() / 2;
+  rerdmft::Matrix<std::complex<double>> d_cart(n_cart, n_cart, std::complex<double>(0.0, 0.0));
+  for (std::size_t i = 0; i < n_cart; ++i)
+    for (std::size_t j = 0; j < n_cart; ++j) d_cart(i, j) = d_spin_cart(i, j) + d_spin_cart(n_cart + i, n_cart + j);
+  return d_cart;
+}
+
+// C4_DHF only: builds the 1-RDM over the Small component's OWN raw analytic RKB Gaussian basis
+// (SmallComponentBasis::functions(), i.e. buildRkbSmallBasis's output -- genuinely different
+// Cartesian functions from the Large basis, one angular momentum up/down via the kinetic-balance
+// derivative, NOT the same functions re-indexed). `c_full`'s compressed-RKB-small-partner block
+// (rows [n2, 2*n2), n2 = 2*n_large_final = rkb_coefficients.rows()) is related to the RAW small AO
+// coefficients by rkb_coefficients itself (RkbTransformation.h/RkbHamiltonian.h's own W = [[I,0],
+// [0,C^T]] embedding: H_RKB = W^dagger H_UKB W projects the RAW uKB-small Hamiltonian DOWN via
+// C^T, so going the other way -- expanding a compressed-small coefficient vector z back up to raw
+// AO coefficients -- is c_raw = C^T z, i.e. complexTranspose(rkb_coefficients) * z, exactly
+// mirroring how W embeds the compressed basis into the raw one). `occ_start` is the SAME
+// occupied-column window `largeComponentAimpacDensity` uses (c_full.rows() / 2); the row offset
+// into the compressed-small block is `rkb_coefficients.rows()` (= n2) instead.
+rerdmft::Matrix<std::complex<double>> rkbComponentAimpacDensity(
+    const rerdmft::Matrix<std::complex<double>>& c_full, const std::vector<double>& occupations,
+    std::size_t occ_start, const rerdmft::Matrix<std::complex<double>>& rkb_coefficients) {
+  const std::size_t n2 = rkb_coefficients.rows();
+  const std::size_t n_small2 = rkb_coefficients.cols();  // 2 * (raw RKB small AO count)
+  const rerdmft::Matrix<std::complex<double>> c_t = complexTranspose(rkb_coefficients);  // (n_small2 x n2)
+  rerdmft::Matrix<std::complex<double>> p(n_small2, n_small2, std::complex<double>(0.0, 0.0));
+  for (std::size_t k = 0; k < occupations.size(); ++k) {
+    const double w = occupations[k];
+    if (w == 0.0) continue;
+    const std::size_t col = occ_start + k;
+    rerdmft::Matrix<std::complex<double>> z(n2, 1);
+    for (std::size_t i = 0; i < n2; ++i) z(i, 0) = c_full(n2 + i, col);
+    const rerdmft::Matrix<std::complex<double>> c_raw = c_t * z;  // (n_small2 x 1) raw AO coefficients
+    for (std::size_t i = 0; i < n_small2; ++i) {
+      const auto ci = c_raw(i, 0);
+      if (ci == std::complex<double>(0.0, 0.0)) continue;
+      for (std::size_t j = 0; j < n_small2; ++j) p(i, j) += w * ci * std::conj(c_raw(j, 0));
+    }
+  }
+  const std::size_t n_small = n_small2 / 2;  // alpha/beta spin-duplicated over the SAME raw AO list
+  rerdmft::Matrix<std::complex<double>> d(n_small, n_small, std::complex<double>(0.0, 0.0));
+  for (std::size_t i = 0; i < n_small; ++i)
+    for (std::size_t j = 0; j < n_small; ++j) d(i, j) = p(i, j) + p(n_small + i, n_small + j);
+  return d;
+}
+
+// Writes the AIMPAC/AIMAll WFN file of the converged X2C 1-RDM's natural orbitals. No-op unless
+// AIMPAC TRUE. `c_scf`: the SCF spinor coefficients BEFORE the FULL_OPTIMIZATION rotation (same
+// convention as writeRestartFile's own `c_scf` -- restartCoefficients applies `capture.total_rotation`).
+void writeX2CAimpac(const rerdmft::Input& input, const std::string& input_path,
+                     const rerdmft::Matrix<std::complex<double>>& c_scf, const rerdmft::RestartCapture& capture,
+                     const std::vector<rerdmft::BasisFunction>& large_basis_fns,
+                     const rerdmft::Matrix<double>& large_transform_final, double nuclear_repulsion_energy,
+                     std::ostream& log) {
+  if (!input.aimpac()) return;
+  if (!capture.valid) {
+    log << "\nAIMPAC WFN file (X2C): not written -- no RDMFT result was produced.\n";
+    return;
+  }
+  const auto c_final = rerdmft::restartCoefficients(c_scf, capture.total_rotation);
+  const auto d_ao = largeComponentAimpacDensity(c_final, capture.occupations, /*occ_start=*/0, large_transform_final);
+  const rerdmft::Matrix<double> s_cart = rerdmft::overlapMatrix(large_basis_fns);
+  const auto orbitals = rerdmft::naturalOrbitalsFromDensity(s_cart, d_ao, input.x_lin_dep_thrs_l());
+  const std::string path = wfnOutputPath(input_path, /*is_neg=*/false);
+  rerdmft::writeAimpacWfn(path, "RERDMFT X2C WFN FILE", input.geometry(), large_basis_fns, orbitals,
+                           capture.electronic_energy + nuclear_repulsion_energy, 0.0);
+  log << "\nAIMPAC WFN file written (X2C): " << path << "\n";
+}
+
+// Writes the AIMPAC/AIMAll WFN file(s) of the converged C4_DHF 1-RDM's natural orbitals: Large and
+// Small components are diagonalized INDEPENDENTLY (see largeComponentAimpacDensity/
+// rkbComponentAimpacDensity's own comments -- rho(r) = rho_Large(r) + rho_Small(r), no cross term)
+// and merged into one WFN file whose basis is large_basis_fns ++ small_basis_fns concatenated (each
+// orbital's coefficients zero-padded over the OTHER component's primitives; writeAimpacWfn itself
+// drops near-zero-occupation orbitals and re-sorts by decreasing occupation). No-op unless AIMPAC
+// TRUE. Writes "<input>.wfn" from the positive-energy-only minimum (`capture`), and -- only when
+// FULL_OPTIMIZATION_4C_NEG actually ran and converged (`capture_neg.valid`) -- ADDITIONALLY
+// "<input>_neg.wfn" from the min-max saddle-stage result.
+void writeC4Aimpac(const rerdmft::Input& input, const std::string& input_path,
+                    const rerdmft::Matrix<std::complex<double>>& c_scf, const rerdmft::RestartCapture& capture,
+                    const rerdmft::RestartCapture& capture_neg,
+                    const std::vector<rerdmft::BasisFunction>& large_basis_fns,
+                    const std::vector<rerdmft::BasisFunction>& small_basis_fns,
+                    const rerdmft::Matrix<double>& large_transform_final,
+                    const rerdmft::Matrix<std::complex<double>>& rkb_coefficients, double nuclear_repulsion_energy,
+                    std::ostream& log) {
+  if (!input.aimpac()) return;
+  std::vector<rerdmft::BasisFunction> combined_basis = large_basis_fns;
+  combined_basis.insert(combined_basis.end(), small_basis_fns.begin(), small_basis_fns.end());
+  const std::size_t n_large_cart = large_basis_fns.size();
+  const std::size_t n_small_cart = small_basis_fns.size();
+  const rerdmft::Matrix<double> s_large = rerdmft::overlapMatrix(large_basis_fns);
+  const rerdmft::Matrix<double> s_small = rerdmft::overlapMatrix(small_basis_fns);
+
+  const auto zeroPad = [&](std::vector<rerdmft::NaturalOrbital> orbs, bool large_first) {
+    for (auto& orb : orbs) {
+      std::vector<double> padded(n_large_cart + n_small_cart, 0.0);
+      const std::size_t offset = large_first ? 0 : n_large_cart;
+      for (std::size_t i = 0; i < orb.coefficients.size(); ++i) padded[offset + i] = orb.coefficients[i];
+      orb.coefficients = std::move(padded);
+    }
+    return orbs;
+  };
+
+  const auto writeOne = [&](const rerdmft::RestartCapture& cap, const std::string& path, const char* tag) {
+    if (!cap.valid) {
+      log << "\nAIMPAC WFN file (" << tag << "): not written -- no RDMFT result was produced.\n";
+      return;
+    }
+    const auto c_final = rerdmft::restartCoefficients(c_scf, cap.total_rotation);
+    // `cap.occupations` is already FULL-length (== c_final.rows()), zero-padded over the excluded
+    // negative-energy block -- aligned 1:1 with c_final's real column indices, so occ_start=0
+    // here (NOT c_final.rows()/2: that range reads past c_final's own column count entirely).
+    const std::size_t occ_start = 0;
+    const auto d_large = largeComponentAimpacDensity(c_final, cap.occupations, occ_start, large_transform_final);
+    const auto d_small = rkbComponentAimpacDensity(c_final, cap.occupations, occ_start, rkb_coefficients);
+    auto orbitals = zeroPad(rerdmft::naturalOrbitalsFromDensity(s_large, d_large, input.x_lin_dep_thrs_l()), true);
+    const auto small_orbitals =
+        zeroPad(rerdmft::naturalOrbitalsFromDensity(s_small, d_small, input.x_lin_dep_thrs_s()), false);
+    orbitals.insert(orbitals.end(), small_orbitals.begin(), small_orbitals.end());
+    rerdmft::writeAimpacWfn(path, std::string("RERDMFT ") + tag + " WFN FILE", input.geometry(), combined_basis,
+                             orbitals, cap.electronic_energy + nuclear_repulsion_energy, 0.0);
+    log << "\nAIMPAC WFN file written (" << tag << "): " << path << "\n";
+  };
+
+  writeOne(capture, wfnOutputPath(input_path, /*is_neg=*/false), "4C");
+  if (capture_neg.valid) {
+    writeOne(capture_neg, wfnOutputPath(input_path, /*is_neg=*/true), "4C_NEG");
+  }
 }
 
 // Writes the binary RESTART file (Utils/Restart.h) of one method ("NON_REL" | "X2C") from the
@@ -3092,6 +3441,7 @@ int main(int argc, char** argv) {
   const auto t_start = std::chrono::steady_clock::now();
   auto t_checkpoint = t_start;
   std::vector<TimingRecord> timing_records;
+  const std::string input_path = argv[1];  // AIMPAC's own output naming (wfnOutputPath): "<input>.wfn"
   try {
     input.read(argv[1]);
     basis_set.read(input.basis_file());
@@ -3507,6 +3857,8 @@ int main(int argc, char** argv) {
                                  blockDiagTwice(s_large_cart), h_spin, restartFingerprint, restart_nuclear_repulsion);
         writeNonRelFcidump(input, c_spatial, h_core_nonrel, nonrel_eri, ao_cholesky, nonrel_restart,
                            restart_nuclear_repulsion, nonrel_restart_log);
+        writeNonRelAimpac(input, input_path, c_spatial, nonrel_restart, large_basis.functions(), nonrel_transform,
+                           restart_nuclear_repulsion, nonrel_restart_log);
       }
 
       if (input.x2c()) {
@@ -3593,6 +3945,8 @@ int main(int argc, char** argv) {
                                                      : x2c_functional(x2c_mo_sym);
         writeRestartFile<std::complex<double>>(x2c_restart_log, input, "X2C", x2c_restart, c_x2c, x2c_hamiltonian.h_x2c, s_x2c, h_x2c_mo,
                                                restartFingerprint, restart_nuclear_repulsion);
+        writeX2CAimpac(input, input_path, c_x2c, x2c_restart, large_basis.functions(), large_transform_final,
+                       restart_nuclear_repulsion, x2c_restart_log);
       }
 
       if (input.c4_spinor()) {
@@ -3753,6 +4107,7 @@ int main(int argc, char** argv) {
         }
         const std::size_t n_negative_r = dim / 2;
         rerdmft::RestartCapture c4_restart;
+        rerdmft::RestartCapture c4_restart_neg;  // AIMPAC's own "<input>_neg.wfn" (min-max stage), see below
         // USE_RI + FULL_OPTIMIZATION (C4_DHF, READ_RESTART): the SAME UkbDirectSource wiring the
         // non-restart path builds (see its own comment above), from c_dhf_restart and the SAME
         // ri_direct_source_r built above.
@@ -3768,7 +4123,8 @@ int main(int argc, char** argv) {
                 "C4_DHF", h_mo_restart, eri_any, dim - n_negative_r, n_negative_r, input.n_electrons(),
                 restart_nuclear_repulsion, input.pccd_frozen_pairs(), input.pccd_active_pairs(),
                 input.pccd_amplitude_solver(), fullOptSettings(input), input.full_optimization_4c_neg(),
-                t_start, t_checkpoint, timing_records, &c4_restart, eri_full_factory, &ro.data.amplitudes, ukb_direct_ptr_r);
+                t_start, t_checkpoint, timing_records, &c4_restart, eri_full_factory, &ro.data.amplitudes, ukb_direct_ptr_r,
+                nullptr, &c4_restart_neg);
           }
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(
@@ -3776,13 +4132,14 @@ int main(int argc, char** argv) {
                 restart_nuclear_repulsion, input.pnof_subspaces(), input.pnof_coupling(), /*relativistic=*/true,
                 input.sqp_pnof_occ(), input.debug(), fullOptSettings(input),
                 input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &c4_restart, eri_full_factory,
-                &ro.data.occupations, occ_in, ukb_direct_ptr_r);
+                &ro.data.occupations, occ_in, ukb_direct_ptr_r, nullptr, &c4_restart_neg);
           }
           return buildFunctionalReport(
               "C4_DHF", h_mo_restart, eri_any, dummyEnergies(dim - n_negative_r), n_negative_r, input.n_electrons(),
               input.jk_frozen_pairs(), input.jk_active_pairs(), input.temperature(), input.functional(),
               input.occupation_init(), restart_nuclear_repulsion, input.debug(), fullOptSettings(input), input.full_optimization_4c_neg(), t_start, t_checkpoint,
-              timing_records, &c4_restart, eri_full_factory, &ro.data.occupations, occ_in, ukb_direct_ptr_r);
+              timing_records, &c4_restart, eri_full_factory, &ro.data.occupations, occ_in, ukb_direct_ptr_r, nullptr,
+              &c4_restart_neg);
         };
         if (input.use_ri()) {
           // FULL_OPTIMIZATION_4C_NEG + USE_RI: unlike CHOLESKY's own full_chol_factory, no
@@ -3815,6 +4172,9 @@ int main(int argc, char** argv) {
         rkb_cholesky = rerdmft::RkbCholesky();
         writeRestartFile<std::complex<double>>(c4_restart_log, input, "4C", c4_restart, c_dhf_restart, h_rkb, s_full, h_mo_restart,
                                                restartFingerprint, restart_nuclear_repulsion);
+        writeC4Aimpac(input, input_path, c_dhf_restart, c4_restart, c4_restart_neg, large_basis.functions(),
+                      small_basis.functions(), large_transform_final, rkb_coefficients, restart_nuclear_repulsion,
+                      c4_restart_log);
       }
     }
 
@@ -4130,6 +4490,8 @@ int main(int argc, char** argv) {
                                  nonrel_hf_result.nuclear_repulsion_energy);
         writeNonRelFcidump(input, nonrel_hf_result.c_matrix, h_core_nonrel, nonrel_eri, ao_cholesky, nonrel_restart,
                            nonrel_hf_result.nuclear_repulsion_energy, nonrel_restart_log);
+        writeNonRelAimpac(input, input_path, nonrel_hf_result.c_matrix, nonrel_restart, large_basis.functions(),
+                           nonrel_transform, nonrel_hf_result.nuclear_repulsion_energy, nonrel_restart_log);
       }
     }
 
@@ -4473,6 +4835,8 @@ int main(int argc, char** argv) {
             x2c_restart_log, input, "X2C", x2c_restart, x2c_hf_result.c_matrix, x2c_hamiltonian.h_x2c,
             rerdmft::extractLargeComponentBlock(s_full, x2c_hf_result.c_matrix.rows()), h_x2c_mo,
             rerdmft::basisFingerprint(large_basis.functions()), x2c_hf_result.nuclear_repulsion_energy);
+        writeX2CAimpac(input, input_path, x2c_hf_result.c_matrix, x2c_restart, large_basis.functions(),
+                       large_transform_final, x2c_hf_result.nuclear_repulsion_energy, x2c_restart_log);
       }
     }
 
@@ -4895,6 +5259,7 @@ int main(int argc, char** argv) {
                 static_cast<std::ptrdiff_t>(n_negative),
             dhf_result.orbital_energies.end());
         rerdmft::RestartCapture c4_restart;
+        rerdmft::RestartCapture c4_restart_neg;  // AIMPAC's own "<input>_neg.wfn" (min-max stage), see below
         // FUNCTIONAL_DIRECT_4C / RI_4C: the fixed UKB-basis data the ADAM orbital-rotation
         // sub-loop needs to build its generalized Fock directly from UKB AO integrals (AO-direct)
         // or a pre-built RI 3-center tensor (RI_4C -- the SAME ri_direct_source already built
@@ -4920,7 +5285,7 @@ int main(int argc, char** argv) {
                 dhf_result.nuclear_repulsion_energy, input.pccd_frozen_pairs(),
                 input.pccd_active_pairs(), input.pccd_amplitude_solver(), fullOptSettings(input),
                 input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records,
-                &c4_restart, eri_full_factory, nullptr, ukb_direct_ptr);
+                &c4_restart, eri_full_factory, nullptr, ukb_direct_ptr, nullptr, &c4_restart_neg);
           }
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(
@@ -4929,7 +5294,7 @@ int main(int argc, char** argv) {
                 input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
                 fullOptSettings(input),
                 input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &c4_restart, eri_full_factory,
-                nullptr, occ_in, ukb_direct_ptr);
+                nullptr, occ_in, ukb_direct_ptr, nullptr, &c4_restart_neg);
           }
           return buildFunctionalReport(
               "C4_DHF", h_mo, eri_any, dhf_orbital_energies_positive, n_negative,
@@ -4938,7 +5303,8 @@ int main(int argc, char** argv) {
               input.occupation_init(), dhf_result.nuclear_repulsion_energy, input.debug(),
               fullOptSettings(input),
               input.full_optimization_4c_neg(), t_start, t_checkpoint,
-              timing_records, &c4_restart, eri_full_factory, nullptr, occ_in, ukb_direct_ptr);
+              timing_records, &c4_restart, eri_full_factory, nullptr, occ_in, ukb_direct_ptr, nullptr,
+              &c4_restart_neg);
         };
         if (input.use_ri()) {
           // FULL_OPTIMIZATION_4C_NEG + USE_RI: unlike CHOLESKY's own full_chol_factory, no
@@ -4979,6 +5345,9 @@ int main(int argc, char** argv) {
         const auto restart_fingerprint = rerdmft::basisFingerprint(large_basis.functions());
         writeRestartFile<std::complex<double>>(c4_restart_log, input, "4C", c4_restart, dhf_result.c_dhf, h_rkb, s_full, h_mo,
                                                restart_fingerprint, dhf_result.nuclear_repulsion_energy);
+        writeC4Aimpac(input, input_path, dhf_result.c_dhf, c4_restart, c4_restart_neg, large_basis.functions(),
+                      small_basis.functions(), large_transform_final, rkb_coefficients,
+                      dhf_result.nuclear_repulsion_energy, c4_restart_log);
       }
     }
   } catch (const std::exception& e) {
@@ -5296,6 +5665,16 @@ int main(int argc, char** argv) {
     printEnergyLine("Electronic energy", nonrel_hf_result.electronic_energy);
     printEnergyLine("Nuclear repulsion energy", nonrel_hf_result.nuclear_repulsion_energy);
     printEnergyLine("Total nonrelativistic HF energy", nonrel_hf_result.total_energy);
+    {
+      // h_core_nonrel itself is local to the (READ_RESTART vs fresh-SCF) block that ran the SCF --
+      // cheaply recomputed here (same kinetic + nuclear-attraction + CARTESIAN/spherical choice as
+      // both of those blocks) rather than hoisting it just for this print.
+      auto h_core_nonrel_print = rerdmft::schrodingerKineticMatrix(large_basis.functions()) +
+                                  rerdmft::nuclearAttractionMatrix(large_basis.functions(), input.geometry());
+      if (!input.cartesian()) h_core_nonrel_print = rerdmft::transformToSpherical(h_core_nonrel_print, nonrel_transform);
+      printEnergyDecomposition(nonrel_hf_result.density_matrix, h_core_nonrel_print,
+                                nonrel_hf_result.electronic_energy, nonrel_hf_result.nuclear_repulsion_energy);
+    }
     std::cout << std::setprecision(6);
 
     std::cout << "\nConverged one-body (Fock_ortho) orbital energies:\n";
@@ -5492,6 +5871,8 @@ int main(int argc, char** argv) {
     printEnergyLine("Electronic energy", x2c_hf_result.electronic_energy);
     printEnergyLine("Nuclear repulsion energy", x2c_hf_result.nuclear_repulsion_energy);
     printEnergyLine("Total approximate X2C-HF energy", x2c_hf_result.total_energy);
+    printEnergyDecomposition(x2c_hf_result.density_matrix, x2c_hamiltonian.h_x2c, x2c_hf_result.electronic_energy,
+                              x2c_hf_result.nuclear_repulsion_energy);
     std::cout << std::setprecision(6);
 
     std::cout << "\nConverged one-body (Fock_ortho) orbital energies (Kramers pairs, even/odd\n"
@@ -5658,6 +6039,8 @@ int main(int argc, char** argv) {
     printEnergyLine("Electronic energy", dhf_result.electronic_energy);
     printEnergyLine("Nuclear repulsion energy", dhf_result.nuclear_repulsion_energy);
     printEnergyLine("Total DHF (4C) energy", dhf_result.total_energy);
+    printEnergyDecomposition(dhf_result.density_matrix, h_rkb, dhf_result.electronic_energy,
+                              dhf_result.nuclear_repulsion_energy);
     std::cout << std::setprecision(6);
 
     std::cout << "\nConverged one-body (Fock_ortho) state energies (Kramers pairs, even/odd "
