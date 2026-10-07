@@ -1,6 +1,8 @@
 #ifndef RERDMFT_MATRIX_H
 #define RERDMFT_MATRIX_H
 
+#include <cblas.h>
+
 #include <complex>
 #include <cstddef>
 #include <vector>
@@ -58,6 +60,31 @@ Matrix<T> operator*(const Matrix<T>& a, const Matrix<T>& b) {
       }
     }
   }
+  return result;
+}
+
+// BLAS-backed overloads for the two element types actually used in production (double,
+// std::complex<double>); the generic template above stays as the fallback for any other T. A
+// non-template overload is preferred over the template at equal match quality, so every existing
+// `a * b` call picks these up unchanged. The naive triple loop was serial and O(n^3) with no
+// blocking -- the dominant non-integral cost of the SCF Fock assembly at Kr scale.
+inline Matrix<double> operator*(const Matrix<double>& a, const Matrix<double>& b) {
+  Matrix<double> result(a.rows(), b.cols(), 0.0);
+  if (a.rows() == 0 || b.cols() == 0 || a.cols() == 0) return result;
+  cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, static_cast<int>(a.rows()), static_cast<int>(b.cols()),
+              static_cast<int>(a.cols()), 1.0, a.data(), static_cast<int>(a.cols()), b.data(),
+              static_cast<int>(b.cols()), 0.0, result.data(), static_cast<int>(b.cols()));
+  return result;
+}
+
+inline Matrix<std::complex<double>> operator*(const Matrix<std::complex<double>>& a,
+                                               const Matrix<std::complex<double>>& b) {
+  Matrix<std::complex<double>> result(a.rows(), b.cols(), std::complex<double>{});
+  if (a.rows() == 0 || b.cols() == 0 || a.cols() == 0) return result;
+  const std::complex<double> alpha(1.0, 0.0), beta(0.0, 0.0);
+  cblas_zgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, static_cast<int>(a.rows()), static_cast<int>(b.cols()),
+              static_cast<int>(a.cols()), &alpha, a.data(), static_cast<int>(a.cols()), b.data(),
+              static_cast<int>(b.cols()), &beta, result.data(), static_cast<int>(b.cols()));
   return result;
 }
 

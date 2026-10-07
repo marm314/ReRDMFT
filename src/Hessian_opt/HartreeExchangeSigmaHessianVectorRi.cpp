@@ -3,6 +3,7 @@
 #include <complex>
 #include <stdexcept>
 
+#include "RiSigmaGemm.h"
 #include "RiSigmaHessianToolkit.h"
 
 namespace rerdmft {
@@ -16,10 +17,11 @@ inline double conjugateT(double x) { return x; }
 inline std::complex<double> conjugateT(std::complex<double> x) { return std::conj(x); }
 
 template <typename T>
-void addPhiHxRi(Matrix<T>& Phi, const Matrix<T>& h, const std::vector<double>& occ,
+void addPhiHxRiRef(Matrix<T>& Phi, const Matrix<T>& h, const std::vector<double>& occ,
                  const Matrix<double>& hcpl, const Matrix<double>& xcpl, const Matrix<T>& fock,
                  const Matrix<double>& K, const RiSigmaHessianToolkit<T>& t) {
   const std::size_t n = t.n, n_aux = t.n_aux;
+  #pragma omp parallel for collapse(2)
   for (std::size_t a = 0; a < n; ++a)
     for (std::size_t b = 0; b < n; ++b) {
       T acc{};
@@ -69,10 +71,11 @@ void addPhiHxRi(Matrix<T>& Phi, const Matrix<T>& h, const std::vector<double>& o
 }
 
 template <typename T>
-void addPsiHxRi(Matrix<T>& Psi, const Matrix<T>& h, const std::vector<double>& occ,
+void addPsiHxRiRef(Matrix<T>& Psi, const Matrix<T>& h, const std::vector<double>& occ,
                  const Matrix<double>& hcpl, const Matrix<double>& xcpl, const Matrix<T>& fock,
                  const Matrix<double>& K, const RiSigmaHessianToolkit<T>& t) {
   const std::size_t n = t.n, n_aux = t.n_aux;
+  #pragma omp parallel for collapse(2)
   for (std::size_t c = 0; c < n; ++c)
     for (std::size_t d = 0; d < n; ++d) {
       T acc{};
@@ -122,9 +125,10 @@ void addPsiHxRi(Matrix<T>& Psi, const Matrix<T>& h, const std::vector<double>& o
 }
 
 template <typename T>
-void addPhiL12Ri(Matrix<T>& Phi, const std::vector<std::size_t>& pair_of, const Matrix<double>& l1,
+void addPhiL12RiRef(Matrix<T>& Phi, const std::vector<std::size_t>& pair_of, const Matrix<double>& l1,
                   const Matrix<double>& l2, const RiSigmaHessianToolkit<T>& t) {
   const std::size_t n = t.n, n_aux = t.n_aux;
+  #pragma omp parallel for collapse(2)
   for (std::size_t a = 0; a < n; ++a)
     for (std::size_t b = 0; b < n; ++b) {
       const std::size_t pb = pair_of[b], pa = pair_of[a];
@@ -162,9 +166,10 @@ void addPhiL12Ri(Matrix<T>& Phi, const std::vector<std::size_t>& pair_of, const 
 }
 
 template <typename T>
-void addPsiL12Ri(Matrix<T>& Psi, const std::vector<std::size_t>& pair_of, const Matrix<double>& l1,
+void addPsiL12RiRef(Matrix<T>& Psi, const std::vector<std::size_t>& pair_of, const Matrix<double>& l1,
                   const Matrix<double>& l2, const RiSigmaHessianToolkit<T>& t) {
   const std::size_t n = t.n, n_aux = t.n_aux;
+  #pragma omp parallel for collapse(2)
   for (std::size_t c = 0; c < n; ++c)
     for (std::size_t d = 0; d < n; ++d) {
       const std::size_t pd = pair_of[d], pc = pair_of[c];
@@ -199,6 +204,237 @@ void addPsiL12Ri(Matrix<T>& Psi, const std::vector<std::size_t>& pair_of, const 
       }
       Psi(c, d) += acc;
     }
+}
+
+
+// ---- GEMM versions (production). The *Ref functions above are the original element-by-element
+// implementations, kept as a validation oracle (see setRiSigmaHessianVectorReference).
+template <typename T>
+Matrix<T> negated(const Matrix<T>& m) {
+  Matrix<T> r(m.rows(), m.cols());
+  for (std::size_t i = 0; i < m.rows() * m.cols(); ++i) r.data()[i] = -m.data()[i];
+  return r;
+}
+
+template <typename T>
+void addPhiHxRi(Matrix<T>& Phi, const Matrix<T>& h, const std::vector<double>& occ, const Matrix<double>& hcpl,
+                 const Matrix<double>& xcpl, const Matrix<T>& fock, const Matrix<double>& K,
+                 const RiSigmaHessianToolkit<T>& t) {
+  if (risigma::useReference()) return addPhiHxRiRef(Phi, h, occ, hcpl, xcpl, fock, K, t);
+  using risigma::accumU;
+  using risigma::diagContract;
+  using risigma::makeOp;
+  using risigma::pairContract;
+  const std::size_t n = t.n, n_aux = t.n_aux;
+  const Matrix<T>& Bm = t.b();
+  const Matrix<T>& K1 = t.kb1;
+  const Matrix<T>& K2 = t.kb2;
+
+#pragma omp parallel for collapse(2)
+  for (std::size_t a = 0; a < n; ++a)
+    for (std::size_t b = 0; b < n; ++b) {
+      T acc{};
+      for (std::size_t s = 0; s < n; ++s) acc += T(K(b, s)) * fock(a, s);
+      for (std::size_t r = 0; r < n; ++r) acc += conjugateT(fock(b, r)) * T(K(r, a));  // P1b (conjugate)
+      T t3{}, t4{};
+      for (std::size_t s = 0; s < n; ++s) t3 += T(K(b, s)) * h(s, a);
+      for (std::size_t r = 0; r < n; ++r) t4 += h(b, r) * T(K(r, a));
+      acc -= T(occ[b]) * t3;
+      acc -= T(occ[a]) * t4;
+      Phi(a, b) += acc;
+    }
+
+  // Uh(P,x) = sum_u Bdiag(P,u) hcpl(x,u)
+  Matrix<T> Uh(n_aux, n, T{});
+  accumU(Uh, 1.0, n, n_aux, t.bdiag, hcpl);
+  const Matrix<T> nUh = negated(Uh);
+
+  // Ea: sum_{P,u} hcpl(b,u) B(P,u,a) KB1(P,b,u)
+  pairContract(Phi, 1.0, n, n_aux, makeOp<T>(n, &Bm, [&](std::size_t u, std::size_t a) { return u * n + a; }),
+               makeOp<T>(n, &K1, [&](std::size_t u, std::size_t b) { return b * n + u; },
+                         [&](std::size_t u, std::size_t b) { return hcpl(b, u); }));
+  // -Eb: -sum_P KB1(P,b,a) Uh(P,b)
+  diagContract(Phi, n, n_aux, K1, nullptr, &nUh);
+  // Fa: sum_{P,u} hcpl(a,u) B(P,b,u) KB2(P,u,a)
+  pairContract(Phi, 1.0, n, n_aux,
+               makeOp<T>(n, &K2, [&](std::size_t u, std::size_t a) { return u * n + a; },
+                         [&](std::size_t u, std::size_t a) { return hcpl(a, u); }),
+               makeOp<T>(n, &Bm, [&](std::size_t u, std::size_t b) { return b * n + u; }));
+  // -Fb: -sum_P KB2(P,b,a) Uh(P,a)
+  diagContract(Phi, n, n_aux, K2, &nUh, nullptr);
+  // G1: sum_r (xcpl(r,b) - xcpl(r,a)) B(P,b,r) KB1(P,r,a)
+  pairContract(Phi, 1.0, n, n_aux, makeOp<T>(n, &K1, [&](std::size_t r, std::size_t a) { return r * n + a; }),
+               makeOp<T>(n, &Bm, [&](std::size_t r, std::size_t b) { return b * n + r; },
+                         [&](std::size_t r, std::size_t b) { return xcpl(r, b); }));
+  pairContract(Phi, -1.0, n, n_aux,
+               makeOp<T>(n, &K1, [&](std::size_t r, std::size_t a) { return r * n + a; },
+                         [&](std::size_t r, std::size_t a) { return xcpl(r, a); }),
+               makeOp<T>(n, &Bm, [&](std::size_t r, std::size_t b) { return b * n + r; }));
+  // G2: sum_s (xcpl(a,s) - hcpl(s,b)) B(P,s,a) KB2(P,b,s)
+  pairContract(Phi, 1.0, n, n_aux,
+               makeOp<T>(n, &Bm, [&](std::size_t s, std::size_t a) { return s * n + a; },
+                         [&](std::size_t s, std::size_t a) { return xcpl(a, s); }),
+               makeOp<T>(n, &K2, [&](std::size_t s, std::size_t b) { return b * n + s; }));
+  pairContract(Phi, -1.0, n, n_aux, makeOp<T>(n, &Bm, [&](std::size_t s, std::size_t a) { return s * n + a; }),
+               makeOp<T>(n, &K2, [&](std::size_t s, std::size_t b) { return b * n + s; },
+                         [&](std::size_t s, std::size_t b) { return hcpl(s, b); }));
+  // H1/H2: sum_P B(P,b,a) [ UA(P,a) - UB(P,b) + UC(P,b) - UD(P,a) ]
+  const Matrix<double> hcplT = transpose(hcpl), xcplT = transpose(xcpl);
+  Matrix<T> Ua(n_aux, n, T{}), Ub(n_aux, n, T{});
+  accumU(Ua, 1.0, n, n_aux, t.kb1diag, hcplT);   // UA(P,a) = sum_r KB1diag(P,r) hcpl(r,a)
+  accumU(Ua, -1.0, n, n_aux, t.kb2diag, xcpl);   // -UD(P,a) = -sum_s KB2diag(P,s) xcpl(a,s)
+  accumU(Ub, -1.0, n, n_aux, t.kb1diag, xcplT);  // -UB(P,b) = -sum_r KB1diag(P,r) xcpl(r,b)
+  accumU(Ub, 1.0, n, n_aux, t.kb2diag, xcpl);    // UC(P,b) = sum_s KB2diag(P,s) xcpl(b,s)
+  diagContract(Phi, n, n_aux, Bm, &Ua, &Ub);
+}
+
+template <typename T>
+void addPsiHxRi(Matrix<T>& Psi, const Matrix<T>& h, const std::vector<double>& occ, const Matrix<double>& hcpl,
+                 const Matrix<double>& xcpl, const Matrix<T>& fock, const Matrix<double>& K,
+                 const RiSigmaHessianToolkit<T>& t) {
+  if (risigma::useReference()) return addPsiHxRiRef(Psi, h, occ, hcpl, xcpl, fock, K, t);
+  using risigma::accumU;
+  using risigma::diagContract;
+  using risigma::makeOp;
+  using risigma::pairContract;
+  const std::size_t n = t.n, n_aux = t.n_aux;
+  const Matrix<T>& Bm = t.b();
+  const Matrix<T>& K1 = t.kb1;
+  const Matrix<T>& K2 = t.kb2;
+
+#pragma omp parallel for collapse(2)
+  for (std::size_t c = 0; c < n; ++c)
+    for (std::size_t d = 0; d < n; ++d) {
+      T acc{};
+      for (std::size_t a = 0; a < n; ++a) acc += T(K(a, c)) * fock(a, d);
+      for (std::size_t b = 0; b < n; ++b) acc += T(K(d, b)) * conjugateT(fock(b, c));  // Q2 (conjugate)
+      T t3{}, t4{};
+      for (std::size_t a = 0; a < n; ++a) t3 += T(K(a, c)) * h(d, a);
+      for (std::size_t b = 0; b < n; ++b) t4 += T(K(d, b)) * h(b, c);
+      acc -= T(occ[c]) * t3;
+      acc -= T(occ[d]) * t4;
+      Psi(c, d) += acc;
+    }
+
+  Matrix<T> Uh(n_aux, n, T{});
+  accumU(Uh, 1.0, n, n_aux, t.bdiag, hcpl);
+  const Matrix<T> nUh = negated(Uh);
+
+  // Ra: sum_{P,u} hcpl(c,u) B(P,d,u) KB2(P,u,c)
+  pairContract(Psi, 1.0, n, n_aux,
+               makeOp<T>(n, &K2, [&](std::size_t u, std::size_t c) { return u * n + c; },
+                         [&](std::size_t u, std::size_t c) { return hcpl(c, u); }),
+               makeOp<T>(n, &Bm, [&](std::size_t u, std::size_t d) { return d * n + u; }));
+  // -Rb: -sum_P KB2(P,d,c) Uh(P,c)
+  diagContract(Psi, n, n_aux, K2, &nUh, nullptr);
+  // Sa: sum_{P,u} hcpl(d,u) B(P,u,c) KB1(P,d,u)
+  pairContract(Psi, 1.0, n, n_aux, makeOp<T>(n, &Bm, [&](std::size_t u, std::size_t c) { return u * n + c; }),
+               makeOp<T>(n, &K1, [&](std::size_t u, std::size_t d) { return d * n + u; },
+                         [&](std::size_t u, std::size_t d) { return hcpl(d, u); }));
+  // -Sb: -sum_P KB1(P,d,c) Uh(P,d)
+  diagContract(Psi, n, n_aux, K1, nullptr, &nUh);
+  // U1: sum_b (xcpl(c,b) - hcpl(d,b)) B(P,b,c) KB2(P,d,b)
+  pairContract(Psi, 1.0, n, n_aux,
+               makeOp<T>(n, &Bm, [&](std::size_t b, std::size_t c) { return b * n + c; },
+                         [&](std::size_t b, std::size_t c) { return xcpl(c, b); }),
+               makeOp<T>(n, &K2, [&](std::size_t b, std::size_t d) { return d * n + b; }));
+  pairContract(Psi, -1.0, n, n_aux, makeOp<T>(n, &Bm, [&](std::size_t b, std::size_t c) { return b * n + c; }),
+               makeOp<T>(n, &K2, [&](std::size_t b, std::size_t d) { return d * n + b; },
+                         [&](std::size_t b, std::size_t d) { return hcpl(d, b); }));
+  // U2: sum_a (xcpl(a,d) - xcpl(c,a)) B(P,d,a) KB1(P,a,c)
+  pairContract(Psi, 1.0, n, n_aux, makeOp<T>(n, &K1, [&](std::size_t a, std::size_t c) { return a * n + c; }),
+               makeOp<T>(n, &Bm, [&](std::size_t a, std::size_t d) { return d * n + a; },
+                         [&](std::size_t a, std::size_t d) { return xcpl(a, d); }));
+  pairContract(Psi, -1.0, n, n_aux,
+               makeOp<T>(n, &K1, [&](std::size_t a, std::size_t c) { return a * n + c; },
+                         [&](std::size_t a, std::size_t c) { return xcpl(c, a); }),
+               makeOp<T>(n, &Bm, [&](std::size_t a, std::size_t d) { return d * n + a; }));
+  // V1/V2: sum_P B(P,d,c) [ UE(P,c) - UF(P,d) + UG(P,d) - UH(P,c) ]
+  const Matrix<double> xcplT = transpose(xcpl);
+  Matrix<T> Ua(n_aux, n, T{}), Ub(n_aux, n, T{});
+  accumU(Ua, 1.0, n, n_aux, t.kb1diag, hcpl);   // UE(P,c) = sum_a KB1diag(P,a) hcpl(c,a)
+  accumU(Ua, -1.0, n, n_aux, t.kb2diag, xcpl);  // -UH(P,c) = -sum_b KB2diag(P,b) xcpl(c,b)
+  accumU(Ub, -1.0, n, n_aux, t.kb1diag, xcplT); // -UF(P,d) = -sum_a KB1diag(P,a) xcpl(a,d)
+  accumU(Ub, 1.0, n, n_aux, t.kb2diag, xcplT);  // UG(P,d) = sum_b KB2diag(P,b) xcpl(b,d)
+  diagContract(Psi, n, n_aux, Bm, &Ua, &Ub);
+}
+
+template <typename T>
+void addPhiL12Ri(Matrix<T>& Phi, const std::vector<std::size_t>& pair_of, const Matrix<double>& l1,
+                  const Matrix<double>& l2, const RiSigmaHessianToolkit<T>& t) {
+  if (risigma::useReference()) return addPhiL12RiRef(Phi, pair_of, l1, l2, t);
+  using risigma::makeOp;
+  using risigma::pairContract;
+  const std::size_t n = t.n, n_aux = t.n_aux;
+  const Matrix<T>& Bm = t.b();
+  const Matrix<T>& K1 = t.kb1;
+  const Matrix<T>& K2 = t.kb2;
+  const auto& pr = pair_of;
+  using Z = std::size_t;
+  // I: -sum_u 2(l1(u,pb)+l2(u,b)) B(P,u,a) KB2(P,pair(u),pb)
+  pairContract(Phi, -1.0, n, n_aux, makeOp<T>(n, &Bm, [&](Z u, Z a) { return u * n + a; }),
+               makeOp<T>(n, &K2, [&](Z u, Z b) { return pr[u] * n + pr[b]; },
+                         [&](Z u, Z b) { return 2.0 * (l1(u, pr[b]) + l2(u, b)); }));
+  // Jr, Jr2
+  pairContract(Phi, 1.0, n, n_aux, makeOp<T>(n, &Bm, [&](Z r, Z a) { return pr[r] * n + a; }),
+               makeOp<T>(n, &K1, [&](Z r, Z b) { return r * n + pr[b]; },
+                         [&](Z r, Z b) { return 2.0 * (l1(r, b) + l2(r, pr[b])); }));
+  pairContract(Phi, -1.0, n, n_aux, makeOp<T>(n, &K1, [&](Z r, Z a) { return r * n + a; }),
+               makeOp<T>(n, &Bm, [&](Z r, Z b) { return pr[r] * n + pr[b]; },
+                         [&](Z r, Z b) { return 2.0 * (l1(r, b) + l2(r, pr[b])); }));
+  // Ls, Ls2
+  pairContract(Phi, 1.0, n, n_aux,
+               makeOp<T>(n, &K2, [&](Z s, Z a) { return pr[a] * n + s; },
+                         [&](Z s, Z a) { return 2.0 * (l1(a, s) + l2(a, pr[s])); }),
+               makeOp<T>(n, &Bm, [&](Z s, Z b) { return b * n + pr[s]; }));
+  pairContract(Phi, -1.0, n, n_aux,
+               makeOp<T>(n, &Bm, [&](Z s, Z a) { return pr[a] * n + pr[s]; },
+                         [&](Z s, Z a) { return 2.0 * (l1(a, s) + l2(a, pr[s])); }),
+               makeOp<T>(n, &K2, [&](Z s, Z b) { return b * n + s; }));
+  // Mw
+  pairContract(Phi, 1.0, n, n_aux,
+               makeOp<T>(n, &K1, [&](Z w, Z a) { return pr[a] * n + w; },
+                         [&](Z w, Z a) { return 2.0 * (l1(pr[a], w) + l2(pr[a], pr[w])); }),
+               makeOp<T>(n, &Bm, [&](Z w, Z b) { return b * n + pr[w]; }));
+}
+
+template <typename T>
+void addPsiL12Ri(Matrix<T>& Psi, const std::vector<std::size_t>& pair_of, const Matrix<double>& l1,
+                  const Matrix<double>& l2, const RiSigmaHessianToolkit<T>& t) {
+  if (risigma::useReference()) return addPsiL12RiRef(Psi, pair_of, l1, l2, t);
+  using risigma::makeOp;
+  using risigma::pairContract;
+  const std::size_t n = t.n, n_aux = t.n_aux;
+  const Matrix<T>& Bm = t.b();
+  const Matrix<T>& K1 = t.kb1;
+  const Matrix<T>& K2 = t.kb2;
+  const auto& pr = pair_of;
+  using Z = std::size_t;
+  // Wu
+  pairContract(Psi, -1.0, n, n_aux, makeOp<T>(n, &Bm, [&](Z u, Z c) { return pr[u] * n + c; }),
+               makeOp<T>(n, &K2, [&](Z u, Z d) { return u * n + pr[d]; },
+                         [&](Z u, Z d) { return 2.0 * (l1(u, d) + l2(u, pr[d])); }));
+  // Xb, Xb2
+  pairContract(Psi, 1.0, n, n_aux,
+               makeOp<T>(n, &K2, [&](Z b, Z c) { return pr[c] * n + b; },
+                         [&](Z b, Z c) { return 2.0 * (l1(c, b) + l2(c, pr[b])); }),
+               makeOp<T>(n, &Bm, [&](Z b, Z d) { return d * n + pr[b]; }));
+  pairContract(Psi, -1.0, n, n_aux,
+               makeOp<T>(n, &Bm, [&](Z b, Z c) { return pr[c] * n + pr[b]; },
+                         [&](Z b, Z c) { return 2.0 * (l1(c, b) + l2(c, pr[b])); }),
+               makeOp<T>(n, &K2, [&](Z b, Z d) { return d * n + b; }));
+  // Ya, Ya2
+  pairContract(Psi, 1.0, n, n_aux, makeOp<T>(n, &Bm, [&](Z a, Z c) { return pr[a] * n + c; }),
+               makeOp<T>(n, &K1, [&](Z a, Z d) { return a * n + pr[d]; },
+                         [&](Z a, Z d) { return 2.0 * (l1(a, d) + l2(a, pr[d])); }));
+  pairContract(Psi, -1.0, n, n_aux, makeOp<T>(n, &K1, [&](Z a, Z c) { return a * n + c; }),
+               makeOp<T>(n, &Bm, [&](Z a, Z d) { return pr[a] * n + pr[d]; },
+                         [&](Z a, Z d) { return 2.0 * (l1(a, d) + l2(a, pr[d])); }));
+  // Zw
+  pairContract(Psi, 1.0, n, n_aux,
+               makeOp<T>(n, &K1, [&](Z w, Z c) { return pr[c] * n + pr[w]; },
+                         [&](Z w, Z c) { return 2.0 * (l1(c, w) + l2(c, pr[w])); }),
+               makeOp<T>(n, &Bm, [&](Z w, Z d) { return d * n + w; }));
 }
 
 }  // namespace

@@ -85,4 +85,7 @@ Tensor4<T> jkOnlyDenseTwoRdm(std::size_t n, const Matrix<double>& two_rdm_h,
 
 }  // namespace rerdmft
 
+// GEMM-based overloads for the RI MO-ERI classes (win over the generic templates above).
+#include "RiGemmFock.h"
+
 #endif  // RERDMFT_JKONLYFOCK_H

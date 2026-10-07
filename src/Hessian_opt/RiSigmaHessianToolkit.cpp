@@ -1,9 +1,25 @@
 #include "RiSigmaHessianToolkit.h"
 
+#include <cblas.h>
+
 #include <complex>
 #include <stdexcept>
 
 namespace rerdmft {
+
+namespace {
+// C = A @ B for square n x n row-major blocks.
+void gemmNN(std::size_t n, const double* a, const double* b, double* c) {
+  cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, static_cast<int>(n), static_cast<int>(n), static_cast<int>(n),
+              1.0, a, static_cast<int>(n), b, static_cast<int>(n), 0.0, c, static_cast<int>(n));
+}
+void gemmNN(std::size_t n, const std::complex<double>* a, const std::complex<double>* b, std::complex<double>* c) {
+  const std::complex<double> one(1.0, 0.0), zero(0.0, 0.0);
+  cblas_zgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, static_cast<int>(n), static_cast<int>(n),
+              static_cast<int>(n), &one, a, static_cast<int>(n), b, static_cast<int>(n), &zero, c,
+              static_cast<int>(n));
+}
+}  // namespace
 
 template <typename T>
 RiSigmaHessianToolkit<T> buildRiSigmaHessianToolkit(std::size_t n, const Matrix<T>& b,
@@ -14,23 +30,22 @@ RiSigmaHessianToolkit<T> buildRiSigmaHessianToolkit(std::size_t n, const Matrix<
   RiSigmaHessianToolkit<T> t;
   t.n = n;
   t.n_aux = b.rows();
-  t.b = b;
+  t.bp = &b;
   t.kb1 = Matrix<T>(t.n_aux, n * n, T{});
   t.kb2 = Matrix<T>(t.n_aux, n * n, T{});
   t.bdiag.assign(t.n_aux * n, T{});
   t.kb1diag.assign(t.n_aux * n, T{});
   t.kb2diag.assign(t.n_aux * n, T{});
 
-#pragma omp parallel for
+  Matrix<T> Kt(n, n);
+  for (std::size_t i = 0; i < n * n; ++i) Kt.data()[i] = T(K.data()[i]);
+
+  // KB1[P] = K @ B_P and KB2[P] = B_P @ K: one pair of n x n GEMMs per aux function.
+#pragma omp parallel for schedule(dynamic)
   for (std::size_t P = 0; P < t.n_aux; ++P) {
-    for (std::size_t a = 0; a < n; ++a)
-      for (std::size_t c = 0; c < n; ++c) {
-        T acc1{}, acc2{};
-        for (std::size_t s = 0; s < n; ++s) acc1 += T(K(a, s)) * b(P, s * n + c);  // KB1[P](a,c)=sum_s K(a,s)*B(P,s,c)
-        for (std::size_t r = 0; r < n; ++r) acc2 += b(P, a * n + r) * T(K(r, c));  // KB2[P](a,c)=sum_r B(P,a,r)*K(r,c)
-        t.kb1(P, a * n + c) = acc1;
-        t.kb2(P, a * n + c) = acc2;
-      }
+    const T* slice = b.data() + P * n * n;
+    gemmNN(n, Kt.data(), slice, t.kb1.data() + P * n * n);
+    gemmNN(n, slice, Kt.data(), t.kb2.data() + P * n * n);
     for (std::size_t x = 0; x < n; ++x) {
       t.bdiag[P * n + x] = b(P, x * n + x);
       t.kb1diag[P * n + x] = t.kb1(P, x * n + x);

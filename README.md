@@ -384,6 +384,13 @@ The new results overwrite `RESTART.*`, so a geometry scan is a chain:
 run the first point, then edit the geometry, add `READ_RESTART TRUE`,
 and repeat. See `examples/lih_gnof_read_restart.inp`.
 
+## Environment variables
+
+| Variable | Effect |
+|---|---|
+| `OMP_NUM_THREADS` | Standard OpenMP thread count; also governs the threaded BLAS (OpenBLAS) calls. |
+| `RERDMFT_RI_HV_REFERENCE` | If set (any value), the `USE_RI` generalized-Fock and sigma-vector Hessian-vector products use the original element-by-element implementations instead of the GEMM ones -- a validation A/B switch, same results to roundoff but much slower. |
+
 ## Contributors
 
 - Dr. M. Rodriguez-Mayorga

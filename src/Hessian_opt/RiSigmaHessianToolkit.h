@@ -44,14 +44,15 @@ template <typename T>
 struct RiSigmaHessianToolkit {
   std::size_t n = 0;
   std::size_t n_aux = 0;
-  Matrix<T> b;         // (n_aux, n*n), b(P, p*n+q) = B(P,p,q)
+  const Matrix<T>* bp = nullptr;  // (n_aux, n*n), (*bp)(P, p*n+q) = B(P,p,q); NOT owned (the caller's tensor outlives the toolkit)
   Matrix<T> kb1;       // (n_aux, n*n), kb1(P, a*n+b) = KB1[P](a,b)
   Matrix<T> kb2;       // (n_aux, n*n), kb2(P, a*n+b) = KB2[P](a,b)
   std::vector<T> bdiag;     // size n_aux*n, bdiag[P*n+t] = Bdiag[P,t]
   std::vector<T> kb1diag;   // size n_aux*n
   std::vector<T> kb2diag;   // size n_aux*n
 
-  T B(std::size_t P, std::size_t p, std::size_t q) const { return b(P, p * n + q); }
+  const Matrix<T>& b() const { return *bp; }
+  T B(std::size_t P, std::size_t p, std::size_t q) const { return (*bp)(P, p * n + q); }
   T KB1(std::size_t P, std::size_t a, std::size_t c) const { return kb1(P, a * n + c); }
   T KB2(std::size_t P, std::size_t a, std::size_t c) const { return kb2(P, a * n + c); }
   T Bdiag(std::size_t P, std::size_t t) const { return bdiag[P * n + t]; }

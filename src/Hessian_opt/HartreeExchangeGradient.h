@@ -128,4 +128,7 @@ double hartreeExchangeEnergy(const Matrix<T>& h, const Eri& eri,
 
 }  // namespace rerdmft
 
+// GEMM-based overloads for the RI MO-ERI classes (win over the generic templates above).
+#include "RiGemmFock.h"
+
 #endif  // RERDMFT_HARTREEEXCHANGEGRADIENT_H
