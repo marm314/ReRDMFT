@@ -14,8 +14,10 @@
 #include "CholeskyEri.h"
 #include "HartreeExchangeGradient.h"
 #include "HartreeExchangeHessian.h"
+#include "HartreeExchangeSigmaHessianVectorRi.h"
 #include "JkOnlyFock.h"
 #include "JkOnlyHessian.h"
+#include "JkOnlySigmaHessianVectorRi.h"
 #include "KramersPairing.h"
 #include "KramersRestriction.h"
 #include "LBFGS.h"
@@ -598,6 +600,45 @@ RdmftModel<T, Eri> makeJkOnlyModel(JkFunctional functional, std::size_t f_l, dou
       model.hessian_diagonal = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ) {
         return jkOnlyHessianDiagonalImpl(functional, f_l, pair_indices, h, eri, occ);
       };
+    } else if constexpr (std::is_same_v<Eri, RiMoEri>) {
+      // RI-direct (B-only, never-dense-eri) Hessian-vector -- see
+      // [[project-ri-hessian-neo-design]] Stage 5. `RiMoEri` is always T=complex<double> in this
+      // codebase (the C4_SPINOR/X2C joint [t;y] case), confirmed by `RERDMFT_INSTANTIATE_FULLOPT`
+      // only ever instantiating it that way -- the `if constexpr` below is defense in depth, not
+      // a genuinely exercised branch. `hessian_diagonal` reuses `jkOnlyHessianDiagonalImpl`
+      // UNCHANGED -- it is already generic over `EriT` (confirmed: it only ever calls
+      // `jkOnlyJointHessianDiagonal<Eri>`, which `RiMoEri` already satisfies), so this is zero
+      // new derivation, just lifting the same assignment the `!kIsRiMoEri` branch above already
+      // does. Found to matter in practice, not just in theory: without it NEO's Davidson solve
+      // ran fully unpreconditioned on RI, far slower than the already-known CO/cc-pVDZ lesson
+      // (2026-09-25) would suggest even for a tiny LiH test.
+      if constexpr (std::is_same_v<T, std::complex<double>>) {
+        model.hessian_diagonal = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ) {
+          return jkOnlyHessianDiagonalImpl(functional, f_l, pair_indices, h, eri, occ);
+        };
+        model.hessian_vector = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ,
+                                   const std::vector<double>& v) {
+          const auto hc = jkHartreeCoupling(functional, occ, f_l);
+          const auto xc = jkExchangeCoupling(functional, occ, f_l);
+          return jkOnlySigmaJointHessianVectorRi(h, eri.b(), eri.dim0(), occ, hc, xc, pair_indices, v);
+        };
+      }
+    } else if constexpr (std::is_same_v<Eri, RiNonRelSpinMoEri>) {
+      // NON_RELATIVISTIC's own RI type -- real T=double, so this reuses the REAL (non-joint)
+      // `jkOnlySigmaHessianVectorRi` directly, fed `eri.embeddedB()` (the spin-selection rule
+      // embedded as a block-diagonal B, see NonRelSpinRiMoEri.h's own comment -- confirmed exact,
+      // not an approximation). See [[project-ri-hessian-neo-design]] Stage 6.
+      if constexpr (std::is_same_v<T, double>) {
+        model.hessian_diagonal = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ) {
+          return jkOnlyHessianDiagonalImpl(functional, f_l, pair_indices, h, eri, occ);
+        };
+        model.hessian_vector = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ,
+                                   const std::vector<double>& v) {
+          const auto hc = jkHartreeCoupling(functional, occ, f_l);
+          const auto xc = jkExchangeCoupling(functional, occ, f_l);
+          return jkOnlySigmaHessianVectorRi(h, eri.embeddedB(), eri.dim0(), occ, hc, xc, pair_indices, v);
+        };
+      }
     }
     // ALWAYS Tensor4-based (even when Eri = CholeskyEri) -- see NeoOrbitalProblem's own comment
     // on why (its dense-tensor cache for the Cholesky case calls this, not `hessian_vector`). No
@@ -770,6 +811,97 @@ RdmftModel<T, Eri> makePnofModel(PnofFunctional functional, std::vector<PnofGemi
         return pnofHessianDiagonalImpl(functional, geminals, cachedTwoRdm(occ), pair_of, relativistic, pair_indices,
                                        h, eri, occ);
       };
+    } else if constexpr (std::is_same_v<Eri, RiMoEri>) {
+      // RI-direct Hessian-vector -- see JK_only's own comment above / [[project-ri-hessian-neo-design]]
+      // Stage 5. Covers PNOF AND pCCD (both call into this same hartreeExchangeSigmaJointHessianVectorRi,
+      // differing only in which two_rdm_h/x/l1/l2/pair_of they pass -- see makePccdModel's own branch).
+      if constexpr (std::is_same_v<T, std::complex<double>>) {
+        // `fock` depends only on the CURRENT orbital point (h, eri) + occ -- NOT on `v` -- but
+        // NEO's Davidson solve calls hessian_vector MANY times per Newton step, always at the SAME
+        // point with a DIFFERENT trial `v` each time. Without this cache, `pnofFockMatrix` (itself
+        // O(n^3*n_aux) for Eri=RiMoEri's own generic elementwise path) was being rebuilt from
+        // scratch on EVERY call -- a real, measured performance bug (not just suboptimal), found
+        // and fixed the same day it was wired in. Keyed on `occ` (like `cachedTwoRdm`) AND `h`
+        // (exact element-wise equality -- cheap, O(n^2), negligible next to the O(n^3*n_aux)
+        // rebuild it avoids): `h` changes only between accepted Newton steps, never within one
+        // Davidson solve, so this reuses the SAME fock for every `v` tried at a given point.
+        struct FockCache {
+          std::vector<double> occ;
+          Matrix<T> h;
+          Matrix<T> fock;
+          bool valid = false;
+        };
+        const auto fock_cache = std::make_shared<FockCache>();
+        const auto cachedFock = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ) -> const Matrix<T>& {
+          const bool same_h = fock_cache->valid && fock_cache->h.rows() == h.rows() && fock_cache->h.cols() == h.cols() &&
+                               [&] {
+                                 for (std::size_t i = 0; i < h.rows(); ++i)
+                                   for (std::size_t j = 0; j < h.cols(); ++j)
+                                     if (fock_cache->h(i, j) != h(i, j)) return false;
+                                 return true;
+                               }();
+          if (!fock_cache->valid || fock_cache->occ != occ || !same_h) {
+            fock_cache->fock = pnofFockMatrix(functional, h, eri, geminals, occ, relativistic);
+            fock_cache->occ = occ;
+            fock_cache->h = h;
+            fock_cache->valid = true;
+          }
+          return fock_cache->fock;
+        };
+        model.hessian_diagonal = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ) {
+          return pnofHessianDiagonalImpl(functional, geminals, cachedTwoRdm(occ), pair_of, relativistic,
+                                         pair_indices, h, eri, occ);
+        };
+        model.hessian_vector = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ,
+                                   const std::vector<double>& v) {
+          const auto& full = cachedTwoRdm(occ);
+          const auto& fock = cachedFock(h, eri, occ);
+          return hartreeExchangeSigmaJointHessianVectorRi(h, eri.b(), n_total, occ, full.two_rdm_h,
+                                                           full.two_rdm_x, fock, pair_of, full.two_rdm_l1,
+                                                           full.two_rdm_l2, pair_indices, v);
+        };
+      }
+    } else if constexpr (std::is_same_v<Eri, RiNonRelSpinMoEri>) {
+      // NON_RELATIVISTIC's own RI type -- real T=double, reuses the REAL (non-joint)
+      // `hartreeExchangeSigmaHessianVectorRi` directly, fed `eri.embeddedB()`. Same fock-caching
+      // fix as the RiMoEri branch above (simpler here -- no complex<double>, same reasoning).
+      if constexpr (std::is_same_v<T, double>) {
+        struct FockCache {
+          std::vector<double> occ;
+          Matrix<T> h;
+          Matrix<T> fock;
+          bool valid = false;
+        };
+        const auto fock_cache = std::make_shared<FockCache>();
+        const auto cachedFock = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ) -> const Matrix<T>& {
+          const bool same_h = fock_cache->valid && fock_cache->h.rows() == h.rows() && fock_cache->h.cols() == h.cols() &&
+                               [&] {
+                                 for (std::size_t i = 0; i < h.rows(); ++i)
+                                   for (std::size_t j = 0; j < h.cols(); ++j)
+                                     if (fock_cache->h(i, j) != h(i, j)) return false;
+                                 return true;
+                               }();
+          if (!fock_cache->valid || fock_cache->occ != occ || !same_h) {
+            fock_cache->fock = pnofFockMatrix(functional, h, eri, geminals, occ, relativistic);
+            fock_cache->occ = occ;
+            fock_cache->h = h;
+            fock_cache->valid = true;
+          }
+          return fock_cache->fock;
+        };
+        model.hessian_diagonal = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ) {
+          return pnofHessianDiagonalImpl(functional, geminals, cachedTwoRdm(occ), pair_of, relativistic,
+                                         pair_indices, h, eri, occ);
+        };
+        model.hessian_vector = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ,
+                                   const std::vector<double>& v) {
+          const auto& full = cachedTwoRdm(occ);
+          const auto& fock = cachedFock(h, eri, occ);
+          return hartreeExchangeSigmaHessianVectorRi(h, eri.embeddedB(), n_total, occ, full.two_rdm_h,
+                                                      full.two_rdm_x, fock, pair_of, full.two_rdm_l1,
+                                                      full.two_rdm_l2, pair_indices, v);
+        };
+      }
     }
     // ALWAYS Tensor4-based -- see JK_only's own comment on this field / NeoOrbitalProblem's cache.
     // No Eri dependency at all, so these two always compile/stay assigned regardless of Eri.
@@ -1013,6 +1145,89 @@ RdmftModel<T, Eri> makePccdModel(std::vector<std::size_t> reps, std::vector<std:
         return pccdHessianDiagonalImpl(reps, bar, n_core, n_occ, n_vir, cache->rdm, cachedTwoRdm(occ),
                                        pair_of, pair_indices, h, eri, occ);
       };
+    } else if constexpr (std::is_same_v<Eri, RiMoEri>) {
+      // RI-direct Hessian-vector -- see makePnofModel's own identical branch / JK_only's own
+      // comment / [[project-ri-hessian-neo-design]] Stage 5.
+      if constexpr (std::is_same_v<T, std::complex<double>>) {
+        // Same fock-caching fix as makePnofModel's own identical branch -- see its comment for
+        // why (pccdFockMatrix does NOT depend on `v`, so rebuilding it per Hv call during NEO's
+        // Davidson solve was pure waste).
+        struct FockCache {
+          std::vector<double> occ;
+          Matrix<T> h;
+          Matrix<T> fock;
+          bool valid = false;
+        };
+        const auto fock_cache = std::make_shared<FockCache>();
+        const auto cachedFock = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ) -> const Matrix<T>& {
+          const bool same_h = fock_cache->valid && fock_cache->h.rows() == h.rows() && fock_cache->h.cols() == h.cols() &&
+                               [&] {
+                                 for (std::size_t i = 0; i < h.rows(); ++i)
+                                   for (std::size_t j = 0; j < h.cols(); ++j)
+                                     if (fock_cache->h(i, j) != h(i, j)) return false;
+                                 return true;
+                               }();
+          if (!fock_cache->valid || fock_cache->occ != occ || !same_h) {
+            fock_cache->fock = pccdFockMatrix(h, eri, reps, bar, n_core, n_occ, n_vir, cache->rdm, occ);
+            fock_cache->occ = occ;
+            fock_cache->h = h;
+            fock_cache->valid = true;
+          }
+          return fock_cache->fock;
+        };
+        model.hessian_diagonal = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ) {
+          return pccdHessianDiagonalImpl(reps, bar, n_core, n_occ, n_vir, cache->rdm, cachedTwoRdm(occ),
+                                         pair_of, pair_indices, h, eri, occ);
+        };
+        model.hessian_vector = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ,
+                                   const std::vector<double>& v) {
+          const auto& full = cachedTwoRdm(occ);
+          const auto& fock = cachedFock(h, eri, occ);
+          return hartreeExchangeSigmaJointHessianVectorRi(h, eri.b(), n_total, occ, full.two_rdm_h,
+                                                           full.two_rdm_x, fock, pair_of, full.two_rdm_l1,
+                                                           full.two_rdm_l2, pair_indices, v);
+        };
+      }
+    } else if constexpr (std::is_same_v<Eri, RiNonRelSpinMoEri>) {
+      // NON_RELATIVISTIC's own RI type -- real T=double, same reasoning as makePnofModel's own
+      // identical branch.
+      if constexpr (std::is_same_v<T, double>) {
+        struct FockCache {
+          std::vector<double> occ;
+          Matrix<T> h;
+          Matrix<T> fock;
+          bool valid = false;
+        };
+        const auto fock_cache = std::make_shared<FockCache>();
+        const auto cachedFock = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ) -> const Matrix<T>& {
+          const bool same_h = fock_cache->valid && fock_cache->h.rows() == h.rows() && fock_cache->h.cols() == h.cols() &&
+                               [&] {
+                                 for (std::size_t i = 0; i < h.rows(); ++i)
+                                   for (std::size_t j = 0; j < h.cols(); ++j)
+                                     if (fock_cache->h(i, j) != h(i, j)) return false;
+                                 return true;
+                               }();
+          if (!fock_cache->valid || fock_cache->occ != occ || !same_h) {
+            fock_cache->fock = pccdFockMatrix(h, eri, reps, bar, n_core, n_occ, n_vir, cache->rdm, occ);
+            fock_cache->occ = occ;
+            fock_cache->h = h;
+            fock_cache->valid = true;
+          }
+          return fock_cache->fock;
+        };
+        model.hessian_diagonal = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ) {
+          return pccdHessianDiagonalImpl(reps, bar, n_core, n_occ, n_vir, cache->rdm, cachedTwoRdm(occ),
+                                         pair_of, pair_indices, h, eri, occ);
+        };
+        model.hessian_vector = [=](const Matrix<T>& h, const Eri& eri, const std::vector<double>& occ,
+                                   const std::vector<double>& v) {
+          const auto& full = cachedTwoRdm(occ);
+          const auto& fock = cachedFock(h, eri, occ);
+          return hartreeExchangeSigmaHessianVectorRi(h, eri.embeddedB(), n_total, occ, full.two_rdm_h,
+                                                      full.two_rdm_x, fock, pair_of, full.two_rdm_l1,
+                                                      full.two_rdm_l2, pair_indices, v);
+        };
+      }
     }
     model.hessian_vector_dense = [=](const Matrix<T>& h, const Tensor4<T>& eri,
                                      const std::vector<double>& occ, const std::vector<double>& v) {
@@ -1355,6 +1570,20 @@ class NeoOrbitalProblem : public NeoProblem<double> {
   }
   void accept(const std::vector<double>& d) override {
     problem_.rotate(toStep(d));
+    // RI-direct Hessian wiring (ukbDirect()&&ukb_direct_ri, see
+    // [[project-ri-hessian-neo-design]] Stage 5): `rotate()` DEFERS eri_t_'s own rotation while
+    // ukbDirect() (the whole point of that deferral is to amortize the EXPENSIVE dense/Cholesky
+    // integral rotation across many ADAM steps) -- but `energy()`/`gradient()`/`hessianVector()`/
+    // `trialEnergy()` above all read `problem_.eri()` DIRECTLY (unlike RotationProblem's own
+    // ADAM-facing energy()/gradient(), which route through `ukb_direct_fock` instead and never
+    // see eri_t_ at all), so without this, every one of those calls after the FIRST accept()
+    // would silently read a STALE eri. A no-op whenever !ukbDirect() (unchanged behavior for every
+    // already-shipped NEO case) -- NEO never reached a ukbDirect()==true model before this RI
+    // wiring (Input.cpp already blocks FUNCTIONAL_DIRECT_4C+NEO), so this was dormant, not
+    // previously relied upon. For RI specifically the extra sync is cheap (RiMoEri::rotated() is
+    // O(n_aux*n^2), same cost class as the Hessian-vector's own per-call cost), so paying it once
+    // per accepted Newton step (not once per ADAM step) is not a performance concern.
+    problem_.syncIntegrals();
     g0_valid_ = false;  // the point moved
   }
 
@@ -1874,8 +2103,13 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
   }
   // FUNCTIONAL_DIRECT_4C: Input.cpp already rejects ORBITAL_OPTIMIZER NEO/ADAM_NEO and
   // FULL_OPTIMIZATION_4C_NEG together with this keyword at parse time -- this is defense in depth
-  // only (no UKB-direct orbital-rotation Hessian exists for NEO to use).
-  if (model.ukb_direct_fock && want_neo) {
+  // only (no UKB-direct orbital-rotation Hessian exists for NEO to use). Scoped to EXCLUDE the RI
+  // case (`model.ukb_direct_ri`): USE_RI also sets `ukb_direct_fock` (the RI gradient closure),
+  // but unlike FUNCTIONAL_DIRECT_4C it NOW has its own Hessian-vector too (`model.hessian_vector`,
+  // see [[project-ri-hessian-neo-design]] Stage 5) -- Input.cpp's own USE_RI+FULL_OPTIMIZATION_4C_NEG
+  // throw (still in place) already blocks the one RI+NEO combination that genuinely isn't
+  // supported yet (the min-max/saddle stage).
+  if (model.ukb_direct_fock && !model.ukb_direct_ri && want_neo) {
     throw std::runtime_error(
         "FULL_OPTIMIZATION: a model with ukb_direct_fock set (FUNCTIONAL_DIRECT_4C) was asked to "
         "run NEO/the min-max stage, which it does not support (no UKB-direct Hessian exists yet)");
@@ -2409,9 +2643,17 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
     constexpr std::size_t kRoots = 3;
     withReduced([&](NeoProblem<double>& reduced) {
       const std::size_t n_roots = std::min<std::size_t>(kRoots, reduced.dimension());
+      // Preconditioner: was hardcoded `{}` (unpreconditioned) regardless of whether the model
+      // actually has a Hessian diagonal available -- harmless when Hv itself was cheap, but once
+      // RI made the post-loop check's own Davidson solve newly reachable at non-trivial
+      // per-product cost, this became a real, separate slowdown on top of the main Newton loop's
+      // own (now-fixed) cost. `reduced.hessianDiagonal()` already correctly forwards to the
+      // underlying model's diagonal through both Kramers/spin-restriction wrappers (confirmed by
+      // reading KramersRestriction.h / the SpinRestrictedNeoProblem wrapper directly) -- the SAME
+      // diagonal the main Newton loop's own preconditioning already uses.
       const NeoEigenResult<double> eig = neoLowestHessianEigenpairs<double>(
-          reduced.dimension(), [&](const std::vector<double>& v) { return reduced.hessianVector(v); }, n_roots, {},
-          eig_options);
+          reduced.dimension(), [&](const std::vector<double>& v) { return reduced.hessianVector(v); }, n_roots,
+          reduced.hessianDiagonal(), eig_options);
       const int n_negative = static_cast<int>(
           std::count_if(eig.eigenvalues.begin(), eig.eigenvalues.end(), [](double e) { return e < -1e-6; }));
       log << "    Hessian check (lowest " << eig.eigenvalues.size() << " eigenvalue(s) of the "

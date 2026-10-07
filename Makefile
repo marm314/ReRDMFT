@@ -184,6 +184,85 @@ test_pccd_hessian: $(BUILD_DIR)/test_pccd_hessian
 $(BUILD_DIR)/test_pccd_hessian: tests/test_pccd_hessian.cpp $(filter-out $(BUILD_DIR)/main.o,$(OBJS)) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
+# Unit test of Hessian_opt/JkOnlySigmaHessianVector.h (the resummed/"sigma-vector" JK_only
+# Hessian-vector product, [[project-ri-hessian-neo-design]] Stage 1c) against the existing
+# trusted element-by-element jkOnlyHessianElement-based formula. Only needs JkOnlyHessian.o
+# (+ its own CholeskyEri/Cholesky_Decomposition dependencies) and the new
+# JkOnlySigmaHessianVector.o -- no integrals/basis code, no main.cpp dependency closure.
+.PHONY: test_jkonly_sigma_hessian
+test_jkonly_sigma_hessian: $(BUILD_DIR)/test_jkonly_sigma_hessian
+	./$(BUILD_DIR)/test_jkonly_sigma_hessian
+
+$(BUILD_DIR)/test_jkonly_sigma_hessian: tests/test_jkonly_sigma_hessian.cpp $(BUILD_DIR)/JkOnlyHessian.o $(BUILD_DIR)/JkOnlySigmaHessianVector.o $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
+# Unit test of Hessian_opt/HartreeExchangeSigmaHessianVector.h (the resummed/"sigma-vector"
+# PNOF+pCCD-shared Hessian-vector product, [[project-ri-hessian-neo-design]] Stage 2) against the
+# existing trusted hartreeExchangeHessianElement-based formula, including a non-trivial pair_of so
+# the L1/L2 term is actually exercised.
+.PHONY: test_hartreeexchange_sigma_hessian
+test_hartreeexchange_sigma_hessian: $(BUILD_DIR)/test_hartreeexchange_sigma_hessian
+	./$(BUILD_DIR)/test_hartreeexchange_sigma_hessian
+
+$(BUILD_DIR)/test_hartreeexchange_sigma_hessian: tests/test_hartreeexchange_sigma_hessian.cpp $(BUILD_DIR)/HartreeExchangeHessian.o $(BUILD_DIR)/HartreeExchangeSigmaHessianVector.o $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
+# Unit test of Hessian_opt/JkOnlySigmaHessianVectorRi.h (the RI-NATIVE, B/K(v)-only form, built
+# via RiSigmaHessianToolkit.h) against the generic form fed the same eri=B^T B.
+.PHONY: test_jkonly_sigma_hessian_ri
+test_jkonly_sigma_hessian_ri: $(BUILD_DIR)/test_jkonly_sigma_hessian_ri
+	./$(BUILD_DIR)/test_jkonly_sigma_hessian_ri
+
+$(BUILD_DIR)/test_jkonly_sigma_hessian_ri: tests/test_jkonly_sigma_hessian_ri.cpp $(BUILD_DIR)/JkOnlyHessian.o $(BUILD_DIR)/JkOnlySigmaHessianVector.o $(BUILD_DIR)/JkOnlySigmaHessianVectorRi.o $(BUILD_DIR)/RiSigmaHessianToolkit.o $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
+# Unit test of Hessian_opt/JkOnlySigmaHessianVector.h's jkOnlySigmaJointHessianVector (complex/
+# joint [t;y] case) against the existing trusted jkOnlyJointHessianVector.
+.PHONY: test_jkonly_sigma_hessian_joint
+test_jkonly_sigma_hessian_joint: $(BUILD_DIR)/test_jkonly_sigma_hessian_joint
+	./$(BUILD_DIR)/test_jkonly_sigma_hessian_joint
+
+$(BUILD_DIR)/test_jkonly_sigma_hessian_joint: tests/test_jkonly_sigma_hessian_joint.cpp $(BUILD_DIR)/JkOnlyHessian.o $(BUILD_DIR)/JkOnlySigmaHessianVector.o $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
+# Unit test of Hessian_opt/HartreeExchangeSigmaHessianVector.h's
+# hartreeExchangeSigmaJointHessianVector (complex/joint [t;y], covers PNOF+pCCD) against the
+# existing trusted hartreeExchangeJointHessianVector.
+.PHONY: test_hartreeexchange_sigma_hessian_joint
+test_hartreeexchange_sigma_hessian_joint: $(BUILD_DIR)/test_hartreeexchange_sigma_hessian_joint
+	./$(BUILD_DIR)/test_hartreeexchange_sigma_hessian_joint
+
+$(BUILD_DIR)/test_hartreeexchange_sigma_hessian_joint: tests/test_hartreeexchange_sigma_hessian_joint.cpp $(BUILD_DIR)/HartreeExchangeHessian.o $(BUILD_DIR)/HartreeExchangeSigmaHessianVector.o $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
+# Unit test of Hessian_opt/JkOnlySigmaHessianVectorRi.h's jkOnlySigmaJointHessianVectorRi
+# (complex RI-direct joint) against the generic complex/joint form fed the same eri=B^T B.
+.PHONY: test_jkonly_sigma_hessian_ri_joint
+test_jkonly_sigma_hessian_ri_joint: $(BUILD_DIR)/test_jkonly_sigma_hessian_ri_joint
+	./$(BUILD_DIR)/test_jkonly_sigma_hessian_ri_joint
+
+$(BUILD_DIR)/test_jkonly_sigma_hessian_ri_joint: tests/test_jkonly_sigma_hessian_ri_joint.cpp $(BUILD_DIR)/JkOnlyHessian.o $(BUILD_DIR)/JkOnlySigmaHessianVector.o $(BUILD_DIR)/JkOnlySigmaHessianVectorRi.o $(BUILD_DIR)/RiSigmaHessianToolkit.o $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
+# Unit test of Hessian_opt/HartreeExchangeSigmaHessianVectorRi.h's
+# hartreeExchangeSigmaJointHessianVectorRi (complex RI-direct joint, covers PNOF+pCCD) against
+# the generic complex/joint form fed the same eri=B^T B.
+.PHONY: test_hartreeexchange_sigma_hessian_ri_joint
+test_hartreeexchange_sigma_hessian_ri_joint: $(BUILD_DIR)/test_hartreeexchange_sigma_hessian_ri_joint
+	./$(BUILD_DIR)/test_hartreeexchange_sigma_hessian_ri_joint
+
+$(BUILD_DIR)/test_hartreeexchange_sigma_hessian_ri_joint: tests/test_hartreeexchange_sigma_hessian_ri_joint.cpp $(BUILD_DIR)/HartreeExchangeHessian.o $(BUILD_DIR)/HartreeExchangeSigmaHessianVector.o $(BUILD_DIR)/HartreeExchangeSigmaHessianVectorRi.o $(BUILD_DIR)/RiSigmaHessianToolkit.o $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
+# Unit test of Hessian_opt/HartreeExchangeSigmaHessianVectorRi.h (RI-native, covers PNOF+pCCD)
+# against the generic form fed the same eri=B^T B, with a non-trivial pair_of.
+.PHONY: test_hartreeexchange_sigma_hessian_ri
+test_hartreeexchange_sigma_hessian_ri: $(BUILD_DIR)/test_hartreeexchange_sigma_hessian_ri
+	./$(BUILD_DIR)/test_hartreeexchange_sigma_hessian_ri
+
+$(BUILD_DIR)/test_hartreeexchange_sigma_hessian_ri: tests/test_hartreeexchange_sigma_hessian_ri.cpp $(BUILD_DIR)/HartreeExchangeHessian.o $(BUILD_DIR)/HartreeExchangeSigmaHessianVector.o $(BUILD_DIR)/HartreeExchangeSigmaHessianVectorRi.o $(BUILD_DIR)/RiSigmaHessianToolkit.o $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
 # Unit test of Utils/KramersPairing (exact Kramers re-pairing of degenerate clusters).
 .PHONY: test_kramers_pairing
 test_kramers_pairing: $(BUILD_DIR)/test_kramers_pairing

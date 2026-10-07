@@ -562,17 +562,21 @@ void Input::read(const std::string& filename) {
         "the SAME ADAM orbital-rotation sub-loop -- set FUNCTIONAL_DIRECT_4C FALSE (or leave it unset) "
         "to use USE_RI there instead");
   }
-  if (use_ri_ && full_optimization_4c_neg_) {
-    throw std::runtime_error(
-        "USE_RI TRUE with FULL_OPTIMIZATION_4C_NEG TRUE is not supported (the min-max stage always "
-        "needs NEO with a Hessian-vector callback, which the RI-based path does not have yet)");
-  }
-  if (use_ri_ && (orbital_optimizer_ == "NEO" || orbital_optimizer_ == "ADAM_NEO")) {
-    throw std::runtime_error(
-        "USE_RI TRUE with ORBITAL_OPTIMIZER " + orbital_optimizer_ +
-        " is not supported yet (no RI-based orbital-rotation Hessian exists for NEO to use) -- use "
-        "ORBITAL_OPTIMIZER ADAM (the default) instead");
-  }
+  // USE_RI + FULL_OPTIMIZATION_4C_NEG: previously blocked ("the min-max stage always needs NEO
+  // with a Hessian-vector callback, which the RI-based path does not have yet"), now open -- NEO
+  // has an RI-based Hessian-vector (see the note below), and `ri_dhf_mo_eri`/`ri_c4_mo_eri_r`
+  // (main.cpp) are ALREADY built over the FULL, untrimmed RKB space (needed for the ground-state
+  // path's own `positiveBlock` trim), so no separate untrimmed-rebuild factory is even needed --
+  // unlike CHOLESKY's own `full_chol_factory`, which must rebuild from scratch since its
+  // ground-state vectors are trimmed/recompressed at build time. Min-max only ever runs under
+  // C4_SPINOR regardless (main.cpp gates it on `label=="C4_DHF"`), so this has no effect for a
+  // NON_RELATIVISTIC/X2C-only run either way. See [[project-ri-hessian-neo-design]] Stage 7.
+  // NON_RELATIVISTIC/C4_SPINOR/X2C all now have an RI-based orbital-rotation Hessian-vector --
+  // NON_RELATIVISTIC via RiNonRelSpinMoEri (its spin-selection rule embedded as a block-diagonal
+  // B, exact, not an approximation), C4_SPINOR/X2C via RiMoEri (X2C reuses the exact same
+  // UkbDirectSource/RiMoEri machinery C4_SPINOR does). See
+  // [[project-ri-hessian-neo-design]] Stages 5-6. No remaining USE_RI+NEO/ADAM_NEO restriction
+  // for any of the three methods.
   // Applied here, after the whole file is parsed, so UNIT_LENGTH may appear before or after
   // GEOMETRY: "BOHR"/"AU" coordinates are already atomic units, no conversion needed.
   if (unit_length_ == "ANGS") {

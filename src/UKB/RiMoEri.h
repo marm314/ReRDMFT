@@ -38,6 +38,15 @@ class RiMoEri {
   std::size_t dim3() const { return n_total_; }
   std::size_t dim() const { return n_total_; }
 
+  // Raw access to the RI tensor itself (shape n_aux x n_total^2, `b(P,p*n_total+q)==B(P,p,q)`) --
+  // needed by Hessian_opt/JkOnlySigmaHessianVectorRi.h / HartreeExchangeSigmaHessianVectorRi.h's
+  // RI-direct (B-only, never-dense-eri) Hessian-vector product, see
+  // [[project-ri-hessian-neo-design]] Stage 5 (wiring). Everything else in this class only ever
+  // reads `b_` through `operator()`'s O(n_aux)-per-element contraction; this exposes the tensor
+  // itself for callers that contract against it directly (O(n_aux*n^3)-style, not O(n_aux) per
+  // single element).
+  const Matrix<std::complex<double>>& b() const { return b_; }
+
   std::complex<double> operator()(std::size_t a, std::size_t b, std::size_t c, std::size_t d) const {
     std::complex<double> sum{};
     const std::size_t n_aux = b_.rows();

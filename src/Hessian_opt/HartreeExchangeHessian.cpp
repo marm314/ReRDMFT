@@ -1,6 +1,8 @@
 #include "HartreeExchangeHessian.h"
 
 #include "CholeskyEri.h"
+#include "NonRelSpinRiMoEri.h"
+#include "RiMoEri.h"
 #include "SymmetricEri.h"
 
 #include <complex>
@@ -312,6 +314,12 @@ template double hartreeExchangeHessianElement(
     const Matrix<double>& two_rdm_l2);
 template double hartreeExchangeHessianElement(
     const Matrix<double>& h, const SymmetricEri<double>& eri, const std::vector<double>& occupations,
+    const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x, const Matrix<double>& fock,
+    std::size_t p, std::size_t q, std::size_t r, std::size_t s,
+    const std::vector<std::size_t>& pair_of, const Matrix<double>& two_rdm_l1,
+    const Matrix<double>& two_rdm_l2);
+template double hartreeExchangeHessianElement(
+    const Matrix<double>& h, const RiNonRelSpinMoEri& eri, const std::vector<double>& occupations,
     const Matrix<double>& two_rdm_h, const Matrix<double>& two_rdm_x, const Matrix<double>& fock,
     std::size_t p, std::size_t q, std::size_t r, std::size_t s,
     const std::vector<std::size_t>& pair_of, const Matrix<double>& two_rdm_l1,
@@ -683,6 +691,13 @@ template std::vector<double> hartreeExchangeJointHessianDiagonal(
     const Matrix<double>& two_rdm_l2);
 template std::vector<double> hartreeExchangeJointHessianDiagonal(
     const Matrix<std::complex<double>>& h, const SymmetricEri<std::complex<double>>& eri,
+    const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
+    const Matrix<double>& two_rdm_x, const Matrix<std::complex<double>>& fock,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices,
+    const std::vector<std::size_t>& pair_of, const Matrix<double>& two_rdm_l1,
+    const Matrix<double>& two_rdm_l2);
+template std::vector<double> hartreeExchangeJointHessianDiagonal(
+    const Matrix<std::complex<double>>& h, const RiMoEri& eri,
     const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
     const Matrix<double>& two_rdm_x, const Matrix<std::complex<double>>& fock,
     const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices,

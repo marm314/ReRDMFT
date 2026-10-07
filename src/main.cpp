@@ -3785,9 +3785,15 @@ int main(int argc, char** argv) {
               timing_records, &c4_restart, eri_full_factory, &ro.data.occupations, occ_in, ukb_direct_ptr_r);
         };
         if (input.use_ri()) {
-          // FULL_OPTIMIZATION_4C_NEG is mutually exclusive with USE_RI (Input.cpp's own check), so
-          // the MINMAX-only untrimmed-block factory is never needed here.
-          dhf_functional_report = dhf_functional_r(ri_c4_mo_eri_r, std::function<rerdmft::RiMoEri()>());
+          // FULL_OPTIMIZATION_4C_NEG + USE_RI: unlike CHOLESKY's own full_chol_factory, no
+          // SEPARATE rebuild is needed -- `ri_c4_mo_eri_r` is ALREADY built over the full,
+          // untrimmed RKB space (see its own construction comment above), so the min-max stage
+          // can just reuse the SAME object directly. See [[project-ri-hessian-neo-design]] Stage 7.
+          const std::function<rerdmft::RiMoEri()> ri_full_factory_r =
+              (input.full_optimization_4c_neg() && fullOptSettings(input).enabled)
+                  ? std::function<rerdmft::RiMoEri()>([&]() { return ri_c4_mo_eri_r; })
+                  : std::function<rerdmft::RiMoEri()>();
+          dhf_functional_report = dhf_functional_r(ri_c4_mo_eri_r, ri_full_factory_r);
         } else if (input.cholesky()) {
           // Lazy, same reasoning as the non-restart C4_DHF path: only built if/when the saddle
           // stage inside dhf_functional_r() actually needs it.
@@ -4935,9 +4941,15 @@ int main(int argc, char** argv) {
               timing_records, &c4_restart, eri_full_factory, nullptr, occ_in, ukb_direct_ptr);
         };
         if (input.use_ri()) {
-          // FULL_OPTIMIZATION_4C_NEG is mutually exclusive with USE_RI (Input.cpp's own check), so
-          // the MINMAX-only untrimmed-block factory is never needed here.
-          dhf_functional_report = dhf_functional(ri_dhf_mo_eri, std::function<rerdmft::RiMoEri()>());
+          // FULL_OPTIMIZATION_4C_NEG + USE_RI: unlike CHOLESKY's own full_chol_factory, no
+          // SEPARATE rebuild is needed -- `ri_dhf_mo_eri` is ALREADY built over the full,
+          // untrimmed RKB space (see its own construction comment above), so the min-max stage
+          // can just reuse the SAME object directly. See [[project-ri-hessian-neo-design]] Stage 7.
+          const std::function<rerdmft::RiMoEri()> ri_full_factory =
+              (input.full_optimization_4c_neg() && fullOptSettings(input).enabled)
+                  ? std::function<rerdmft::RiMoEri()>([&]() { return ri_dhf_mo_eri; })
+                  : std::function<rerdmft::RiMoEri()>();
+          dhf_functional_report = dhf_functional(ri_dhf_mo_eri, ri_full_factory);
         } else if (use_cholesky_integrals) {
           // FULL_OPTIMIZATION_4C_NEG needs the negative-energy block too: the trimmed vector above
           // has it zeroed and recompressed away, so the full-block vectors are built separately --

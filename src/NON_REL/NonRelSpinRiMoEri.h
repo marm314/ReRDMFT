@@ -57,6 +57,32 @@ class RiNonRelSpinMoEri {
   // n_spatial block is ever read (checked, not just assumed -- see the .cpp).
   RiNonRelSpinMoEri rotated(const Matrix<double>& u) const;
 
+  // Embeds the spatial-only `b_` into a BLOCK-DIAGONAL `(n_aux, dim0()^2)` tensor over the FULL
+  // spin-orbital space (same spatial block repeated at [alpha,alpha] and [beta,beta], zero at the
+  // cross [alpha,beta]/[beta,alpha] blocks) -- needed by
+  // Hessian_opt/JkOnlySigmaHessianVectorRi.h / HartreeExchangeSigmaHessianVectorRi.h's RI-direct
+  // (B-only) Hessian-vector product, which assumes a flat `B(P,p,q)` over the SAME orbital space
+  // the Hessian acts on, with no spin-selection rule of its own (see
+  // [[project-ri-hessian-neo-design]] Stage 6). Confirmed by direct substitution that this
+  // reproduces `operator()`'s own spin-selection rule EXACTLY: `eri(A,B,C,D) = sum_P
+  // B_embedded(P,A,C)*B_embedded(P,B,D)` is zero whenever `A,C` (or `B,D`) are in different spin
+  // blocks, because `B_embedded(P,A,C)` itself is zero there by construction -- not an
+  // approximation, an exact reformulation of the same operator. O(n_aux*n_spatial^2) to build,
+  // cheap (same cost class as `rotated()`).
+  Matrix<double> embeddedB() const {
+    const std::size_t n_aux = b_.rows();
+    const std::size_t n = 2 * n_spatial_;
+    Matrix<double> out(n_aux, n * n, 0.0);
+    for (std::size_t P = 0; P < n_aux; ++P)
+      for (std::size_t p = 0; p < n_spatial_; ++p)
+        for (std::size_t q = 0; q < n_spatial_; ++q) {
+          const double val = b_(P, p * n_spatial_ + q);
+          out(P, p * n + q) = val;                                            // [alpha,alpha] block
+          out(P, (n_spatial_ + p) * n + (n_spatial_ + q)) = val;              // [beta,beta] block
+        }
+    return out;
+  }
+
  private:
   std::size_t n_spatial_ = 0;
   Matrix<double> b_;

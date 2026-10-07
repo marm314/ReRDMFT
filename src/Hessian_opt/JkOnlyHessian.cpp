@@ -1,6 +1,8 @@
 #include "JkOnlyHessian.h"
 
 #include "CholeskyEri.h"
+#include "NonRelSpinRiMoEri.h"
+#include "RiMoEri.h"
 #include "SymmetricEri.h"
 
 #include <complex>
@@ -121,6 +123,11 @@ template std::complex<double> jkOnlyHessianElement(
     const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
     const Matrix<double>& two_rdm_x, std::size_t p, std::size_t q, std::size_t r, std::size_t s);
 template double jkOnlyHessianElement(const Matrix<double>& h, const CholeskyEri<double>& eri,
+                                      const std::vector<double>& occupations,
+                                      const Matrix<double>& two_rdm_h,
+                                      const Matrix<double>& two_rdm_x, std::size_t p,
+                                      std::size_t q, std::size_t r, std::size_t s);
+template double jkOnlyHessianElement(const Matrix<double>& h, const RiNonRelSpinMoEri& eri,
                                       const std::vector<double>& occupations,
                                       const Matrix<double>& two_rdm_h,
                                       const Matrix<double>& two_rdm_x, std::size_t p,
@@ -350,6 +357,11 @@ template std::vector<double> jkOnlyJointHessianDiagonal(
     const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);
 template std::vector<double> jkOnlyJointHessianDiagonal(
     const Matrix<std::complex<double>>& h, const SymmetricEri<std::complex<double>>& eri,
+    const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
+    const Matrix<double>& two_rdm_x,
+    const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);
+template std::vector<double> jkOnlyJointHessianDiagonal(
+    const Matrix<std::complex<double>>& h, const RiMoEri& eri,
     const std::vector<double>& occupations, const Matrix<double>& two_rdm_h,
     const Matrix<double>& two_rdm_x,
     const std::vector<std::pair<std::size_t, std::size_t>>& pair_indices);
