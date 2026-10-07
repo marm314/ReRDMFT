@@ -442,13 +442,19 @@ void Input::read(const std::string& filename) {
   // expressed a preference for a different two-electron representation, explicitly, via any of
   // CHOLESKY/SCF_DIRECT_4C/FUNCTIONAL_DIRECT_4C (an explicit TRUE for the latter two; CHOLESKY
   // defers on either explicit value, since even an explicit CHOLESKY FALSE is a deliberate choice
-  // of the dense path) -- or via DEBUG/HESSIAN_MEAN_FIELD/READ_RESTART/FULL_OPTIMIZATION_4C_NEG/
-  // ORBITAL_OPTIMIZER NEO, none of which RI supports yet (same restrictions as before, just
-  // checked here too so the smart default never silently picks something that would throw right
-  // below). An EXPLICIT USE_RI TRUE against any of those unsupported combinations still hits the
-  // throws right below, unchanged -- this only changes what happens when USE_RI is left unset.
+  // of the dense path) -- or via DEBUG/HESSIAN_MEAN_FIELD/FULL_OPTIMIZATION_4C_NEG/
+  // ORBITAL_OPTIMIZER NEO, none of which RI supports (same restrictions as before, just checked
+  // here too so the smart default never silently picks something that would throw right below).
+  // READ_RESTART is no longer in this list: main.cpp's READ_RESTART branch builds its own RI
+  // aux basis/3-center tensor fresh at the CURRENT geometry (never anything cached from the
+  // restart file) and feeds it through the exact same RiNonRelSpinMoEri/RiMoEri/UkbDirectSource
+  // machinery the non-restart path uses, so a potential-energy-curve scan (run one geometry, keep
+  // RESTART.*, change the geometry, set READ_RESTART TRUE) now gets RI too, by default, just like
+  // every other run. An EXPLICIT USE_RI TRUE against any of the unsupported combinations below
+  // still hits the throws right there, unchanged -- this only changes what happens when USE_RI is
+  // left unset.
   if (!use_ri_explicit_) {
-    use_ri_ = (non_relativistic_ || x2c_ || c4_spinor_) && !cholesky_explicit_ && !read_restart_ &&
+    use_ri_ = (non_relativistic_ || x2c_ || c4_spinor_) && !cholesky_explicit_ &&
               !debug_ && !hessian_mean_field_ && !full_optimization_4c_neg_ && !functional_direct_4c_ &&
               !(scf_direct_4c_explicit_ && scf_direct_4c_) &&
               !(orbital_optimizer_ == "NEO" || orbital_optimizer_ == "ADAM_NEO");
@@ -464,11 +470,6 @@ void Input::read(const std::string& filename) {
     throw std::runtime_error(
         "USE_RI TRUE requires at least one of NON_RELATIVISTIC/X2C/C4_SPINOR TRUE (there is "
         "otherwise no SCF loop for it to change)");
-  }
-  if (use_ri_ && read_restart_) {
-    throw std::runtime_error(
-        "USE_RI TRUE with READ_RESTART TRUE is not yet supported (the restart branch has its own, separate "
-        "dense/Cholesky Fock-build logic that USE_RI has not been wired into)");
   }
   if (use_ri_ && debug_) {
     throw std::runtime_error(

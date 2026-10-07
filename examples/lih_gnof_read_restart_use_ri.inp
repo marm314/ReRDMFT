@@ -1,0 +1,34 @@
+# Validation example: USE_RI TRUE + READ_RESTART TRUE together, the RI counterpart of
+# examples/lih_gnof_read_restart.inp.
+#
+# 1) Run examples/lih_gnof_c4_full_optimization_use_ri.inp (LiH, R = 1.5949 bohr, NON_REL + X2C +
+#    C4_SPINOR, GNOF, FULL_OPTIMIZATION, USE_RI TRUE by default): it writes RESTART.NON_REL,
+#    RESTART.X2C and RESTART.4C from RI orbitals.
+# 2) Run this file from the same directory. The geometry below is stretched to 1.70 bohr.
+#    READ_RESTART TRUE skips the HF/DHF SCF of every method; the orbitals and occupation numbers
+#    (gammas) of the RESTART files are Loewdin-orthonormalized in the new overlap, the Kramers
+#    pairing is re-established, the 4-component positive-energy space is re-defined at the new
+#    geometry, and FULL_OPTIMIZATION starts from that state -- with USE_RI TRUE, the aux
+#    basis/3-center tensor is rebuilt FRESH at this geometry (nothing RI-related is ever cached in
+#    the restart file), then fed through the same RiNonRelSpinMoEri/RiMoEri/UkbDirectSource
+#    machinery the non-restart RI path uses.
+#
+# Compared against a from-scratch USE_RI TRUE run at 1.70 bohr (no READ_RESTART): NON_REL agrees to
+# all displayed digits (-7.998509088 Ha), X2C_HF to ~1.5e-8 Ha (-8.000273099 vs -8.000273084 Ha), and
+# 4C to ~1e-9 Ha (-7.999250484 vs -7.999250485 Ha) -- the same restart-fidelity level the dense/
+# Cholesky READ_RESTART path already has, confirmed 2026-10-07.
+NELEC 4
+BASIS lih-6-31g.gbs
+NON_RELATIVISTIC TRUE
+X2C TRUE
+C4_SPINOR TRUE
+FUNCTIONAL GNOF
+PNOF_SUBSPACES 2
+PNOF_COUPLING 2
+FULL_OPTIMIZATION TRUE
+READ_RESTART TRUE
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.700000
+END

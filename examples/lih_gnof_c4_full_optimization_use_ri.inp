@@ -1,0 +1,18 @@
+# Writer half of examples/lih_gnof_read_restart_use_ri.inp: LiH, 6-31G, GNOF, FULL_OPTIMIZATION
+# TRUE, NON_REL + X2C + C4_SPINOR together, USE_RI left at its smart default (TRUE for all three --
+# no CHOLESKY/SCF_DIRECT_4C/etc. override here, unlike lih_gnof_c4_full_optimization.inp's own
+# dense/Cholesky path). Writes RESTART.NON_REL, RESTART.X2C and RESTART.4C, all from RI orbitals.
+NELEC 4
+BASIS lih-6-31g.gbs
+NON_RELATIVISTIC TRUE
+X2C TRUE
+C4_SPINOR TRUE
+FUNCTIONAL GNOF
+PNOF_SUBSPACES 2
+PNOF_COUPLING 2
+FULL_OPTIMIZATION TRUE
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.594900
+END

@@ -2681,7 +2681,7 @@ void writeNonRelFcidump(const rerdmft::Input& input, const rerdmft::Matrix<doubl
   log << "\nFCIDUMP written (NON_REL, spin-up channel, same MO order as used/optimized in the RDMFT): FCIDUMP\n";
 }
 
-// Writes the binary RESTART file (Utils/Restart.h) of one method ("NON_REL" | "X2C_HF") from the
+// Writes the binary RESTART file (Utils/Restart.h) of one method ("NON_REL" | "X2C") from the
 // state the functional report captured, attaches the final MO coefficients
 //   C = C_scf * U_total   (C_scf: SCF coefficients in the AO SPIN-ORBITAL basis, U_total: the
 //                          FULL_OPTIMIZATION rotation, identity if none),
@@ -2700,7 +2700,7 @@ void writeRestartFile(std::ostream& out, const rerdmft::Input& input, const std:
                       const rerdmft::Matrix<std::complex<double>>& s_ao,
                       const rerdmft::Matrix<T>& h_mo, std::uint64_t basis_fingerprint,
                       double nuclear_repulsion_energy) {
-  const std::string base = "RESTART";  // files: RESTART.NON_REL, RESTART.X2C_HF, RESTART.4C, RESTART.4C_NEG
+  const std::string base = "RESTART";  // files: RESTART.NON_REL, RESTART.X2C, RESTART.4C, RESTART.4C_NEG
   if (!capture.valid) {
     out << "\nRESTART file (" << method << "): not written -- no RDMFT result was produced.\n";
     return;
@@ -3436,13 +3436,48 @@ int main(int argc, char** argv) {
         const auto h_spin = rerdmft::closedShellSpinOrbitalOneElectron(h_mo_nr, n);
         rerdmft::CholeskyEri<double> eri_spin_chol;
         rerdmft::SymmetricEri<double> eri_spin_sym;
-        if (input.cholesky()) {
+        // USE_RI + READ_RESTART: the aux basis/3-center tensor is built FRESH here, straight from
+        // the CURRENT geometry's large_basis.functions() (never anything cached from the restart
+        // file, which holds no RI data at all) -- same getOrBuildLargeAuxRiCache the non-restart
+        // NON_REL/X2C path uses, just evaluated at whatever geometry this run's GEOMETRY block
+        // gives. The MO-RI tensor is then built at the restart orbitals c_spatial (already
+        // Loewdin-orthonormalized in THIS geometry's overlap above), mirroring the non-restart
+        // path's ri_nonrel_mo_eri exactly.
+        rerdmft::RiNonRelSpinMoEri ri_nonrel_mo_eri;
+        rerdmft::Matrix<double> ri_nonrel_eri3_l;
+        if (input.use_ri()) {
+          const LargeAuxRiCache& cache =
+              getOrBuildLargeAuxRiCache(large_aux_ri_cache, large_basis.functions(), input);
+          ri_nonrel_eri3_l = input.cartesian()
+                                  ? cache.eri3_cart
+                                  : rerdmft::transformRiThreeCenterAoLegs(
+                                        cache.eri3_cart, large_basis.functions().size(), nonrel_transform);
+          ri_nonrel_mo_eri = rerdmft::buildRiNonRelSpinMoEri(ri_nonrel_eri3_l, n, c_spatial);
+        } else if (input.cholesky()) {
           eri_spin_chol = rerdmft::aoCholeskyToMoSpinOrbital(ao_cholesky, c_spatial);
         } else {
           eri_spin_sym = rerdmft::closedShellSpinOrbitalTwoElectron(rerdmft::moTwoElectronSymmetric(nonrel_eri, c_spatial), n);
         }
         logTiming("NON_REL MO integral transform complete (READ_RESTART)", t_start, t_checkpoint, timing_records);
         rerdmft::RestartCapture nonrel_restart;
+        // USE_RI + FULL_OPTIMIZATION (NON_REL, READ_RESTART): the SAME RiNonRelDirectSource the
+        // non-restart path builds (see its own comment above), just from the restart orbitals
+        // c_spatial instead of the SCF ones -- the ADAM/NEO orbital-rotation sub-loop reads this
+        // directly, never re-rotating a stored MO tensor.
+        std::optional<RiNonRelDirectSource> ri_nonrel_direct_storage;
+        const RiNonRelDirectSource* ri_nonrel_direct_ptr = nullptr;
+        if (input.use_ri()) {
+          rerdmft::Matrix<double> ri_nonrel_c0(n, 2 * n);
+          for (std::size_t mu = 0; mu < n; ++mu) {
+            for (std::size_t p = 0; p < n; ++p) {
+              ri_nonrel_c0(mu, p) = c_spatial(mu, p);
+              ri_nonrel_c0(mu, n + p) = c_spatial(mu, p);
+            }
+          }
+          ri_nonrel_direct_storage =
+              RiNonRelDirectSource{ri_nonrel_eri3_l, n, std::move(ri_nonrel_c0), h_core_nonrel};
+          ri_nonrel_direct_ptr = &*ri_nonrel_direct_storage;
+        }
         const auto nonrel_functional = [&](const auto& eri_any) {
           if (isPccdFunctionalName(input.functional())) {
             return buildPccdFunctionalReport(
@@ -3450,22 +3485,24 @@ int main(int argc, char** argv) {
                 restart_nuclear_repulsion, input.pccd_frozen_pairs(), input.pccd_active_pairs(),
                 input.pccd_amplitude_solver(), fullOptSettings(input), input.full_optimization_4c_neg(),
                 t_start, t_checkpoint, timing_records, &nonrel_restart,
-                {}, &ro.data.amplitudes);
+                {}, &ro.data.amplitudes, nullptr, ri_nonrel_direct_ptr);
           }
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(
                 "NON_REL", h_spin, eri_any, 2 * n, 0, input.n_electrons(), input.functional(), restart_nuclear_repulsion,
                 input.pnof_subspaces(), input.pnof_coupling(), /*relativistic=*/false, input.sqp_pnof_occ(), input.debug(),
                 fullOptSettings(input), input.full_optimization_4c_neg(),
-                t_start, t_checkpoint, timing_records, &nonrel_restart, {}, &ro.data.occupations, occ_in);
+                t_start, t_checkpoint, timing_records, &nonrel_restart, {}, &ro.data.occupations, occ_in, nullptr, ri_nonrel_direct_ptr);
           }
           return buildFunctionalReport(
               "NON_REL", h_spin, eri_any, dummyEnergies(2 * n), 0, input.n_electrons(), input.jk_frozen_pairs(),
               input.jk_active_pairs(), input.temperature(), input.functional(), input.occupation_init(),
               restart_nuclear_repulsion, input.debug(), fullOptSettings(input),
-              input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &nonrel_restart, {}, &ro.data.occupations, occ_in);
+              input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &nonrel_restart, {}, &ro.data.occupations, occ_in, nullptr, ri_nonrel_direct_ptr);
         };
-        nonrel_functional_report = input.cholesky() ? nonrel_functional(eri_spin_chol) : nonrel_functional(eri_spin_sym);
+        nonrel_functional_report = input.use_ri()     ? nonrel_functional(ri_nonrel_mo_eri)
+                                    : input.cholesky() ? nonrel_functional(eri_spin_chol)
+                                                        : nonrel_functional(eri_spin_sym);
         writeRestartFile<double>(nonrel_restart_log, input, "NON_REL", nonrel_restart, blockDiagTwice(c_spatial), blockDiagTwice(h_core_nonrel),
                                  blockDiagTwice(s_large_cart), h_spin, restartFingerprint, restart_nuclear_repulsion);
         writeNonRelFcidump(input, c_spatial, h_core_nonrel, nonrel_eri, ao_cholesky, nonrel_restart,
@@ -3482,7 +3519,7 @@ int main(int argc, char** argv) {
         prepareX2CEriSph();
         const std::size_t dim = 2 * x_large.rows();
         const auto s_x2c = rerdmft::extractLargeComponentBlock(s_full, dim);
-        const auto ro = rerdmft::readRestartOrbitals("RESTART.X2C_HF", "X2C_HF", input.n_electrons(), dim, dim,
+        const auto ro = rerdmft::readRestartOrbitals("RESTART.X2C", "X2C", input.n_electrons(), dim, dim,
                                                      /*expected_complex=*/true, s_x2c, x2c_structure_log);
         noteWindow(x2c_structure_log, ro);
         // Kramers pairing after the Loewdin step: the pairs must be exact (Theta|2k> = |2k+1>) for the coupled-pair
@@ -3494,36 +3531,67 @@ int main(int argc, char** argv) {
         kramersStructureTestOneBody(x2c_structure_log, "X2C-HF (READ_RESTART)", h_x2c_mo, /*repairs_if_failed=*/false);
         rerdmft::CholeskyEri<std::complex<double>> x2c_mo_chol;
         rerdmft::SymmetricEri<std::complex<double>> x2c_mo_sym;
-        if (input.cholesky()) {
+        // USE_RI + READ_RESTART: same fresh-at-this-geometry aux basis/3-center tensor as NON_REL's
+        // own restart block above (shared getOrBuildLargeAuxRiCache -- built at most once per run
+        // either way), transformed into X2C's own spherical(+LOWGEN) dimension via
+        // large_transform_final exactly like the non-restart path, then wrapped in the SAME ns=0
+        // RiDirectEriSource shim (X2C has no Small component) used there, now at the restart
+        // orbitals c_x2c instead of the SCF ones.
+        rerdmft::RiMoEri ri_x2c_mo_eri;
+        rerdmft::RiDirectEriSource x2c_ri_shim;
+        if (input.use_ri()) {
+          const LargeAuxRiCache& cache =
+              getOrBuildLargeAuxRiCache(large_aux_ri_cache, large_basis.functions(), input);
+          x2c_ri_shim.nl = large_transform_final.cols();
+          x2c_ri_shim.ns = 0;
+          x2c_ri_shim.eri3_LL = rerdmft::transformRiThreeCenterAoLegs(cache.eri3_cart, large_basis.functions().size(),
+                                                                       large_transform_final);
+          x2c_ri_shim.eri3_SS = rerdmft::Matrix<double>(x2c_ri_shim.eri3_LL.rows(), 0);
+          const std::size_t x2c_n_ukb = 2 * x2c_ri_shim.nl;
+          rerdmft::Matrix<std::complex<double>> x2c_v_total_identity(x2c_n_ukb, x2c_n_ukb, std::complex<double>(0.0));
+          for (std::size_t i = 0; i < x2c_n_ukb; ++i) x2c_v_total_identity(i, i) = 1.0;
+          x2c_ri_shim.v_total = x2c_v_total_identity;
+          ri_x2c_mo_eri = rerdmft::buildRiMoEri(x2c_ri_shim, c_x2c);
+        } else if (input.cholesky()) {
           x2c_mo_chol = rerdmft::aoCholeskyToMoSpinor(ao_cholesky_sph, c_x2c);
         } else {
           x2c_mo_sym = rerdmft::x2cMoTwoElectronSymmetric(large_spherical_active ? nonrel_eri_sph : nonrel_eri, c_x2c);
         }
         logTiming("X2C-HF MO integral transform complete (READ_RESTART)", t_start, t_checkpoint, timing_records);
         rerdmft::RestartCapture x2c_restart;
+        // USE_RI + FULL_OPTIMIZATION (X2C_HF, READ_RESTART): the SAME UkbDirectSource wiring the
+        // non-restart path builds (see its own comment above), from the restart spinors c_x2c.
+        std::optional<rerdmft::UkbDirectSource> x2c_ukb_direct_storage;
+        const rerdmft::UkbDirectSource* x2c_ukb_direct_ptr = nullptr;
+        if (input.use_ri()) {
+          x2c_ukb_direct_storage = rerdmft::UkbDirectSource{x2c_hamiltonian.h_x2c, {}, c_x2c, true, x2c_ri_shim};
+          x2c_ukb_direct_ptr = &*x2c_ukb_direct_storage;
+        }
         const auto x2c_functional = [&](const auto& eri_any) {
           if (isPccdFunctionalName(input.functional())) {
             return buildPccdFunctionalReport(
                 "X2C_HF", h_x2c_mo, eri_any, dim, 0, input.n_electrons(), restart_nuclear_repulsion,
                 input.pccd_frozen_pairs(), input.pccd_active_pairs(), input.pccd_amplitude_solver(),
                 fullOptSettings(input), input.full_optimization_4c_neg(), t_start, t_checkpoint,
-                timing_records, &x2c_restart, {}, &ro.data.amplitudes);
+                timing_records, &x2c_restart, {}, &ro.data.amplitudes, x2c_ukb_direct_ptr);
           }
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(
                 "X2C_HF", h_x2c_mo, eri_any, dim, 0, input.n_electrons(), input.functional(), restart_nuclear_repulsion,
                 input.pnof_subspaces(), input.pnof_coupling(), /*relativistic=*/true, input.sqp_pnof_occ(), input.debug(),
                 fullOptSettings(input), input.full_optimization_4c_neg(),
-                t_start, t_checkpoint, timing_records, &x2c_restart, {}, &ro.data.occupations, occ_in);
+                t_start, t_checkpoint, timing_records, &x2c_restart, {}, &ro.data.occupations, occ_in, x2c_ukb_direct_ptr);
           }
           return buildFunctionalReport(
               "X2C_HF", h_x2c_mo, eri_any, dummyEnergies(dim), 0, input.n_electrons(), input.jk_frozen_pairs(),
               input.jk_active_pairs(), input.temperature(), input.functional(), input.occupation_init(),
               restart_nuclear_repulsion, input.debug(), fullOptSettings(input),
-              input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &x2c_restart, {}, &ro.data.occupations, occ_in);
+              input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &x2c_restart, {}, &ro.data.occupations, occ_in, x2c_ukb_direct_ptr);
         };
-        x2c_functional_report = input.cholesky() ? x2c_functional(x2c_mo_chol) : x2c_functional(x2c_mo_sym);
-        writeRestartFile<std::complex<double>>(x2c_restart_log, input, "X2C_HF", x2c_restart, c_x2c, x2c_hamiltonian.h_x2c, s_x2c, h_x2c_mo,
+        x2c_functional_report = input.use_ri()     ? x2c_functional(ri_x2c_mo_eri)
+                                 : input.cholesky() ? x2c_functional(x2c_mo_chol)
+                                                     : x2c_functional(x2c_mo_sym);
+        writeRestartFile<std::complex<double>>(x2c_restart_log, input, "X2C", x2c_restart, c_x2c, x2c_hamiltonian.h_x2c, s_x2c, h_x2c_mo,
                                                restartFingerprint, restart_nuclear_repulsion);
       }
 
@@ -3540,12 +3608,44 @@ int main(int argc, char** argv) {
           rkb_cholesky_built_r = true;
           logTiming("Two-electron integrals built (C4_DHF, Cholesky vectors, READ_RESTART)", t_start, t_checkpoint, timing_records);
         };
-        // With CHOLESKY TRUE + FUNCTIONAL_POS_CHO_4C TRUE + MINMAX not running, whether
-        // rkb_cholesky is needed at all depends on `ro.lowdin_applied` below (only known after
-        // reading the restart file) -- defer the build until then instead of paying for it
-        // upfront unconditionally. Every other CHOLESKY TRUE case needs it regardless (the
-        // ordinary rkbCholeskyToMo path, or MINMAX's own untrimmed transform), so build it now.
-        if (input.cholesky()) {
+        // USE_RI + READ_RESTART: the SAME RI_4C 3-center tensors (LL, SS; no LS -- see project
+        // memory project-ri-pauto-kr-validation) the non-restart C4_DHF path builds (see its own
+        // comment above), from an aux basis built fresh over THIS geometry's UKB basis
+        // (large_basis.functions() + small_basis.functions()) -- never anything cached from the
+        // restart file. `s_full`/`x_full`/`v_total` are the SAME RKB-basis objects already built
+        // in the common setup above (unaffected by READ_RESTART), reused here exactly as the
+        // non-restart path reuses them for riFockTwoElectronDirect's own occupied-orbital
+        // recovery.
+        rerdmft::RiDirectEriSource ri_direct_source_r;
+        if (input.use_ri()) {
+          const rerdmft::AuxBasisType aux_type_r =
+              input.aux_basis_type() == "AUTO" ? rerdmft::AuxBasisType::kAuto : rerdmft::AuxBasisType::kPauto;
+          std::vector<rerdmft::BasisFunction> ukb_basis_for_aux_r = large_basis.functions();
+          const auto& small_fns_for_aux_r = small_basis.functions();
+          ukb_basis_for_aux_r.insert(ukb_basis_for_aux_r.end(), small_fns_for_aux_r.begin(), small_fns_for_aux_r.end());
+          std::vector<rerdmft::BasisFunction> ri_aux_basis_r = rerdmft::buildAutoAuxiliaryBasis(ukb_basis_for_aux_r, aux_type_r);
+          rerdmft::normalizeCartesianBasis(ri_aux_basis_r);
+          rerdmft::RankReductionReport ri_metric_report_r;
+          const rerdmft::Matrix<double> ri_metric_x_r =
+              rerdmft::auxMetricOrthogonalization(ri_aux_basis_r, 1e-10, &ri_metric_report_r);
+          std::cout << "  RI_4C (READ_RESTART): " << ri_aux_basis_r.size() << " cartesian auxiliary functions ("
+                     << input.aux_basis_type() << "), " << ri_metric_x_r.cols() << " kept after the metric's own"
+                     << " LOWGEN safety net (" << ri_metric_report_r.n_dropped << " near-singular direction(s)"
+                     << " dropped).\n";
+          ri_direct_source_r.nl = large_basis.functions().size();
+          ri_direct_source_r.ns = small_basis.functions().size();
+          ri_direct_source_r.eri3_LL = rerdmft::riThreeCenterTensor(large_basis.functions(), ri_aux_basis_r, ri_metric_x_r);
+          ri_direct_source_r.eri3_SS = rerdmft::riThreeCenterTensor(small_basis.functions(), ri_aux_basis_r, ri_metric_x_r);
+          ri_direct_source_r.v_total = v_total;
+          ri_direct_source_r.s_full = s_full;
+          ri_direct_source_r.x_full = x_full;
+          logTiming("RI 3-center tensors built (C4_DHF, READ_RESTART)", t_start, t_checkpoint, timing_records);
+        } else if (input.cholesky()) {
+          // With CHOLESKY TRUE + FUNCTIONAL_POS_CHO_4C TRUE + MINMAX not running, whether
+          // rkb_cholesky is needed at all depends on `ro.lowdin_applied` below (only known after
+          // reading the restart file) -- defer the build until then instead of paying for it
+          // upfront unconditionally. Every other CHOLESKY TRUE case needs it regardless (the
+          // ordinary rkbCholeskyToMo path, or MINMAX's own untrimmed transform), so build it now.
           if (c4_minmax_may_run_r || !input.functional_pos_cho_4c()) buildRkbCholeskyR();
         } else {
           c4_spinor_eri = buildC4SpinorEri(input, large_basis.functions(), small_basis.functions(), rkb_coefficients,
@@ -3559,8 +3659,9 @@ int main(int argc, char** argv) {
         auto u_ortho = rerdmft::dagger(x_full) * (s_full * ro.c);
         std::vector<double> kramers_energies = pseudoKramersEnergies(dim);
         if (ro.lowdin_applied) {
-          // Needed now for fock_restart below but deferred above -- build it.
-          if (input.cholesky() && !rkb_cholesky_built_r) buildRkbCholeskyR();
+          // Needed now for fock_restart below but deferred above -- build it (USE_RI never defers:
+          // ri_direct_source_r is already built unconditionally above).
+          if (!input.use_ri() && input.cholesky() && !rkb_cholesky_built_r) buildRkbCholeskyR();
           // The no-pair positive-energy space must be the one of THIS geometry: the positive-energy spinors read from
           // the file span the OLD geometry's space, whose negative-energy admixture here (through the geometry-dependent
           // small components) would lower the energy of the positive-only calculation and put a large
@@ -3576,8 +3677,9 @@ int main(int argc, char** argv) {
             for (std::size_t i = 0; i < dim; ++i)
               for (std::size_t j = 0; j < dim; ++j) density(i, j) += occ * ro.c(i, col) * std::conj(ro.c(j, col));
           }
-          const auto fock_restart = input.cholesky() ? rerdmft::rkbFockMatrix(h_rkb, rkb_cholesky, density)
-                                                     : rerdmft::rkbFockMatrix(h_rkb, c4_spinor_eri, density);
+          const auto fock_restart = input.use_ri()       ? rerdmft::rkbFockMatrix(h_rkb, ri_direct_source_r, density)
+                                     : input.cholesky() ? rerdmft::rkbFockMatrix(h_rkb, rkb_cholesky, density)
+                                                         : rerdmft::rkbFockMatrix(h_rkb, c4_spinor_eri, density);
           const auto eig_restart = rerdmft::diagonalizeHermitian(rerdmft::dagger(x_full) * (fock_restart * x_full));
           rerdmft::Matrix<std::complex<double>> v_neg(dim, n_neg_space), v_pos(dim, dim - n_neg_space),
               u_pos_old(dim, dim - n_neg_space);
@@ -3617,7 +3719,13 @@ int main(int argc, char** argv) {
         kramersStructureTestOneBody(c4_structure_log, "C4_DHF (READ_RESTART)", h_mo_restart, /*repairs_if_failed=*/false);
         rerdmft::SymmetricEri<std::complex<double>> c4_mo_sym_r;
         rerdmft::CholeskyEri<std::complex<double>> c4_mo_chol_r;
-        if (input.cholesky() && input.functional_pos_cho_4c() && !rkb_cholesky_built_r) {
+        // USE_RI (READ_RESTART): the MO-RI tensor straight from c_dhf_restart, the SAME
+        // ri_direct_source_r built above -- no AO-level Cholesky/dense representation at all,
+        // mirroring the non-restart path's ri_dhf_mo_eri exactly.
+        rerdmft::RiMoEri ri_c4_mo_eri_r;
+        if (input.use_ri()) {
+          ri_c4_mo_eri_r = rerdmft::buildRiMoEri(ri_direct_source_r, ri_direct_source_r.v_total * c_dhf_restart);
+        } else if (input.cholesky() && input.functional_pos_cho_4c() && !rkb_cholesky_built_r) {
           // rkb_cholesky was genuinely never built above (CHOLESKY TRUE, FUNCTIONAL_POS_CHO_4C
           // TRUE, MINMAX not running, geometry unchanged) -- build the positive-energy MO
           // Cholesky vectors directly, built from `c_dhf_restart` AFTER the Löwdin-
@@ -3637,19 +3745,30 @@ int main(int argc, char** argv) {
         logTiming("C4_DHF MO integral transform complete (READ_RESTART)", t_start, t_checkpoint, timing_records);
         // Same early release as the non-restart C4_DHF path: only keep the big AO-basis RKB
         // vectors alive if the min-max (FULL_OPTIMIZATION_4C_NEG) stage might still need them
-        // below, via full_chol_factory_r's lazy untrimmed transform.
+        // below, via full_chol_factory_r's lazy untrimmed transform (USE_RI and
+        // FULL_OPTIMIZATION_4C_NEG are mutually exclusive, Input.cpp's own check, so rkb_cholesky
+        // is simply never built at all whenever input.use_ri() is set here).
         if (input.cholesky() && !(input.full_optimization_4c_neg() && fullOptSettings(input).enabled)) {
           rkb_cholesky = rerdmft::RkbCholesky();
         }
         const std::size_t n_negative_r = dim / 2;
         rerdmft::RestartCapture c4_restart;
+        // USE_RI + FULL_OPTIMIZATION (C4_DHF, READ_RESTART): the SAME UkbDirectSource wiring the
+        // non-restart path builds (see its own comment above), from c_dhf_restart and the SAME
+        // ri_direct_source_r built above.
+        std::optional<rerdmft::UkbDirectSource> ukb_direct_storage_r;
+        const rerdmft::UkbDirectSource* ukb_direct_ptr_r = nullptr;
+        if (input.use_ri()) {
+          ukb_direct_storage_r = rerdmft::UkbDirectSource{h_rkb, {}, c_dhf_restart, true, ri_direct_source_r};
+          ukb_direct_ptr_r = &*ukb_direct_storage_r;
+        }
         const auto dhf_functional_r = [&](const auto& eri_any, const auto& eri_full_factory) {
           if (isPccdFunctionalName(input.functional())) {
             return buildPccdFunctionalReport(
                 "C4_DHF", h_mo_restart, eri_any, dim - n_negative_r, n_negative_r, input.n_electrons(),
                 restart_nuclear_repulsion, input.pccd_frozen_pairs(), input.pccd_active_pairs(),
                 input.pccd_amplitude_solver(), fullOptSettings(input), input.full_optimization_4c_neg(),
-                t_start, t_checkpoint, timing_records, &c4_restart, eri_full_factory, &ro.data.amplitudes);
+                t_start, t_checkpoint, timing_records, &c4_restart, eri_full_factory, &ro.data.amplitudes, ukb_direct_ptr_r);
           }
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(
@@ -3657,15 +3776,19 @@ int main(int argc, char** argv) {
                 restart_nuclear_repulsion, input.pnof_subspaces(), input.pnof_coupling(), /*relativistic=*/true,
                 input.sqp_pnof_occ(), input.debug(), fullOptSettings(input),
                 input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &c4_restart, eri_full_factory,
-                &ro.data.occupations, occ_in);
+                &ro.data.occupations, occ_in, ukb_direct_ptr_r);
           }
           return buildFunctionalReport(
               "C4_DHF", h_mo_restart, eri_any, dummyEnergies(dim - n_negative_r), n_negative_r, input.n_electrons(),
               input.jk_frozen_pairs(), input.jk_active_pairs(), input.temperature(), input.functional(),
               input.occupation_init(), restart_nuclear_repulsion, input.debug(), fullOptSettings(input), input.full_optimization_4c_neg(), t_start, t_checkpoint,
-              timing_records, &c4_restart, eri_full_factory, &ro.data.occupations, occ_in);
+              timing_records, &c4_restart, eri_full_factory, &ro.data.occupations, occ_in, ukb_direct_ptr_r);
         };
-        if (input.cholesky()) {
+        if (input.use_ri()) {
+          // FULL_OPTIMIZATION_4C_NEG is mutually exclusive with USE_RI (Input.cpp's own check), so
+          // the MINMAX-only untrimmed-block factory is never needed here.
+          dhf_functional_report = dhf_functional_r(ri_c4_mo_eri_r, std::function<rerdmft::RiMoEri()>());
+        } else if (input.cholesky()) {
           // Lazy, same reasoning as the non-restart C4_DHF path: only built if/when the saddle
           // stage inside dhf_functional_r() actually needs it.
           const std::function<rerdmft::CholeskyEri<std::complex<double>>()> full_chol_factory_r =
@@ -4341,7 +4464,7 @@ int main(int argc, char** argv) {
         // RESTART file: the (Kramers-fixed) X2C-HF spinor coefficients times the FULL_OPTIMIZATION
         // rotation, in the Large-component spin-orbital AO basis.
         writeRestartFile<std::complex<double>>(
-            x2c_restart_log, input, "X2C_HF", x2c_restart, x2c_hf_result.c_matrix, x2c_hamiltonian.h_x2c,
+            x2c_restart_log, input, "X2C", x2c_restart, x2c_hf_result.c_matrix, x2c_hamiltonian.h_x2c,
             rerdmft::extractLargeComponentBlock(s_full, x2c_hf_result.c_matrix.rows()), h_x2c_mo,
             rerdmft::basisFingerprint(large_basis.functions()), x2c_hf_result.nuclear_repulsion_energy);
       }

@@ -11,7 +11,7 @@
 
 namespace rerdmft {
 
-// RESTART file: the final result of an RDMFT run (NON_REL, X2C_HF or 4C), written in BINARY so that
+// RESTART file: the final result of an RDMFT run (NON_REL, X2C or 4C), written in BINARY so that
 // a later run can start from it: the occupation numbers (JK_only functionals), the GAMMA
 // angles (PNOF functionals), or the t-/z-amplitudes (PCCD) and the final molecular-orbital
 // coefficients. Only the WRITER is used by the program for now; readRestart exists to verify the
@@ -22,7 +22,7 @@ namespace rerdmft {
 //   8 bytes   magic "RERDMFT\0"
 //   uint32    format version (kRestartVersion)
 //   uint32    byte-order marker 0x01020304 (a reader on a big-endian host refuses the file)
-//   string    method            ("NON_REL" | "X2C_HF" | "4C")           string = uint64 length + bytes
+//   string    method            ("NON_REL" | "X2C" | "4C")           string = uint64 length + bytes
 //   string    functional        (the FUNCTIONAL keyword, upper case)
 //   string    kind              ("OCCUPATIONS" | "GAMMAS" | "PCCD")
 //   uint64    basis fingerprint (BasisFingerprint.h's basisFingerprint of the Large AO basis)
@@ -56,7 +56,7 @@ namespace rerdmft {
 //   NON_REL: rows 2 n_ao   ordered [alpha AO_0..AO_{n-1}, beta AO_0..AO_{n-1}],
 //            cols 2 n_mo   ordered [alpha MO_0.., beta MO_0..] (the block layout of the MO
 //            integrals): C = blockdiag(C_scf, C_scf) * U_total, real;
-//   X2C_HF:  rows/cols 2 n_large (Large-component spin-orbital AO basis / spinors ordered as
+//   X2C:     rows/cols 2 n_large (Large-component spin-orbital AO basis / spinors ordered as
 //            the MO integrals, Kramers pairs (2k, 2k+1)): C = C_scf * U_total, complex;
 //   4C:      rows/cols 4 n_large (RKB spinor basis [Large-alpha; Large-beta; Small; Small] /
 //            MOs in ascending energy, the negative-energy branch first with occupation 0): C = C_dhf * U_total,

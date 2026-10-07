@@ -332,7 +332,7 @@ class Input {
   // reduction is already in effect (see doc/RKB.tex's own empirical note on this).
   double x_lin_dep_thrs_s() const { return x_lin_dep_thrs_s_; }
   // Optional; defaults to FALSE. TRUE: the HF/DHF SCF of every requested method (NON_RELATIVISTIC, X2C,
-  // C4_SPINOR) is skipped; RESTART.NON_REL / RESTART.X2C_HF / RESTART.4C (written by an earlier run, possibly
+  // C4_SPINOR) is skipped; RESTART.NON_REL / RESTART.X2C / RESTART.4C (written by an earlier run, possibly
   // at another geometry -- a potential-energy-curve scan) supply the MO coefficients and the occupation numbers
   // (gammas for the PNOF functionals). The orbitals are Loewdin-orthonormalized in the current overlap if needed,
   // their Kramers pairing is verified (and repaired) and the FUNCTIONAL calculation (FULL_OPTIMIZATION, ...) starts
