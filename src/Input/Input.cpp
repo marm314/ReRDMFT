@@ -460,9 +460,8 @@ void Input::read(const std::string& filename) {
   // left unset.
   if (!use_ri_explicit_) {
     use_ri_ = (non_relativistic_ || x2c_ || c4_spinor_) && !cholesky_explicit_ &&
-              !debug_ && !hessian_mean_field_ && !full_optimization_4c_neg_ && !functional_direct_4c_ &&
-              !(scf_direct_4c_explicit_ && scf_direct_4c_) &&
-              !(orbital_optimizer_ == "NEO" || orbital_optimizer_ == "ADAM_NEO");
+              !debug_ && !hessian_mean_field_ && !functional_direct_4c_ &&
+              !(scf_direct_4c_explicit_ && scf_direct_4c_);
   }
   // Valid for any of NON_RELATIVISTIC/X2C/C4_SPINOR (independently -- a run combining more than
   // one, e.g. the common NON_RELATIVISTIC + X2C + C4_SPINOR comparison pattern, gets RI for ALL
