@@ -518,6 +518,13 @@ class Input {
   // to NEO (once |dE| falls to or below this) and back to ADAM (once it rises above it again) -- see
   // ORBITAL_OPTIMIZER's own comment and Full_opt/FullOptimization.h's OrbitalOptimizer::kAdamNeo.
   double adam_neo_switch_tolerance() const { return adam_neo_switch_tolerance_; }
+  // Optional. NEO's Davidson stagnation stop (Utils/NEO.h NeoStepOptions::stagnation_*): after at least
+  // NEO_DAVIDSON_STAGNATION_MIN_ITERATIONS Davidson iterations, a solve gives up (reported not converged) when its
+  // residual is still above NEO_DAVIDSON_STAGNATION_FACTOR times its value NEO_DAVIDSON_STAGNATION_WINDOW iterations earlier.
+  // NEO_DAVIDSON_STAGNATION_WINDOW 0 disables the rule.
+  int neo_stagnation_window() const { return neo_stagnation_window_; }
+  int neo_stagnation_min_iterations() const { return neo_stagnation_min_iterations_; }
+  double neo_stagnation_factor() const { return neo_stagnation_factor_; }
   // Optional; defaults to FALSE. Only meaningful with ORBITAL_OPTIMIZER NEO or ADAM_NEO: when
   // true, after each macro-iteration loop converges (or hits MAX_MACRO_ITERATIONS) with NEO having
   // run last, performs a matrix-free block Davidson diagonalization (Utils/NEO.h's
@@ -618,6 +625,9 @@ class Input {
   std::string orbital_optimizer_ = "ADAM";
   int neo_max_iterations_ = 100;
   double adam_neo_switch_tolerance_ = 1e-4;
+  int neo_stagnation_window_ = 5;
+  int neo_stagnation_min_iterations_ = 10;
+  double neo_stagnation_factor_ = 0.5;
   bool check_hess_neo_ = false;
   bool fixed_occupancies_ = false;
   bool read_occupancies_ = false;

@@ -333,6 +333,7 @@ template <typename T>
 bool NeoStepSolver<T>::davidson(double alpha, int& micro, double& residual) {
   const double tol = effectiveTolerance();
   const double floor_value = opt_.preconditioner_floor;
+  std::vector<double> residual_history;
   for (int it = 0; it < opt_.max_micro_iterations; ++it) {
     ++micro;
     const RitzSet set = ritz(alpha);
@@ -405,6 +406,17 @@ bool NeoStepSolver<T>::davidson(double alpha, int& micro, double& residual) {
     residual = max_res;
     roots_ = std::move(roots);
     if (max_res <= tol) return true;
+    // Stagnation stop. Near-degenerate lowest roots (e.g. the exact zero modes of an atom's rotational symmetry)
+    // leave Davidson either growing its residual while it explores the flat directions or creeping down a few
+    // percent per iteration; hundreds of Hessian products then buy nothing the trust-region ratio test cares about.
+    // Give up (reported not converged; the step is still built from the current Ritz vector and ratio-tested) when
+    // the residual has not improved by `stagnation_factor` over the last `stagnation_window` iterations.
+    residual_history.push_back(max_res);
+    if (opt_.stagnation_window > 0 && residual_history.size() > static_cast<std::size_t>(opt_.stagnation_window) &&
+        static_cast<int>(residual_history.size()) > opt_.stagnation_min_iterations &&
+        max_res > opt_.stagnation_factor * residual_history[residual_history.size() - 1 - opt_.stagnation_window]) {
+      return false;
+    }
 
     if (m + corrections.size() > std::max(opt_.max_subspace, 4 * need)) collapse(set, keep);
     std::size_t added = 0;

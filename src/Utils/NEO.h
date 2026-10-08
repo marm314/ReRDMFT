@@ -84,6 +84,12 @@ struct NeoStepOptions {
   double residual_relative = 0.1;
   // Maximum Davidson iterations per (re)solve at one alpha.
   int max_micro_iterations = 200;
+  // Davidson stagnation stop (see NeoStepSolver::davidson): after at least `stagnation_min_iterations`, give up
+  // when the residual is still above `stagnation_factor` times its value `stagnation_window` iterations ago.
+  // stagnation_window = 0 disables it.
+  int stagnation_window = 5;
+  int stagnation_min_iterations = 10;
+  double stagnation_factor = 0.5;
   // Maximum trial-subspace dimension before collapsing to the current
   // Ritz vectors (stored H*b products are rotated, not recomputed).
   // Raised internally to at least 4*(target_order+1).

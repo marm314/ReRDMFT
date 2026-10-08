@@ -2375,6 +2375,9 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
     }
   }
   neo_options.step.target_order = 0;
+  neo_options.step.stagnation_window = settings.neo_stagnation_window;
+  neo_options.step.stagnation_min_iterations = settings.neo_stagnation_min_iterations;
+  neo_options.step.stagnation_factor = settings.neo_stagnation_factor;
   if (saddle) {
     neo_options.step.saddle_cutoff = settings.saddle.curvature_cutoff;
     neo_options.step.guess_from_diagonal = false;

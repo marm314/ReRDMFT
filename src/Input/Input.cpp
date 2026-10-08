@@ -348,6 +348,23 @@ void Input::read(const std::string& filename) {
         throw std::runtime_error("line " + std::to_string(line_number) +
                                   ": ADAM_NEO_SWITCH_TOLERANCE must be positive");
       }
+    } else if (keyword == "NEO_DAVIDSON_STAGNATION_WINDOW") {
+      neo_stagnation_window_ = parseInt(iss, line_number, keyword);
+      if (neo_stagnation_window_ < 0) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": NEO_DAVIDSON_STAGNATION_WINDOW must be non-negative (0 disables the rule)");
+      }
+    } else if (keyword == "NEO_DAVIDSON_STAGNATION_MIN_ITERATIONS") {
+      neo_stagnation_min_iterations_ = parseInt(iss, line_number, keyword);
+      if (neo_stagnation_min_iterations_ < 0) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": NEO_DAVIDSON_STAGNATION_MIN_ITERATIONS must be non-negative");
+      }
+    } else if (keyword == "NEO_DAVIDSON_STAGNATION_FACTOR") {
+      neo_stagnation_factor_ = parseDouble(iss, line_number, keyword);
+      if (!(neo_stagnation_factor_ > 0.0)) {
+        throw std::runtime_error("line " + std::to_string(line_number) + ": NEO_DAVIDSON_STAGNATION_FACTOR must be positive");
+      }
     } else if (keyword == "CHECK_HESS_NEO") {
       check_hess_neo_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "FIXED_OCCUPANCIES") {
@@ -649,6 +666,9 @@ void Input::print(std::ostream& out) const {
   line("ORBITAL_OPTIMIZER") << orbital_optimizer_ << "\n";
   line("NEO_MAX_ITERATIONS") << neo_max_iterations_ << "\n";
   line("ADAM_NEO_SWITCH_TOLERANCE") << adam_neo_switch_tolerance_ << "\n";
+  line("NEO_DAVIDSON_STAGNATION_WINDOW") << neo_stagnation_window_ << "\n";
+  line("NEO_DAVIDSON_STAGNATION_MIN_ITERATIONS") << neo_stagnation_min_iterations_ << "\n";
+  line("NEO_DAVIDSON_STAGNATION_FACTOR") << neo_stagnation_factor_ << "\n";
   line("CHECK_HESS_NEO") << flag(check_hess_neo_) << "\n";
   line("FIXED_OCCUPANCIES") << flag(fixed_occupancies_) << "\n";
   line("READ_OCCUPANCIES") << flag(read_occupancies_) << "\n";

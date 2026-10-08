@@ -87,6 +87,10 @@ struct FullOptSettings {
   // ORBITAL_OPTIMIZER ADAM_NEO only: the |dE| threshold (Hartree) that switches the driver -- see
   // OrbitalOptimizer's own comment. User-settable via the ADAM_NEO_SWITCH_TOLERANCE keyword (Input.h).
   double adam_neo_switch_tolerance = 1e-4;
+  // NEO Davidson stagnation stop; see NeoStepOptions::stagnation_* (Utils/NEO.h) and the NEO_DAVIDSON_STAGNATION_* keywords.
+  int neo_stagnation_window = 5;
+  int neo_stagnation_min_iterations = 10;
+  double neo_stagnation_factor = 0.5;
   // Post-loop Davidson Hessian check (minimum vs. saddle) after a macro-iteration loop that ended on
   // NEO, plus the automatic saddle-escape it drives -- see the check's own comment at its call site.
   // User-settable via the CHECK_HESS_NEO keyword (Input.h); off by default, since it costs extra
