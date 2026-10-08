@@ -49,6 +49,9 @@ namespace rerdmft {
 // and runFullOptimization's own `run_neo`).
 enum class OrbitalOptimizer { kAdam, kNeo, kAdamNeo };
 
+// ADAM_NEO: the first this-many macro-iterations are always ADAM; the |dE| selector only acts afterwards.
+inline constexpr int kAdamNeoFixedAdamIterations = 3;
+
 struct FullOptSettings {
   bool enabled = false;
   int max_macro_iterations = 1000;
@@ -86,7 +89,7 @@ struct FullOptSettings {
   int neo_max_iterations = 100;
   // ORBITAL_OPTIMIZER ADAM_NEO only: the |dE| threshold (Hartree) that switches the driver -- see
   // OrbitalOptimizer's own comment. User-settable via the ADAM_NEO_SWITCH_TOLERANCE keyword (Input.h).
-  double adam_neo_switch_tolerance = 1e-4;
+  double adam_neo_switch_tolerance = 5e-3;
   // NEO Davidson stagnation stop; see NeoStepOptions::stagnation_* (Utils/NEO.h) and the NEO_DAVIDSON_STAGNATION_* keywords.
   int neo_stagnation_window = 5;
   int neo_stagnation_min_iterations = 10;

@@ -108,7 +108,7 @@ are comments.
 | `ORBITAL_GRADIENT_TOLERANCE` | float | `1e-5` | ADAM/NEO orbital-gradient convergence threshold. |
 | `ORBITAL_OPTIMIZER` | string | `ADAM` | Orbital-rotation driver: `ADAM` (first-order), `NEO` (matrix-free Newton, fewer iterations), or `ADAM_NEO` (switches between them by `|dE|`). |
 | `NEO_MAX_ITERATIONS` | int | `100` | Cap on Newton steps per macro-iteration for `NEO`/`ADAM_NEO`. |
-| `ADAM_NEO_SWITCH_TOLERANCE` | double | `1e-4` | `|dE|` threshold that switches `ADAM_NEO` between drivers. |
+| `ADAM_NEO_SWITCH_TOLERANCE` | double | `5e-3` | `|dE|` threshold that switches `ADAM_NEO` between drivers; the first 3 macro-iterations are always ADAM. |
 | `NEO_DAVIDSON_STAGNATION_WINDOW` | int | `5` | NEO's Davidson solve gives up (step reported not converged, trust-region ratio test still guards it) when its residual is still above `NEO_DAVIDSON_STAGNATION_FACTOR` times its value this many iterations ago; `0` disables the rule. Stops the near-degenerate-root crawl (e.g. atoms) that otherwise costs hundreds of Hessian products per step. |
 | `NEO_DAVIDSON_STAGNATION_MIN_ITERATIONS` | int | `10` | Davidson iterations per solve before the stagnation rule may fire. |
 | `NEO_DAVIDSON_STAGNATION_FACTOR` | double | `0.5` | Required residual improvement over the window; the rule fires if `residual > factor * residual(window iterations ago)`. |

@@ -2,7 +2,7 @@
 # ADAM_NEO -- the hybrid counterpart of lih_gnof_c4_full_optimization.inp (ADAM) and
 # lih_gnof_c4_neo_full_optimization.inp (NEO), same system, same functional, including C4_SPINOR.
 # Every macro-iteration re-decides its driver from the PREVIOUS iteration's own |dE|: ADAM while
-# |dE| > ADAM_NEO_SWITCH_TOLERANCE (default 1e-4 Ha), NEO once it drops to or below that, and back
+# |dE| > ADAM_NEO_SWITCH_TOLERANCE (default 5e-3 Ha, after 3 fixed initial ADAM macro-iterations), NEO once it drops to or below that, and back
 # to ADAM whenever it grows above it again -- iteration 1 always starts on ADAM, since there is no
 # previous |dE| yet. Watch the "driver" column of the iteration table switch back and forth (this
 # system switches several times per method), and the "switching orbital optimizer: ..." log lines

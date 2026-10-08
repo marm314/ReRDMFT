@@ -2135,7 +2135,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
   if (settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo && !saddle) {
     std::ostringstream tol_str;
     tol_str << std::scientific << std::setprecision(1) << settings.adam_neo_switch_tolerance;
-    driver_phrase = "ADAM, switching to NEO whenever |dE| <= " + tol_str.str() + " Ha and back whenever it grows again";
+    driver_phrase = "ADAM for the first 3 macro-iterations, then switching to NEO whenever |dE| <= " + tol_str.str() + " Ha and back whenever it grows again";
   }
   log << "\n  FULL orbital + occupation optimization ("
       << driver_phrase
@@ -2446,10 +2446,10 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
       problem.setOccupations(occ);
       // The actual driver for THIS macro-iteration: NEO always for the min-max stage and plain ORBITAL_OPTIMIZER
       // NEO; for ADAM_NEO, re-decided every iteration from the PREVIOUS iteration's |dE| (iter == 1 has none yet,
-      // so it always starts on ADAM -- see the user-facing description above).
+      // so the first kAdamNeoFixedAdamIterations (3) macro-iterations are always ADAM, regardless of |dE|).
       const bool run_neo = neo_available &&
           (saddle || settings.orbital_optimizer == OrbitalOptimizer::kNeo ||
-           (settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo && iter > 1 &&
+           (settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo && iter > kAdamNeoFixedAdamIterations &&
             std::abs(last_dE) <= settings.adam_neo_switch_tolerance));
       // Watch out: ADAM and NEO reach the Kramers-/spin-restricted subspace through DIFFERENT parametrizations
       // (KramersAdamProblem's "representative" embedding vs. KramersNeoProblem's "isometric" one, and similarly

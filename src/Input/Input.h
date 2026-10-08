@@ -500,7 +500,7 @@ class Input {
   // orbital-rotation step of the FULL_OPTIMIZATION macro loop: "ADAM" (DoNOF's first-order
   // optimizer), "NEO" (Utils/NEO.h's matrix-free, second-order trust-region Newton method), or
   // "ADAM_NEO" (Full_opt/FullOptimization.h's own FullOptSettings::OrbitalOptimizer::kAdamNeo):
-  // ADAM while the previous macro-iteration's |dE| is still above ADAM_NEO_SWITCH_TOLERANCE,
+  // the first 3 macro-iterations are always ADAM (fixed); after that, ADAM while the previous macro-iteration's |dE| is still above ADAM_NEO_SWITCH_TOLERANCE,
   // NEO once it drops below that, switching back to ADAM whenever it grows above it again --
   // re-decided every macro-iteration, works with CHOLESKY TRUE or FALSE (same NEO machinery
   // either way, including the CHOLESKY TRUE dense-tensor-per-Newton-step cache).
@@ -513,7 +513,7 @@ class Input {
   // back). Lower it only to bound run time on a system you already expect to be slow to converge;
   // raising it is safe and just changes how long a pathological macro-iteration is allowed to run.
   int neo_max_iterations() const { return neo_max_iterations_; }
-  // Optional; defaults to 1e-4 Hartree when ADAM_NEO_SWITCH_TOLERANCE is absent. Only meaningful with
+  // Optional; defaults to 5e-3 Hartree when ADAM_NEO_SWITCH_TOLERANCE is absent. Only meaningful with
   // ORBITAL_OPTIMIZER ADAM_NEO: the |dE| threshold between macro-iterations that switches the driver from ADAM
   // to NEO (once |dE| falls to or below this) and back to ADAM (once it rises above it again) -- see
   // ORBITAL_OPTIMIZER's own comment and Full_opt/FullOptimization.h's OrbitalOptimizer::kAdamNeo.
@@ -624,7 +624,7 @@ class Input {
   double orbital_gradient_tolerance_ = 1e-5;
   std::string orbital_optimizer_ = "ADAM";
   int neo_max_iterations_ = 100;
-  double adam_neo_switch_tolerance_ = 1e-4;
+  double adam_neo_switch_tolerance_ = 5e-3;
   int neo_stagnation_window_ = 5;
   int neo_stagnation_min_iterations_ = 10;
   double neo_stagnation_factor_ = 0.5;
