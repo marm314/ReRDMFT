@@ -500,7 +500,7 @@ class Input {
   // orbital-rotation step of the FULL_OPTIMIZATION macro loop: "ADAM" (DoNOF's first-order
   // optimizer), "NEO" (Utils/NEO.h's matrix-free, second-order trust-region Newton method), or
   // "ADAM_NEO" (Full_opt/FullOptimization.h's own FullOptSettings::OrbitalOptimizer::kAdamNeo):
-  // the first 3 macro-iterations are always ADAM (fixed); after that, ADAM while the previous macro-iteration's |dE| is still above ADAM_NEO_SWITCH_TOLERANCE,
+  // the first ADAM_NEO_INITIAL_ADAM_ITERATIONS (3) macro-iterations are always ADAM; after that, ADAM while the previous macro-iteration's |dE| is still above ADAM_NEO_SWITCH_TOLERANCE,
   // NEO once it drops below that, switching back to ADAM whenever it grows above it again --
   // re-decided every macro-iteration, works with CHOLESKY TRUE or FALSE (same NEO machinery
   // either way, including the CHOLESKY TRUE dense-tensor-per-Newton-step cache).
@@ -518,6 +518,10 @@ class Input {
   // to NEO (once |dE| falls to or below this) and back to ADAM (once it rises above it again) -- see
   // ORBITAL_OPTIMIZER's own comment and Full_opt/FullOptimization.h's OrbitalOptimizer::kAdamNeo.
   double adam_neo_switch_tolerance() const { return adam_neo_switch_tolerance_; }
+  // Optional; defaults to 3 when ADAM_NEO_INITIAL_ADAM_ITERATIONS is absent (0 allowed). Only meaningful with
+  // ORBITAL_OPTIMIZER ADAM_NEO: the number of initial macro-iterations that are always ADAM, before the |dE|
+  // selector (ADAM_NEO_SWITCH_TOLERANCE) takes over.
+  int adam_neo_initial_adam_iterations() const { return adam_neo_initial_adam_iterations_; }
   // Optional. NEO's Davidson stagnation stop (Utils/NEO.h NeoStepOptions::stagnation_*): after at least
   // NEO_DAVIDSON_STAGNATION_MIN_ITERATIONS Davidson iterations, a solve gives up (reported not converged) when its
   // residual is still above NEO_DAVIDSON_STAGNATION_FACTOR times its value NEO_DAVIDSON_STAGNATION_WINDOW iterations earlier.
@@ -625,6 +629,7 @@ class Input {
   std::string orbital_optimizer_ = "ADAM";
   int neo_max_iterations_ = 100;
   double adam_neo_switch_tolerance_ = 5e-3;
+  int adam_neo_initial_adam_iterations_ = 3;
   int neo_stagnation_window_ = 5;
   int neo_stagnation_min_iterations_ = 10;
   double neo_stagnation_factor_ = 0.5;

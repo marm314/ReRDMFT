@@ -348,6 +348,12 @@ void Input::read(const std::string& filename) {
         throw std::runtime_error("line " + std::to_string(line_number) +
                                   ": ADAM_NEO_SWITCH_TOLERANCE must be positive");
       }
+    } else if (keyword == "ADAM_NEO_INITIAL_ADAM_ITERATIONS") {
+      adam_neo_initial_adam_iterations_ = parseInt(iss, line_number, keyword);
+      if (adam_neo_initial_adam_iterations_ < 0) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": ADAM_NEO_INITIAL_ADAM_ITERATIONS must be non-negative");
+      }
     } else if (keyword == "NEO_DAVIDSON_STAGNATION_WINDOW") {
       neo_stagnation_window_ = parseInt(iss, line_number, keyword);
       if (neo_stagnation_window_ < 0) {
@@ -666,6 +672,7 @@ void Input::print(std::ostream& out) const {
   line("ORBITAL_OPTIMIZER") << orbital_optimizer_ << "\n";
   line("NEO_MAX_ITERATIONS") << neo_max_iterations_ << "\n";
   line("ADAM_NEO_SWITCH_TOLERANCE") << adam_neo_switch_tolerance_ << "\n";
+  line("ADAM_NEO_INITIAL_ADAM_ITERATIONS") << adam_neo_initial_adam_iterations_ << "\n";
   line("NEO_DAVIDSON_STAGNATION_WINDOW") << neo_stagnation_window_ << "\n";
   line("NEO_DAVIDSON_STAGNATION_MIN_ITERATIONS") << neo_stagnation_min_iterations_ << "\n";
   line("NEO_DAVIDSON_STAGNATION_FACTOR") << neo_stagnation_factor_ << "\n";
