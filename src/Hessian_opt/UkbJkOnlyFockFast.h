@@ -11,10 +11,10 @@
 
 namespace rerdmft {
 
-// Cost-optimized counterpart to UkbJkOnlyFock.h's ukbJkOnlyFockMatrix: for the 6 functionals
+// Cost-optimized counterpart to UkbJkOnlyFock.h's ukbJkOnlyFockMatrix: for the 7 functionals
 // whose two_rdm_h/x have NO diagonal (i==j) special case in JK_only.cpp's own
 // jkHartreeFunction/jkExchangeFunction (verified directly against that file, not assumed) --
-// SD, MBB, CA, CGA, POWER, MULLER_AS -- two_rdm_h(s,q) and two_rdm_x(q,s) are both genuinely
+// SD, MBB, CA, RHFB, CGA, POWER, MULLER_AS -- two_rdm_h(s,q) and two_rdm_x(q,s) are both genuinely
 // separable as (function of s) * (function of q), needing at most 2 shared UKB-AO densities
 // total (reused, scaled per output row q), instead of the generic path's 2*n_mo. For the other 4
 // (BBC2, GU: a diagonal override on an otherwise rank-1-3 off-diagonal form; ML, MLSIC: the

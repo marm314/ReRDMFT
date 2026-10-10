@@ -135,6 +135,9 @@ double jkExchangeFunction(JkFunctional functional, double n_i, double n_j, std::
     case JkFunctional::kCa:
       return std::sqrt(n_i * (1.0 - n_i) * n_j * (1.0 - n_j)) + n_i * n_j;
 
+    case JkFunctional::kRhfb:
+      return -std::sqrt(n_i * (1.0 - n_i) * n_j * (1.0 - n_j)) + n_i * n_j;
+
     case JkFunctional::kCga:
       return 0.5 * (n_i * n_j + std::sqrt(n_i * (2.0 - n_i) * n_j * (2.0 - n_j)));
 
@@ -202,6 +205,12 @@ double jkExchangeFunctionD1(JkFunctional functional, double n_i, double n_j, std
       return d1;
     }
 
+    case JkFunctional::kRhfb: {  // -S + n_i*n_j with CA = S + n_i*n_j  =>  RHFB = 2*n_i*n_j - CA
+      double d1, d11, d12;
+      csanyiAriasDerivatives(n_i, n_j, d1, d11, d12);
+      return 2.0 * n_j - d1;
+    }
+
     case JkFunctional::kCga: {
       double d1, d11, d12;
       csanyiGoedeckerAriasDerivatives(n_i, n_j, d1, d11, d12);
@@ -262,6 +271,12 @@ double jkExchangeFunctionD11(JkFunctional functional, double n_i, double n_j, st
       return d11;
     }
 
+    case JkFunctional::kRhfb: {  // -S + n_i*n_j with CA = S + n_i*n_j  =>  RHFB = 2*n_i*n_j - CA
+      double d1, d11, d12;
+      csanyiAriasDerivatives(n_i, n_j, d1, d11, d12);
+      return -d11;
+    }
+
     case JkFunctional::kCga: {
       double d1, d11, d12;
       csanyiGoedeckerAriasDerivatives(n_i, n_j, d1, d11, d12);
@@ -320,6 +335,12 @@ double jkExchangeFunctionD12(JkFunctional functional, double n_i, double n_j, st
       double d1, d11, d12;
       csanyiAriasDerivatives(n_i, n_j, d1, d11, d12);
       return d12;
+    }
+
+    case JkFunctional::kRhfb: {  // -S + n_i*n_j with CA = S + n_i*n_j  =>  RHFB = 2*n_i*n_j - CA
+      double d1, d11, d12;
+      csanyiAriasDerivatives(n_i, n_j, d1, d11, d12);
+      return 2.0 - d12;
     }
 
     case JkFunctional::kCga: {
@@ -412,6 +433,7 @@ JkFunctional parseJkFunctional(const std::string& name) {
   if (upper == "MBB" || upper == "MULLER") return JkFunctional::kMbb;
   if (upper == "BBC2") return JkFunctional::kBbc2;
   if (upper == "CA") return JkFunctional::kCa;
+  if (upper == "RHFB") return JkFunctional::kRhfb;
   if (upper == "CGA") return JkFunctional::kCga;
   if (upper == "ML") return JkFunctional::kMl;
   if (upper == "MLSIC") return JkFunctional::kMlsic;

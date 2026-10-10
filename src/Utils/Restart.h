@@ -4,6 +4,7 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -108,6 +109,9 @@ struct RestartCapture {
   bool orbitals_optimized = false;
   bool converged = false;
   Matrix<std::complex<double>> total_rotation;  // FULL_OPTIMIZATION rotation; empty = identity
+  // Set by the caller that owns the SCF coefficients: writes the RESTART file for a (snapshot) capture. Used for the periodic
+  // FULL_OPTIMIZATION checkpoints; the final file is written the usual way.
+  std::function<void(const RestartCapture&)> checkpoint_writer;
 };
 
 constexpr std::uint32_t kRestartVersion = 2;  // v2: adds the `amplitudes` vector (PCCD)

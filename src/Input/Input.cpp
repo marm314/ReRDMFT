@@ -246,14 +246,14 @@ void Input::read(const std::string& filename) {
       // functional by either name.
       if (upper == "MULLER") upper = "MBB";
       static const std::vector<std::string> kKnownFunctionals = {
-          "SD",    "MBB",   "BBC2",     "CA",    "CGA",   "ML",
+          "SD",    "MBB",   "BBC2",     "CA",    "RHFB",   "CGA",   "ML",
           "MLSIC", "GU",    "POWER",    "MULLER_AS",
           "PNOF5", "PNOF7", "PNOF7S", "GNOF", "PCCD"};
       if (std::find(kKnownFunctionals.begin(), kKnownFunctionals.end(), upper) ==
           kKnownFunctionals.end()) {
         throw std::runtime_error("line " + std::to_string(line_number) +
                                   ": unrecognized FUNCTIONAL '" + token +
-                                  "' (expected one of SD, MBB (or MULLER), BBC2, CA, CGA, ML, "
+                                  "' (expected one of SD, MBB (or MULLER), BBC2, CA, RHFB, CGA, ML, "
                                   "MLSIC, GU, POWER, MULLER_AS, PNOF5, PNOF7, PNOF7S, GNOF, "
                                   "PCCD)");
       }

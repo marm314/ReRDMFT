@@ -58,16 +58,20 @@ std::vector<NaturalOrbital> naturalOrbitalsFromDensity(const Matrix<double>& s,
 // (Large against its own overlap, Small against ITS OWN, via the RKB small AO basis and
 // rkb_coefficients' closed-form relation back to it), zero-pads each orbital's coefficients over
 // the OTHER component's primitives, and passes the concatenated `basis` (Large ++ Small) and
-// merged orbital list here. Orbitals are re-sorted by decreasing occupation and renumbered
-// (MO 1, 2, ...) regardless of the input list's own order, and any orbital whose |occupation| is
+// merged orbital list here. Orbitals are renumbered (MO 1, 2, ...) and, unless `keep_input_order`
+// (C4_DHF: Large block first, then Small, each already in decreasing occupation), re-sorted by decreasing occupation, and any orbital whose |occupation| is
 // below `occ_print_threshold` (default: half the last printed decimal, i.e. "rounds to 0 at the
 // printed precision") is dropped entirely rather than written.
 // `total_energy`/`virial_ratio`: written verbatim on the trailing "TOTAL ENERGY" line (the virial
 // ratio -V/T has no clean meaning for a relativistic density; callers for whom it is not available
 // may pass 0.0 -- AIMPAC itself does not use either value for its QTAIM integration).
+// Default occupation cutoff of writeAimpacWfn (callers that report which orbitals were kept use it too).
+constexpr double kAimpacOccPrintThreshold = 5e-8;
+
 void writeAimpacWfn(const std::string& path, const std::string& title, const std::vector<Atom>& geometry,
                      const std::vector<BasisFunction>& basis, const std::vector<NaturalOrbital>& orbitals,
-                     double total_energy, double virial_ratio, double occ_print_threshold = 5e-8);
+                     double total_energy, double virial_ratio, double occ_print_threshold = kAimpacOccPrintThreshold,
+                     bool keep_input_order = false);
 
 }  // namespace rerdmft
 

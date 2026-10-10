@@ -73,7 +73,7 @@ are comments.
 | `DEBUG` | bool | `FALSE` | Extra diagnostics: internal gradient cross-checks, finite-difference tests, dense-vs-Cholesky comparisons. Builds the dense two-electron tensor on demand. |
 | `HESSIAN_MEAN_FIELD` | bool | `FALSE` | Build and fully diagonalize the dense orbital-rotation Hessian (minimum expected for `NON_REL`/`X2C`, saddle for `C4_SPINOR`). O(n^5)-O(n^6), needs the dense tensor. |
 | `FCIDUMP` | bool | `FALSE` | `NON_RELATIVISTIC` + `FUNCTIONAL` only: write an `FCIDUMP` file of the MO integrals for an external CI/DMRG/FCI code. |
-| `AIMPAC` | bool | `FALSE` | Requires `FUNCTIONAL`: write the converged 1-RDM's natural orbitals as an AIMPAC WFN file (`<input>.wfn`) over Cartesian Gaussian primitives. Works for `NON_RELATIVISTIC`/`X2C`/`C4_SPINOR` (Large/Small diagonalized independently); also writes `<input>_neg.wfn` if `FULL_OPTIMIZATION_4C_NEG` converges. |
+| `AIMPAC` | bool | `FALSE` | Requires `FUNCTIONAL`: write the converged 1-RDM's natural orbitals as an AIMPAC WFN file (`<input>.wfn`) over Cartesian Gaussian primitives. Works for `NON_RELATIVISTIC`/`X2C`/`C4_SPINOR` (Large/Small diagonalized independently; the output lists the Large and Small MO ranges); also writes `<input>_neg.wfn` if `FULL_OPTIMIZATION_4C_NEG` converges. |
 | `SPEED_OF_LIGHT` | double (> 0) | CODATA value | Override the speed of light (a.u.), to probe the nonrelativistic limit or exaggerate relativistic effects. |
 | `MIXING` | double, `(0,1]` | `0.4` | Linear density-mixing weight, used only with `DIIS FALSE`. |
 | `DIIS` | bool | `TRUE` | Pulay DIIS instead of linear mixing in every SCF loop. |
@@ -91,7 +91,7 @@ are comments.
 | `AUX_BASIS_TYPE` | string | `PAUTO` | Auxiliary basis recipe `USE_RI` builds internally (Yang, Rendell, Frisch, *J. Chem. Phys.* 127, 074102 (2007); MOLGW's `init_auxil_basis_set_auto`). `PAUTO` (default) considers every pair of orbital shells; `AUTO` only self-products (cruder, rarely needed). Only meaningful when `USE_RI` is active. |
 | `X_LIN_DEP_THRS_L` | double (> 0) | `1e-6` | Large-component linear-dependence threshold (LOWGEN-style safety net). |
 | `X_LIN_DEP_THRS_S` | double (> 0) | `1e-8` | Small-component linear-dependence threshold (`X2C`/`C4_SPINOR` only). |
-| `FUNCTIONAL` | string | *(none)* | Selects the RDMFT functional: JK-only (`SD`, `MULLER`/`MBB`, `BBC2`, `CA`, `CGA`, `ML`, `MLSIC`, `GU`, `POWER`), PNOF (`PNOF5`, `PNOF7`, `PNOF7S`, `GNOF`), or `PCCD`. Unset skips the whole RDMFT step. |
+| `FUNCTIONAL` | string | *(none)* | Selects the RDMFT functional: JK-only (`SD`, `MULLER`/`MBB`, `BBC2`, `CA`, `RHFB`, `CGA`, `ML`, `MLSIC`, `GU`, `POWER`), PNOF (`PNOF5`, `PNOF7`, `PNOF7S`, `GNOF`), or `PCCD`. Unset skips the whole RDMFT step. |
 | `OCCUPATION_INIT` | string | `PROPORTIONAL` | Initial occupations for a JK-only functional: `PROPORTIONAL` or `FERMI_DIRAC` (at `TEMPERATURE`). |
 | `JK_FROZEN_PAIRS` | int (>= 0) | `0` | JK-only: freeze the lowest `2*JK_FROZEN_PAIRS` spin-orbitals/spinors at occupation 1. |
 | `JK_ACTIVE_PAIRS` | int (>= 1) | all remaining | JK-only: size of the fractional-occupation window above the frozen core; above that is deep virtual (occupation 0). |
@@ -107,8 +107,8 @@ are comments.
 | `MACRO_ENERGY_TOLERANCE` | float | `1e-9` | Macro-loop energy convergence threshold. |
 | `ORBITAL_GRADIENT_TOLERANCE` | float | `1e-5` | ADAM/NEO orbital-gradient convergence threshold. |
 | `ORBITAL_OPTIMIZER` | string | `ADAM` | Orbital-rotation driver: `ADAM` (first-order), `NEO` (matrix-free Newton, fewer iterations), or `ADAM_NEO` (ADAM for the first `ADAM_NEO_INITIAL_ADAM_ITERATIONS` macro-iterations, then switches between them by `|dE|`). |
-| `NEO_MAX_ITERATIONS` | int | `100` | Cap on Newton steps per macro-iteration for `NEO`/`ADAM_NEO`. |
-| `ADAM_NEO_SWITCH_TOLERANCE` | double | `5e-3` | `|dE|` threshold that switches `ADAM_NEO` between drivers (after the initial ADAM iterations). |
+| `NEO_MAX_ITERATIONS` | int | `20` | Cap on Newton steps per macro-iteration for `NEO`/`ADAM_NEO`. |
+| `ADAM_NEO_SWITCH_TOLERANCE` | double | `2e-3` | `|dE|` threshold that switches `ADAM_NEO` between drivers (after the initial ADAM iterations). |
 | `ADAM_NEO_INITIAL_ADAM_ITERATIONS` | int | `3` | Number of initial macro-iterations `ADAM_NEO` always runs with ADAM before the `|dE|` selector acts. |
 | `NEO_DAVIDSON_STAGNATION_WINDOW` | int | `5` | NEO's Davidson solve gives up (step reported not converged, trust-region ratio test still guards it) when its residual is still above `NEO_DAVIDSON_STAGNATION_FACTOR` times its value this many iterations ago; `0` disables the rule. Stops the near-degenerate-root crawl (e.g. atoms) that otherwise costs hundreds of Hessian products per step. |
 | `NEO_DAVIDSON_STAGNATION_MIN_ITERATIONS` | int | `10` | Davidson iterations per solve before the stagnation rule may fire. |
@@ -217,6 +217,8 @@ converges, using its orbitals/integrals as a fixed background:
 3. Optimize the occupations via SQP (`Occ_opt/SQP.h`), subject to
    `sum(n_p) = NELEC` and `0 < n_p < 1`, with both members of each
    Kramers/spin pair tied to one variable.
+
+The output also prints `Tr(2-RDM)` next to its exact value N(N-1)/2. It is exact for MULLER, BBC2, CA, CGA, PNOF and pCCD; it deviates where the exchange coupling has f(n,n) != n (GU, ML, MLSIC, POWER, RHFB, SD at fractional occupations) and for MULLER_AS.
 
 For `C4_SPINOR` the negative-energy branch is excluded entirely
 (no-pair approximation); for `X2C` and `NON_RELATIVISTIC`, every
@@ -358,7 +360,8 @@ Build cost is NOT uniform across functionals -- this keyword is most valuable fo
 At the end of a run with a `FUNCTIONAL`, the final RDMFT state is
 written in binary to `RESTART.NON_REL`, `RESTART.X2C`, and/or
 `RESTART.4C` (`Utils/Restart.h`), read back immediately as an identity
-check. Contents: occupation numbers, the resolved frozen/active window
+check. With `FULL_OPTIMIZATION` the file is also rewritten every 10 macro-iterations; the `FULL_OPTIMIZATION_4C_NEG` min-max result goes to
+`RESTART.4C_NEG` (write-only). Contents: occupation numbers, the resolved frozen/active window
 (JK-only/pCCD), gamma angles (PNOF), t-/z-amplitudes (pCCD), the final
 MO coefficients, and metadata (basis fingerprint, electron count,
 converged energy, convergence flags).
@@ -394,6 +397,7 @@ and repeat. See `examples/lih_gnof_read_restart.inp`.
 |---|---|
 | `OMP_NUM_THREADS` | Standard OpenMP thread count; also governs the threaded BLAS (OpenBLAS) calls. |
 | `RERDMFT_RI_HV_REFERENCE` | If set (any value), the `USE_RI` generalized-Fock and sigma-vector Hessian-vector products use the original element-by-element implementations instead of the GEMM ones -- a validation A/B switch, same results to roundoff but much slower. |
+| `SWITCH_SIGN_ERI` | If set (any value), every electron-repulsion integral changes sign -- a diagnostic. Valid only for the dense integrals: refused with `USE_RI`, `CHOLESKY`, `SCF_DIRECT_4C` or `FUNCTIONAL_DIRECT_4C` (set them `FALSE`). |
 
 ## Contributors
 

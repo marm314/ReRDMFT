@@ -63,7 +63,8 @@ Matrix<C> ukbJkOnlyFockMatrixFast(const Matrix<C>& h_rkb, const UkbDirectEriSour
       for (std::size_t s = 0; s < n_mo; ++s) extra[s] = std::sqrt(occupations[s]);
       break;
     }
-    case JkFunctional::kCa: {
+    case JkFunctional::kCa:
+    case JkFunctional::kRhfb: {
       extra.resize(n_mo);
       for (std::size_t s = 0; s < n_mo; ++s) extra[s] = std::sqrt(occupations[s] * (1.0 - occupations[s]));
       break;
@@ -119,6 +120,11 @@ Matrix<C> ukbJkOnlyFockMatrixFast(const Matrix<C>& h_rkb, const UkbDirectEriSour
         hartree_q = n_q;
         exch_n_q = n_q;
         exch_extra_q = extra[q];  // sqrt(n_q*(1-n_q))
+        break;
+      case JkFunctional::kRhfb:
+        hartree_q = n_q;
+        exch_n_q = n_q;
+        exch_extra_q = -extra[q];  // -sqrt(n_q*(1-n_q))
         break;
       case JkFunctional::kCga:
         hartree_q = n_q;

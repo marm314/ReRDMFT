@@ -60,6 +60,7 @@
 #include "PNOFs.h"
 #include "Progress.h"
 #include "PnofFock.h"
+#include "PccdFock.h"
 #include "PnofHessian.h"
 #include "RkbDensityMatrix.h"
 #include "RkbFockMatrix.h"
@@ -258,6 +259,76 @@ void printEnergyDecompositionMo(std::ostream& out, const rerdmft::Matrix<T>& h_m
       << " Hartree\n";
   out << "    N-N:       " << std::setprecision(10) << nuclear_repulsion_energy << std::setprecision(6)
       << " Hartree\n";
+}
+
+// Trace of the diagonal-D 2-RDM ansatz of Hessian_opt/HartreeExchangeGradient.h,
+//   Gamma_pqrs = (1/2)[h(p,q) d_pr d_qs - x(p,q) d_ps d_qr] + l1(p,q) d_{r,pbar} d_{s,qbar} + l2(p,q) d_{r,pbar} d_{s,q}'
+// (energy E = sum h n + sum <pq|rs> Gamma_pqrs, no extra 1/2, so Gamma is normalized to N(N-1)/2):
+//   Tr Gamma = sum_pq Gamma_pqpq = (1/2)[ sum_pq h(p,q) - sum_p x(p,p) ] + sum_p [ l1(p,p) + l2(p,pbar) ].
+// The trace is invariant under orbital rotations, so it only needs the occupations (and, for pCCD, the amplitudes), never the
+// orbitals. `l1`/`l2`/`pair_of` may be empty (JK_only functionals have none).
+inline double twoRdmTrace(const rerdmft::Matrix<double>& h, const rerdmft::Matrix<double>& x,
+                          const rerdmft::Matrix<double>& l1, const rerdmft::Matrix<double>& l2,
+                          const std::vector<std::size_t>& pair_of) {
+  double sum_h = 0.0, sum_x_diag = 0.0, sum_l = 0.0;
+  for (std::size_t p = 0; p < h.rows(); ++p)
+    for (std::size_t q = 0; q < h.cols(); ++q) sum_h += h(p, q);
+  for (std::size_t p = 0; p < x.rows(); ++p) sum_x_diag += x(p, p);
+  if (!pair_of.empty()) {
+    for (std::size_t p = 0; p < l1.rows(); ++p) sum_l += l1(p, p);
+    for (std::size_t p = 0; p < l2.rows(); ++p) sum_l += l2(p, pair_of[p]);
+  }
+  return 0.5 * (sum_h - sum_x_diag) + sum_l;
+}
+
+// Prints the 2-RDM trace next to its exact value N(N-1)/2, N = sum of the occupations. Called right after
+// printEnergyDecompositionMo.
+inline void printTwoRdmTrace(std::ostream& out, double trace, const std::vector<double>& occupations) {
+  double n = 0.0;
+  for (const double o : occupations) n += o;
+  const double expected = 0.5 * n * (n - 1.0);
+  out << "    Tr(2-RDM): " << std::setprecision(10) << trace << std::setprecision(6) << "  (exact N(N-1)/2 = "
+      << std::setprecision(10) << expected << std::setprecision(6) << ", difference " << std::scientific
+      << std::setprecision(2) << trace - expected << std::defaultfloat << std::setprecision(6) << ")\n";
+}
+
+inline void printJkTwoRdmTrace(std::ostream& out, rerdmft::JkFunctional functional, const std::vector<double>& occupations,
+                               std::size_t f_l) {
+  printTwoRdmTrace(out,
+                   twoRdmTrace(rerdmft::jkHartreeCoupling(functional, occupations, f_l),
+                               rerdmft::jkExchangeCoupling(functional, occupations, f_l), {}, {}, {}),
+                   occupations);
+}
+
+inline void printPnofTwoRdmTrace(std::ostream& out, rerdmft::PnofFunctional functional,
+                                 const std::vector<rerdmft::PnofGeminal>& geminals, const std::vector<double>& occupations,
+                                 std::size_t n_total, bool relativistic) {
+  const auto rdm = rerdmft::buildPnofFullTwoRdm(functional, geminals, occupations, n_total, relativistic);
+  printTwoRdmTrace(out,
+                   twoRdmTrace(rdm.two_rdm_h, rdm.two_rdm_x, rdm.two_rdm_l1, rdm.two_rdm_l2,
+                               rerdmft::buildPnofPairOf(geminals, n_total)),
+                   occupations);
+}
+
+// pCCD: `state` = flattened [t; z] amplitudes (size 2*n_occ*n_vir), as in the RESTART file.
+inline void printPccdTwoRdmTrace(std::ostream& out, const std::vector<std::size_t>& reps, const std::vector<std::size_t>& bar,
+                                 std::size_t n_core, std::size_t n_occ, std::size_t n_vir, const rerdmft::PccdRdm& rdm,
+                                 const std::vector<double>& occupations, std::size_t n_total) {
+  const auto full = rerdmft::buildPccdFullTwoRdm(reps, bar, n_core, n_occ, n_vir, rdm, occupations, n_total);
+  printTwoRdmTrace(out,
+                   twoRdmTrace(full.two_rdm_h, full.two_rdm_x, full.two_rdm_l1, full.two_rdm_l2,
+                               rerdmft::buildPccdPairOf(reps, bar, n_total)),
+                   occupations);
+}
+
+inline rerdmft::PccdRdm pccdRdmFromState(const std::vector<double>& state, std::size_t n_occ, std::size_t n_vir) {
+  rerdmft::Matrix<double> t(n_occ, n_vir), z(n_occ, n_vir);
+  for (std::size_t i = 0; i < n_occ; ++i)
+    for (std::size_t a = 0; a < n_vir; ++a) {
+      t(i, a) = state[i * n_vir + a];
+      z(i, a) = state[n_occ * n_vir + i * n_vir + a];
+    }
+  return rerdmft::buildPccdRdm(t, z);
 }
 
 // Prints the "h-onebody" / "Vee" / "N-N" breakdown right after a method's own Electronic/Nuclear
@@ -1008,6 +1079,34 @@ struct RiNonRelDirectSource {
   rerdmft::Matrix<double> h_core_ao;
 };
 
+// Method name shown in the live progress lines: the report labels C4_DHF / X2C_HF appear there as C4_SPINOR / X2C.
+inline std::string liveProgressLabel(const std::string& label) {
+  if (label == "C4_DHF") return "C4_SPINOR";
+  if (label == "X2C_HF") return "X2C";
+  return label;
+}
+
+// Periodic RESTART checkpoint (FULL_OPTIMIZATION, every FullOptSettings::checkpoint_interval macro-iterations): returns `base`
+// with a checkpoint callback that fills a copy of the (already-initialised) capture `*restart` from the loop's snapshot via
+// `fill` and hands it to restart->checkpoint_writer. Unchanged if there is no writer.
+inline rerdmft::FullOptSettings withRestartCheckpoint(
+    const rerdmft::FullOptSettings& base, const rerdmft::RestartCapture* restart,
+    std::function<void(rerdmft::RestartCapture&, const rerdmft::FullOptResult&)> fill) {
+  rerdmft::FullOptSettings s = base;
+  if (restart == nullptr || !restart->checkpoint_writer) return s;
+  s.checkpoint = [restart, fill = std::move(fill)](const rerdmft::FullOptResult& r) {
+    rerdmft::RestartCapture c = *restart;
+    c.valid = true;
+    c.electronic_energy = r.electronic_energy;
+    c.converged = false;
+    c.orbitals_optimized = true;
+    c.occupations = r.occupations;
+    c.total_rotation = r.total_rotation;
+    fill(c, r);
+    restart->checkpoint_writer(c);
+  };
+  return s;
+}
 // `Eri` is the dense Tensor4<T> or Cholesky vectors (rerdmft::CholeskyEri<T>): the energy/gradient/Hessian
 // code below only needs element access, so it takes either; the DEBUG-only validation blocks that need a
 // dense tensor take a dense view (denseOf) of it.
@@ -1035,7 +1134,7 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
   // Generic (element-access) view of the integrals, used by the production code below; the DEBUG /
   // validation blocks that need a dense Tensor4 re-bind `eri` to a dense view of `eri_in`.
   const Eri& eri = eri_in;
-  rerdmft::progressContext() = label;  // live progress lines (stderr) are prefixed with the method
+  rerdmft::progressContext() = liveProgressLabel(label);  // live progress lines (stderr) are prefixed with the method
   const std::size_t n_total = h.rows();
   constexpr double kOccupationEpsilon = 1e-6;
 
@@ -1335,18 +1434,24 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
     const std::size_t r_idx = 0;
     const std::size_t s_idx = 1;
     constexpr double kOccFdStep = 1e-5;
+    // The step must stay inside the SQP bounds [lb, ub]: an occupation starting at a bound (1 - 1e-6 for a closed-shell
+    // start) pushed past 1 makes sqrt(n(1-n)) (CA, RHFB, ...) NaN. 1% of the distance to the nearest bound (the sqrt has a huge third derivative there), at most kOccFdStep.
+    auto fdStep = [&](std::size_t idx) {
+      return std::min(kOccFdStep, 0.01 * std::min(reduced_state0[idx] - lb[idx], ub[idx] - reduced_state0[idx]));
+    };
+    const double step_r = fdStep(r_idx), step_s = fdStep(s_idx);
     auto perturbed = [&](std::size_t idx, double delta) {
       std::vector<double> x = reduced_state0;
       x[idx] += delta;
       return x;
     };
-    const double e_plus = value_fn(perturbed(r_idx, kOccFdStep));
-    const double e_minus = value_fn(perturbed(r_idx, -kOccFdStep));
-    const double fd_grad_r = (e_plus - e_minus) / (2.0 * kOccFdStep);
+    const double e_plus = value_fn(perturbed(r_idx, step_r));
+    const double e_minus = value_fn(perturbed(r_idx, -step_r));
+    const double fd_grad_r = (e_plus - e_minus) / (2.0 * step_r);
     const auto analytic_grad = gradient_fn(reduced_state0);
-    const auto grad_plus = gradient_fn(perturbed(s_idx, kOccFdStep));
-    const auto grad_minus = gradient_fn(perturbed(s_idx, -kOccFdStep));
-    const double fd_hess_rs = (grad_plus[r_idx] - grad_minus[r_idx]) / (2.0 * kOccFdStep);
+    const auto grad_plus = gradient_fn(perturbed(s_idx, step_s));
+    const auto grad_minus = gradient_fn(perturbed(s_idx, -step_s));
+    const double fd_hess_rs = (grad_plus[r_idx] - grad_minus[r_idx]) / (2.0 * step_s);
     const auto analytic_hess = hessian_fn(reduced_state0);
     out << "\n  Occ_opt/OccupationEnergy.h finite-difference check (functional " << functional_name
         << ", pair-tied indices " << r_idx << "," << s_idx << " of the active subspace):\n";
@@ -1407,8 +1512,9 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
           << (optimized_total_energy <= total_energy ? "<=" : ">")
           << " the initial-occupations value above, as expected for a minimization)\n";
     }
-    printEnergyDecompositionMo(out, h, optimized_active, rerdmft::Matrix<std::complex<double>>(),
+    printEnergyDecompositionMo(out, h, embed(sqp_result.x), rerdmft::Matrix<std::complex<double>>(),
                                 sqp_result.objective_value, nuclear_repulsion_energy);
+    printJkTwoRdmTrace(out, functional, embed(sqp_result.x), f_l);
     // Rounds to the SAME 5 decimals actually printed below, so the
     // reported sum matches what a reader would get by adding up the
     // displayed digits themselves (rather than the full-precision
@@ -1572,11 +1678,19 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
         extra_direct_c0 = ri_nonrel_direct->c0;
       }
     }
+    std::function<void(rerdmft::RestartCapture&, const rerdmft::FullOptResult&)> fill_restart = [](rerdmft::RestartCapture&, const rerdmft::FullOptResult&) {};
     if (full_opt.enabled) {
       try {
+        if (restart != nullptr) {
+          restart->kind = "OCCUPATIONS";
+          restart->jk_frozen_pairs = static_cast<std::int64_t>(n_frozen / 2);
+          restart->jk_active_pairs = static_cast<std::int64_t>(n_active_window / 2);
+        }
+        fill_restart = [](rerdmft::RestartCapture&, const rerdmft::FullOptResult&) {};
+        const auto full_opt_run = withRestartCheckpoint(full_opt, restart, fill_restart);
         full_result = rerdmft::runFullOptimizationJk<T>(h, eri, embed(sqp_result.x), sqp_result.x, functional, f_l,
                                           n_electrons_active, n_total, n_frozen, n_inactive_below, n_active,
-                                          /*two_columns=*/label == "X2C_HF" || label == "C4_DHF", full_opt,
+                                          /*two_columns=*/label == "X2C_HF" || label == "C4_DHF", full_opt_run,
                                           /*kramers_restricted=*/label == "X2C_HF" || label == "C4_DHF",
                                           nuclear_repulsion_energy, out,
                                           label == "NON_REL" ? blockSpinPartner(n_total)
@@ -1598,6 +1712,13 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
                    "  include the positive <-> negative-energy pairs: NEO (whatever ORBITAL_OPTIMIZER says) converges the orbitals to the saddle\n"
                    "  point of the order set by the occupied positive-energy spinors, then the occupations are fully re-minimized, macro-iterated.\n";
             rerdmft::FullOptSettings saddle_settings = full_opt;
+            if (restart_neg != nullptr && restart != nullptr) {  // min-max stage checkpoints go to RESTART.4C_NEG
+              restart_neg->kind = restart->kind;
+              restart_neg->n_core = restart->n_core;
+              restart_neg->jk_frozen_pairs = restart->jk_frozen_pairs;
+              restart_neg->jk_active_pairs = restart->jk_active_pairs;
+              saddle_settings = withRestartCheckpoint(full_opt, restart_neg, fill_restart);
+            }
             saddle_settings.orbital_optimizer = rerdmft::OrbitalOptimizer::kNeo;
             saddle_settings.saddle.n_negative = frozen_base;
             saddle_settings.saddle.start_rotation = full_result.total_rotation;
@@ -1619,6 +1740,7 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
                 << " relative to the positive-energy-only minimum)\n";
             printEnergyDecompositionMo(out, h, saddle_result.occupations, saddle_result.total_rotation,
                                         saddle_result.electronic_energy, nuclear_repulsion_energy);
+            printJkTwoRdmTrace(out, functional, saddle_result.occupations, f_l);
             // AIMPAC WFN (<input>_neg.wfn): the saddle-stage result itself is NOT persisted into
             // `restart` above (that stays the positive-energy-only minimum, see its own comment) --
             // this is the only place the saddle-stage occupations/rotation/energy are available, so
@@ -1630,6 +1752,7 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
               restart_neg->converged = saddle_result.converged;
               restart_neg->orbitals_optimized = true;
               restart_neg->total_rotation = saddle_result.total_rotation;
+              fill_restart(*restart_neg, saddle_result);
             }
           } catch (const std::exception& e) {
             out << "\n  FULL_OPTIMIZATION_4C_NEG FAILED: " << e.what() << "\n";
@@ -1709,7 +1832,7 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
                                        rerdmft::RestartCapture* restart_neg = nullptr) {
   // See buildFunctionalReport: generic view here, dense re-binding in the DEBUG blocks.
   const Eri& eri = eri_in;
-  rerdmft::progressContext() = label;  // live progress lines (stderr) are prefixed with the method
+  rerdmft::progressContext() = liveProgressLabel(label);  // live progress lines (stderr) are prefixed with the method
   constexpr double kOccupationEpsilon = 1e-6;
   const std::size_t n_total = h.rows();
   const auto functional = rerdmft::parsePnofFunctional(functional_name);
@@ -1934,6 +2057,7 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
         << " Hartree (READ_OCCUPANCIES: no occupation-number optimization performed)\n";
     printEnergyDecompositionMo(out, h, optimized_occ, rerdmft::Matrix<std::complex<double>>(),
                                 optimized_electronic_energy, nuclear_repulsion_energy);
+    printPnofTwoRdmTrace(out, functional, geminals, optimized_occ, n_total, relativistic);
     out << "    Optimized geminal occupation numbers (n_p, both members of each Kramers/spin "
            "pair share this value; fixed 5 decimals):\n";
     out << std::fixed << std::setprecision(5);
@@ -2014,6 +2138,7 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
           << " the initial-occupations value above, as expected for a minimization)\n";
       printEnergyDecompositionMo(out, h, embed(sqp_result.x), rerdmft::Matrix<std::complex<double>>(),
                                   sqp_result.objective_value, nuclear_repulsion_energy);
+      printPnofTwoRdmTrace(out, functional, geminals, embed(sqp_result.x), n_total, relativistic);
       out << "    Optimized geminal occupation numbers (n_p, both members of each Kramers/spin "
              "pair share this value; fixed 5 decimals):\n";
       out << std::fixed << std::setprecision(5);
@@ -2141,6 +2266,7 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
       const auto final_occ = embedGammas(lbfgs_result.x);
       printEnergyDecompositionMo(out, h, final_occ, rerdmft::Matrix<std::complex<double>>(),
                                   lbfgs_result.objective_value, nuclear_repulsion_energy);
+      printPnofTwoRdmTrace(out, functional, geminals, final_occ, n_total, relativistic);
       out << "    Optimized geminal occupation numbers (n_p, both members of each Kramers/spin "
              "pair share this value; fixed 5 decimals):\n";
       out << std::fixed << std::setprecision(5);
@@ -2314,14 +2440,33 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
       extra_direct_c0 = ri_nonrel_direct->c0;
     }
   }
+  std::function<void(rerdmft::RestartCapture&, const rerdmft::FullOptResult&)> fill_restart = [](rerdmft::RestartCapture&, const rerdmft::FullOptResult&) {};
   if (full_opt.enabled) {
     if (!occupations_optimized) {
       out << "\n  FULL_OPTIMIZATION skipped: the occupation optimization did not succeed.\n";
     } else {
       try {
+        if (restart != nullptr) {
+          restart->kind = "GAMMAS";
+          restart->n_core = static_cast<std::int64_t>(n_core);
+        }
+        fill_restart = [&geminals, n_core, pnof_subspaces, pnof_coupling](rerdmft::RestartCapture& r, const rerdmft::FullOptResult&) {
+              r.gammas.clear();
+              for (int sub = 0; sub < pnof_subspaces; ++sub) {
+                std::vector<double> occ_subspace(static_cast<std::size_t>(pnof_coupling));
+                for (int v = 0; v < pnof_coupling; ++v) {
+                  const auto& g = geminals[n_core + static_cast<std::size_t>(sub) * static_cast<std::size_t>(pnof_coupling) +
+                                           static_cast<std::size_t>(v)];
+                  occ_subspace[static_cast<std::size_t>(v)] = r.occupations[g.i];
+                }
+                const auto gammas = rerdmft::pnofSubspaceGammasFromOccupations(pnof_coupling, occ_subspace);
+                r.gammas.insert(r.gammas.end(), gammas.begin(), gammas.end());
+              }
+            };
+        const auto full_opt_run = withRestartCheckpoint(full_opt, restart, fill_restart);
         full_result = rerdmft::runFullOptimizationPnof<T>(h, eri, optimized_occ, optimized_state, functional,
                                             geminals, n_core, pnof_subspaces, pnof_coupling,
-                                            relativistic, sqp_pnof_occ, n_total, full_opt,
+                                            relativistic, sqp_pnof_occ, n_total, full_opt_run,
                                             /*kramers_restricted=*/label == "X2C_HF" || label == "C4_DHF",
                                             nuclear_repulsion_energy, out,
                                             label == "NON_REL" ? blockSpinPartner(n_total)
@@ -2343,6 +2488,13 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
                    "  include the positive <-> negative-energy pairs: NEO (whatever ORBITAL_OPTIMIZER says) converges the orbitals to the saddle\n"
                    "  point of the order set by the occupied positive-energy spinors, then the occupations are fully re-minimized, macro-iterated.\n";
             rerdmft::FullOptSettings saddle_settings = full_opt;
+            if (restart_neg != nullptr && restart != nullptr) {  // min-max stage checkpoints go to RESTART.4C_NEG
+              restart_neg->kind = restart->kind;
+              restart_neg->n_core = restart->n_core;
+              restart_neg->jk_frozen_pairs = restart->jk_frozen_pairs;
+              restart_neg->jk_active_pairs = restart->jk_active_pairs;
+              saddle_settings = withRestartCheckpoint(full_opt, restart_neg, fill_restart);
+            }
             saddle_settings.orbital_optimizer = rerdmft::OrbitalOptimizer::kNeo;
             saddle_settings.saddle.n_negative = n_inactive_below;
             saddle_settings.saddle.start_rotation = full_result.total_rotation;
@@ -2361,6 +2513,7 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
                 << " relative to the positive-energy-only minimum)\n";
             printEnergyDecompositionMo(out, h, saddle_result.occupations, saddle_result.total_rotation,
                                         saddle_result.electronic_energy, nuclear_repulsion_energy);
+            printPnofTwoRdmTrace(out, functional, geminals, saddle_result.occupations, n_total, relativistic);
             // AIMPAC WFN (<input>_neg.wfn): see buildFunctionalReport's own comment -- the
             // saddle-stage result is only available here, so capture it separately for main.cpp.
             if (restart_neg != nullptr && saddle_result.checks_passed) {
@@ -2370,6 +2523,7 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
               restart_neg->converged = saddle_result.converged;
               restart_neg->orbitals_optimized = true;
               restart_neg->total_rotation = saddle_result.total_rotation;
+              fill_restart(*restart_neg, saddle_result);
             }
           } catch (const std::exception& e) {
             out << "\n  FULL_OPTIMIZATION_4C_NEG FAILED: " << e.what() << "\n";
@@ -2496,7 +2650,7 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
                                        const rerdmft::UkbDirectSource* ukb_direct = nullptr,
                                        const RiNonRelDirectSource* ri_nonrel_direct = nullptr,
                                        rerdmft::RestartCapture* restart_neg = nullptr) {
-  rerdmft::progressContext() = label;
+  rerdmft::progressContext() = liveProgressLabel(label);
   const std::size_t n_total = h.rows();
   const std::size_t n_spatial = n_active / 2;
   const std::size_t n_pairs_total = n_active / 2;
@@ -2627,8 +2781,10 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
       << " Hartree (electronic " << electronic_energy << ")" << std::setprecision(6) << "\n";
   printEnergyDecompositionMo(out, h, occupations, rerdmft::Matrix<std::complex<double>>(), electronic_energy,
                               nuclear_repulsion_energy);
+  printPccdTwoRdmTrace(out, reps, bar, n_core, n_occ, n_vir, rdm, occupations, n_total);
 
   rerdmft::FullOptResult full_result;
+  std::function<void(rerdmft::RestartCapture&, const rerdmft::FullOptResult&)> fill_restart = [](rerdmft::RestartCapture&, const rerdmft::FullOptResult&) {};
   if (full_opt.enabled) {
     std::vector<double> state(2 * n_occ * n_vir, 0.0);
     for (std::size_t i = 0; i < n_occ; ++i) {
@@ -2661,9 +2817,16 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
       }
     }
     try {
+      if (restart != nullptr) {
+        restart->kind = "PCCD";
+        restart->jk_frozen_pairs = static_cast<std::int64_t>(n_core);
+        restart->jk_active_pairs = static_cast<std::int64_t>(n_occ + n_vir);
+      }
+      fill_restart = [](rerdmft::RestartCapture& r, const rerdmft::FullOptResult& res) { r.amplitudes = res.occupation_state; };
+      const auto full_opt_run = withRestartCheckpoint(full_opt, restart, fill_restart);
       full_result = rerdmft::runFullOptimizationPccd<T, Eri>(
           h, eri, occupations, state, reps, bar, n_core, n_occ, n_vir, n_total, amp_settings,
-          full_opt, kramers_restricted, nuclear_repulsion_energy, out,
+          full_opt_run, kramers_restricted, nuclear_repulsion_energy, out,
           label == "NON_REL" ? blockSpinPartner(n_total) : std::vector<std::size_t>{},
           /*n_negative=*/n_inactive_below, ukb_direct, extra_direct_pccd_fock, extra_direct_c0);
       out << "\n  FULL_OPTIMIZATION " << (full_result.checks_passed && full_result.converged ? "converged" : "did NOT converge")
@@ -2691,6 +2854,13 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
                  "  include the positive <-> negative-energy pairs: NEO converges the orbitals to the saddle point of the order set by the\n"
                  "  occupied positive-energy spinors, then the amplitudes are fully re-solved, macro-iterated.\n";
           rerdmft::FullOptSettings saddle_settings = full_opt;
+            if (restart_neg != nullptr && restart != nullptr) {  // min-max stage checkpoints go to RESTART.4C_NEG
+              restart_neg->kind = restart->kind;
+              restart_neg->n_core = restart->n_core;
+              restart_neg->jk_frozen_pairs = restart->jk_frozen_pairs;
+              restart_neg->jk_active_pairs = restart->jk_active_pairs;
+              saddle_settings = withRestartCheckpoint(full_opt, restart_neg, fill_restart);
+            }
           saddle_settings.orbital_optimizer = rerdmft::OrbitalOptimizer::kNeo;
           saddle_settings.saddle.n_negative = n_inactive_below;
           saddle_settings.saddle.start_rotation = full_result.total_rotation;
@@ -2714,6 +2884,7 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
               << " relative to the positive-energy-only minimum)\n";
           printEnergyDecompositionMo(out, h, saddle_result.occupations, saddle_result.total_rotation,
                                       saddle_result.electronic_energy, nuclear_repulsion_energy);
+          printPccdTwoRdmTrace(out, reps, bar, n_core, n_occ, n_vir, pccdRdmFromState(saddle_result.occupation_state, n_occ, n_vir), saddle_result.occupations, n_total);
           // AIMPAC WFN (<input>_neg.wfn): see buildFunctionalReport's own comment -- the
           // saddle-stage result is only available here, so capture it separately for main.cpp.
           if (restart_neg != nullptr && saddle_result.checks_passed) {
@@ -2723,6 +2894,7 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
             restart_neg->converged = saddle_result.converged;
             restart_neg->orbitals_optimized = true;
             restart_neg->total_rotation = saddle_result.total_rotation;
+            fill_restart(*restart_neg, saddle_result);
           }
         } catch (const std::exception& e) {
           out << "\n  FULL_OPTIMIZATION_4C_NEG FAILED: " << e.what() << "\n";
@@ -2977,7 +3149,7 @@ void writeX2CAimpac(const rerdmft::Input& input, const std::string& input_path,
 // rkbComponentAimpacDensity's own comments -- rho(r) = rho_Large(r) + rho_Small(r), no cross term)
 // and merged into one WFN file whose basis is large_basis_fns ++ small_basis_fns concatenated (each
 // orbital's coefficients zero-padded over the OTHER component's primitives; writeAimpacWfn itself
-// drops near-zero-occupation orbitals and re-sorts by decreasing occupation). No-op unless AIMPAC
+// drops near-zero-occupation orbitals; the Large block stays first, then the Small one). No-op unless AIMPAC
 // TRUE. Writes "<input>.wfn" from the positive-energy-only minimum (`capture`), and -- only when
 // FULL_OPTIMIZATION_4C_NEG actually ran and converged (`capture_neg.valid`) -- ADDITIONALLY
 // "<input>_neg.wfn" from the min-max saddle-stage result.
@@ -3022,10 +3194,22 @@ void writeC4Aimpac(const rerdmft::Input& input, const std::string& input_path,
     auto orbitals = zeroPad(rerdmft::naturalOrbitalsFromDensity(s_large, d_large, input.x_lin_dep_thrs_l()), true);
     const auto small_orbitals =
         zeroPad(rerdmft::naturalOrbitalsFromDensity(s_small, d_small, input.x_lin_dep_thrs_s()), false);
+    // writeAimpacWfn drops orbitals below kAimpacOccPrintThreshold and (keep_input_order) keeps the order: count what survives per block.
+    const auto countKept = [](const std::vector<rerdmft::NaturalOrbital>& orbs) {
+      std::size_t n = 0;
+      for (const auto& orb : orbs)
+        if (std::abs(orb.occupation) >= rerdmft::kAimpacOccPrintThreshold) ++n;
+      return n;
+    };
+    const std::size_t n_large_mo = countKept(orbitals), n_small_mo = countKept(small_orbitals);
     orbitals.insert(orbitals.end(), small_orbitals.begin(), small_orbitals.end());
     rerdmft::writeAimpacWfn(path, std::string("RERDMFT ") + tag + " WFN FILE", input.geometry(), combined_basis,
-                             orbitals, cap.electronic_energy + nuclear_repulsion_energy, 0.0);
+                             orbitals, cap.electronic_energy + nuclear_repulsion_energy, 0.0, /*occ_print_threshold=*/5e-8,
+                             /*keep_input_order=*/true);  // Large-component orbitals first, then Small
     log << "\nAIMPAC WFN file written (" << tag << "): " << path << "\n";
+    if (n_large_mo > 0) log << "  Large-component orbitals: MO 1-" << n_large_mo << "\n";
+    if (n_small_mo > 0) log << "  Small-component orbitals: MO " << n_large_mo + 1 << "-" << n_large_mo + n_small_mo << "\n";
+    log << "  (" << n_large_mo + n_small_mo << " orbitals with occupation >= " << rerdmft::kAimpacOccPrintThreshold << ")\n";
   };
 
   writeOne(capture, wfnOutputPath(input_path, /*is_neg=*/false), "4C");
@@ -3449,6 +3633,14 @@ int main(int argc, char** argv) {
   try {
     input.read(argv[1]);
     basis_set.read(input.basis_file());
+    if (std::getenv("SWITCH_SIGN_ERI") != nullptr) {
+      if (input.use_ri() || input.cholesky() || input.scf_direct_4c() || input.functional_direct_4c()) {
+        throw std::runtime_error(
+            "SWITCH_SIGN_ERI is only valid for the DENSE two-electron integrals: set USE_RI FALSE, CHOLESKY FALSE, "
+            "SCF_DIRECT_4C FALSE and FUNCTIONAL_DIRECT_4C FALSE");
+      }
+      std::cout << "SWITCH_SIGN_ERI is set: every dense electron-repulsion integral (pq|rs) changes sign.\n\n";
+    }
 
     // READ_OCCUPANCIES TRUE: read ONCE here (before any method-specific block), passed by
     // pointer into every buildPnofFunctionalReport/buildFunctionalReport call below -- empty
@@ -3854,6 +4046,11 @@ int main(int argc, char** argv) {
               restart_nuclear_repulsion, input.debug(), fullOptSettings(input),
               input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &nonrel_restart, {}, &ro.data.occupations, occ_in, nullptr, ri_nonrel_direct_ptr);
         };
+        nonrel_restart.checkpoint_writer = [&](const rerdmft::RestartCapture& c) {
+          std::ostringstream sink;  // periodic FULL_OPTIMIZATION checkpoint: the verification printout is discarded
+          writeRestartFile<double>(sink, input, "NON_REL", c, blockDiagTwice(c_spatial), blockDiagTwice(h_core_nonrel),
+                                 blockDiagTwice(s_large_cart), h_spin, restartFingerprint, restart_nuclear_repulsion);
+        };
         nonrel_functional_report = input.use_ri()     ? nonrel_functional(ri_nonrel_mo_eri)
                                     : input.cholesky() ? nonrel_functional(eri_spin_chol)
                                                         : nonrel_functional(eri_spin_sym);
@@ -3943,6 +4140,11 @@ int main(int argc, char** argv) {
               input.jk_active_pairs(), input.temperature(), input.functional(), input.occupation_init(),
               restart_nuclear_repulsion, input.debug(), fullOptSettings(input),
               input.full_optimization_4c_neg(), t_start, t_checkpoint, timing_records, &x2c_restart, {}, &ro.data.occupations, occ_in, x2c_ukb_direct_ptr);
+        };
+        x2c_restart.checkpoint_writer = [&](const rerdmft::RestartCapture& c) {
+          std::ostringstream sink;  // periodic FULL_OPTIMIZATION checkpoint: the verification printout is discarded
+          writeRestartFile<std::complex<double>>(sink, input, "X2C", c, c_x2c, x2c_hamiltonian.h_x2c, s_x2c, h_x2c_mo,
+                                               restartFingerprint, restart_nuclear_repulsion);
         };
         x2c_functional_report = input.use_ri()     ? x2c_functional(ri_x2c_mo_eri)
                                  : input.cholesky() ? x2c_functional(x2c_mo_chol)
@@ -4121,6 +4323,16 @@ int main(int argc, char** argv) {
           ukb_direct_storage_r = rerdmft::UkbDirectSource{h_rkb, {}, c_dhf_restart, true, ri_direct_source_r};
           ukb_direct_ptr_r = &*ukb_direct_storage_r;
         }
+        c4_restart.checkpoint_writer = [&](const rerdmft::RestartCapture& c) {
+          std::ostringstream sink;  // periodic FULL_OPTIMIZATION checkpoint: the verification printout is discarded
+          writeRestartFile<std::complex<double>>(sink, input, "4C", c, c_dhf_restart, h_rkb, s_full, h_mo_restart,
+                                               restartFingerprint, restart_nuclear_repulsion);
+        };
+        c4_restart_neg.checkpoint_writer = [&](const rerdmft::RestartCapture& c) {
+          std::ostringstream sink;  // periodic FULL_OPTIMIZATION checkpoint: the verification printout is discarded
+          writeRestartFile<std::complex<double>>(sink, input, "4C_NEG", c, c_dhf_restart, h_rkb, s_full, h_mo_restart,
+                                               restartFingerprint, restart_nuclear_repulsion);
+        };
         const auto dhf_functional_r = [&](const auto& eri_any, const auto& eri_full_factory) {
           if (isPccdFunctionalName(input.functional())) {
             return buildPccdFunctionalReport(
@@ -4175,6 +4387,9 @@ int main(int argc, char** argv) {
         // extracted everything needed from them.
         rkb_cholesky = rerdmft::RkbCholesky();
         writeRestartFile<std::complex<double>>(c4_restart_log, input, "4C", c4_restart, c_dhf_restart, h_rkb, s_full, h_mo_restart,
+                                               restartFingerprint, restart_nuclear_repulsion);
+        if (c4_restart_neg.valid)
+          writeRestartFile<std::complex<double>>(c4_restart_log, input, "4C_NEG", c4_restart_neg, c_dhf_restart, h_rkb, s_full, h_mo_restart,
                                                restartFingerprint, restart_nuclear_repulsion);
         writeC4Aimpac(input, input_path, c_dhf_restart, c4_restart, c4_restart_neg, large_basis.functions(),
                       small_basis.functions(), large_transform_final, rkb_coefficients, restart_nuclear_repulsion,
@@ -4474,9 +4689,6 @@ int main(int argc, char** argv) {
               t_start, t_checkpoint, timing_records,
               &nonrel_restart, {}, nullptr, occ_in, nullptr, ri_nonrel_direct_ptr);
         };
-        nonrel_functional_report = input.use_ri()     ? nonrel_functional(ri_nonrel_mo_eri)
-                                    : input.cholesky() ? nonrel_functional(eri_spin_chol)
-                                                        : nonrel_functional(eri_spin_sym);
         // RESTART file: spin-orbital coefficients [alpha; beta] x [alpha MOs, beta MOs] in the
         // spin-orbital AO basis, blockdiag(C, C) times the FULL_OPTIMIZATION rotation.
         const auto blockDiagTwice = [](const rerdmft::Matrix<double>& m) {
@@ -4488,6 +4700,16 @@ int main(int argc, char** argv) {
             }
           return out;
         };
+        nonrel_restart.checkpoint_writer = [&](const rerdmft::RestartCapture& c) {
+          std::ostringstream sink;  // periodic FULL_OPTIMIZATION checkpoint: the verification printout is discarded
+          writeRestartFile<double>(sink, input, "NON_REL", c, blockDiagTwice(nonrel_hf_result.c_matrix),
+                                 blockDiagTwice(h_core_nonrel), blockDiagTwice(s_large_cart), h_spin,
+                                 rerdmft::basisFingerprint(large_basis.functions()),
+                                 nonrel_hf_result.nuclear_repulsion_energy);
+        };
+        nonrel_functional_report = input.use_ri()     ? nonrel_functional(ri_nonrel_mo_eri)
+                                    : input.cholesky() ? nonrel_functional(eri_spin_chol)
+                                                        : nonrel_functional(eri_spin_sym);
         writeRestartFile<double>(nonrel_restart_log, input, "NON_REL", nonrel_restart, blockDiagTwice(nonrel_hf_result.c_matrix),
                                  blockDiagTwice(h_core_nonrel), blockDiagTwice(s_large_cart), h_spin,
                                  rerdmft::basisFingerprint(large_basis.functions()),
@@ -4829,6 +5051,13 @@ int main(int argc, char** argv) {
               fullOptSettings(input),
               input.full_optimization_4c_neg(), t_start, t_checkpoint,
               timing_records, &x2c_restart, {}, nullptr, occ_in, x2c_ukb_direct_ptr);
+        };
+        x2c_restart.checkpoint_writer = [&](const rerdmft::RestartCapture& c) {
+          std::ostringstream sink;  // periodic FULL_OPTIMIZATION checkpoint: the verification printout is discarded
+          writeRestartFile<std::complex<double>>(
+            sink, input, "X2C", c, x2c_hf_result.c_matrix, x2c_hamiltonian.h_x2c,
+            rerdmft::extractLargeComponentBlock(s_full, x2c_hf_result.c_matrix.rows()), h_x2c_mo,
+            rerdmft::basisFingerprint(large_basis.functions()), x2c_hf_result.nuclear_repulsion_energy);
         };
         x2c_functional_report = input.use_ri()       ? x2c_functional(ri_x2c_mo_eri)
                                  : input.cholesky()   ? x2c_functional(x2c_mo_chol)
@@ -5282,6 +5511,16 @@ int main(int argc, char** argv) {
           ukb_direct_storage = rerdmft::UkbDirectSource{h_rkb, ukb_direct_source, dhf_result.c_dhf, false, {}};
           ukb_direct_ptr = &*ukb_direct_storage;
         }
+        c4_restart.checkpoint_writer = [&](const rerdmft::RestartCapture& c) {
+          std::ostringstream sink;  // periodic FULL_OPTIMIZATION checkpoint: the verification printout is discarded
+          writeRestartFile<std::complex<double>>(sink, input, "4C", c, dhf_result.c_dhf, h_rkb, s_full, h_mo,
+                                               rerdmft::basisFingerprint(large_basis.functions()), dhf_result.nuclear_repulsion_energy);
+        };
+        c4_restart_neg.checkpoint_writer = [&](const rerdmft::RestartCapture& c) {
+          std::ostringstream sink;  // periodic FULL_OPTIMIZATION checkpoint: the verification printout is discarded
+          writeRestartFile<std::complex<double>>(sink, input, "4C_NEG", c, dhf_result.c_dhf, h_rkb, s_full, h_mo,
+                                               rerdmft::basisFingerprint(large_basis.functions()), dhf_result.nuclear_repulsion_energy);
+        };
         const auto dhf_functional = [&](const auto& eri_any, const auto& eri_full_factory) {
           if (isPccdFunctionalName(input.functional())) {
             return buildPccdFunctionalReport(
@@ -5348,6 +5587,9 @@ int main(int argc, char** argv) {
         // RESTART files: RESTART.4C (the positive-energy-only minimization); coefficients in the RKB spinor basis.
         const auto restart_fingerprint = rerdmft::basisFingerprint(large_basis.functions());
         writeRestartFile<std::complex<double>>(c4_restart_log, input, "4C", c4_restart, dhf_result.c_dhf, h_rkb, s_full, h_mo,
+                                               restart_fingerprint, dhf_result.nuclear_repulsion_energy);
+        if (c4_restart_neg.valid)
+          writeRestartFile<std::complex<double>>(c4_restart_log, input, "4C_NEG", c4_restart_neg, dhf_result.c_dhf, h_rkb, s_full, h_mo,
                                                restart_fingerprint, dhf_result.nuclear_repulsion_energy);
         writeC4Aimpac(input, input_path, dhf_result.c_dhf, c4_restart, c4_restart_neg, large_basis.functions(),
                       small_basis.functions(), large_transform_final, rkb_coefficients,

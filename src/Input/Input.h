@@ -349,7 +349,7 @@ class Input {
   // JK-only density matrix functional approximation (Occ_opt/JK_only.h,
   // Table 1 of Rodriguez-Mayorga et al., PCCP (2017)) main.cpp's
   // buildFunctionalReport evaluates on the converged HF/DHF orbitals --
-  // one of SD, MBB (or MULLER), BBC2, CA, CGA, ML, MLSIC, GU, POWER,
+  // one of SD, MBB (or MULLER), BBC2, CA, RHFB, CGA, ML, MLSIC, GU, POWER,
   // MULLER_AS (case-insensitive; validated against this exact list, throws
   // otherwise). Stored as a plain string rather than Occ_opt's own
   // JkFunctional enum so that Input.h stays independent of Occ_opt.
@@ -505,7 +505,7 @@ class Input {
   // re-decided every macro-iteration, works with CHOLESKY TRUE or FALSE (same NEO machinery
   // either way, including the CHOLESKY TRUE dense-tensor-per-Newton-step cache).
   const std::string& orbital_optimizer() const { return orbital_optimizer_; }
-  // Optional; defaults to 100 when NEO_MAX_ITERATIONS is absent. Only meaningful with
+  // Optional; defaults to 20 when NEO_MAX_ITERATIONS is absent. Only meaningful with
   // ORBITAL_OPTIMIZER NEO: the hard cap on Newton steps ONE macro-iteration's orbital-rotation
   // descent may take (Full_opt/FullOptimization.h's own FullOptSettings::neo_max_iterations --
   // see its comment for why this is a fixed generous budget, not an ADAM-style growing one, and
@@ -513,7 +513,7 @@ class Input {
   // back). Lower it only to bound run time on a system you already expect to be slow to converge;
   // raising it is safe and just changes how long a pathological macro-iteration is allowed to run.
   int neo_max_iterations() const { return neo_max_iterations_; }
-  // Optional; defaults to 5e-3 Hartree when ADAM_NEO_SWITCH_TOLERANCE is absent. Only meaningful with
+  // Optional; defaults to 2e-3 Hartree when ADAM_NEO_SWITCH_TOLERANCE is absent. Only meaningful with
   // ORBITAL_OPTIMIZER ADAM_NEO: the |dE| threshold between macro-iterations that switches the driver from ADAM
   // to NEO (once |dE| falls to or below this) and back to ADAM (once it rises above it again) -- see
   // ORBITAL_OPTIMIZER's own comment and Full_opt/FullOptimization.h's OrbitalOptimizer::kAdamNeo.
@@ -627,8 +627,8 @@ class Input {
   double macro_energy_tolerance_ = 1e-9;
   double orbital_gradient_tolerance_ = 1e-5;
   std::string orbital_optimizer_ = "ADAM";
-  int neo_max_iterations_ = 100;
-  double adam_neo_switch_tolerance_ = 5e-3;
+  int neo_max_iterations_ = 20;
+  double adam_neo_switch_tolerance_ = 2e-3;
   int adam_neo_initial_adam_iterations_ = 3;
   int neo_stagnation_window_ = 5;
   int neo_stagnation_min_iterations_ = 10;

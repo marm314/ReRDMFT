@@ -49,8 +49,14 @@ namespace rerdmft {
 // and runFullOptimization's own `run_neo`).
 enum class OrbitalOptimizer { kAdam, kNeo, kAdamNeo };
 
+struct FullOptResult;
+
 struct FullOptSettings {
   bool enabled = false;
+  // Periodic RESTART checkpoint: every `checkpoint_interval` macro-iterations (10, 20, 30, ...) the loop hands a snapshot of its
+  // current state (occupations, occupation state, accumulated rotation, energy) to `checkpoint`, if set; the caller writes the RESTART file.
+  int checkpoint_interval = 10;
+  std::function<void(const FullOptResult&)> checkpoint;
   int max_macro_iterations = 1000;
   double energy_tolerance = 1e-9;     // tolE of the Fortran
   double gradient_tolerance = 1e-5;   // 10**-itolLambda of the Fortran
@@ -81,12 +87,14 @@ struct FullOptSettings {
   // it: NEO is a quadratically convergent Newton method, so genuinely needing more than a few tens
   // of steps per macro-iteration would itself be a sign of trouble. User-settable via the
   // NEO_MAX_ITERATIONS keyword (Input.h) -- lowering it below the default risks exactly the
-  // truncated-descent failure mode described above; see its own comment.
+  // truncated-descent failure mode described above; see its own comment. Default 20 (was 100): on the Kr pCCD
+  // C4_SPINOR run 20 steps proved sufficient -- the next occupation re-optimization / orbital pass picks up what a
+  // budget-cut descent leaves, and the extra steps only cost time.
   OrbitalOptimizer orbital_optimizer = OrbitalOptimizer::kAdam;
-  int neo_max_iterations = 100;
+  int neo_max_iterations = 20;
   // ORBITAL_OPTIMIZER ADAM_NEO only: the |dE| threshold (Hartree) that switches the driver -- see
   // OrbitalOptimizer's own comment. User-settable via the ADAM_NEO_SWITCH_TOLERANCE keyword (Input.h).
-  double adam_neo_switch_tolerance = 5e-3;
+  double adam_neo_switch_tolerance = 2e-3;
   // ORBITAL_OPTIMIZER ADAM_NEO only: the first this-many macro-iterations are always ADAM; the |dE| selector only
   // acts afterwards. User-settable via ADAM_NEO_INITIAL_ADAM_ITERATIONS (Input.h).
   int adam_neo_initial_adam_iterations = 3;

@@ -4,12 +4,22 @@
 #include <cstddef>
 #include <stdexcept>
 #include <utility>
+#include <cstdlib>
 #include <vector>
 
 #include "MolecularBasis.h"
 #include "Tensor4.h"
 
 namespace rerdmft {
+
+// Environment variable SWITCH_SIGN_ERI (set to anything): every electron-repulsion integral stored by the DENSE builders
+// below (twoElectronIntegrals / ...Packed / ...Cross / ...CrossPacked) changes sign. Diagnostic only; the Schwarz screening
+// bounds, the Cholesky/RI decompositions and the integral-direct kernels are NOT affected (they need a positive Coulomb
+// metric / the true |(pq|rs)|), so main.cpp refuses SWITCH_SIGN_ERI together with any of those paths.
+inline double eriSign() {
+  static const double sign = std::getenv("SWITCH_SIGN_ERI") != nullptr ? -1.0 : 1.0;
+  return sign;
+}
 
 // (pq|rs) for one specific quadruplet of individually-normalized cartesian AOs, each placed at its
 // own real atomic center -- a minimal, independent 4-shell/4-atom libcint system per call (not

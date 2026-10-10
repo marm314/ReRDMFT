@@ -225,7 +225,7 @@ Tensor4<double> twoElectronIntegrals(const std::vector<BasisFunction>& basis, do
             continue;  // |(pq|rs)| <= sqrt_diag_pq * sqrt_diag_rs < threshold: leave it at 0.
           }
 
-          const double value = twoElectronQuadruplet(basis[p], basis[q], basis[r], basis[s]);
+          const double value = eriSign() * twoElectronQuadruplet(basis[p], basis[q], basis[r], basis[s]);
 
           result(p, q, r, s) = value;
           result(q, p, r, s) = value;
@@ -268,7 +268,7 @@ PackedTwoElectronTensor twoElectronIntegralsPacked(const std::vector<BasisFuncti
             continue;  // |(pq|rs)| <= sqrt_diag_pq * sqrt_diag_rs < threshold: leave it at 0.
           }
 
-          const double value = twoElectronQuadruplet(basis[p], basis[q], basis[r], basis[s]);
+          const double value = eriSign() * twoElectronQuadruplet(basis[p], basis[q], basis[r], basis[s]);
           result.set(p, q, r, s, value);
         }
       }
@@ -301,7 +301,7 @@ Tensor4<double> twoElectronIntegralsCross(const std::vector<BasisFunction>& basi
             continue;  // |(pq|rs)| <= sqrt_diag_pq * sqrt_diag_rs < threshold: leave it at 0.
           }
           const double value =
-              twoElectronQuadruplet(basis_pq[p], basis_pq[q], basis_rs[r], basis_rs[s]);
+              eriSign() * twoElectronQuadruplet(basis_pq[p], basis_pq[q], basis_rs[r], basis_rs[s]);
 
           result(p, q, r, s) = value;
           result(q, p, r, s) = value;
@@ -340,7 +340,7 @@ CrossPackedTwoElectronTensor twoElectronIntegralsCrossPacked(const std::vector<B
             continue;  // |(pq|rs)| <= sqrt_diag_pq * sqrt_diag_rs < threshold: leave it at 0.
           }
           const double value =
-              twoElectronQuadruplet(basis_pq[p], basis_pq[q], basis_rs[r], basis_rs[s]);
+              eriSign() * twoElectronQuadruplet(basis_pq[p], basis_pq[q], basis_rs[r], basis_rs[s]);
           result.set(p, q, r, s, value);
         }
       }

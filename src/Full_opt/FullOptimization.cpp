@@ -2534,6 +2534,9 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
         max_gradient = nr.gradient_max;
         orbital_iterations = nr.iterations;
         gradient_converged = nr.converged;
+        // Any NEO descent moves the orbitals away from the point ADAM's learning rate and extra-iteration allowance were
+        // tuned (cut back) for, so the next ADAM stretch starts fresh: initial learning rate, base step count.
+        adam.reset();
         log_extra = nr.history.empty() ? 0.0 : nr.history.back().radius;
       } else {
         AdamResult ar;
@@ -2605,6 +2608,26 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
                                                      : (occ_result.converged ? "" : ", occupations not converged"))
                      << ")";
       last_dE = d_e;
+      // Periodic RESTART checkpoint (every `checkpoint_interval` macro-iterations): same fields the final result carries.
+      if (settings.checkpoint && settings.checkpoint_interval > 0 && iter % settings.checkpoint_interval == 0 &&
+          !(std::abs(d_e) < settings.energy_tolerance)) {
+        FullOptResult snapshot;
+        snapshot.checks_passed = true;
+        snapshot.iterations = iter;
+        snapshot.electronic_energy = e_elec;
+        snapshot.occupations = occ;
+        snapshot.occupation_state = occ_state;
+        const Matrix<T>& u_now = problem.totalRotation();
+        snapshot.total_rotation = Matrix<std::complex<double>>(u_now.rows(), u_now.cols());
+        for (std::size_t i = 0; i < u_now.rows() * u_now.cols(); ++i)
+          snapshot.total_rotation.data()[i] = std::complex<double>(u_now.data()[i]);
+        if (saddle) snapshot.total_rotation = settings.saddle.start_rotation * snapshot.total_rotation;
+        try {
+          settings.checkpoint(snapshot);
+        } catch (const std::exception& e) {
+          log << "    RESTART checkpoint FAILED (" << e.what() << ")\n";
+        }
+      }
       if (std::abs(d_e) < settings.energy_tolerance && !(run_neo ? false : adam.restartRequested())) {
         result.converged = true;
         break;
@@ -2997,8 +3020,16 @@ namespace {
 // ---------------------------------------------------------------------
 // The trimmed (no-pair) runs never see the negative-energy branch, whose ~1e4 Hartree entries set the roundoff of the
 // gradient sums (see the time-reversal checks): carry the untrimmed scale in the settings.
+FullOptResult embedTrimmedResult(FullOptResult r, std::size_t off, std::size_t n_full);
+
 template <typename T>
-FullOptSettings withRoundoffScale(FullOptSettings s, const Matrix<T>& h) {
+FullOptSettings withRoundoffScale(FullOptSettings s, const Matrix<T>& h, std::size_t n_negative) {
+  // The trimmed loop's periodic checkpoint result is in the positive-energy block: embed it back before handing it on.
+  if (s.checkpoint) {
+    s.checkpoint = [inner = s.checkpoint, n_negative, n_full = h.rows()](const FullOptResult& r) {
+      inner(embedTrimmedResult(r, n_negative, n_full));
+    };
+  }
   for (std::size_t p = 0; p < h.rows(); ++p)
     for (std::size_t q = 0; q < h.cols(); ++q) s.roundoff_scale = std::max(s.roundoff_scale, std::abs(std::complex<double>(h(p, q))));
   return s;
@@ -3099,7 +3130,7 @@ FullOptResult runFullOptimizationJk(const Matrix<T>& h, const CholeskyEri<T>& er
         runFullOptimizationJk<T>(positiveBlock(h, n_negative), positiveBlock(eri, n_negative),
                                  std::vector<double>(occupations.begin() + static_cast<std::ptrdiff_t>(n_negative), occupations.end()),
                                  state, functional, f_l, n_electrons, n_total - n_negative, n_frozen,
-                                 n_inactive_below - n_negative, n_active, two_columns, withRoundoffScale(settings, h), kramers_restricted,
+                                 n_inactive_below - n_negative, n_active, two_columns, withRoundoffScale(settings, h, n_negative), kramers_restricted,
                                  nuclear_repulsion_energy, log, spin_partner, 0,
                                  trimmed_ukb_direct ? &*trimmed_ukb_direct : nullptr, extra_direct_fock, extra_direct_c0),
         n_negative, n_total);
@@ -3138,7 +3169,7 @@ FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const CholeskyEri<T>& 
         runFullOptimizationPnof<T>(positiveBlock(h, n_negative), positiveBlock(eri, n_negative),
                                    std::vector<double>(occupations.begin() + static_cast<std::ptrdiff_t>(n_negative), occupations.end()),
                                    state, functional, shifted, n_core, pnof_subspaces, pnof_coupling, relativistic,
-                                   sqp_occupations, n_total - n_negative, withRoundoffScale(settings, h), kramers_restricted,
+                                   sqp_occupations, n_total - n_negative, withRoundoffScale(settings, h, n_negative), kramers_restricted,
                                    nuclear_repulsion_energy, log, spin_partner, 0,
                                    trimmed_ukb_direct ? &*trimmed_ukb_direct : nullptr, extra_direct_fock, extra_direct_c0),
         n_negative, n_total);
@@ -3171,7 +3202,7 @@ FullOptResult runFullOptimizationJk(const Matrix<T>& h, const SymmetricEri<T>& e
         runFullOptimizationJk<T>(positiveBlock(h, n_negative), positiveBlock(eri, n_negative),
                                  std::vector<double>(occupations.begin() + static_cast<std::ptrdiff_t>(n_negative), occupations.end()),
                                  state, functional, f_l, n_electrons, n_total - n_negative, n_frozen,
-                                 n_inactive_below - n_negative, n_active, two_columns, withRoundoffScale(settings, h), kramers_restricted,
+                                 n_inactive_below - n_negative, n_active, two_columns, withRoundoffScale(settings, h, n_negative), kramers_restricted,
                                  nuclear_repulsion_energy, log, spin_partner, 0,
                                  trimmed_ukb_direct ? &*trimmed_ukb_direct : nullptr, extra_direct_fock, extra_direct_c0),
         n_negative, n_total);
@@ -3210,7 +3241,7 @@ FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const SymmetricEri<T>&
         runFullOptimizationPnof<T>(positiveBlock(h, n_negative), positiveBlock(eri, n_negative),
                                    std::vector<double>(occupations.begin() + static_cast<std::ptrdiff_t>(n_negative), occupations.end()),
                                    state, functional, shifted, n_core, pnof_subspaces, pnof_coupling, relativistic,
-                                   sqp_occupations, n_total - n_negative, withRoundoffScale(settings, h), kramers_restricted,
+                                   sqp_occupations, n_total - n_negative, withRoundoffScale(settings, h, n_negative), kramers_restricted,
                                    nuclear_repulsion_energy, log, spin_partner, 0,
                                    trimmed_ukb_direct ? &*trimmed_ukb_direct : nullptr, extra_direct_fock, extra_direct_c0),
         n_negative, n_total);
@@ -3250,7 +3281,7 @@ FullOptResult runFullOptimizationJk(const Matrix<T>& h, const RiMoEri& eri,
         runFullOptimizationJk(positiveBlock(h, n_negative), positiveBlock(eri, n_negative),
                                std::vector<double>(occupations.begin() + static_cast<std::ptrdiff_t>(n_negative), occupations.end()),
                                state, functional, f_l, n_electrons, n_total - n_negative, n_frozen,
-                               n_inactive_below - n_negative, n_active, two_columns, withRoundoffScale(settings, h), kramers_restricted,
+                               n_inactive_below - n_negative, n_active, two_columns, withRoundoffScale(settings, h, n_negative), kramers_restricted,
                                nuclear_repulsion_energy, log, spin_partner, 0,
                                trimmed_ukb_direct ? &*trimmed_ukb_direct : nullptr, extra_direct_fock, extra_direct_c0),
         n_negative, n_total);
@@ -3288,7 +3319,7 @@ FullOptResult runFullOptimizationPnof(const Matrix<T>& h, const RiMoEri& eri,
         runFullOptimizationPnof(positiveBlock(h, n_negative), positiveBlock(eri, n_negative),
                                  std::vector<double>(occupations.begin() + static_cast<std::ptrdiff_t>(n_negative), occupations.end()),
                                  state, functional, shifted, n_core, pnof_subspaces, pnof_coupling, relativistic,
-                                 sqp_occupations, n_total - n_negative, withRoundoffScale(settings, h), kramers_restricted,
+                                 sqp_occupations, n_total - n_negative, withRoundoffScale(settings, h, n_negative), kramers_restricted,
                                  nuclear_repulsion_energy, log, spin_partner, 0,
                                  trimmed_ukb_direct ? &*trimmed_ukb_direct : nullptr, extra_direct_fock, extra_direct_c0),
         n_negative, n_total);
@@ -3511,7 +3542,7 @@ FullOptResult runFullOptimizationPccd(const Matrix<T>& h, const Eri& eri,
         runFullOptimizationPccd<T>(positiveBlock(h, n_negative), positiveBlock(eri, n_negative),
                                    std::vector<double>(occupations.begin() + static_cast<std::ptrdiff_t>(n_negative), occupations.end()),
                                    state, shifted_reps, shifted_bar, n_core, n_occ, n_vir, n_total - n_negative,
-                                   amplitude_settings, withRoundoffScale(settings, h), kramers_restricted,
+                                   amplitude_settings, withRoundoffScale(settings, h, n_negative), kramers_restricted,
                                    nuclear_repulsion_energy, log, spin_partner, 0,
                                    trimmed_ukb_direct ? &*trimmed_ukb_direct : nullptr, extra_direct_pccd_fock,
                                    extra_direct_c0),

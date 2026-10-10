@@ -26,6 +26,7 @@ enum class JkFunctional {
   kMbb,     // Muller / Buijse-Baerends: f = sqrt(n_i*n_j).
   kBbc2,    // BBC2 (== BBC1 for a two-electron closed-shell system).
   kCa,      // Csanyi-Arias.
+  kRhfb,    // RHFB (Hartree-Fock-Bogoliubov, meant for ATTRACTIVE interactions): f = -sqrt(n_i(1-n_i) n_j(1-n_j)) + n_i*n_j. For repulsive Coulomb the minimum is HF (integer occupations); see SWITCH_SIGN_ERI.
   kCga,     // Csanyi-Goedecker-Arias.
   kMl,      // Marques-Lathiotakis.
   kMlsic,   // Marques-Lathiotakis, self-interaction corrected.

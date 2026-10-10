@@ -154,7 +154,7 @@ std::vector<NaturalOrbital> naturalOrbitalsFromDensity(const Matrix<double>& s,
 
 void writeAimpacWfn(const std::string& path, const std::string& title, const std::vector<Atom>& geometry,
                      const std::vector<BasisFunction>& basis, const std::vector<NaturalOrbital>& orbitals,
-                     double total_energy, double virial_ratio, double occ_print_threshold) {
+                     double total_energy, double virial_ratio, double occ_print_threshold, bool keep_input_order) {
   const std::size_t n_cart = basis.size();
   if (geometry.empty()) throw std::runtime_error("writeAimpacWfn: empty geometry");
   for (const auto& orb : orbitals) {
@@ -181,14 +181,16 @@ void writeAimpacWfn(const std::string& path, const std::string& title, const std
 
   // Drop orbitals that round to zero at the printed precision (OCC NO has 7 decimals -- AIMPAC
   // gains nothing from them, they only bloat the file), then re-sort by decreasing occupation
-  // (the caller may have merged several independently-diagonalized basis blocks, e.g. C4_DHF's
-  // Large and Small components, each in its own internal order).
+  // unless `keep_input_order` (C4_DHF: the Large-component orbitals first, then the Small ones, each block already
+  // in decreasing occupation order).
   std::vector<const NaturalOrbital*> kept;
   for (const auto& orb : orbitals) {
     if (std::abs(orb.occupation) >= occ_print_threshold) kept.push_back(&orb);
   }
-  std::sort(kept.begin(), kept.end(),
-            [](const NaturalOrbital* a, const NaturalOrbital* b) { return a->occupation > b->occupation; });
+  if (!keep_input_order) {
+    std::sort(kept.begin(), kept.end(),
+              [](const NaturalOrbital* a, const NaturalOrbital* b) { return a->occupation > b->occupation; });
+  }
   const std::size_t n_mo = kept.size();
 
   std::ofstream out(path);
