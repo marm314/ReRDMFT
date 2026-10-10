@@ -236,6 +236,8 @@ double jkExchangeFunctionD1(JkFunctional functional, double n_i, double n_j, std
 
     case JkFunctional::kPower: {
       const double x = n_i * n_j;
+      // x == 0 happens for the excluded (negative-energy / deep-virtual) orbitals: pow(0, alpha-1) would give 0*inf = NaN.
+      if (x <= 0.0) return power_alpha == 1.0 ? n_j : 0.0;
       return power_alpha * std::pow(x, power_alpha - 1.0) * n_j;
     }
 
@@ -302,6 +304,7 @@ double jkExchangeFunctionD11(JkFunctional functional, double n_i, double n_j, st
 
     case JkFunctional::kPower: {
       const double x = n_i * n_j;
+      if (power_alpha == 1.0 || x <= 0.0) return 0.0;  // alpha == 1: f = n_i*n_j is linear; x == 0: see D1
       return power_alpha * (power_alpha - 1.0) * std::pow(x, power_alpha - 2.0) * n_j * n_j;
     }
 
@@ -368,6 +371,7 @@ double jkExchangeFunctionD12(JkFunctional functional, double n_i, double n_j, st
 
     case JkFunctional::kPower: {
       const double x = n_i * n_j;
+      if (x <= 0.0) return power_alpha == 1.0 ? 1.0 : 0.0;  // see D1
       return power_alpha * power_alpha * std::pow(x, power_alpha - 1.0);
     }
 
