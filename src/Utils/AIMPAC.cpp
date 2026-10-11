@@ -20,7 +20,7 @@ namespace {
 // (codes 1..35) -- this table is the WFN FORMAT ITSELF (fixed by the AIMPAC/AIMAll readers,
 // completely independent of any internal basis-function ordering this project happens to use;
 // matches the table used by, e.g., PySCF's tools/wfn_format.py).
-int aimpacTypeCode(int lx, int ly, int lz) {
+const std::array<std::array<int, 3>, 35>& aimpacTypeTable() {
   static const std::array<std::array<int, 3>, 35> table = {{
       {{0, 0, 0}},                                                    // 1: S
       {{1, 0, 0}}, {{0, 1, 0}}, {{0, 0, 1}},                          // 2-4: P
@@ -31,6 +31,11 @@ int aimpacTypeCode(int lx, int ly, int lz) {
       {{0, 3, 1}}, {{1, 0, 3}}, {{0, 1, 3}}, {{2, 2, 0}}, {{2, 0, 2}}, {{0, 2, 2}},
       {{2, 1, 1}}, {{1, 2, 1}}, {{1, 1, 2}},                          // 21-35: G
   }};
+  return table;
+}
+
+int aimpacTypeCode(int lx, int ly, int lz) {
+  const auto& table = aimpacTypeTable();
   for (std::size_t i = 0; i < table.size(); ++i) {
     if (table[i][0] == lx && table[i][1] == ly && table[i][2] == lz) return static_cast<int>(i) + 1;
   }
@@ -89,6 +94,14 @@ struct PrimitiveSlot {
   double exponent = 0.0;
 };
 
+// libcint's integral kernels evaluate coefficient * fac(l) * x^lx y^ly z^lz exp(-a r^2) with
+// fac = CINTcommon_fac_sp(l) = 1/sqrt(4 pi) (s), sqrt(3/(4 pi)) (p), 1 (l>=2), whereas a WFN file's
+// coefficients multiply the plain Gaussian directly (verified by Utils/check_wfn.cpp against a real
+// AIMPAC-written file: S_mo = I to 1e-8), so BasisFunction::coefficients must be scaled by it.
+double libcintCommonFac(int l) {
+  return l == 0 ? 0.282094791773878143 : l == 1 ? 0.488602511902919921 : 1.0;
+}
+
 int centreIndexOf(const BasisFunction& fn, const std::vector<Atom>& geometry) {
   constexpr double kTol = 1e-8;
   for (std::size_t a = 0; a < geometry.size(); ++a) {
@@ -101,6 +114,15 @@ int centreIndexOf(const BasisFunction& fn, const std::vector<Atom>& geometry) {
 }
 
 }  // namespace
+
+CartesianExponents aimpacTypeExponents(int code) {
+  const auto& table = aimpacTypeTable();
+  if (code < 1 || code > static_cast<int>(table.size())) {
+    throw std::runtime_error("aimpacTypeExponents: WFN TYPE code " + std::to_string(code) + " outside 1..35");
+  }
+  const auto& t = table[static_cast<std::size_t>(code) - 1];
+  return {t[0], t[1], t[2]};
+}
 
 std::vector<NaturalOrbital> naturalOrbitalsFromDensity(const Matrix<double>& s,
                                                         const Matrix<std::complex<double>>& d_ao,
@@ -250,7 +272,7 @@ void writeAimpacWfn(const std::string& path, const std::string& title, const std
       const auto [first, count] = ao_primitive_range[i];
       const double c_ao = orb.coefficients[i];
       for (std::size_t p = 0; p < count; ++p) {
-        primitive_coeffs[first + p] = c_ao * basis[i].coefficients[p];
+        primitive_coeffs[first + p] = c_ao * basis[i].coefficients[p] * libcintCommonFac(basis[i].l);
       }
     }
     std::snprintf(buf, sizeof(buf), "MO%5d     MO 0.0        OCC NO =%13.7f  ORB. ENERGY =%12.6f\n",

@@ -6,3 +6,4 @@ RESTART.*
 FCIDUMP
 *.live
 tests_mau/
+check_wfn

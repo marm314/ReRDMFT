@@ -62,7 +62,8 @@ $(error LIBCINT is not set. Build with: make LIBCINT=/path/to/libcint.a)
 endif
 endif
 
-SRCS := $(foreach d,$(ALL_SRC_DIRS),$(wildcard $(d)/*.cpp))
+# check_wfn.cpp has its own main(): standalone utility, built by the check_wfn target below.
+SRCS := $(filter-out $(SRC_DIR)/Utils/check_wfn.cpp,$(foreach d,$(ALL_SRC_DIRS),$(wildcard $(d)/*.cpp)))
 OBJS := $(addprefix $(BUILD_DIR)/,$(notdir $(SRCS:.cpp=.o)))
 
 # Every discovered directory is on the quoted-include search path, so
@@ -75,7 +76,7 @@ LDLIBS   := $(LIBCINT) -llapacke -llapack -lblas -lquadmath -lm -ldl
 
 GIT_VERSION_HEADER := $(SRC_DIR)/GitVersion.h
 
-.PHONY: all clean force
+.PHONY: all clean force check_wfn
 
 all: $(BIN)
 
@@ -117,6 +118,11 @@ $(GIT_VERSION_HEADER): force
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
+
+# Standalone WFN checker (Utils/check_wfn.cpp): S_mo = C^T S_prim C of an AIMPAC WFN file.
+# Links every object except main.o, like the tests below.
+check_wfn: $(BUILD_DIR)/check_wfn.o $(filter-out $(BUILD_DIR)/main.o,$(OBJS))
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDLIBS)
 
 # Standalone unit test of Utils/NEO (tests/test_neo.cpp): needs only NEO and
 # the LAPACK wrappers, no integrals/basis code. Run: make test_neo LIBCINT=...
@@ -361,6 +367,6 @@ $(BUILD_DIR)/test_rkb_coefficients_cross_check: tests/test_rkb_coefficients_cros
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
 clean:
-	rm -rf $(BUILD_DIR) $(BIN) $(GIT_VERSION_HEADER)
+	rm -rf $(BUILD_DIR) $(BIN) check_wfn $(GIT_VERSION_HEADER)
 # ($(BUILD_DIR) already holds the .d files alongside their .o's, so the
 # rm -rf above removes them too -- nothing extra needed here.)

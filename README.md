@@ -399,6 +399,26 @@ and repeat. See `examples/lih_gnof_read_restart.inp`.
 | `RERDMFT_RI_HV_REFERENCE` | If set (any value), the `USE_RI` generalized-Fock and sigma-vector Hessian-vector products use the original element-by-element implementations instead of the GEMM ones -- a validation A/B switch, same results to roundoff but much slower. |
 | `SWITCH_SIGN_ERI` | If set (any value), every electron-repulsion integral changes sign -- a diagnostic. Valid only for the dense integrals: refused with `USE_RI`, `CHOLESKY`, `SCF_DIRECT_4C` or `FUNCTIONAL_DIRECT_4C` (set them `FALSE`). |
 
+## Compiling LIBCINT
+
+ReRDMFT links LIBCINT statically and only uses its Cartesian (`_cart`) kernels. The recipe below is the one used for development (the same build [MOLGW](https://www.molgw.org/tuto_compilation/) asks for, so one build serves both codes):
+
+```sh
+git clone https://github.com/sunqm/libcint.git     # or unpack a release tarball, e.g. libcint-5.1.6
+cd libcint && mkdir build && cd build
+cmake -DWITH_RANGE_COULOMB=1 -DPYPZPX=1 -DBUILD_SHARED_LIBS=0 \
+      -DENABLE_EXAMPLE=0 -DENABLE_TEST=0 \
+      -DCMAKE_BUILD_TYPE=Release ..
+make -j
+```
+
+Then point ReRDMFT at `libcint/build/libcint.a` (see Building above); its headers are in `libcint/build/include/`.
+
+- `BUILD_SHARED_LIBS=0`: a static `libcint.a` is required (the Makefile links it directly).
+- `PYPZPX=1` and `WITH_RANGE_COULOMB=1`: needed by MOLGW; harmless for ReRDMFT, which never uses libcint's spherical functions (it has its own Cartesian-to-spherical transform), so the p-orbital order flag does not affect results.
+- Leave `WITH_CINT2_INTERFACE` at its default (ON): `Integrals.cpp` calls `cint1e_ovlp_cart`, which that interface provides.
+- A `Fortran` compiler is not needed by ReRDMFT; if cmake complains about one, add `-DWITH_FORTRAN=0`.
+
 ## Contributors
 
 - Dr. M. Rodriguez-Mayorga
