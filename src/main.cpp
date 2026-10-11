@@ -2985,13 +2985,27 @@ void writeNonRelFcidump(const rerdmft::Input& input, const rerdmft::Matrix<doubl
 // Derives the AIMPAC WFN output path from the input file's own name: "foo.inp" -> "foo.wfn" (same
 // directory, extension replaced); "_neg" is appended before the extension for the C4_DHF min-max
 // (FULL_OPTIMIZATION_4C_NEG) saddle-stage file, see writeC4Aimpac below.
-std::string wfnOutputPath(const std::string& input_path, bool is_neg) {
+// With a non-empty `hf_level` ("nonrel"/"x2c"/"4c") it is instead the HF/DHF file: "foo.inp" -> "hf_foo_<level>.wfn".
+std::string wfnOutputPath(const std::string& input_path, bool is_neg, const std::string& hf_level = std::string()) {
   const auto slash = input_path.find_last_of("/\\");
   const std::string dir = (slash == std::string::npos) ? std::string() : input_path.substr(0, slash + 1);
   std::string name = (slash == std::string::npos) ? input_path : input_path.substr(slash + 1);
   const auto dot = name.find_last_of('.');
   if (dot != std::string::npos && dot != 0) name = name.substr(0, dot);
+  if (!hf_level.empty()) return dir + "hf_" + name + "_" + hf_level + ".wfn";
   return dir + name + (is_neg ? "_neg.wfn" : ".wfn");
+}
+
+// A RestartCapture standing for the converged HF/DHF 1-RDM itself (AIMPAC's HF/DHF files): identity rotation,
+// occupation 1 for `n_occupied` consecutive columns starting at `first_occupied`, 0 elsewhere, `n_columns` long.
+rerdmft::RestartCapture hartreeFockAimpacCapture(std::size_t n_columns, std::size_t first_occupied,
+                                                 std::size_t n_occupied, double electronic_energy) {
+  rerdmft::RestartCapture cap;
+  cap.valid = true;
+  cap.occupations.assign(n_columns, 0.0);
+  for (std::size_t k = 0; k < n_occupied; ++k) cap.occupations[first_occupied + k] = 1.0;
+  cap.electronic_energy = electronic_energy;
+  return cap;
 }
 
 // Writes the AIMPAC/AIMAll WFN file (Utils/AIMPAC.h) of the converged NON_REL 1-RDM's natural
@@ -3002,7 +3016,7 @@ void writeNonRelAimpac(const rerdmft::Input& input, const std::string& input_pat
                         const rerdmft::Matrix<double>& c_base, const rerdmft::RestartCapture& capture,
                         const std::vector<rerdmft::BasisFunction>& large_basis_fns,
                         const rerdmft::Matrix<double>& nonrel_transform, double nuclear_repulsion_energy,
-                        std::ostream& log) {
+                        std::ostream& log, bool hf = false) {
   if (!input.aimpac()) return;
   if (!capture.valid) {
     log << "\nAIMPAC WFN file (NON_REL): not written -- no RDMFT result was produced.\n";
@@ -3025,10 +3039,11 @@ void writeNonRelAimpac(const rerdmft::Input& input, const std::string& input_pat
     for (std::size_t j = 0; j < d_real.cols(); ++j) d_ao(i, j) = d_real(i, j);
   const rerdmft::Matrix<double> s_cart = rerdmft::overlapMatrix(large_basis_fns);
   const auto orbitals = rerdmft::naturalOrbitalsFromDensity(s_cart, d_ao, input.x_lin_dep_thrs_l());
-  const std::string path = wfnOutputPath(input_path, /*is_neg=*/false);
-  rerdmft::writeAimpacWfn(path, "RERDMFT NON_REL WFN FILE", input.geometry(), large_basis_fns, orbitals,
+  const std::string path = wfnOutputPath(input_path, /*is_neg=*/false, hf ? "nonrel" : "");
+  const char* tag = hf ? "NON_REL HF" : "NON_REL";
+  rerdmft::writeAimpacWfn(path, std::string("RERDMFT ") + tag + " WFN FILE", input.geometry(), large_basis_fns, orbitals,
                            capture.electronic_energy + nuclear_repulsion_energy, 0.0);
-  log << "\nAIMPAC WFN file written (NON_REL): " << path << "\n";
+  log << "\nAIMPAC WFN file written (" << tag << "): " << path << "\n";
 }
 
 // Plain (non-conjugating) transpose of a complex matrix -- Matrix.h only provides `dagger`
@@ -3128,7 +3143,7 @@ void writeX2CAimpac(const rerdmft::Input& input, const std::string& input_path,
                      const rerdmft::Matrix<std::complex<double>>& c_scf, const rerdmft::RestartCapture& capture,
                      const std::vector<rerdmft::BasisFunction>& large_basis_fns,
                      const rerdmft::Matrix<double>& large_transform_final, double nuclear_repulsion_energy,
-                     std::ostream& log) {
+                     std::ostream& log, bool hf = false) {
   if (!input.aimpac()) return;
   if (!capture.valid) {
     log << "\nAIMPAC WFN file (X2C): not written -- no RDMFT result was produced.\n";
@@ -3138,10 +3153,11 @@ void writeX2CAimpac(const rerdmft::Input& input, const std::string& input_path,
   const auto d_ao = largeComponentAimpacDensity(c_final, capture.occupations, /*occ_start=*/0, large_transform_final);
   const rerdmft::Matrix<double> s_cart = rerdmft::overlapMatrix(large_basis_fns);
   const auto orbitals = rerdmft::naturalOrbitalsFromDensity(s_cart, d_ao, input.x_lin_dep_thrs_l());
-  const std::string path = wfnOutputPath(input_path, /*is_neg=*/false);
-  rerdmft::writeAimpacWfn(path, "RERDMFT X2C WFN FILE", input.geometry(), large_basis_fns, orbitals,
+  const std::string path = wfnOutputPath(input_path, /*is_neg=*/false, hf ? "x2c" : "");
+  const char* tag = hf ? "X2C HF" : "X2C";
+  rerdmft::writeAimpacWfn(path, std::string("RERDMFT ") + tag + " WFN FILE", input.geometry(), large_basis_fns, orbitals,
                            capture.electronic_energy + nuclear_repulsion_energy, 0.0);
-  log << "\nAIMPAC WFN file written (X2C): " << path << "\n";
+  log << "\nAIMPAC WFN file written (" << tag << "): " << path << "\n";
 }
 
 // Writes the AIMPAC/AIMAll WFN file(s) of the converged C4_DHF 1-RDM's natural orbitals: Large and
@@ -3160,7 +3176,7 @@ void writeC4Aimpac(const rerdmft::Input& input, const std::string& input_path,
                     const std::vector<rerdmft::BasisFunction>& small_basis_fns,
                     const rerdmft::Matrix<double>& large_transform_final,
                     const rerdmft::Matrix<std::complex<double>>& rkb_coefficients, double nuclear_repulsion_energy,
-                    std::ostream& log) {
+                    std::ostream& log, bool hf = false) {
   if (!input.aimpac()) return;
   std::vector<rerdmft::BasisFunction> combined_basis = large_basis_fns;
   combined_basis.insert(combined_basis.end(), small_basis_fns.begin(), small_basis_fns.end());
@@ -3212,6 +3228,10 @@ void writeC4Aimpac(const rerdmft::Input& input, const std::string& input_path,
     log << "  (" << n_large_mo + n_small_mo << " orbitals with occupation >= " << rerdmft::kAimpacOccPrintThreshold << ")\n";
   };
 
+  if (hf) {
+    writeOne(capture, wfnOutputPath(input_path, /*is_neg=*/false, "4c"), "4C DHF");
+    return;
+  }
   writeOne(capture, wfnOutputPath(input_path, /*is_neg=*/false), "4C");
   if (capture_neg.valid) {
     writeOne(capture_neg, wfnOutputPath(input_path, /*is_neg=*/true), "4C_NEG");
@@ -4433,6 +4453,13 @@ int main(int argc, char** argv) {
                          : input.cholesky() ? run_nonrel_scf(ao_cholesky)
                                             : run_nonrel_scf(nonrel_eri);
       logTiming("Nonrelativistic HF SCF complete", t_start, t_checkpoint, timing_records);
+      if (input.aimpac()) {  // HF density's own WFN file (hf_<input>_nonrel.wfn)
+        const std::size_t n_hf = nonrel_hf_result.c_matrix.cols(), n_pairs_hf = input.n_electrons() / 2;
+        auto hf_cap = hartreeFockAimpacCapture(2 * n_hf, 0, n_pairs_hf, nonrel_hf_result.electronic_energy);
+        for (std::size_t k = 0; k < n_pairs_hf; ++k) hf_cap.occupations[n_hf + k] = 1.0;  // beta copy
+        writeNonRelAimpac(input, input_path, nonrel_hf_result.c_matrix, hf_cap, large_basis.functions(), nonrel_transform,
+                          nonrel_hf_result.nuclear_repulsion_energy, nonrel_restart_log, /*hf=*/true);
+      }
 
       // Transform h and the ERIs into the converged natural (canonical
       // HF, here) MO basis, then into spin-orbitals (see
@@ -4989,6 +5016,12 @@ int main(int argc, char** argv) {
       // occupation -- n_inactive_below = 0, since X2C's own decoupling
       // already eliminated the negative-energy branch entirely, so
       // there is nothing left to hold at exactly zero.
+      if (input.aimpac()) {  // X2C-HF density's own WFN file (hf_<input>_x2c.wfn); no sea: the first N spinors are occupied
+        writeX2CAimpac(input, input_path, x2c_hf_result.c_matrix,
+                       hartreeFockAimpacCapture(x2c_hf_result.c_matrix.cols(), 0, input.n_electrons(), x2c_hf_result.electronic_energy),
+                       large_basis.functions(), large_transform_final, x2c_hf_result.nuclear_repulsion_energy,
+                       x2c_restart_log, /*hf=*/true);
+      }
       if (input.has_functional()) {
         rerdmft::RestartCapture x2c_restart;
         // USE_RI + FULL_OPTIMIZATION (X2C_HF): unlike NON_REL (T=double, needs the spin-selection-
@@ -5485,6 +5518,13 @@ int main(int argc, char** argv) {
       // EXACTLY zero occupation, matching this project's existing
       // no-pair convention (occupiedPositiveEnergyDensity) rather than
       // relying on it being numerically negligible.
+      if (input.aimpac()) {  // DHF density's own WFN file (hf_<input>_4c.wfn); no-pair: N occupied above the Dirac sea
+        writeC4Aimpac(input, input_path, dhf_result.c_dhf,
+                      hartreeFockAimpacCapture(dhf_result.c_dhf.cols(), dhf_result.c_dhf.cols() / 2, input.n_electrons(),
+                                               dhf_result.electronic_energy),
+                      rerdmft::RestartCapture(), large_basis.functions(), small_basis.functions(), large_transform_final,
+                      rkb_coefficients, dhf_result.nuclear_repulsion_energy, c4_restart_log, /*hf=*/true);
+      }
       if (input.has_functional()) {
         const std::size_t n_negative = rkb_dim / 2;
         const std::vector<double> dhf_orbital_energies_positive(

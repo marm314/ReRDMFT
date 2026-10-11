@@ -449,9 +449,6 @@ void Input::read(const std::string& filename) {
   if (read_occupancies_ && !has_functional_) {
     throw std::runtime_error("READ_OCCUPANCIES TRUE requires FUNCTIONAL (there are otherwise no occupations to read into)");
   }
-  if (aimpac_ && !has_functional_) {
-    throw std::runtime_error("AIMPAC TRUE requires FUNCTIONAL (there is otherwise no 1-RDM to write)");
-  }
   // Smart-conditional defaults: SCF_DIRECT_4C/FUNCTIONAL_POS_CHO_4C default to TRUE, but only in
   // the specific cases where they're actually applicable and non-conflicting -- an input that
   // never mentions either keyword at all (the overwhelming majority: every NON_REL/X2C-only run,
