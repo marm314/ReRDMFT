@@ -61,8 +61,11 @@ X2CHamiltonianResult buildX2CHamiltonian(const Matrix<std::complex<double>>& h_r
   const auto h_ls_r = h_ls * r;
   result.h_x2c = h_ll + h_ls_r + dagger(h_ls_r) + r_dagger * (h_ss * r);
 
+  // X = inverseSqrtHermitian(Lambda) is diagonally preconditioned by default (X = D^-1 Y), so it
+  // satisfies X^dagger Lambda X = I but is NOT Hermitian: the orthonormalized Hamiltonian must be
+  // X^dagger h X, not X h X (which was off by ~1e-3 Ha for Ne/cc-pVDZ).
   const auto lambda_inv_sqrt = inverseSqrtHermitian(result.lambda);
-  result.h_x2c_ortho = lambda_inv_sqrt * (result.h_x2c * lambda_inv_sqrt);
+  result.h_x2c_ortho = dagger(lambda_inv_sqrt) * (result.h_x2c * lambda_inv_sqrt);
 
   return result;
 }
