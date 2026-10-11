@@ -171,6 +171,7 @@ class Bowl : public AdamProblem<T> {
   void restoreBest() override { trial_ = best_; ++restores; }
   const std::vector<T>& best() const { return best_; }
   const std::vector<T>& trial() const { return trial_; }
+  void setTrial(std::vector<T> x) { trial_ = std::move(x); }  // an external mover (NEO) changes the orbitals
   int saves = 0, restores = 0;
 
  private:
@@ -347,6 +348,29 @@ void testRestart() {
   check(q.iterations == 10, "icall_max above the limit falls back to the base value");
 }
 
+// NEO -> ADAM: something other than ADAM moves the orbitals between two ADAM runs. A run that then finds nothing better must
+// fall back to ITS OWN starting point (the externally moved orbitals), never to the best point of the earlier run.
+void testExternalMove() {
+  AdamOptions o;
+  o.learning_rate = 0.05;
+  o.energy_tolerance = 1e-14;
+  o.gradient_tolerance = 1e-12;
+  AdamOptimizer<double> opt(o);
+  Bowl<double> problem({1.0, -0.7, 0.4}, {0.0, 0.0, 0.0}, {1.0, 2.0, 0.5});
+  opt.run(problem);  // improves, leaves a saved best from THIS (earlier) run
+  const std::vector<double> moved = {0.0004, -0.0003, 0.0002};  // "NEO": much closer to the minimum
+  problem.setTrial(moved);
+  const double e_moved = problem.energy();
+  AdamOptions bad = o;
+  bad.learning_rate = 100.0;
+  bad.energy_tolerance = 1e-12;
+  AdamOptimizer<double> opt_bad(bad);
+  const AdamResult r = opt_bad.run(problem);  // huge rate: every step overshoots, nothing beats the start
+  check(!r.improved, "external move: the overshooting run finds no improvement");
+  check(near(problem.energy(), e_moved) && near(problem.trial()[0], moved[0]),
+        "external move: a run without improvement returns to the externally moved orbitals, not to the earlier run's best");
+}
+
 }  // namespace
 
 int main() {
@@ -372,6 +396,7 @@ int main() {
     testOrbitalRotation<C>("complex orbital rotation toy", ac);
   }
   testRestart();
+  testExternalMove();
   std::cout << "\n" << g_checks - g_failures << " / " << g_checks << " checks passed\n";
   return g_failures == 0 ? 0 : 1;
 }

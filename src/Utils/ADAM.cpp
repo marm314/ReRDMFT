@@ -151,6 +151,9 @@ AdamResult AdamOptimizer<T>::run(AdamProblem<T>& problem) {
 
   double energy_old = problem.energy();
   double energy_best = energy_old;
+  // The starting point is the first "best": without this, a run that never improves would restoreBest() the best point of an
+  // EARLIER run -- stale if something else (NEO) moved the orbitals in between -- and silently undo that work.
+  problem.saveBest();
   double energy_difference = 0.0;
   double max_gradient_best = 0.0;
   double max_gradient = 0.0;
