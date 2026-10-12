@@ -581,9 +581,9 @@ $T$ ladder, $O(o^2v^4)$ time and no $v^4$ memory. Any other use of $\Gamma_{abcd
 the same convergence criterion as $T$; the $vvvv$ ladder is streamed one slab $\langle c\,d|a\,b\rangle$ at a time, the
 $ovvv$ block $\anti{m}{a}{e}{f}$ is held once) and writes
 \begin{itemize}
-\item \texttt{<input>.dm1}: records $(\texttt{int32}\;p,q;\ \texttt{float64}\;\operatorname{Re},\operatorname{Im})$ with
+\item \texttt{<input>\_MO.dm1}: records $(\texttt{int32}\;p,q;\ \texttt{float64}\;\operatorname{Re},\operatorname{Im})$ with
  $\bar\gamma_{pq}=\langle a_p^\dagger a_q\rangle$ (Hermitian part), all $p,q$;
-\item \texttt{<input>.dm2}: records $(\texttt{int32}\;p,q,r,s;\ \texttt{float64}\;\operatorname{Re},\operatorname{Im})$ with
+\item \texttt{<input>\_MO.dm2}: records $(\texttt{int32}\;p,q,r,s;\ \texttt{float64}\;\operatorname{Re},\operatorname{Im})$ with
  $\Gamma_{pqrs}=\langle a_p^\dagger a_q^\dagger a_s a_r\rangle$ for $p<q$, $r<s$ only (the remaining elements follow from
  $\Gamma_{pqrs}=-\Gamma_{qprs}=-\Gamma_{pqsr}$); the energy is
  $E=\sum_{pq}h_{pq}\bar\gamma_{pq}+\tfrac12\sum_{pqrs}\langle pq|rs\rangle\Gamma_{pqrs}$;
@@ -596,6 +596,63 @@ Section~9.4). Elements with $|\Gamma|$ below \texttt{CC\_RDM\_THRESHOLD} are omi
 written elements is printed next to $E_0+E_c$ as a check (the two agree to $10^{-9}$ Eh for the default $10^{-10}$).
 The 2-RDM is produced element by element from the $d$-blocks (never as a dense $n^4$ array); only the all-virtual
 block is formed slab by slab from $\bar\tau$ and $\lambda$. The densities are unrelaxed: no orbital response is included.
+
+\subsection{Densities in the basis of the Gaussian primitives (\texttt{src/CC/gauss\_rdm.\{h,cpp\}})}
+
+With \texttt{CC\_RDM\_GAUSSIAN} (default) the same densities are also written over the Cartesian Gaussian \emph{primitives}
+$\chi_\mu=N_\mu x^{l_x}y^{l_y}z^{l_z}e^{-\alpha_\mu|\mathbf r-\mathbf A|^2}$ in the formats read by \texttt{RHO2\_OPS}:
+\texttt{<input>\_GAU.basis}, \texttt{<input>\_GAU.dm1}, \texttt{<input>\_GAU.dm2}.
+
+\paragraph{Expansion.} Every contracted Cartesian AO is unrolled into its primitives (the libcint factor of its shell times its
+contraction coefficient is the weight of the plain monomial), and identical primitives (same centre, exponent and powers) are
+merged. A spinor has one coefficient vector per spin/large--small component $c$: $\varphi_p^{(c)}=\sum_\mu C^{c}_{\mu p}\chi_\mu$,
+with $c\in\{\alpha,\beta\}$ over the Large primitives for NON\_REL and X2C (the NON\_REL spin-orbitals are pure $\alpha$ or $\beta$,
+the spherical transformation and the \texttt{LOWGEN} reduction are folded into $C$), and $c\in\{L\alpha,L\beta,S\alpha,S\beta\}$ for
+the 4-component spinors, the Small component being expanded over the raw RKB small AOs (their own primitives, kept distinct from the
+Large ones). The weights are divided by $N_\mu=(2\alpha/\pi)^{3/4}(4\alpha)^{l/2}/\sqrt{(2l_x-1)!!(2l_y-1)!!(2l_z-1)!!}$ (the
+normalization \texttt{RHO2\_OPS} multiplies by); \texttt{CC\_RDM\_CNORM1 TRUE} keeps it inside $D$ instead (\texttt{\$CNORM1}).
+
+\paragraph{Definition.} The spin- and component-summed pair density is
+$\rho_2(\mathbf r_1,\mathbf r_2)=\sum D_{\mu\nu\lambda\sigma}\,\chi_\mu(\mathbf r_1)\chi_\lambda(\mathbf r_1)\chi_\nu(\mathbf r_2)\chi_\sigma(\mathbf r_2)$,
+\begin{equation}
+D^{\rm raw}_{\mu\nu\lambda\sigma}=\sum_{c_1c_2}\sum_{pqrs}\Gamma_{pqrs}\;
+\overline{C^{c_1}_{\mu p}}\,C^{c_1}_{\lambda r}\;\overline{C^{c_2}_{\nu q}}\,C^{c_2}_{\sigma s},
+\end{equation}
+so only pairs of primitives of the same component occur ($\mu,\lambda$ both Large or both Small, and likewise
+$\nu,\sigma$), and $\sum D_{\mu\nu\lambda\sigma}S_{\mu\lambda}S_{\nu\sigma}=N(N-1)$. The real basis functions make
+$\chi_\mu\chi_\lambda$ symmetric in $(\mu,\lambda)$ and $\chi_\nu\chi_\sigma$ in $(\nu,\sigma)$, and $\Gamma$ is Hermitian,
+$D^{\rm raw}_{\lambda\sigma\mu\nu}=\overline{D^{\rm raw}_{\mu\nu\lambda\sigma}}$, so the average over the four permutations
+$D^S=\tfrac14\sum_{\rm perm}D^{\rm raw}=\tfrac12\operatorname{Re}\big(D^{\rm raw}_{\mu\nu\lambda\sigma}+D^{\rm raw}_{\lambda\nu\mu\sigma}\big)$
+is exactly real: the imaginary parts cancel by complex conjugation, and only $D^S$ is written (the largest imaginary part of
+the symmetrized element is printed as a check). The 1-RDM is $\gamma^S_{\mu\lambda}=\tfrac12\operatorname{Re}\big(\gamma_{\mu\lambda}+\gamma_{\lambda\mu}\big)$,
+$\gamma_{\mu\lambda}=\sum_c\sum_{pr}\overline{C^c_{\mu p}}\bar\gamma_{pr}C^c_{\lambda r}$.
+
+\paragraph{Files.}
+\texttt{.basis}: a header line, then one line \texttt{Z x y z exponent nx ny nz} per primitive, Large primitives first.
+\texttt{.dm2}: Fortran-unformatted-style records (\texttt{int32} record length, four \texttt{int32} indices $p,q,r,s$,
+\texttt{float64} value, \texttt{int32} record length), 1-based primitive indices, terminated by a record of four zero indices.
+Both $D_{pqrs}$ and its electron-exchange partner $D_{qpsr}$ are present, with $r\le p$ and $s\le q$ (the
+\texttt{RHO2\_OPS} convention without \texttt{\$SYMRED}); the stored value is the sum of the symmetry-equivalent elements,
+$m_{pr}m_{qs}D^S_{pqrs}$ with $m=2$ when the two indices differ and $1$ otherwise.
+\texttt{.dm1}: records (\texttt{int32} length, \texttt{int32} $\mu$, \texttt{int32} $\lambda$, \texttt{float64}
+$\gamma^S_{\mu\lambda}$, \texttt{int32} length) for $\mu\ge\lambda$, terminated by $\mu=\lambda=0$.
+
+\paragraph{Algorithm.} $\Gamma$ is never held as an $n^4$ array: it is generated one slab $\Gamma_{p\,\cdot\cdot\cdot}$ at a time
+from the $d$-blocks. For a block of rows $\mu$ of one sector, a sweep over $p$ accumulates
+$R^c_{\mu qrs}=\sum_p\overline{C^c_{\mu p}}\Gamma_{pqrs}$ and $W^c_{\mu pqs}=\sum_rC^c_{\mu r}\Gamma_{pqrs}$ (\texttt{zgemm}); then, for each $\mu$,
+$Y_{\mu\lambda;qs}=\tfrac12\sum_c\big(\sum_rC^c_{\lambda r}R^c_{\mu qrs}+\sum_p\overline{C^c_{\lambda p}}W^c_{\mu pqs}\big)$ for $\lambda\le\mu$ (the
+two-term average already is the permutation average over $\mu\leftrightarrow\lambda$), and finally
+$E_{\mu\lambda;\nu\sigma}=\sum_{c_2}\sum_{qs}\overline{C^{c_2}_{\nu q}}Y_{\mu\lambda;qs}C^{c_2}_{\sigma s}$, whose real part is $D^S$.
+Only $\nu\le\mu$ is computed and the electron-exchange partner is written alongside; each record is written to disk at once, so the
+memory is $2N_c B n^3$ complex numbers for a block of $B$ rows (\texttt{CC\_RDM\_MAXMEM} sets $B$; more rows per block means
+fewer sweeps over $\Gamma$). The cost is about $4P^4n$ flops for $P$ primitives and $n$ spinors, plus the sweeps over $\Gamma$.
+
+\paragraph{Checks and validation.} Printed after each run: $\sum\gamma^S S=N$ and $\sum D^SSS=N(N-1)$ with the primitive
+overlaps. With \texttt{RERDMFT\_CC\_RDM\_GAU\_CHECK=1}, $V_{ee}=\tfrac12\sum D\,(\mu\lambda|\nu\sigma)$ is also recomputed with the
+integrals of the primitives themselves (small systems): LiH/6-31G (NON\_REL, X2C and 4-component, with the Small primitives) and
+water/cc-pVDZ with a frozen core agree with the molecular-basis two-body energy to $10^{-11}$--$10^{-13}$~Eh with dense integrals
+(with RI the difference is the RI error). \texttt{RHO2\_OPS} reads the files directly and reports $\mathrm{Tr}[{}^2D]=N(N-1)/2$ (for LiH,
+$V_{ee}$ from the intracule converges to the molecular value as its radial/angular quadratures are refined).
 
 \subsection{Numerical check}
 \label{sec:lambda-check}

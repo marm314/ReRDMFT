@@ -25,6 +25,7 @@
 #include "AIMPAC.h"
 #include "Uccsd.h"
 #include "lambda_Uccsd.h"
+#include "gauss_rdm.h"
 #include "Fcidump.h"
 #include "FermiDirac.h"
 #include "FullOptimization.h"
@@ -2608,7 +2609,8 @@ std::string scfAccelerationLabel(const rerdmft::Input& input) {
 template <typename T, typename Eri>
 void runUccsdStage(const std::string& label, const rerdmft::Input& input, const std::string& input_path,
                    const std::string& method_tag, const rerdmft::Matrix<T>& h_mo, const Eri& eri, std::size_t eri_shift,
-                   const rerdmft::CcOrbitalSpaces& spaces, double scf_total_energy, std::ostringstream& log) {
+                   const rerdmft::CcOrbitalSpaces& spaces, double scf_total_energy, std::ostringstream& log,
+                   const rerdmft::CartesianSpinors* gauss = nullptr) {
   rerdmft::UccsdSettings settings;
   settings.max_iterations = input.cc_max_iterations();
   settings.convergence = input.cc_convergence();
@@ -2632,9 +2634,93 @@ void runUccsdStage(const std::string& label, const rerdmft::Input& input, const 
   rdm.diis_size = input.cc_diis_size();
   rdm.level_shift = input.cc_level_shift();
   rdm.threshold = input.cc_rdm_threshold();
-  rdm.dm1_path = base + ".dm1";
-  rdm.dm2_path = base + ".dm2";
+  rdm.dm1_path = base + "_MO.dm1";
+  rdm.dm2_path = base + "_MO.dm2";
+  if (gauss != nullptr) {
+    rdm.gauss = gauss;
+    rdm.gauss_settings.basis_path = base + "_GAU.basis";
+    rdm.gauss_settings.dm1_path = base + "_GAU.dm1";
+    rdm.gauss_settings.dm2_path = base + "_GAU.dm2";
+    rdm.gauss_settings.threshold = input.cc_rdm_threshold();
+    rdm.gauss_settings.max_memory_gb = input.cc_rdm_maxmem();
+    rdm.gauss_settings.unnormalized_primitives = input.cc_rdm_cnorm1();
+  }
   rerdmft::runUccsdRdmReport(label, h_mo, eri, eri_shift, spaces, settings, rdm, scf_total_energy, log);
+}
+
+// CC_RDM in the Gaussian primitive basis: the spinors in the output order of the density matrix files, expanded over the
+// contracted Cartesian AOs (rerdmft::CartesianSpinors, CC/gauss_rdm.h).
+rerdmft::CartesianSpinors buildNonRelCartesianSpinors(const std::vector<rerdmft::BasisFunction>& large_fns,
+                                                      const rerdmft::Matrix<double>& c_ao, bool cartesian,
+                                                      const rerdmft::Matrix<double>& nonrel_transform,
+                                                      const std::vector<std::size_t>& glob) {
+  const rerdmft::Matrix<double> c_cart = cartesian ? c_ao : nonrel_transform * c_ao;  // (n_cart x n_spatial)
+  const std::size_t n_cart = c_cart.rows(), n_spatial = c_cart.cols(), n = glob.size();
+  rerdmft::CartesianSpinors cs;
+  cs.large_basis = large_fns;
+  cs.large_alpha = rerdmft::Matrix<std::complex<double>>(n_cart, n, std::complex<double>(0.0));
+  cs.large_beta = rerdmft::Matrix<std::complex<double>>(n_cart, n, std::complex<double>(0.0));
+  for (std::size_t k = 0; k < n; ++k) {
+    const std::size_t g = glob[k], j = g % n_spatial;
+    auto& dst = (g < n_spatial) ? cs.large_alpha : cs.large_beta;  // block layout [alpha_0..alpha_{n-1}, beta_0..beta_{n-1}]
+    for (std::size_t i = 0; i < n_cart; ++i) dst(i, k) = c_cart(i, j);
+  }
+  return cs;
+}
+
+// X2C / C4_SPINOR Large component: rows [0, nf) alpha and [nf, 2 nf) beta over the final large basis (T: n_cart x nf).
+void fillLargeSpinors(rerdmft::CartesianSpinors& cs, const rerdmft::Matrix<double>& large_transform_final,
+                      const rerdmft::Matrix<std::complex<double>>& c_full, const std::vector<std::size_t>& glob) {
+  const std::size_t n_cart = large_transform_final.rows(), nf = large_transform_final.cols(), n = glob.size();
+  cs.large_alpha = rerdmft::Matrix<std::complex<double>>(n_cart, n, std::complex<double>(0.0));
+  cs.large_beta = rerdmft::Matrix<std::complex<double>>(n_cart, n, std::complex<double>(0.0));
+  for (std::size_t k = 0; k < n; ++k)
+    for (std::size_t i = 0; i < n_cart; ++i) {
+      std::complex<double> a(0.0), b(0.0);
+      for (std::size_t j = 0; j < nf; ++j) {
+        const double t = large_transform_final(i, j);
+        if (t == 0.0) continue;
+        a += t * c_full(j, glob[k]);
+        b += t * c_full(nf + j, glob[k]);
+      }
+      cs.large_alpha(i, k) = a;
+      cs.large_beta(i, k) = b;
+    }
+}
+
+rerdmft::CartesianSpinors buildX2cCartesianSpinors(const std::vector<rerdmft::BasisFunction>& large_fns,
+                                                   const rerdmft::Matrix<double>& large_transform_final,
+                                                   const rerdmft::Matrix<std::complex<double>>& c_x2c,
+                                                   const std::vector<std::size_t>& glob) {
+  rerdmft::CartesianSpinors cs;
+  cs.large_basis = large_fns;
+  fillLargeSpinors(cs, large_transform_final, c_x2c, glob);
+  return cs;
+}
+
+rerdmft::CartesianSpinors buildC4CartesianSpinors(const std::vector<rerdmft::BasisFunction>& large_fns,
+                                                  const std::vector<rerdmft::BasisFunction>& small_fns,
+                                                  const rerdmft::Matrix<double>& large_transform_final,
+                                                  const rerdmft::Matrix<std::complex<double>>& rkb_coefficients,
+                                                  const rerdmft::Matrix<std::complex<double>>& c_dhf,
+                                                  const std::vector<std::size_t>& glob) {
+  const std::size_t n2 = rkb_coefficients.rows(), n_small2 = rkb_coefficients.cols(), n = glob.size();
+  if (n2 != 2 * large_transform_final.cols() || c_dhf.rows() != 2 * n2 || n_small2 != 2 * small_fns.size())
+    throw std::runtime_error("CC_RDM Gaussian basis: unexpected 4-component coefficient layout");
+  rerdmft::CartesianSpinors cs;
+  cs.large_basis = large_fns;
+  cs.small_basis = small_fns;
+  fillLargeSpinors(cs, large_transform_final, c_dhf, glob);
+  const std::size_t n_small = small_fns.size();
+  cs.small_alpha = rerdmft::Matrix<std::complex<double>>(n_small, n, std::complex<double>(0.0));
+  cs.small_beta = rerdmft::Matrix<std::complex<double>>(n_small, n, std::complex<double>(0.0));
+  for (std::size_t k = 0; k < n; ++k)
+    for (std::size_t i = 0; i < n_small2; ++i) {
+      std::complex<double> v(0.0);
+      for (std::size_t j = 0; j < n2; ++j) v += rkb_coefficients(j, i) * c_dhf(n2 + j, glob[k]);  // UNCONJUGATED transpose
+      (i < n_small ? cs.small_alpha(i, k) : cs.small_beta(i - n_small, k)) = v;
+    }
+  return cs;
 }
 
 template <typename T>
@@ -4554,9 +4640,14 @@ int main(int argc, char** argv) {
         const auto cc_spaces = rerdmft::nonRelCcSpaces(n_spatial, static_cast<std::size_t>(input.n_electrons()),
                                                        static_cast<std::size_t>(input.cc_frozen_core()));
         const double e_scf = nonrel_hf_result.total_energy;
-        if (input.use_ri()) runUccsdStage("NON_REL", input, input_path, "nonrel", h_spin, ri_nonrel_mo_eri, 0, cc_spaces, e_scf, uccsd_nonrel_log);
-        else if (input.cholesky()) runUccsdStage("NON_REL", input, input_path, "nonrel", h_spin, eri_spin_chol, 0, cc_spaces, e_scf, uccsd_nonrel_log);
-        else runUccsdStage("NON_REL", input, input_path, "nonrel", h_spin, eri_spin_sym, 0, cc_spaces, e_scf, uccsd_nonrel_log);
+        std::optional<rerdmft::CartesianSpinors> cs_gau;
+        if (input.cc_rdm() && input.cc_rdm_gaussian())
+          cs_gau = buildNonRelCartesianSpinors(large_basis.functions(), nonrel_hf_result.c_matrix, input.cartesian(), nonrel_transform,
+                                               rerdmft::fileOrderGlobals(cc_spaces));
+        const rerdmft::CartesianSpinors* cs_ptr = cs_gau ? &*cs_gau : nullptr;
+        if (input.use_ri()) runUccsdStage("NON_REL", input, input_path, "nonrel", h_spin, ri_nonrel_mo_eri, 0, cc_spaces, e_scf, uccsd_nonrel_log, cs_ptr);
+        else if (input.cholesky()) runUccsdStage("NON_REL", input, input_path, "nonrel", h_spin, eri_spin_chol, 0, cc_spaces, e_scf, uccsd_nonrel_log, cs_ptr);
+        else runUccsdStage("NON_REL", input, input_path, "nonrel", h_spin, eri_spin_sym, 0, cc_spaces, e_scf, uccsd_nonrel_log, cs_ptr);
         logTiming("NON_REL UCCSD complete", t_start, t_checkpoint, timing_records);
       }
       if (input.cholesky() && input.debug()) {
@@ -4969,9 +5060,14 @@ int main(int argc, char** argv) {
         const auto cc_spaces = rerdmft::contiguousCcSpaces(0, x2c_dim, static_cast<std::size_t>(input.n_electrons()),
                                                            static_cast<std::size_t>(input.cc_frozen_core()));
         const double e_scf = x2c_hf_result.total_energy;
-        if (input.use_ri()) runUccsdStage("X2C", input, input_path, "x2c", h_x2c_mo, ri_x2c_mo_eri, 0, cc_spaces, e_scf, uccsd_x2c_log);
-        else if (input.cholesky()) runUccsdStage("X2C", input, input_path, "x2c", h_x2c_mo, x2c_mo_chol, 0, cc_spaces, e_scf, uccsd_x2c_log);
-        else runUccsdStage("X2C", input, input_path, "x2c", h_x2c_mo, x2c_mo_sym, 0, cc_spaces, e_scf, uccsd_x2c_log);
+        std::optional<rerdmft::CartesianSpinors> cs_gau;
+        if (input.cc_rdm() && input.cc_rdm_gaussian())
+          cs_gau = buildX2cCartesianSpinors(large_basis.functions(), large_transform_final, x2c_hf_result.c_matrix,
+                                            rerdmft::fileOrderGlobals(cc_spaces));
+        const rerdmft::CartesianSpinors* cs_ptr = cs_gau ? &*cs_gau : nullptr;
+        if (input.use_ri()) runUccsdStage("X2C", input, input_path, "x2c", h_x2c_mo, ri_x2c_mo_eri, 0, cc_spaces, e_scf, uccsd_x2c_log, cs_ptr);
+        else if (input.cholesky()) runUccsdStage("X2C", input, input_path, "x2c", h_x2c_mo, x2c_mo_chol, 0, cc_spaces, e_scf, uccsd_x2c_log, cs_ptr);
+        else runUccsdStage("X2C", input, input_path, "x2c", h_x2c_mo, x2c_mo_sym, 0, cc_spaces, e_scf, uccsd_x2c_log, cs_ptr);
         logTiming("X2C UCCSD complete", t_start, t_checkpoint, timing_records);
       }
 
@@ -5456,9 +5552,14 @@ int main(int argc, char** argv) {
         const auto cc_spaces = rerdmft::contiguousCcSpaces(n_neg, h_mo.rows(), static_cast<std::size_t>(input.n_electrons()),
                                                            static_cast<std::size_t>(input.cc_frozen_core()));
         const double e_scf = dhf_result.total_energy;
-        if (input.use_ri()) runUccsdStage("C4_SPINOR", input, input_path, "4c", h_mo, ri_dhf_mo_eri, 0, cc_spaces, e_scf, uccsd_c4_log);
-        else if (use_cholesky_integrals) runUccsdStage("C4_SPINOR", input, input_path, "4c", h_mo, c4_mo_chol, 0, cc_spaces, e_scf, uccsd_c4_log);
-        else runUccsdStage("C4_SPINOR", input, input_path, "4c", h_mo, c4_mo_sym, 0, cc_spaces, e_scf, uccsd_c4_log);
+        std::optional<rerdmft::CartesianSpinors> cs_gau;
+        if (input.cc_rdm() && input.cc_rdm_gaussian())
+          cs_gau = buildC4CartesianSpinors(large_basis.functions(), small_basis.functions(), large_transform_final, rkb_coefficients,
+                                           dhf_result.c_dhf, rerdmft::fileOrderGlobals(cc_spaces));
+        const rerdmft::CartesianSpinors* cs_ptr = cs_gau ? &*cs_gau : nullptr;
+        if (input.use_ri()) runUccsdStage("C4_SPINOR", input, input_path, "4c", h_mo, ri_dhf_mo_eri, 0, cc_spaces, e_scf, uccsd_c4_log, cs_ptr);
+        else if (use_cholesky_integrals) runUccsdStage("C4_SPINOR", input, input_path, "4c", h_mo, c4_mo_chol, 0, cc_spaces, e_scf, uccsd_c4_log, cs_ptr);
+        else runUccsdStage("C4_SPINOR", input, input_path, "4c", h_mo, c4_mo_sym, 0, cc_spaces, e_scf, uccsd_c4_log, cs_ptr);
         logTiming("C4_SPINOR UCCSD complete", t_start, t_checkpoint, timing_records);
       }
 

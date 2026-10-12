@@ -4,12 +4,34 @@
 # CHOLESKY TRUE work as well.
 #
 # Output (written next to this file; <name> = lih_uccsd_rdm, with the method appended because three methods run):
-#   lih_uccsd_rdm_nonrel.dm1 / .dm2,  lih_uccsd_rdm_x2c.dm1 / .dm2,  lih_uccsd_rdm_4c.dm1 / .dm2
+#   molecular basis : lih_uccsd_rdm_{nonrel,x2c,4c}_MO.dm1 / _MO.dm2   (Kramers-pair order, p<q and r<s in the 2-RDM)
+#   Gaussian basis  : lih_uccsd_rdm_{nonrel,x2c,4c}_GAU.basis / _GAU.dm1 / _GAU.dm2   (formats of RHO2_OPS; the Small
+#                     component of C4_SPINOR contributes its own raw RKB primitives)
 # The report printed after each UCCSD lists the Lambda iterations, the number of elements written, the trace of the 1-RDM
 # (the number of electrons) and the energy recomputed from the written elements (sum h gamma + 1/2 sum <pq|rs> Gamma)
-# against E_0 + E_c: they agree to ~1e-9 Eh for the default CC_RDM_THRESHOLD 1e-10.
-# Read them with   python3 read_cc_rdm.py lih_uccsd_rdm_x2c   (see the docstring there for the record layout: 1-based indices in
-# Kramers-pair order, int32 p q [r s] + float64 re im, p<q and r<s in the 2-RDM, terminated by an all-zero record).
+# against E_0 + E_c (they agree to ~1e-9 Eh for the default CC_RDM_THRESHOLD 1e-10), then the Gaussian-basis checks
+# sum gamma S = N and sum D S S = N(N-1) with the primitive overlaps. Set RERDMFT_CC_RDM_GAU_CHECK=1 to also recompute V_ee
+# with the integrals of the primitives (small systems only) -- with USE_RI FALSE it reproduces the molecular-basis two-body
+# energy to ~1e-11 Eh.
+# Read the molecular-basis files with   python3 read_cc_rdm.py lih_uccsd_rdm_x2c_MO   (record layout in the docstring).
+# Use the Gaussian-basis files with RHO2_OPS, e.g. an input file
+#   $INTRACULE
+#   $NAME_BASIS
+#   lih_uccsd_rdm_x2c_GAU.basis
+#   $NAME_DM2
+#   lih_uccsd_rdm_x2c_GAU.dm2
+#   $Threshold
+#   1e-12
+#   $Tau
+#   1e-8
+#   $Legendre
+#   120
+#   20
+#   $Angular
+#   50
+#   $Parallel
+#   16
+# (no $SYMRED, no $CNORM1 with the default CC_RDM_CNORM1 FALSE; RHO2_OPS prints Tr[^2Dijkl] = N(N-1)/2 as a check).
 NELEC 4
 BASIS lih-6-31g.gbs
 NON_RELATIVISTIC TRUE

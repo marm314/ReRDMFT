@@ -158,6 +158,14 @@ class Input {
   bool cc_rdm() const { return cc_rdm_; }
   // Optional; defaults to 1e-10. Density-matrix elements with a smaller absolute value are not written.
   double cc_rdm_threshold() const { return cc_rdm_threshold_; }
+  // Optional; defaults to TRUE. With CC_RDM TRUE, also write the densities in the basis of the Gaussian primitives
+  // (<input>_GAU.basis / .dm1 / .dm2, the formats of RHO2_OPS); the molecular-basis files are <input>_MO.dm1 / .dm2.
+  bool cc_rdm_gaussian() const { return cc_rdm_gaussian_; }
+  // Optional; defaults to 4. Memory budget (GB) of the block buffers of the transform to the Gaussian primitive basis.
+  double cc_rdm_maxmem() const { return cc_rdm_maxmem_; }
+  // Optional; defaults to FALSE. TRUE: the Gaussian-basis 2-RDM contains the normalization of the primitives (RHO2_OPS: $CNORM1);
+  // FALSE: normalized primitives (the RHO2_OPS default, which multiplies by the normalization itself).
+  bool cc_rdm_cnorm1() const { return cc_rdm_cnorm1_; }
   // Optional; defaults to 100. Maximum number of UCCSD amplitude iterations.
   int cc_max_iterations() const { return cc_max_iterations_; }
   // Optional; defaults to 1e-8. UCCSD convergence threshold on the correlation-energy change; the amplitude-vector
@@ -625,6 +633,9 @@ class Input {
   bool uccsd_ = false;
   bool cc_rdm_ = false;
   double cc_rdm_threshold_ = 1e-10;
+  bool cc_rdm_gaussian_ = true;
+  double cc_rdm_maxmem_ = 4.0;
+  bool cc_rdm_cnorm1_ = false;
   int cc_frozen_core_ = 0;
   int cc_max_iterations_ = 100;
   double cc_convergence_ = 1e-8;

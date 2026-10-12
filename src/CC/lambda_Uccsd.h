@@ -8,6 +8,7 @@
 
 #include "Matrix.h"
 #include "Uccsd.h"
+#include "gauss_rdm.h"
 
 namespace rerdmft {
 
@@ -22,8 +23,13 @@ struct CcRdmSettings {
   double level_shift = 0.0;
   double threshold = 1e-10;  // matrix elements with |value| below this are not written
   std::string dm1_path, dm2_path;
+  const CartesianSpinors* gauss = nullptr;  // when set, the density matrices are also written in the Gaussian primitive basis
+  GaussRdmSettings gauss_settings;
   double reference_total_energy = 0.0;  // SCF total energy (E_0 + nuclear repulsion), to report the total energy from the densities
 };
+
+// Global spinor index (position in the one-electron/integral index space) of every output spinor, in output order.
+std::vector<std::size_t> fileOrderGlobals(const CcOrbitalSpaces& spaces);
 
 struct CcRdmResult {
   bool lambda_converged = false;

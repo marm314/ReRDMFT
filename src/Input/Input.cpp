@@ -160,6 +160,13 @@ void Input::read(const std::string& filename) {
       if (!(cc_rdm_threshold_ >= 0.0)) {
         throw std::runtime_error("line " + std::to_string(line_number) + ": CC_RDM_THRESHOLD must be non-negative");
       }
+    } else if (keyword == "CC_RDM_GAUSSIAN") {
+      cc_rdm_gaussian_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "CC_RDM_MAXMEM") {
+      cc_rdm_maxmem_ = parseDouble(iss, line_number, keyword);
+      if (!(cc_rdm_maxmem_ > 0.0)) throw std::runtime_error("line " + std::to_string(line_number) + ": CC_RDM_MAXMEM must be positive");
+    } else if (keyword == "CC_RDM_CNORM1") {
+      cc_rdm_cnorm1_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "CC_FROZEN_CORE") {
       cc_frozen_core_ = parseInt(iss, line_number, keyword);
       if (cc_frozen_core_ < 0 || cc_frozen_core_ % 2 != 0) {
@@ -681,6 +688,9 @@ void Input::print(std::ostream& out) const {
   line("UCCSD") << flag(uccsd_) << "\n";
   line("CC_RDM") << flag(cc_rdm_) << "\n";
   line("CC_RDM_THRESHOLD") << cc_rdm_threshold_ << "\n";
+  line("CC_RDM_GAUSSIAN") << flag(cc_rdm_gaussian_) << "\n";
+  line("CC_RDM_MAXMEM") << cc_rdm_maxmem_ << "\n";
+  line("CC_RDM_CNORM1") << flag(cc_rdm_cnorm1_) << "\n";
   line("CC_FROZEN_CORE") << cc_frozen_core_ << "\n";
   line("CC_MAX_ITERATIONS") << cc_max_iterations_ << "\n";
   line("CC_CONVERGENCE") << cc_convergence_ << "\n";

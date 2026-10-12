@@ -297,6 +297,15 @@ class RecordWriter {
 
 }  // namespace
 
+std::vector<std::size_t> fileOrderGlobals(const CcOrbitalSpaces& spaces) {
+  std::size_t n_out = 0;
+  for (std::size_t fi : spaces.file_index) n_out = std::max(n_out, fi);
+  std::vector<std::size_t> glob(n_out, std::size_t(-1));
+  for (std::size_t g = 0; g < spaces.file_index.size(); ++g)
+    if (spaces.file_index[g] > 0) glob[spaces.file_index[g] - 1] = g;
+  return glob;
+}
+
 CcRdmResult runUccsdRdm(const Matrix<CcScalar>& h_mo, const CcIntegrals& ints, const CcOrbitalSpaces& spaces,
                         const UccsdResult& amps, const CcRdmSettings& settings, std::ostream& log) {
   const auto t_start = Clock::now();
@@ -720,7 +729,49 @@ CcRdmResult runUccsdRdm(const Matrix<CcScalar>& h_mo, const CcIntegrals& ints, c
   log << "  energy from the density matrices (elements written, threshold " << std::scientific << std::setprecision(1) << thr << "): "
       << std::fixed << std::setprecision(10) << result.e_elec_rdm << " Eh (electronic);  E_0 + E_c = " << result.e_elec_cc
       << " Eh;  difference " << std::scientific << std::setprecision(2) << result.e_elec_rdm - result.e_elec_cc << "\n";
-  log << "  CC_RDM total time " << std::fixed << std::setprecision(1) << elapsed() << " s\n";
+  log << "  CC_RDM (molecular basis) total time " << std::fixed << std::setprecision(1) << elapsed() << " s\n";
+
+  // ---- the same densities in the basis of the Gaussian primitives (RHO2_OPS format) ----
+  if (settings.gauss != nullptr) {
+    Matrix<cplx> g1(n_out, n_out);
+    for (std::size_t p = 0; p < n_out; ++p)
+      for (std::size_t q = 0; q < n_out; ++q) g1(p, q) = gammaBar(p, q);
+    const std::size_t n3 = n_out * n_out * n_out;
+    const GammaSlabFn fill_slab = [&](std::size_t p, cplx* out) {
+      std::fill(out, out + n3, cplx{});
+      if (cls[p] == 0) buildDvvvvSlab(loc[p]);
+#pragma omp parallel for schedule(dynamic, 2) if (n3 > (std::size_t(1) << 18))
+      for (std::ptrdiff_t qq = 0; qq < static_cast<std::ptrdiff_t>(n_out); ++qq) {
+        const std::size_t q = static_cast<std::size_t>(qq);
+        if (q == p) continue;
+        for (std::size_t r = 0; r < n_out; ++r)
+          for (std::size_t s = r + 1; s < n_out; ++s) {
+            cplx val;
+            if (cls[p] == 0 && cls[q] == 0 && cls[r] == 0 && cls[s] == 0) val = std::conj(dslab.d[(loc[r] * v + loc[q]) * v + loc[s]]);
+            else val = gammaElement(p, q, r, s);
+            out[(q * n_out + r) * n_out + s] = val;
+            out[(q * n_out + s) * n_out + r] = -val;
+          }
+      }
+    };
+    try {
+      const GaussRdmResult gr = writeGaussRdm(*settings.gauss, g1, n_out, fill_slab, settings.gauss_settings, log);
+      log << "  Gaussian primitives: " << gr.n_primitives << " (Large " << gr.n_primitives_large << ", Small " << gr.n_primitives - gr.n_primitives_large << ")\n";
+      log << "  basis written to " << settings.gauss_settings.basis_path << "\n";
+      log << "  1-RDM written to " << settings.gauss_settings.dm1_path << " (" << gr.n_dm1 << " elements)\n";
+      log << "  2-RDM written to " << settings.gauss_settings.dm2_path << " (" << gr.n_dm2 << " elements, " << gr.passes << " sweep(s) over the MO-basis 2-RDM)\n";
+      log << "  Gaussian-basis checks: sum gamma S = " << std::fixed << std::setprecision(10) << gr.trace_dm1 << " (N = " << n_occ_all
+          << "),  sum D S S = " << gr.trace_dm2 << " (N(N-1) = " << static_cast<double>(n_occ_all) * (static_cast<double>(n_occ_all) - 1.0)
+          << "),  max |Im D_sym| = " << std::scientific << std::setprecision(2) << gr.max_imag << "\n";
+      if (!std::isnan(gr.vee_primitives))
+        log << "  [check] V_ee from the primitive-basis 2-RDM and primitive integrals = " << std::fixed << std::setprecision(10)
+            << gr.vee_primitives << " Eh  (MO basis: " << e2.real() << " Eh, difference " << std::scientific << std::setprecision(2)
+            << gr.vee_primitives - e2.real() << ")\n";
+      log << "  CC_RDM (Gaussian basis) total time " << std::fixed << std::setprecision(1) << gr.seconds << " s\n";
+    } catch (const std::exception& ex) {
+      log << "  CC_RDM (Gaussian basis) FAILED: " << ex.what() << "\n";
+    }
+  }
   return result;
 }
 

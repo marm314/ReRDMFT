@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Reader for the CC_RDM files <name>.dm1 / <name>.dm2 written by ReRDMFT (UCCSD TRUE, CC_RDM TRUE).
+"""Reader for the molecular-basis CC_RDM files <name>_MO.dm1 / <name>_MO.dm2 written by ReRDMFT (UCCSD TRUE, CC_RDM TRUE).
+(The Gaussian-primitive files <name>_GAU.* use the Fortran-record formats of RHO2_OPS instead.)
 
 dm1 record: int32 p, int32 q, float64 re, float64 im           -> gamma[p,q] = <a+_p a_q>   (Hermitian part)
 dm2 record: int32 p, q, r, s, float64 re, float64 im  (p<q, r<s) -> Gamma[p,q,r,s] = <a+_p a+_q a_s a_r>
@@ -33,7 +34,7 @@ def read_dm2(path, n=None):
 
 if __name__ == '__main__':
     base = sys.argv[1]
-    g = read_dm1(base + '.dm1')
+    g = read_dm1(base + '.dm1')    # base = '<name>_MO'
     print('n spinors', g.shape[0], ' trace gamma =', g.trace().real, ' max|gamma-gamma^H| =', abs(g - g.conj().T).max())
     print('natural occupation numbers:', np.round(np.sort(np.linalg.eigvalsh((g + g.conj().T) / 2))[::-1], 6))
     G = read_dm2(base + '.dm2', g.shape[0])
