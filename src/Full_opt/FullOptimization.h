@@ -98,6 +98,11 @@ struct FullOptSettings {
   // ORBITAL_OPTIMIZER ADAM_NEO only: the first this-many macro-iterations are always ADAM; the |dE| selector only
   // acts afterwards. User-settable via ADAM_NEO_INITIAL_ADAM_ITERATIONS (Input.h).
   int adam_neo_initial_adam_iterations = 3;
+  // ORBITAL_OPTIMIZER ADAM_NEO only: after a NEO -> ADAM handoff, at least this many consecutive macro-iterations stay on
+  // ADAM before the |dE| selector may switch back to NEO (ADAM's restart ladder -- lower learning rate, more steps --
+  // needs several runs to find a usable rate; a failed run reports dE = 0, which would otherwise bounce straight back).
+  // User-settable via ADAM_NEO_MIN_ADAM_ITERATIONS (Input.h).
+  int adam_neo_min_adam_iterations = 3;
   // NEO Davidson stagnation stop; see NeoStepOptions::stagnation_* (Utils/NEO.h) and the NEO_DAVIDSON_STAGNATION_* keywords.
   int neo_stagnation_window = 5;
   int neo_stagnation_min_iterations = 10;

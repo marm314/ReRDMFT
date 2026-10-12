@@ -2135,7 +2135,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
   if (settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo && !saddle) {
     std::ostringstream tol_str;
     tol_str << std::scientific << std::setprecision(1) << settings.adam_neo_switch_tolerance;
-    driver_phrase = "ADAM for the first " + std::to_string(settings.adam_neo_initial_adam_iterations) + " macro-iterations, then switching to NEO whenever |dE| <= " + tol_str.str() + " Ha and back whenever it grows again";
+    driver_phrase = "ADAM for the first " + std::to_string(settings.adam_neo_initial_adam_iterations) + " macro-iterations, then switching to NEO whenever |dE| <= " + tol_str.str() + " Ha (after at least " + std::to_string(settings.adam_neo_min_adam_iterations) + " ADAM macro-iterations) and back whenever it grows again";
   }
   log << "\n  FULL orbital + occupation optimization ("
       << driver_phrase
@@ -2441,6 +2441,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
     // reset at the top of every escape attempt, so a perturbed restart always starts on ADAM again (iter == 1
     // below), exactly like a fresh run does.
     std::optional<bool> prev_run_neo;
+    int adam_streak = 0;  // consecutive ADAM macro-iterations just run (ADAM_NEO_MIN_ADAM_ITERATIONS)
     double last_dE = 0.0;
     for (iter = 1; iter <= settings.max_macro_iterations; ++iter) {
       problem.setOccupations(occ);
@@ -2450,7 +2451,9 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
       const bool run_neo = neo_available &&
           (saddle || settings.orbital_optimizer == OrbitalOptimizer::kNeo ||
            (settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo && iter > settings.adam_neo_initial_adam_iterations &&
-            std::abs(last_dE) <= settings.adam_neo_switch_tolerance));
+            std::abs(last_dE) <= settings.adam_neo_switch_tolerance &&
+            // Having just left NEO, ADAM must get its minimum number of macro-iterations before NEO may take over again.
+            (!prev_run_neo || *prev_run_neo || adam_streak >= settings.adam_neo_min_adam_iterations)));
       // Watch out: ADAM and NEO reach the Kramers-/spin-restricted subspace through DIFFERENT parametrizations
       // (KramersAdamProblem's "representative" embedding vs. KramersNeoProblem's "isometric" one, and similarly
       // for SpinRestrictedNeoProblem vs. ADAM's own per-pair averaging) -- both are exact BY CONSTRUCTION given a
@@ -2509,6 +2512,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
         }
       }
       prev_run_neo = run_neo;
+      adam_streak = run_neo ? 0 : adam_streak + 1;
       double max_gradient = 0.0;
       int orbital_iterations = 0;
       bool gradient_converged = false, orbital_restart_requested = false;
@@ -2534,9 +2538,6 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
         max_gradient = nr.gradient_max;
         orbital_iterations = nr.iterations;
         gradient_converged = nr.converged;
-        // Any NEO descent moves the orbitals away from the point ADAM's learning rate and extra-iteration allowance were
-        // tuned (cut back) for, so the next ADAM stretch starts fresh: initial learning rate, base step count.
-        adam.reset();
         log_extra = nr.history.empty() ? 0.0 : nr.history.back().radius;
       } else {
         AdamResult ar;
@@ -2628,7 +2629,11 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
           log << "    RESTART checkpoint FAILED (" << e.what() << ")\n";
         }
       }
-      if (std::abs(d_e) < settings.energy_tolerance && !(run_neo ? false : adam.restartRequested())) {
+      // ORBITAL_OPTIMIZER ADAM_NEO: never declare convergence on an ADAM macro-iteration -- a forced ADAM stretch
+      // (ADAM_NEO_MIN_ADAM_ITERATIONS) that finds nothing better reports dE ~ 0, which would end the run before NEO has
+      // polished the point. The |dE| selector then hands the next macro-iteration to NEO, and only NEO can converge.
+      const bool adam_defers_to_neo = neo_available && !saddle && !run_neo && settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo;
+      if (std::abs(d_e) < settings.energy_tolerance && !adam_defers_to_neo && !(run_neo ? false : adam.restartRequested())) {
         result.converged = true;
         break;
       }

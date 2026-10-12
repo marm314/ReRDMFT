@@ -110,6 +110,7 @@ are comments.
 | `NEO_MAX_ITERATIONS` | int | `20` | Cap on Newton steps per macro-iteration for `NEO`/`ADAM_NEO`. |
 | `ADAM_NEO_SWITCH_TOLERANCE` | double | `2e-3` | `|dE|` threshold that switches `ADAM_NEO` between drivers (after the initial ADAM iterations). |
 | `ADAM_NEO_INITIAL_ADAM_ITERATIONS` | int | `3` | Number of initial macro-iterations `ADAM_NEO` always runs with ADAM before the `|dE|` selector acts. |
+| `ADAM_NEO_MIN_ADAM_ITERATIONS` | int | `3` | Minimum consecutive ADAM macro-iterations `ADAM_NEO` runs after switching from NEO before it may switch back; `ADAM_NEO` also never converges on an ADAM macro-iteration, only on a NEO one. |
 | `NEO_DAVIDSON_STAGNATION_WINDOW` | int | `5` | NEO's Davidson solve gives up (step reported not converged, trust-region ratio test still guards it) when its residual is still above `NEO_DAVIDSON_STAGNATION_FACTOR` times its value this many iterations ago; `0` disables the rule. Stops the near-degenerate-root crawl (e.g. atoms) that otherwise costs hundreds of Hessian products per step. |
 | `NEO_DAVIDSON_STAGNATION_MIN_ITERATIONS` | int | `10` | Davidson iterations per solve before the stagnation rule may fire. |
 | `NEO_DAVIDSON_STAGNATION_FACTOR` | double | `0.5` | Required residual improvement over the window; the rule fires if `residual > factor * residual(window iterations ago)`. |

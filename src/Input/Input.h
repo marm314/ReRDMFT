@@ -522,6 +522,10 @@ class Input {
   // ORBITAL_OPTIMIZER ADAM_NEO: the number of initial macro-iterations that are always ADAM, before the |dE|
   // selector (ADAM_NEO_SWITCH_TOLERANCE) takes over.
   int adam_neo_initial_adam_iterations() const { return adam_neo_initial_adam_iterations_; }
+  // Optional; defaults to 3 when ADAM_NEO_MIN_ADAM_ITERATIONS is absent (0 allowed). Only meaningful with
+  // ORBITAL_OPTIMIZER ADAM_NEO: once the loop is on ADAM it stays there for at least this many consecutive
+  // macro-iterations before the |dE| selector may switch to NEO, so ADAM can walk down its restart ladder.
+  int adam_neo_min_adam_iterations() const { return adam_neo_min_adam_iterations_; }
   // Optional. NEO's Davidson stagnation stop (Utils/NEO.h NeoStepOptions::stagnation_*): after at least
   // NEO_DAVIDSON_STAGNATION_MIN_ITERATIONS Davidson iterations, a solve gives up (reported not converged) when its
   // residual is still above NEO_DAVIDSON_STAGNATION_FACTOR times its value NEO_DAVIDSON_STAGNATION_WINDOW iterations earlier.
@@ -630,6 +634,7 @@ class Input {
   int neo_max_iterations_ = 20;
   double adam_neo_switch_tolerance_ = 2e-3;
   int adam_neo_initial_adam_iterations_ = 3;
+  int adam_neo_min_adam_iterations_ = 3;
   int neo_stagnation_window_ = 5;
   int neo_stagnation_min_iterations_ = 10;
   double neo_stagnation_factor_ = 0.5;
