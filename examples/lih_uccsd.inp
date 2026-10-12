@@ -1,0 +1,19 @@
+# Example ReRDMFT input file: LiH at its experimental equilibrium bond length (r_e = 1.5949 Angstrom), 6-31G, with
+# UCCSD (spin-orbital coupled cluster singles and doubles for complex spinors, CC/Uccsd.h, doc/uccsd.tex) run right
+# after each of the three SCF references: NON_RELATIVISTIC (RHF), X2C (X2C-HF) and C4_SPINOR (DHF, no-pair: only the
+# positive-energy spinors are correlated). Default two-electron representation (USE_RI); set USE_RI FALSE (dense) or
+# CHOLESKY TRUE to use the other two.
+# Reference (PySCF 2.14 RHF + CCSD, same geometry/basis): with USE_RI FALSE the NON_REL correlation energy is
+# -0.0189951968 Eh (PySCF -0.0189951969); with the default USE_RI it is -0.0189847241 Eh (the RI error of the
+# SCF + CC together). X2C / C4_SPINOR at SPEED_OF_LIGHT 100000 reproduce the NON_REL value to 1e-9 Eh.
+NELEC 4
+BASIS lih-6-31g.gbs
+NON_RELATIVISTIC TRUE
+X2C TRUE
+C4_SPINOR TRUE
+UCCSD TRUE
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.594900
+END

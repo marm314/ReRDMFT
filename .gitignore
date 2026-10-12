@@ -7,3 +7,5 @@ FCIDUMP
 *.live
 tests_mau/
 check_wfn
+*.dm1
+*.dm2

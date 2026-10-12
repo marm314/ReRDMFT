@@ -141,6 +141,32 @@ class Input {
   // WFN.X2C or WFN.4C depending on which method produced it. Requires FUNCTIONAL (there is
   // otherwise no 1-RDM to write).
   bool aimpac() const { return aimpac_; }
+  // Optional; defaults to false when the UCCSD keyword is absent. When true, right after the NON_REL / X2C /
+  // C4_SPINOR Hartree-Fock (or Dirac-Hartree-Fock) SCF, runs coupled cluster singles and doubles with complex
+  // spin-orbitals/spinors (CC/Uccsd.h, doc/uccsd.tex) on the converged reference, using the same two-electron
+  // integral representation as the rest of the run (USE_RI by default, CHOLESKY, or dense unique elements).
+  // For C4_SPINOR only the positive-energy spinors enter (no-pair).
+  bool uccsd() const { return uccsd_; }
+  // Optional; defaults to 0. Number of lowest occupied spinors (spin-orbitals) kept frozen in the UCCSD
+  // (even; each Kramers/spin pair counts as two). Only meaningful with UCCSD TRUE.
+  int cc_frozen_core() const { return cc_frozen_core_; }
+  // Optional; defaults to false. Requires UCCSD TRUE. After the UCCSD amplitudes converge, solves the Lambda equations and writes
+  // the one- and two-particle density matrices of the complex spin-orbital CCSD (CC/lambda_Uccsd.h) to <input>.dm1 and
+  // <input>.dm2 (with the method name appended, <input>_nonrel/_x2c/_4c, when more than one method runs): binary records
+  // (int32 p, q[, r, s], float64 re, im), 1-based indices in Kramers-pair order, p<q and r<s for the 2-RDM, terminated by an
+  // all-zero record.
+  bool cc_rdm() const { return cc_rdm_; }
+  // Optional; defaults to 1e-10. Density-matrix elements with a smaller absolute value are not written.
+  double cc_rdm_threshold() const { return cc_rdm_threshold_; }
+  // Optional; defaults to 100. Maximum number of UCCSD amplitude iterations.
+  int cc_max_iterations() const { return cc_max_iterations_; }
+  // Optional; defaults to 1e-8. UCCSD convergence threshold on the correlation-energy change; the amplitude-vector
+  // change must additionally fall below 100 times this value.
+  double cc_convergence() const { return cc_convergence_; }
+  // Optional; defaults to 8. Number of amplitude vectors kept by the UCCSD DIIS (< 2 disables it).
+  int cc_diis_size() const { return cc_diis_size_; }
+  // Optional; defaults to 0. Level shift (Hartree) applied to the UCCSD amplitude denominators.
+  double cc_level_shift() const { return cc_level_shift_; }
   // Optional; defaults to 0.4 when the MIXING keyword is absent. Linear
   // density-matrix mixing weight for the C4_DHF SCF loop (C4_DHF/C4_DHF.h):
   // the density fed into the next iteration's Fock build is
@@ -596,6 +622,14 @@ class Input {
   bool hessian_mean_field_ = false;
   bool fcidump_ = false;
   bool aimpac_ = false;
+  bool uccsd_ = false;
+  bool cc_rdm_ = false;
+  double cc_rdm_threshold_ = 1e-10;
+  int cc_frozen_core_ = 0;
+  int cc_max_iterations_ = 100;
+  double cc_convergence_ = 1e-8;
+  int cc_diis_size_ = 8;
+  double cc_level_shift_ = 0.0;
   double mixing_ = 0.4;
   bool diis_ = true;
   int diis_size_ = 5;

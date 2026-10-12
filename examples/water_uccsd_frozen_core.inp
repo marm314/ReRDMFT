@@ -1,0 +1,17 @@
+# Example ReRDMFT input file: water, cc-pVDZ (spherical), NON_RELATIVISTIC with dense integrals (USE_RI FALSE) and
+# UCCSD with the oxygen 1s core frozen (CC_FROZEN_CORE 2 = two spin-orbitals).
+# Reference (PySCF 2.14 RHF + CCSD with frozen=1, same geometry/basis): E(RHF) = -76.0267936450 Eh,
+# E_corr = -0.2111965374 Eh; this run gives -76.0267936449 and -0.2111965370 Eh.
+NELEC 10
+BASIS water-cc-pvdz.gbs
+NON_RELATIVISTIC TRUE
+CARTESIAN FALSE
+UCCSD TRUE
+USE_RI FALSE
+CC_FROZEN_CORE 2
+
+GEOMETRY
+O   0.000000   0.000000   0.000000
+H   0.000000   0.757000   0.586000
+H   0.000000  -0.757000   0.586000
+END

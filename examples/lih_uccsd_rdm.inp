@@ -1,0 +1,25 @@
+# Example ReRDMFT input file: LiH (r_e = 1.5949 Angstrom), 6-31G, UCCSD followed by the Lambda equations and the one- and
+# two-particle density matrices (CC_RDM TRUE, requires UCCSD TRUE) for all three references: NON_RELATIVISTIC (RHF),
+# X2C (X2C-HF) and C4_SPINOR (no-pair DHF). USE_RI (the default) is used for the integrals; USE_RI FALSE (dense) or
+# CHOLESKY TRUE work as well.
+#
+# Output (written next to this file; <name> = lih_uccsd_rdm, with the method appended because three methods run):
+#   lih_uccsd_rdm_nonrel.dm1 / .dm2,  lih_uccsd_rdm_x2c.dm1 / .dm2,  lih_uccsd_rdm_4c.dm1 / .dm2
+# The report printed after each UCCSD lists the Lambda iterations, the number of elements written, the trace of the 1-RDM
+# (the number of electrons) and the energy recomputed from the written elements (sum h gamma + 1/2 sum <pq|rs> Gamma)
+# against E_0 + E_c: they agree to ~1e-9 Eh for the default CC_RDM_THRESHOLD 1e-10.
+# Read them with   python3 read_cc_rdm.py lih_uccsd_rdm_x2c   (see the docstring there for the record layout: 1-based indices in
+# Kramers-pair order, int32 p q [r s] + float64 re im, p<q and r<s in the 2-RDM, terminated by an all-zero record).
+NELEC 4
+BASIS lih-6-31g.gbs
+NON_RELATIVISTIC TRUE
+X2C TRUE
+C4_SPINOR TRUE
+UCCSD TRUE
+CC_RDM TRUE
+CC_RDM_THRESHOLD 1e-10
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.594900
+END

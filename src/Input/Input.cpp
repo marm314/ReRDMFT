@@ -151,6 +151,35 @@ void Input::read(const std::string& filename) {
       fcidump_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "AIMPAC") {
       aimpac_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "UCCSD") {
+      uccsd_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "CC_RDM") {
+      cc_rdm_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "CC_RDM_THRESHOLD") {
+      cc_rdm_threshold_ = parseDouble(iss, line_number, keyword);
+      if (!(cc_rdm_threshold_ >= 0.0)) {
+        throw std::runtime_error("line " + std::to_string(line_number) + ": CC_RDM_THRESHOLD must be non-negative");
+      }
+    } else if (keyword == "CC_FROZEN_CORE") {
+      cc_frozen_core_ = parseInt(iss, line_number, keyword);
+      if (cc_frozen_core_ < 0 || cc_frozen_core_ % 2 != 0) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": CC_FROZEN_CORE must be a non-negative even number of spinors");
+      }
+    } else if (keyword == "CC_MAX_ITERATIONS") {
+      cc_max_iterations_ = parseInt(iss, line_number, keyword);
+      if (cc_max_iterations_ < 1) {
+        throw std::runtime_error("line " + std::to_string(line_number) + ": CC_MAX_ITERATIONS must be >= 1");
+      }
+    } else if (keyword == "CC_CONVERGENCE") {
+      cc_convergence_ = parseDouble(iss, line_number, keyword);
+      if (!(cc_convergence_ > 0.0)) {
+        throw std::runtime_error("line " + std::to_string(line_number) + ": CC_CONVERGENCE must be positive");
+      }
+    } else if (keyword == "CC_DIIS_SIZE") {
+      cc_diis_size_ = parseInt(iss, line_number, keyword);
+    } else if (keyword == "CC_LEVEL_SHIFT") {
+      cc_level_shift_ = parseDouble(iss, line_number, keyword);
     } else if (keyword == "MIXING") {
       mixing_ = parseDouble(iss, line_number, keyword);
       if (!(mixing_ > 0.0 && mixing_ <= 1.0)) {
@@ -496,6 +525,17 @@ void Input::read(const std::string& filename) {
   // Fock matrices) -- an explicit SCF_DIRECT_4C TRUE alongside it is an ambiguous request and
   // throws; SCF_DIRECT_4C's own smart DEFAULT (not an explicit TRUE) is silently overridden
   // instead, since USE_RI is the more specific, explicitly requested choice.
+  if (cc_rdm_ && !uccsd_) {
+    throw std::runtime_error("CC_RDM TRUE requires UCCSD TRUE (the density matrices are built from the UCCSD amplitudes)");
+  }
+  if (uccsd_) {
+    if (!(non_relativistic_ || x2c_ || c4_spinor_)) {
+      throw std::runtime_error("UCCSD TRUE requires at least one of NON_RELATIVISTIC/X2C/C4_SPINOR TRUE (it runs on their SCF reference)");
+    }
+    if (read_restart_) {
+      throw std::runtime_error("UCCSD TRUE with READ_RESTART TRUE is not supported (UCCSD runs on a converged SCF reference)");
+    }
+  }
   if (use_ri_ && !(non_relativistic_ || x2c_ || c4_spinor_)) {
     throw std::runtime_error(
         "USE_RI TRUE requires at least one of NON_RELATIVISTIC/X2C/C4_SPINOR TRUE (there is "
@@ -638,6 +678,14 @@ void Input::print(std::ostream& out) const {
   line("HESSIAN_MEAN_FIELD") << flag(hessian_mean_field_) << "\n";
   line("FCIDUMP") << flag(fcidump_) << "\n";
   line("AIMPAC") << flag(aimpac_) << "\n";
+  line("UCCSD") << flag(uccsd_) << "\n";
+  line("CC_RDM") << flag(cc_rdm_) << "\n";
+  line("CC_RDM_THRESHOLD") << cc_rdm_threshold_ << "\n";
+  line("CC_FROZEN_CORE") << cc_frozen_core_ << "\n";
+  line("CC_MAX_ITERATIONS") << cc_max_iterations_ << "\n";
+  line("CC_CONVERGENCE") << cc_convergence_ << "\n";
+  line("CC_DIIS_SIZE") << cc_diis_size_ << "\n";
+  line("CC_LEVEL_SHIFT") << cc_level_shift_ << "\n";
   line("MIXING") << mixing_ << "\n";
   line("DIIS") << flag(diis_) << "\n";
   line("DIIS_SIZE") << diis_size_ << "\n";

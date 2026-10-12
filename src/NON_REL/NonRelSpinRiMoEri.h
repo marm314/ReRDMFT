@@ -57,6 +57,11 @@ class RiNonRelSpinMoEri {
   // n_spatial block is ever read (checked, not just assumed -- see the .cpp).
   RiNonRelSpinMoEri rotated(const Matrix<double>& u) const;
 
+  // The spatial RI tensor itself, b(P, p*n_spatial+q) (CC/Uccsd.h gathers sub-blocks of it directly, applying the
+  // spin selection rule of operator() on the fly instead of embedding it into the 4x larger spin-orbital tensor).
+  const Matrix<double>& b() const { return b_; }
+  std::size_t nSpatial() const { return n_spatial_; }
+
   // Embeds the spatial-only `b_` into a BLOCK-DIAGONAL `(n_aux, dim0()^2)` tensor over the FULL
   // spin-orbital space (same spatial block repeated at [alpha,alpha] and [beta,beta], zero at the
   // cross [alpha,beta]/[beta,alpha] blocks) -- needed by

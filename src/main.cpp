@@ -23,6 +23,8 @@
 #include "ClosedShellSpinOrbitals.h"
 #include "DiracKinetic.h"
 #include "AIMPAC.h"
+#include "Uccsd.h"
+#include "lambda_Uccsd.h"
 #include "Fcidump.h"
 #include "FermiDirac.h"
 #include "FullOptimization.h"
@@ -2601,6 +2603,40 @@ std::string scfAccelerationLabel(const rerdmft::Input& input) {
   return label.str();
 }
 
+// UCCSD keyword: coupled cluster singles and doubles on the converged HF/DHF reference (CC/Uccsd.h). `eri` is whichever
+// MO-basis two-electron representation the run holds (RI / Cholesky vectors / unique elements); the report goes to `log`.
+template <typename T, typename Eri>
+void runUccsdStage(const std::string& label, const rerdmft::Input& input, const std::string& input_path,
+                   const std::string& method_tag, const rerdmft::Matrix<T>& h_mo, const Eri& eri, std::size_t eri_shift,
+                   const rerdmft::CcOrbitalSpaces& spaces, double scf_total_energy, std::ostringstream& log) {
+  rerdmft::UccsdSettings settings;
+  settings.max_iterations = input.cc_max_iterations();
+  settings.convergence = input.cc_convergence();
+  settings.diis_size = input.cc_diis_size();
+  settings.level_shift = input.cc_level_shift();
+  if (!input.cc_rdm()) {
+    rerdmft::runUccsdReport(label, h_mo, eri, eri_shift, spaces, settings, scf_total_energy, log);
+    return;
+  }
+  // <input>.dm1 / <input>.dm2 (directory and name of the input file); the method tag is appended when several methods run
+  const auto slash = input_path.find_last_of("/\\");
+  const std::string dir = (slash == std::string::npos) ? std::string() : input_path.substr(0, slash + 1);
+  std::string name = (slash == std::string::npos) ? input_path : input_path.substr(slash + 1);
+  const auto dot = name.find_last_of('.');
+  if (dot != std::string::npos && dot != 0) name = name.substr(0, dot);
+  const int n_methods = (input.non_relativistic() ? 1 : 0) + (input.x2c() ? 1 : 0) + (input.c4_spinor() ? 1 : 0);
+  const std::string base = dir + name + (n_methods > 1 ? "_" + method_tag : std::string());
+  rerdmft::CcRdmSettings rdm;
+  rdm.max_iterations = input.cc_max_iterations();
+  rdm.convergence = input.cc_convergence();
+  rdm.diis_size = input.cc_diis_size();
+  rdm.level_shift = input.cc_level_shift();
+  rdm.threshold = input.cc_rdm_threshold();
+  rdm.dm1_path = base + ".dm1";
+  rdm.dm2_path = base + ".dm2";
+  rerdmft::runUccsdRdmReport(label, h_mo, eri, eri_shift, spaces, settings, rdm, scf_total_energy, log);
+}
+
 template <typename T>
 rerdmft::Matrix<std::complex<double>> toComplexMatrix(const rerdmft::Matrix<T>& m) {
   rerdmft::Matrix<std::complex<double>> out(m.rows(), m.cols());
@@ -3616,6 +3652,7 @@ int main(int argc, char** argv) {
   // per method and printed at the place it belongs in the report below, not at the top of the output.
   std::ostringstream nonrel_structure_log, nonrel_restart_log, x2c_structure_log, x2c_restart_log, c4_pre_log,
       c4_structure_log, c4_restart_log;
+  std::ostringstream uccsd_nonrel_log, uccsd_x2c_log, uccsd_c4_log;  // UCCSD keyword: one report per method
   double dhf_gradient_efficient_norm = 0.0;
   double dhf_gradient_efficient_max_abs = 0.0;
   double dhf_gradient_rdmft_norm = 0.0;
@@ -4487,7 +4524,7 @@ int main(int argc, char** argv) {
       // built straight from the already-RI-transformed AO tensor instead) -- DEBUG/HESSIAN_MEAN_FIELD
       // are mutually exclusive with USE_RI (Input.cpp's own check), so `nonrel_dense` is always
       // false here whenever USE_RI is active.
-      if (!input.use_ri() && input.cholesky() && (nonrel_dense || input.has_functional())) {
+      if (!input.use_ri() && input.cholesky() && (nonrel_dense || input.has_functional() || input.uccsd())) {
         eri_spin_chol = rerdmft::aoCholeskyToMoSpinOrbital(ao_cholesky, nonrel_hf_result.c_matrix);
       }
       logTiming("NON_REL MO integral transform complete", t_start, t_checkpoint, timing_records);
@@ -4513,6 +4550,15 @@ int main(int argc, char** argv) {
       }
       rerdmft::Tensor4<double> eri_spin;
       if (nonrel_dense) eri_spin = rerdmft::denseOf(eri_spin_sym);
+      if (input.uccsd()) {
+        const auto cc_spaces = rerdmft::nonRelCcSpaces(n_spatial, static_cast<std::size_t>(input.n_electrons()),
+                                                       static_cast<std::size_t>(input.cc_frozen_core()));
+        const double e_scf = nonrel_hf_result.total_energy;
+        if (input.use_ri()) runUccsdStage("NON_REL", input, input_path, "nonrel", h_spin, ri_nonrel_mo_eri, 0, cc_spaces, e_scf, uccsd_nonrel_log);
+        else if (input.cholesky()) runUccsdStage("NON_REL", input, input_path, "nonrel", h_spin, eri_spin_chol, 0, cc_spaces, e_scf, uccsd_nonrel_log);
+        else runUccsdStage("NON_REL", input, input_path, "nonrel", h_spin, eri_spin_sym, 0, cc_spaces, e_scf, uccsd_nonrel_log);
+        logTiming("NON_REL UCCSD complete", t_start, t_checkpoint, timing_records);
+      }
       if (input.cholesky() && input.debug()) {
         // DEBUG: dense (exact) vs Cholesky, for the Fock matrix at the converged density and for the MO integrals.
         const auto f_dense = rerdmft::nonRelFockMatrix(h_core_nonrel, nonrel_eri, nonrel_hf_result.density_matrix);
@@ -4877,7 +4923,7 @@ int main(int argc, char** argv) {
           for (std::size_t i = 0; i < n_ukb; ++i) v_identity(i, i) = 1.0;
           shim.v_total = v_identity;
           ri_x2c_mo_eri = rerdmft::buildRiMoEri(shim, x2c_hf_result.c_matrix);
-        } else if (input.cholesky() && (x2c_dense || input.has_functional())) {
+        } else if (input.cholesky() && (x2c_dense || input.has_functional() || input.uccsd())) {
           x2c_mo_chol = rerdmft::aoCholeskyToMoSpinor(ao_cholesky_sph, x2c_hf_result.c_matrix);
         }
         if (!input.use_ri() && (!input.cholesky() || input.debug())) {
@@ -4919,6 +4965,15 @@ int main(int argc, char** argv) {
       logTiming("X2C-HF MO integral transform complete", t_start, t_checkpoint, timing_records);
 
       const std::size_t x2c_dim = h_x2c_mo.rows();
+      if (input.uccsd()) {
+        const auto cc_spaces = rerdmft::contiguousCcSpaces(0, x2c_dim, static_cast<std::size_t>(input.n_electrons()),
+                                                           static_cast<std::size_t>(input.cc_frozen_core()));
+        const double e_scf = x2c_hf_result.total_energy;
+        if (input.use_ri()) runUccsdStage("X2C", input, input_path, "x2c", h_x2c_mo, ri_x2c_mo_eri, 0, cc_spaces, e_scf, uccsd_x2c_log);
+        else if (input.cholesky()) runUccsdStage("X2C", input, input_path, "x2c", h_x2c_mo, x2c_mo_chol, 0, cc_spaces, e_scf, uccsd_x2c_log);
+        else runUccsdStage("X2C", input, input_path, "x2c", h_x2c_mo, x2c_mo_sym, 0, cc_spaces, e_scf, uccsd_x2c_log);
+        logTiming("X2C UCCSD complete", t_start, t_checkpoint, timing_records);
+      }
 
       // Default, always-on check: the RDMFT-ansatz gradient, TESTED
       // here with X2C-HF's own occupation numbers (1.0 for each of the
@@ -5184,6 +5239,7 @@ int main(int argc, char** argv) {
           (input.cholesky() && !input.scf_direct_4c() && !input.use_ri()) || (input.cholesky() && input.debug()) ||
           (use_cholesky_integrals && c4_dense) ||
           (use_cholesky_integrals && input.has_functional() && !input.functional_pos_cho_4c() && !input.use_ri()) ||
+          (use_cholesky_integrals && input.uccsd() && !input.use_ri()) ||
           c4_minmax_may_run;
       if (use_cholesky_integrals) {
         // ONE decomposition of the real AO Coulomb matrix over {LL} u {SS} pairs; everything else (SCF Fock
@@ -5321,7 +5377,7 @@ int main(int argc, char** argv) {
                                                       rkb_coefficients, large_transform_final, dhf_result.c_dhf,
                                                       h_mo.rows() / 2, input.cholesky_threshold(),
                                                       input.on_demand_eri());
-        } else if (use_cholesky_integrals && (c4_dense || input.has_functional())) {
+        } else if (use_cholesky_integrals && (c4_dense || input.has_functional() || input.uccsd())) {
           c4_mo_chol = rerdmft::rkbCholeskyToMo(rkb_cholesky, dhf_result.c_dhf, h_mo.rows() / 2, input.cholesky_threshold());
         }
         if (!input.use_ri() && (!use_cholesky_integrals || input.debug())) {
@@ -5392,6 +5448,19 @@ int main(int argc, char** argv) {
         repairC4Kramers();
       }
       logTiming("C4_DHF MO integral transform complete", t_start, t_checkpoint, timing_records);
+
+      if (input.uccsd()) {
+        // No-pair: the correlated space is the positive-energy block (indices n_neg..); every MO-basis tensor here
+        // (RI, Cholesky vectors -- zero-padded on the negative block --, unique elements) spans all n_mo spinors.
+        const std::size_t n_neg = h_mo.rows() / 2;
+        const auto cc_spaces = rerdmft::contiguousCcSpaces(n_neg, h_mo.rows(), static_cast<std::size_t>(input.n_electrons()),
+                                                           static_cast<std::size_t>(input.cc_frozen_core()));
+        const double e_scf = dhf_result.total_energy;
+        if (input.use_ri()) runUccsdStage("C4_SPINOR", input, input_path, "4c", h_mo, ri_dhf_mo_eri, 0, cc_spaces, e_scf, uccsd_c4_log);
+        else if (use_cholesky_integrals) runUccsdStage("C4_SPINOR", input, input_path, "4c", h_mo, c4_mo_chol, 0, cc_spaces, e_scf, uccsd_c4_log);
+        else runUccsdStage("C4_SPINOR", input, input_path, "4c", h_mo, c4_mo_sym, 0, cc_spaces, e_scf, uccsd_c4_log);
+        logTiming("C4_SPINOR UCCSD complete", t_start, t_checkpoint, timing_records);
+      }
 
       // Release the big AO-basis RKB vectors as soon as the MO-basis ones (c4_mo_chol, trimmed to
       // the positive-energy block above) are the only thing FUNCTIONAL OPTIMIZATION below will
@@ -6002,6 +6071,7 @@ int main(int argc, char** argv) {
     // and its own gradient/Hessian diagnostics -- printed last within
     // this section accordingly (moved here from right after "Total
     // ... energy" per explicit user feedback).
+    std::cout << uccsd_nonrel_log.str();
     std::cout << nonrel_functional_report;
     std::cout << nonrel_restart_log.str();
   }
@@ -6244,6 +6314,7 @@ int main(int argc, char** argv) {
     // optimization) is conceptually a step AFTER the X2C-HF calculation
     // and its own gradient/Hessian diagnostics -- printed last within
     // this section accordingly, matching NON_REL/C4_DHF's own placement.
+    std::cout << uccsd_x2c_log.str();
     std::cout << x2c_functional_report;
     std::cout << x2c_restart_log.str();
   }
@@ -6383,6 +6454,7 @@ int main(int argc, char** argv) {
     // and its own gradient/Hessian diagnostics -- printed last within
     // this section accordingly (moved here from right after "Total
     // ... energy" per explicit user feedback).
+    std::cout << uccsd_c4_log.str();
     std::cout << dhf_functional_report;
     std::cout << c4_restart_log.str();
   }

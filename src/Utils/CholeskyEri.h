@@ -51,6 +51,8 @@ class CholeskyEri {
   std::size_t dim2() const { return n_; }
   std::size_t dim3() const { return n_; }
   std::size_t nVectors() const { return nchol_; }
+  // Raw storage w[(x*n + y)*nVectors() + L] = V_L(x,y) (CC/Uccsd.h contracts the vectors with ZGEMM directly).
+  const std::vector<T>& rawVectors() const { return w_; }
 
   // <ab|cd>, O(Nchol).
   T operator()(std::size_t a, std::size_t b, std::size_t c, std::size_t d) const;

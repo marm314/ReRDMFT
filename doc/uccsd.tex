@@ -1,0 +1,647 @@
+\documentclass[11pt]{article}
+\usepackage{amsmath,amssymb}
+\usepackage[margin=1in]{geometry}
+
+\newcommand{\bra}[1]{\langle #1|}
+\newcommand{\ket}[1]{|#1\rangle}
+\newcommand{\anti}[4]{\langle #1#2\Vert #3#4\rangle}
+\newcommand{\dir}[4]{\langle #1#2|#3#4\rangle}
+\newcommand{\cc}{^{*}}
+
+\title{Unrestricted Coupled Cluster Singles and Doubles\\ for Complex Orbitals}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Scope}
+
+The standard spin-orbital CCSD equations (Stanton, Gauss, Watts, Bartlett,
+J.\ Chem.\ Phys.\ \textbf{94}, 4334 (1991)) are written for real orbitals. In
+that form several integrals appear in a particular index order that is only
+correct because of the real-orbital symmetry $\anti{p}{q}{r}{s}=\anti{r}{s}{p}{q}$.
+Here the equations are re-derived by tracking which operator string every
+integral multiplies, so that they hold for \emph{arbitrary complex}
+spin-orbitals $\varphi_p(\mathbf r,\sigma)$. This covers
+
+\begin{itemize}
+\item UCCSD with complex spatial orbitals, $\varphi_p=\psi_p(\mathbf r)\,\sigma_p$ with
+      $\sigma_p\in\{\alpha,\beta\}$ (Section~\ref{sec:blocks});
+\item general two-component or four-component spinors (the case needed for the
+      relativistic code), where there is no spin factorization at all.
+\end{itemize}
+
+No time-reversal or other symmetry is assumed. The reference determinant
+$\ket{0}$ is built from the $N$ occupied spin-orbitals and need not be a
+Hartree--Fock solution (the Fock matrix may have non-zero occupied--virtual
+blocks).
+
+\section{Conventions}
+
+Indices $i,j,k,l,m,n$ label occupied, $a,b,c,d,e,f$ virtual, $p,q,r,s$ general
+spin-orbitals. The one-electron operator is $h$, with
+$h_{pq}=\bra{p}h\ket{q}=\int\varphi_p^*\,h\,\varphi_q$. Integrals:
+\begin{align}
+\dir{p}{q}{r}{s} &= \iint \varphi_p^*(1)\,\varphi_q^*(2)\,\frac{1}{r_{12}}\,\varphi_r(1)\,\varphi_s(2),\\
+\anti{p}{q}{r}{s} &= \dir{p}{q}{r}{s}-\dir{p}{q}{s}{r}.
+\end{align}
+The Hamiltonian in second quantization,
+\begin{equation}
+H=\sum_{pq}h_{pq}\,a_p^\dagger a_q+\tfrac14\sum_{pqrs}\anti{p}{q}{r}{s}\,
+a_p^\dagger a_q^\dagger a_s a_r ,
+\end{equation}
+so that $\anti{p}{q}{r}{s}$ is always the coefficient of the string
+$a_p^\dagger a_q^\dagger a_s a_r$: \emph{the two left indices are the created
+orbitals, the two right indices the annihilated ones.} This single rule fixes
+every conjugation below.
+
+The Fock matrix and the reference energy are
+\begin{equation}
+f_{pq}=h_{pq}+\sum_i\anti{p}{i}{q}{i},\qquad
+E_0=\sum_i h_{ii}+\tfrac12\sum_{ij}\anti{i}{j}{i}{j},
+\end{equation}
+$f_{pq}=f_{qp}^*$ (Hermitian, in general complex).
+
+\subsection*{Integral symmetries}
+
+\begin{center}
+\begin{tabular}{lcc}
+ & real orbitals & complex orbitals\\ \hline
+$\anti{p}{q}{r}{s}=-\anti{q}{p}{r}{s}=-\anti{p}{q}{s}{r}=\anti{q}{p}{s}{r}$ & yes & yes\\
+$\anti{p}{q}{r}{s}=\anti{r}{s}{p}{q}$ & yes & \textbf{no}\\
+$\anti{p}{q}{r}{s}=\anti{r}{s}{p}{q}^{*}$ & (trivial) & yes\\
+$f_{pq}=f_{qp}$ & yes & \textbf{no}, $f_{pq}=f_{qp}^*$\\
+\end{tabular}
+\end{center}
+The 8-fold permutational symmetry of the real case is reduced to 4-fold for the
+unantisymmetrized $\dir{p}{q}{r}{s}$ (namely
+$\dir{p}{q}{r}{s}=\dir{q}{p}{s}{r}=\dir{r}{s}{p}{q}^*=\dir{s}{r}{q}{p}^*$).
+In particular, the blocks with virtuals in the bra and occupied in the ket
+(e.g.\ $\anti{a}{b}{i}{j}$) are the complex conjugates of the corresponding
+blocks with occupied in the bra (e.g.\ $\anti{i}{j}{a}{b}$), and are not equal
+to them.
+
+\section{Cluster ansatz and amplitude equations}
+
+\begin{equation}
+\ket{\Psi}=e^{T}\ket{0},\qquad T=T_1+T_2,
+\end{equation}
+\begin{equation}
+T_1=\sum_{ia}t_i^a\,a_a^\dagger a_i,\qquad
+T_2=\tfrac14\sum_{ijab}t_{ij}^{ab}\,a_a^\dagger a_b^\dagger a_j a_i ,
+\end{equation}
+with $t_{ij}^{ab}$ antisymmetric in $(ij)$ and in $(ab)$. The amplitudes are
+complex and satisfy no conjugation relation such as
+$t_{ij}^{ab}=t_{ji}^{ba*}$. The equations are the usual projections of the
+similarity-transformed Hamiltonian $\bar H=e^{-T}He^{T}$,
+\begin{equation}
+E_c=\bra{0}\bar H\ket{0}-E_0,\qquad
+\bra{\Phi_i^a}\bar H\ket{0}=0,\qquad
+\bra{\Phi_{ij}^{ab}}\bar H\ket{0}=0 .
+\end{equation}
+Neither the $T$ amplitudes nor the left-hand projectors are ever complex
+conjugated. Complex orbitals therefore enter \emph{only} through the
+integrals, and the algebra is identical to the real case term by term; what
+changes is which of the two members of a conjugate pair
+$\anti{p}{q}{r}{s}$, $\anti{r}{s}{p}{q}$ appears. There is no left-hand
+state and no $\Lambda$ equation in what follows.
+
+\section{Working equations}
+
+\subsection{Correlation energy}
+
+\begin{equation}
+E_c=\sum_{ia}f_{ia}\,t_i^a+\tfrac14\sum_{ijab}\anti{i}{j}{a}{b}\,t_{ij}^{ab}
++\tfrac12\sum_{ijab}\anti{i}{j}{a}{b}\,t_i^a t_j^b .
+\end{equation}
+For the exact wave function $E_c$ is real. For truncated CCSD no identity
+guarantees it, so take $\operatorname{Re}E_c$ and monitor
+$\operatorname{Im}E_c$ (PySCF's GCCSD warns when it exceeds $10^{-4}$).
+
+\subsection{Intermediates}
+
+With
+\begin{equation}
+\tilde\tau_{ij}^{ab}=t_{ij}^{ab}+\tfrac12\left(t_i^a t_j^b-t_i^b t_j^a\right),\qquad
+\tau_{ij}^{ab}=t_{ij}^{ab}+t_i^a t_j^b-t_i^b t_j^a ,
+\end{equation}
+and $P(pq)X_{pq}=X_{pq}-X_{qp}$:
+\begin{align}
+F_{ae} &= (1-\delta_{ae})f_{ae}-\tfrac12\sum_m f_{me}\,t_m^a
+ +\sum_{mf}t_m^f\anti{m}{a}{f}{e}
+ -\tfrac12\sum_{mnf}\tilde\tau_{mn}^{af}\anti{m}{n}{e}{f},\\
+F_{mi} &= (1-\delta_{mi})f_{mi}+\tfrac12\sum_e t_i^e f_{me}
+ +\sum_{ne}t_n^e\anti{m}{n}{i}{e}
+ +\tfrac12\sum_{nef}\tilde\tau_{in}^{ef}\anti{m}{n}{e}{f},\\
+F_{me} &= f_{me}+\sum_{nf}t_n^f\anti{m}{n}{e}{f},\\
+W_{mnij} &= \anti{m}{n}{i}{j}+P(ij)\sum_e t_j^e\anti{m}{n}{i}{e}
+ +\tfrac14\sum_{ef}\tau_{ij}^{ef}\anti{m}{n}{e}{f},\\
+W_{abef} &= \anti{a}{b}{e}{f}-P(ab)\sum_m t_m^b\anti{a}{m}{e}{f}
+ +\tfrac14\sum_{mn}\tau_{mn}^{ab}\anti{m}{n}{e}{f},\\
+W_{mbej} &= \anti{m}{b}{e}{j}+\sum_f t_j^f\anti{m}{b}{e}{f}
+ -\sum_n t_n^b\anti{m}{n}{e}{j}
+ -\sum_{nf}\left(\tfrac12 t_{jn}^{fb}+t_j^f t_n^b\right)\anti{m}{n}{e}{f}.
+\end{align}
+Each of these multiplies, in $\bar H$, an operator string whose created
+indices are the left indices (e.g.\ $F_{ae}$ multiplies $a_a^\dagger a_e$ and
+$W_{abef}$ multiplies $a_a^\dagger a_b^\dagger a_f a_e$), and every
+integral inside them keeps the created-left / annihilated-right pattern of
+that string. This is why these seven definitions need no conjugate: all
+integrals appearing there are already in the orientation that the operator
+algebra delivers.
+
+\subsection{$T_1$ equation}
+
+\begin{multline}
+t_i^a D_i^a = f_{ai}+\sum_e t_i^e F_{ae}-\sum_m t_m^a F_{mi}
++\sum_{me}t_{im}^{ae}F_{me}
+-\sum_{nf}t_n^f\anti{n}{a}{i}{f}\\
+-\tfrac12\sum_{mef}t_{im}^{ef}\anti{m}{a}{e}{f}
+-\tfrac12\sum_{men}t_{mn}^{ae}\anti{n}{m}{e}{i}.
+\end{multline}
+
+\subsection{$T_2$ equation}
+
+\begin{multline}
+t_{ij}^{ab}D_{ij}^{ab}=\anti{a}{b}{i}{j}
++P(ab)\sum_e t_{ij}^{ae}\Big(F_{be}-\tfrac12\sum_m t_m^b F_{me}\Big)
+-P(ij)\sum_m t_{im}^{ab}\Big(F_{mj}+\tfrac12\sum_e t_j^e F_{me}\Big)\\
++\tfrac12\sum_{mn}\tau_{mn}^{ab}W_{mnij}
++\tfrac12\sum_{ef}\tau_{ij}^{ef}W_{abef}
++P(ij)P(ab)\sum_{me}\Big(t_{im}^{ae}W_{mbej}-t_i^e t_m^a\anti{m}{b}{e}{j}\Big)\\
++P(ij)\sum_e t_i^e\anti{a}{b}{e}{j}
+-P(ab)\sum_m t_m^a\anti{m}{b}{i}{j}.
+\end{multline}
+
+The denominators contain the diagonal of the (Hermitian, hence real-diagonal)
+Fock matrix,
+\begin{equation}
+D_i^a=f_{ii}-f_{aa},\qquad D_{ij}^{ab}=f_{ii}+f_{jj}-f_{aa}-f_{bb}.
+\end{equation}
+The off-diagonal Fock elements enter through the $(1-\delta)$ terms in
+$F_{ae},F_{mi}$, so no canonical-orbital assumption is made. Level shifting
+and DIIS act on the complex amplitude vector as in the real case, with the
+DIIS overlap matrix taken as $\mathbf e_k^\dagger\mathbf e_l$ and the
+extrapolation coefficients real.
+
+\section{Differences with respect to the real-orbital equations}
+
+Compared with the equations as usually printed for real orbitals, only the two
+inhomogeneous terms change, and they change because the real-orbital
+formulas are written with the occupied-bra orientation using
+$\anti{p}{q}{r}{s}=\anti{r}{s}{p}{q}$:
+
+\begin{center}
+\begin{tabular}{lll}
+term & real-orbital form & complex form (this note)\\ \hline
+$T_1$ inhomogeneous term & $f_{ia}$ & $f_{ai}=f_{ia}^*$\\
+$T_2$ inhomogeneous term & $\anti{i}{j}{a}{b}$ & $\anti{a}{b}{i}{j}=\anti{i}{j}{a}{b}^*$
+\end{tabular}
+\end{center}
+
+All other terms, including $P(ij)\,t_i^e\anti{a}{b}{e}{j}$ and
+$-P(ab)\,t_m^a\anti{m}{b}{i}{j}$, are printed with the same index order as in
+the real case; they are correct for complex orbitals because that order is the
+created-left / annihilated-right order of the operator algebra. What differs
+is only how they are obtained from stored arrays: if the code stores the
+occupied-bra blocks ($\anti{i}{j}{m}{b}$, $\anti{j}{e}{b}{a}$), then
+\begin{equation}
+\anti{a}{b}{e}{j}=\anti{j}{e}{b}{a}^*,\qquad
+\anti{m}{b}{i}{j}=\anti{i}{j}{m}{b}^*,
+\end{equation}
+(pair swap $\anti{p}{q}{r}{s}=\anti{q}{p}{s}{r}$ combined with Hermitian
+conjugation) and the conjugate must be taken. For real orbitals every
+conjugation is trivial and the equations reduce to Stanton's. The same
+pattern is used in PySCF's \texttt{GCCSD} (\texttt{pyscf/cc/gccsd.py},
+\texttt{update\_amps}), which can serve as an external reference with complex
+spin-orbitals.
+
+\section{Initial guess}
+
+With $f_{ov}=0$ the first iteration from $T=0$ gives the MP2 amplitudes
+\begin{equation}
+t_i^a=\frac{f_{ai}}{D_i^a},\qquad
+t_{ij}^{ab}=\frac{\anti{a}{b}{i}{j}}{D_{ij}^{ab}},
+\end{equation}
+and $E_{\mathrm{MP2}}=\tfrac14\sum\anti{i}{j}{a}{b}\,t_{ij}^{ab}
+=\tfrac14\sum|\anti{i}{j}{a}{b}|^2/D_{ij}^{ab}$ is real and negative as it
+should be. Using $\anti{i}{j}{a}{b}$ instead of $\anti{a}{b}{i}{j}$ in the
+numerator would give a complex energy, which is a convenient sanity check on
+the orientation of the integrals.
+
+\section{UCCSD: spin blocks for complex spatial orbitals}
+\label{sec:blocks}
+
+For $\varphi_p=\psi_p\,\sigma_p$ with complex spatial $\psi_p$,
+\begin{equation}
+\dir{p}{q}{r}{s}=\delta_{\sigma_p\sigma_r}\delta_{\sigma_q\sigma_s}\,
+(pr|qs),\qquad
+(pr|qs)=\iint\psi_p^*(1)\psi_r(1)\,\frac1{r_{12}}\,\psi_q^*(2)\psi_s(2),
+\end{equation}
+and $h$, $f$ conserve spin. Spin conservation then restricts the amplitudes
+to
+\begin{itemize}
+\item $t_i^a$: $\sigma_i=\sigma_a$, giving $t^{\alpha}$ and $t^{\beta}$;
+\item $t_{ij}^{ab}$: $\sigma_i+\sigma_j=\sigma_a+\sigma_b$, giving the
+      unique blocks $\alpha\alpha\to\alpha\alpha$, $\beta\beta\to\beta\beta$,
+      and $\alpha\beta\to\alpha\beta$ ($t_{iJ}^{aB}$; the blocks with $a,B$
+      swapped follow by antisymmetry).
+\end{itemize}
+The equations of the previous section hold verbatim in this block structure:
+the sums run over the spin-allowed combinations and the integral blocks are
+$\anti{p}{q}{r}{s}=(pr|qs)-(ps|qr)$ for equal spins (all four orbitals of one spin, or
+$\sigma_p=\sigma_r,\sigma_q=\sigma_s$) and $\anti{p}{q}{r}{s}=(pr|qs)$ for the
+mixed block $p,r\in\alpha$, $q,s\in\beta$. The conjugation pattern of the
+previous section applies unchanged to each block; in particular the
+$\alpha\beta$ inhomogeneous term is
+$\anti{a}{B}{i}{J}=(ai|BJ)=(ia|JB)^*$, with no exchange part.
+
+For genuine spinors (two- or four-component) $\varphi_p$ is not an eigenfunction
+of $\sigma_z$, the integrals $\dir{p}{q}{r}{s}$ do not factorize, and the
+spin-orbital equations of Section~4 are used directly with all index
+combinations, i.e.\ as a generalized CCSD (GCCSD) with complex orbitals.
+
+\section{Cost and storage}
+
+The scaling is that of real CCSD, $O(o^2v^4)$ time and $O(o^2v^2)$ amplitude
+storage, with complex arithmetic (about $4\times$ the flops and $2\times$ the
+memory per element, using \texttt{zgemm} in the contractions). Because
+$\anti{p}{q}{r}{s}$ has only 4-fold symmetry, one cannot store only the unique
+integrals of one orientation and reuse them for the conjugate orientation by
+a transposition; the conjugate blocks of the previous section are obtained
+by conjugating the stored block, never by transposing it alone.
+
+\section{Left-hand equations ($\Lambda$) and reduced density matrices}
+\label{sec:lambda}
+
+Everything above is the right-hand side of the CCSD problem. Densities, and any property that is not the energy, need
+the left-hand state $\bra{0}(1+\Lambda)e^{-T}$,
+\begin{equation}
+\Lambda=\sum_{ia}\lambda_i^a\,a_i^\dagger a_a+\tfrac14\sum_{ijab}\lambda_{ij}^{ab}\,a_i^\dagger a_j^\dagger a_b a_a ,
+\end{equation}
+with $\lambda_{ij}^{ab}$ antisymmetric in $(ij)$ and in $(ab)$. The $\Lambda$ equations are the stationarity conditions of
+the Lagrangian
+\begin{equation}
+\mathcal L(t,\lambda)=E_c(t)+\sum_{ia}\lambda_i^a\,R_i^a(t)+\tfrac14\sum_{ijab}\lambda_{ij}^{ab}\,R_{ij}^{ab}(t),
+\qquad R_\mu(t)=\bra{\Phi_\mu}\bar H\ket{0}=n_\mu(t)-D_\mu t_\mu ,
+\end{equation}
+where $n_\mu$ is the numerator of Section~4 ($t_\mu=n_\mu/D_\mu$ is the amplitude equation). $\mathcal L$ is holomorphic in
+$t$ and $\lambda$ (neither is ever complex conjugated), so $\partial\mathcal L/\partial t_\mu=0$ gives \emph{linear}
+equations for $\lambda$ with the same complex integrals as the $T$ equations; at convergence $\mathcal L=E_c$. With complex
+orbitals the only change with respect to the real-orbital formulas is again which member of a conjugate pair of integrals
+appears. The inhomogeneous terms are $f_{ia}$ and $\anti{i}{j}{a}{b}$ with the occupied indices in the bra and
+\emph{not} conjugated (the complex conjugates of the $T$-equation driving terms); the conjugated integrals
+$\overline{\anti{j}{k}{i}{c}}=\anti{i}{c}{j}{k}$ and $\overline{\anti{j}{a}{c}{b}}=\anti{b}{c}{a}{j}$ enter only through
+$W^{\rm ovoo}$ and $W^{\rm vvvo}$ below. The equations are those of PySCF's \texttt{gccsd\_lambda.py}
+(\texttt{make\_intermediates}, \texttt{update\_lambda}) in the conventions of this note, written out from the same data that
+was evaluated with \texttt{numpy} and compared with PySCF (Section~\ref{sec:lambda-check}).
+
+\subsection{$T$-dependent intermediates}
+
+$\tau_{ij}^{ab}=t_{ij}^{ab}+t_i^at_j^b-t_i^bt_j^a$ as in Section~4. The intermediate $F_{kc}$ below equals $F_{me}$ of
+Section~4.2. $\mathcal A,\mathcal B$ are one-body, $\mathcal C,\mathcal D,\mathcal E,\mathcal G$ and the four $W$ two-body
+building blocks; all are independent of $\lambda$ and built once.
+\begin{align*}
+  \mathcal A_{ba} &=  f_{ba} -  \sum_{j}\,f_{ja}\,t_{j}^{b} \notag\\
+  & \quad -  \sum_{jc}\,\anti{j}{b}{a}{c}\,t_{j}^{c} + \tfrac{1}{2}\, \sum_{jkc}\,\anti{j}{k}{c}{a}\,\tau_{jk}^{bc}
+\end{align*}
+\begin{align*}
+  \mathcal B_{ij} &=  f_{ij} +  \sum_{b}\,f_{ib}\,t_{j}^{b} \notag\\
+  & \quad -  \sum_{kb}\,\anti{k}{i}{j}{b}\,t_{k}^{b} + \tfrac{1}{2}\, \sum_{kbc}\,\anti{i}{k}{b}{c}\,\tau_{jk}^{bc}
+\end{align*}
+\begin{align*}
+  \mathcal C_{ijkl} &=  \sum_{cd}\,\anti{i}{j}{c}{d}\,\tau_{kl}^{cd}
+\end{align*}
+\begin{align*}
+  \mathcal D_{jcbk} &=  \sum_{ld}\,\anti{l}{j}{d}{b}\,t_{kl}^{cd} +  \anti{j}{c}{b}{k}
+\end{align*}
+\begin{align*}
+  F_{kc} &=  f_{kc} -  \sum_{ld}\,\anti{k}{l}{d}{c}\,t_{l}^{d}
+\end{align*}
+\begin{align*}
+  \mathcal E_{bj} &=  f_{bj} +  \sum_{kc}\,f_{kc}\,t_{jk}^{bc} \notag\\
+  & \quad +  \sum_{kc}\,F_{kc}\,t_{k}^{b}\,t_{j}^{c} - \tfrac{1}{2}\, \sum_{klc}\,\anti{k}{l}{j}{c}\,t_{kl}^{bc} \notag\\
+  & \quad + \tfrac{1}{2}\, \sum_{kcd}\,\anti{k}{b}{d}{c}\,t_{jk}^{cd}
+\end{align*}
+\begin{align*}
+  \mathcal G_{ck} &=  \mathcal E_{ck} +  \sum_{jb}\,\mathcal D_{jcbk}\,t_{j}^{b} \notag\\
+  & \quad +  \sum_{b}\,\mathcal A_{cb}\,t_{k}^{b} -  \sum_{j}\,\mathcal B_{jk}\,t_{j}^{c}
+\end{align*}
+\begin{align*}
+  W^{\rm oooo}_{ijkl} &= \tfrac{1}{2}\, \anti{i}{j}{k}{l} + \tfrac{1}{4}\, \mathcal C_{ijkl} \notag\\
+  & \quad +  \sum_{c}\,\anti{i}{j}{k}{c}\,t_{l}^{c}
+\end{align*}
+\begin{align*}
+  W^{\rm ovvo}_{jcbk} &=  \mathcal D_{jcbk} -  \sum_{ld}\,\anti{l}{j}{d}{b}\,t_{l}^{c}\,t_{k}^{d} \notag\\
+  & \quad -  \sum_{l}\,\anti{l}{j}{k}{b}\,t_{l}^{c} +  \sum_{d}\,\anti{j}{c}{b}{d}\,t_{k}^{d}
+\end{align*}
+\begin{align*}
+  W^{\rm ovoo}_{icjk} &= \tfrac{1}{4}\, \sum_{bd}\,\anti{i}{c}{d}{b}\,\tau_{jk}^{db} + \tfrac{1}{2}\, \overline{\anti{j}{k}{i}{c}} \notag\\
+  & \quad +  \sum_{b}\,\mathcal D_{icbk}\,t_{j}^{b} -  \sum_{lb}\,\anti{l}{i}{j}{b}\,t_{kl}^{cb}
+\end{align*}
+\begin{align*}
+  W^{\rm vvvo}_{bcak} &=  \sum_{j}\,\mathcal D_{jcak}\,t_{j}^{b} + \tfrac{1}{4}\, \sum_{jl}\,\anti{j}{l}{k}{a}\,\tau_{jl}^{bc} \notag\\
+  & \quad - \tfrac{1}{2}\, \overline{\anti{k}{a}{c}{b}} +  \sum_{jd}\,\anti{j}{b}{a}{d}\,t_{kj}^{cd}
+\end{align*}
+
+\subsection{$\Lambda$ update}
+
+The $\lambda$-dependent intermediates are
+\begin{align*}
+  M^{\rm v}_{ba} &= \tfrac{1}{2}\, \sum_{klc}\,\lambda_{kl}^{ca}\,t_{kl}^{cb}
+\end{align*}
+\begin{align*}
+  M^{\rm o}_{ij} &= \tfrac{1}{2}\, \sum_{kcd}\,\lambda_{ki}^{cd}\,t_{kj}^{cd}
+\end{align*}
+\begin{align*}
+  N^{\rm v}_{ba} &=  M^{\rm v}_{ba} +  \sum_{k}\,\lambda_{k}^{a}\,t_{k}^{b}
+\end{align*}
+\begin{align*}
+  N^{\rm o}_{ik} &=  M^{\rm o}_{ik} +  \sum_{c}\,\lambda_{i}^{c}\,t_{k}^{c}
+\end{align*}
+\begin{align*}
+  S_{ijkl} &=  \sum_{cd}\,\lambda_{ij}^{cd}\,\tau_{kl}^{cd}
+\end{align*}
+\begin{align*}
+  U_{ijck} &=  \sum_{d}\,\lambda_{ij}^{cd}\,t_{k}^{d}
+\end{align*}
+\begin{align*}
+  M_{ijab} &=  \sum_{kl}\,\lambda_{kl}^{ab}\,W^{\rm oooo}_{ijkl} + \tfrac{1}{4}\, \sum_{kl}\,\anti{k}{l}{a}{b}\,S_{ijkl} \notag\\
+  & \quad -  \sum_{kc}\,\anti{k}{c}{b}{a}\,U_{ijck} + \tfrac{1}{2}\, \sum_{cd}\,\lambda_{ij}^{cd}\,\anti{c}{d}{a}{b}
+\end{align*}
+\begin{align*}
+  q_{jb} &=  t_{j}^{b} +  \sum_{kc}\,\lambda_{k}^{c}\,t_{kj}^{cb} \notag\\
+  & \quad -  \sum_{d}\,N^{\rm v}_{bd}\,t_{j}^{d} -  \sum_{l}\,M^{\rm o}_{lj}\,t_{l}^{b}
+\end{align*}
+
+The term $\tfrac12\sum_{cd}\lambda_{ij}^{cd}\anti{c}{d}{a}{b}$ in $M_{ijab}$ is the $\Lambda$-equation particle--particle ladder: like the $T$-equation ladder it needs only the $vvvv$ slabs, and $\sum_{c}\anti{k}{c}{b}{a}\,U_{ijck}$ needs the $ovvv$ slabs, so the streamed scheme of Section~\ref{sec:impl} applies unchanged.
+The diagonal Fock elements are moved to the denominators, $\mathcal A'_{ba}=\mathcal A_{ba}-\delta_{ba}f_{aa}$ and
+$\mathcal B'_{ij}=\mathcal B_{ij}-\delta_{ij}f_{ii}$ (they are not part of the right-hand sides). With
+$P(ij)X_{ijab}=X_{ijab}-X_{jiab}$ and $P(ab)X_{ijab}=X_{ijab}-X_{ijba}$ the numerator of the doubles equation is
+\begin{equation}
+\mathcal N_{ij}^{ab}=\anti{i}{j}{a}{b}+M_{ijab}+P(ij)P(ab)\,X_{ijab}-P(ab)\,Y_{ijab}+P(ij)\,Z_{ijab},
+\end{equation}
+with
+\begin{align*}
+  X_{ijab} &=  \lambda_{i}^{a}\,F_{jb} +  \sum_{kc}\,\lambda_{ki}^{ca}\,W^{\rm ovvo}_{jcbk}
+\end{align*}
+\begin{align*}
+  Y_{ijab} &=  \sum_{k}\,\lambda_{k}^{a}\,\anti{i}{j}{k}{b} +  \sum_{c}\,\lambda_{ij}^{ca}\,\mathcal A'_{cb} \notag\\
+  & \quad +  \sum_{c}\,N^{\rm v}_{ca}\,\anti{i}{j}{c}{b}
+\end{align*}
+\begin{align*}
+  Z_{ijab} &=  \sum_{c}\,\lambda_{j}^{c}\,\anti{i}{c}{a}{b} +  \sum_{k}\,\lambda_{ki}^{ab}\,\mathcal B'_{jk} \notag\\
+  & \quad -  \sum_{k}\,N^{\rm o}_{ik}\,\anti{k}{j}{a}{b}
+\end{align*}
+and that of the singles equation
+\begin{align*}
+  \mathcal N_{i}^{a} &=  f_{ia} +  \sum_{jb}\,\lambda_{j}^{b}\,\anti{i}{b}{a}{j} \notag\\
+  & \quad +  \sum_{b}\,\lambda_{i}^{b}\,\mathcal A'_{ba} -  \sum_{j}\,\lambda_{j}^{a}\,\mathcal B'_{ij} \notag\\
+  & \quad -  \sum_{jkc}\,\lambda_{kj}^{ca}\,W^{\rm ovoo}_{icjk} -  \sum_{kbc}\,\lambda_{ik}^{bc}\,W^{\rm vvvo}_{bcak} \notag\\
+  & \quad +  \sum_{jb}\,M_{ijab}\,t_{j}^{b} +  \sum_{jb}\,\lambda_{ji}^{ba}\,\mathcal G_{bj} \notag\\
+  & \quad +  \sum_{jb}\,\anti{j}{i}{b}{a}\,q_{jb} +  \sum_{bc}\,\anti{i}{c}{a}{b}\,N^{\rm v}_{bc} \notag\\
+  & \quad -  \sum_{jk}\,\anti{j}{i}{k}{a}\,N^{\rm o}_{kj} -  \sum_{k}\,M^{\rm o}_{ik}\,F_{ka} \notag\\
+  & \quad -  \sum_{c}\,M^{\rm v}_{ca}\,F_{ic}
+\end{align*}
+Both are divided by the same denominators as the $T$ equations,
+\begin{equation}
+\lambda_i^a\leftarrow\frac{\mathcal N_i^a}{D_i^a},\qquad
+\lambda_{ij}^{ab}\leftarrow\frac{\mathcal N_{ij}^{ab}}{D_{ij}^{ab}},\qquad
+D_i^a=f_{ii}-f_{aa},\quad D_{ij}^{ab}=f_{ii}+f_{jj}-f_{aa}-f_{bb},
+\end{equation}
+iterated from $\lambda=t$ with DIIS and an optional level shift exactly like the amplitudes. The cost per iteration is that
+of one $T$ iteration (the same contractions, with $\lambda$ replacing $t$ in the ladder).
+
+\subsection{One-particle density matrix}
+
+Let $\gamma_{pq}=\bra{0}(1+\Lambda)e^{-T}a_p^\dagger a_q e^{T}\ket{0}$, so that the one-body energy is
+$\sum_{pq}h_{pq}\gamma_{pq}$ (orbital relaxation is not included). In the occupied--virtual partitioning
+$\gamma_{pq}=\delta_{pq}n_p+D_{qp}$, with the blocks $D^{\rm oo}_{ij}$, $D^{\rm vv}_{ab}$, $D^{\rm vo}_{ai}$ and
+$D^{\rm ov}_{ia}=\lambda_i^a$ given by
+\begin{align*}
+  D^{\rm oo}_{ij} &= -  \sum_{e}\,\lambda_{i}^{e}\,t_{j}^{e} - \tfrac{1}{2}\, \sum_{mef}\,\lambda_{im}^{ef}\,t_{jm}^{ef}
+\end{align*}
+\begin{align*}
+  D^{\rm vv}_{ab} &=  \sum_{m}\,t_{m}^{a}\,\lambda_{m}^{b} + \tfrac{1}{2}\, \sum_{mne}\,t_{mn}^{ea}\,\lambda_{mn}^{eb}
+\end{align*}
+\begin{align*}
+  x^{(1)}_{mi} &= \tfrac{1}{2}\, \sum_{nef}\,\lambda_{mn}^{ef}\,t_{in}^{ef}
+\end{align*}
+\begin{align*}
+  x^{(2)}_{ae} &= \tfrac{1}{2}\, \sum_{mnf}\,t_{mn}^{fa}\,\lambda_{mn}^{fe} +  \sum_{m}\,t_{m}^{a}\,\lambda_{m}^{e}
+\end{align*}
+\begin{align*}
+  D^{\rm vo}_{ai} &=  \sum_{me}\,t_{im}^{ae}\,\lambda_{m}^{e} -  \sum_{m}\,x^{(1)}_{mi}\,t_{m}^{a} \notag\\
+  & \quad -  \sum_{e}\,t_{i}^{e}\,x^{(2)}_{ae} +  t_{i}^{a}
+\end{align*}
+The coupled-cluster (Lagrangian) density is not Hermitian, already for real orbitals (e.g.\ $D^{\rm ov}$ and
+$D^{\rm vo}$ differ); the Hermitian part, which is what the real part of the energy and of its derivatives
+involves, is
+\begin{equation}
+\bar\gamma_{pq}=\tfrac12\big(\gamma_{pq}+\gamma_{qp}^{*}\big),\qquad
+\operatorname{Re}\sum_{pq}h_{pq}\gamma_{pq}=\sum_{pq}h_{pq}\bar\gamma_{pq}.
+\end{equation}
+PySCF returns $\bar\gamma^{\mathsf T}$ (its \texttt{dm1[p,q]} is $\bar\gamma_{qp}=\langle a_q^\dagger a_p\rangle$).
+
+\subsection{Two-particle density matrix}
+
+Let $\Gamma_{pqrs}=\bra{0}(1+\Lambda)e^{-T}a_p^\dagger a_q^\dagger a_s a_r e^{T}\ket{0}$, so the energy is
+\begin{equation}
+E=\sum_{pq}h_{pq}\bar\gamma_{pq}+\tfrac14\sum_{pqrs}\anti{p}{q}{r}{s}\,\Gamma_{pqrs}\quad(\text{real part}),
+\end{equation}
+and $\Gamma$ is antisymmetric in $(pq)$ and in $(rs)$, with $\Gamma_{pqrs}^{*}=\Gamma_{rspq}$ and
+$\sum_p\Gamma_{pqps}=(N-1)\bar\gamma_{qs}$. It is assembled in four steps; the notation is that of \texttt{gccsd\_rdm.py}.
+In this part (and only here) the intermediate $\bar\tau_{ij}^{ab}=t_{ij}^{ab}+2t_i^at_j^b$ is \emph{not} antisymmetrized:
+the antisymmetrization is carried out by the $d$-blocks below, and using the antisymmetrized $\tau$ in these formulas
+changes the result.
+
+\paragraph{Intermediates.}
+\begin{align*}
+  \bar\tau_{ij}^{ab} &=  t_{ij}^{ab} + 2\, t_{i}^{a}\,t_{j}^{b}
+\end{align*}
+\begin{align*}
+  m_{iajb} &=  \sum_{kc}\,\lambda_{ik}^{ac}\,t_{kj}^{cb}
+\end{align*}
+\begin{align*}
+  u^{(1)}_{ia} &=  \sum_{kc}\,\lambda_{k}^{c}\,t_{ki}^{ca}
+\end{align*}
+\begin{align*}
+  u^{(2)}_{cb} &=  \sum_{k}\,\lambda_{k}^{c}\,t_{k}^{b}
+\end{align*}
+\begin{align*}
+  u^{(3)}_{kj} &=  \sum_{c}\,\lambda_{k}^{c}\,t_{j}^{c}
+\end{align*}
+\begin{align*}
+  u^{(4)}_{lj} &=  \sum_{d}\,m_{ldjd}
+\end{align*}
+\begin{align*}
+  u^{(5)}_{db} &=  \sum_{l}\,m_{ldlb}
+\end{align*}
+\begin{align*}
+  u^{(6)}_{ijkl} &= \tfrac{1}{16}\, \sum_{cd}\,\lambda_{kl}^{cd}\,\bar\tau_{ij}^{cd}
+\end{align*}
+\begin{align*}
+  u^{(7)}_{ij} &= \tfrac{1}{4}\, \sum_{c}\,m_{icjc}
+\end{align*}
+\begin{align*}
+  u^{(8)}_{ab} &= \tfrac{1}{4}\, \sum_{k}\,m_{kakb}
+\end{align*}
+
+\paragraph{$g$-blocks.} The $oovv$, $ovvv$ and $ooov$ blocks are complex conjugated before the last (unconjugated) term of
+the last two is added:
+\begin{align*}
+  g^{\rm oovv}_{ijab} &= \Big[\tfrac{1}{4}\, \overline{\lambda_{ij}^{ab}} + \tfrac{1}{4}\, \bar\tau_{ij}^{ab} \notag\\
+  & \quad +  u^{(1)}_{ia}\,t_{j}^{b} + \tfrac{1}{2}\, \sum_{c}\,u^{(2)}_{cb}\,t_{ij}^{ca} \notag\\
+  & \quad + \tfrac{1}{2}\, \sum_{k}\,\bar\tau_{ki}^{ab}\,u^{(3)}_{kj} - \tfrac{1}{4}\, \sum_{l}\,u^{(4)}_{lj}\,\bar\tau_{li}^{ba} \notag\\
+  & \quad - \tfrac{1}{4}\, \sum_{d}\,u^{(5)}_{db}\,\bar\tau_{ji}^{da} - \tfrac{1}{2}\, \sum_{ld}\,m_{ldia}\,\bar\tau_{lj}^{bd} \notag\\
+  & \quad +  \sum_{kl}\,u^{(6)}_{ijkl}\,\bar\tau_{kl}^{ab}\Big]^{*}
+\end{align*}
+\begin{align*}
+  g^{\rm vvvv}_{abcd} &= \tfrac{1}{8}\, \sum_{ij}\,\bar\tau_{ij}^{ab}\,\lambda_{ij}^{cd}
+\end{align*}
+\begin{align*}
+  g^{\rm oooo}_{klij} &= \tfrac{1}{8}\, \sum_{ab}\,\lambda_{kl}^{ab}\,\bar\tau_{ij}^{ab}
+\end{align*}
+\begin{align*}
+  g^{\rm ooov}_{jkia} &= \Big[- \tfrac{1}{4}\, \sum_{b}\,\bar\tau_{jk}^{ba}\,\lambda_{i}^{b} +  \sum_{l}\,g^{\rm oooo}_{iljk}\,t_{l}^{a} \notag\\
+  & \quad -  u^{(7)}_{ij}\,t_{k}^{a} + \tfrac{1}{2}\, \sum_{c}\,m_{icja}\,t_{k}^{c}\Big]^{*}\ + \tfrac{1}{4}\, \sum_{b}\,\lambda_{jk}^{ab}\,t_{i}^{b}
+\end{align*}
+\begin{align*}
+  g^{\rm ovvo}_{ibaj} &=  \lambda_{i}^{a}\,t_{j}^{b} +  m_{iajb} \notag\\
+  & \quad -  \sum_{kc}\,\lambda_{ik}^{ac}\,t_{j}^{c}\,t_{k}^{b}
+\end{align*}
+\begin{align*}
+  g^{\rm ovvv}_{iabc} &= \Big[\tfrac{1}{4}\, \sum_{j}\,\lambda_{j}^{a}\,\bar\tau_{ij}^{bc} +  \sum_{d}\,g^{\rm vvvv}_{bcad}\,t_{i}^{d} \notag\\
+  & \quad +  u^{(8)}_{ac}\,t_{i}^{b} + \tfrac{1}{2}\, \sum_{k}\,m_{kaib}\,t_{k}^{c}\Big]^{*}\ + \tfrac{1}{4}\, \sum_{j}\,\lambda_{ij}^{bc}\,t_{j}^{a}
+\end{align*}
+Here $g^{\rm oooo}$ in $g^{\rm ooov}$ is the unconjugated block, and the $g^{\rm ovvo}$ and $g^{\rm vvvv}$ blocks
+enter the $d$-blocks without conjugation.
+
+\paragraph{$d$-blocks.} Antisymmetrizing and symmetrizing the $g$-blocks,
+\begin{align*}
+  d^{\rm ovov}_{iajb} &=  g^{\rm oovv}_{ijab} - g^{\rm oovv}_{ijba} \\
+  d^{\rm vvvv}_{abcd} &=  g^{\rm vvvv}_{acbd} - g^{\rm vvvv}_{acdb} \\
+  d^{\rm oooo}_{ijkl} &=  g^{\rm oooo}_{ikjl} - g^{\rm oooo}_{iklj} \\
+  d^{\rm ovvv}_{iabc} &=  g^{\rm ovvv}_{ibac} - g^{\rm ovvv}_{ibca} \\
+  d^{\rm ooov}_{ijka} &=  g^{\rm ooov}_{ikja} - g^{\rm ooov}_{kija} \\
+  d^{\rm ovvo}_{iabj} &=  g^{\rm ovvo}_{ibaj}
+\end{align*}
+and then
+\begin{align*}
+ d^{\rm ovov}_{iajb}&\leftarrow\tfrac12\big(d^{\rm ovov}_{iajb}+d^{\rm ovov}_{jbia}\big),\\
+ d^{\rm vvvv}_{abcd}&\leftarrow d^{\rm vvvv}_{abcd}+\overline{d^{\rm vvvv}_{badc}},\qquad
+ d^{\rm oooo}_{ijkl}\leftarrow d^{\rm oooo}_{ijkl}+\overline{d^{\rm oooo}_{jilk}},\\
+ d^{\rm ovvo}_{iabj}&\leftarrow\tfrac12\big(d^{\rm ovvo}_{iabj}+\overline{d^{\rm ovvo}_{jbai}}\big).
+\end{align*}
+
+\paragraph{Assembly.} Define the array $\mathcal R_{pqrs}\equiv\Gamma_{qspr}$ blockwise ($i,j,k$ occupied; $a,b,c$ virtual),
+\begin{align*}
+  \mathcal R_{iajb} &= d^{\rm ovov}_{iajb} \\
+  \mathcal R_{aibj} &= \overline{d^{\rm ovov}_{iajb}} \\
+  \mathcal R_{ijab} &= -d^{\rm ovvo}_{ibaj} \\
+  \mathcal R_{abij} &= -d^{\rm ovvo}_{ibaj} \\
+  \mathcal R_{iabj} &= d^{\rm ovvo}_{iabj} \\
+  \mathcal R_{aijb} &= \overline{d^{\rm ovvo}_{iabj}} \\
+  \mathcal R_{abcd} &= d^{\rm vvvv}_{abcd} \\
+  \mathcal R_{ijkl} &= d^{\rm oooo}_{ijkl} \\
+  \mathcal R_{iabc} &= d^{\rm ovvv}_{iabc} \\
+  \mathcal R_{abic} &= d^{\rm ovvv}_{icab} \\
+  \mathcal R_{abci} &= \overline{d^{\rm ovvv}_{icba}} \\
+  \mathcal R_{aibc} &= \overline{d^{\rm ovvv}_{iacb}} \\
+  \mathcal R_{ijka} &= d^{\rm ooov}_{ijka} \\
+  \mathcal R_{iajk} &= d^{\rm ooov}_{jkia} \\
+  \mathcal R_{ijak} &= \overline{d^{\rm ooov}_{jika}} \\
+  \mathcal R_{aijk} &= \overline{d^{\rm ooov}_{kjia}}
+\end{align*}
+where the block of $\mathcal R$ is selected by the occupied/virtual character of $p,q,r,s$ in that order.
+The correlation part of the one-particle matrix, $\bar\delta_{pq}\equiv\bar\gamma_{qp}-\delta_{pq}n_p$ (with $n_p=1$ for
+occupied $p$), is then added for every occupied $i$,
+\begin{equation}
+\mathcal R_{ii\,pq}\mathrel{+}=\bar\delta_{pq},\quad \mathcal R_{pq\,ii}\mathrel{+}=\bar\delta_{pq},\quad
+\mathcal R_{p\,ii\,q}\mathrel{-}=\bar\delta_{pq},\quad \mathcal R_{i\,pq\,i}\mathrel{-}=\bar\delta_{qp},
+\end{equation}
+followed by the mean-field part, $\mathcal R_{iijj}\mathrel{+}=1$ and $\mathcal R_{ijji}\mathrel{-}=1$ for all occupied
+$i,j$, and finally
+\begin{equation}
+\Gamma_{pqrs}=\mathcal R_{rpsq}.
+\end{equation}
+(For real orbitals every conjugation is trivial and $\Gamma$ reduces to the usual 2-RDM of spin-orbital CCSD.)
+
+\subsection{Storage}
+
+Of the $g$/$d$-blocks only $g^{\rm vvvv}$ is $O(v^4)$. To avoid ever storing it, contract it directly with the
+integrals: $\tfrac14\sum\anti{a}{b}{c}{d}\,\Gamma_{abcd}$ with $\Gamma_{abcd}=d^{\rm vvvv}_{cadb}$ and
+$g^{\rm vvvv}_{abcd}=\tfrac18\sum_{ij}\bar\tau_{ij}^{ab}\lambda_{ij}^{cd}$ is evaluated slab by slab exactly like the
+$T$ ladder, $O(o^2v^4)$ time and no $v^4$ memory. Any other use of $\Gamma_{abcd}$ needs it explicitly.
+
+\subsection{Density matrix files (\texttt{CC\_RDM})}
+
+\texttt{src/CC/lambda\_Uccsd.\{h,cpp\}} solves the $\Lambda$ equations above (Jacobi sweeps with DIIS from $\lambda=t$,
+the same convergence criterion as $T$; the $vvvv$ ladder is streamed one slab $\langle c\,d|a\,b\rangle$ at a time, the
+$ovvv$ block $\anti{m}{a}{e}{f}$ is held once) and writes
+\begin{itemize}
+\item \texttt{<input>.dm1}: records $(\texttt{int32}\;p,q;\ \texttt{float64}\;\operatorname{Re},\operatorname{Im})$ with
+ $\bar\gamma_{pq}=\langle a_p^\dagger a_q\rangle$ (Hermitian part), all $p,q$;
+\item \texttt{<input>.dm2}: records $(\texttt{int32}\;p,q,r,s;\ \texttt{float64}\;\operatorname{Re},\operatorname{Im})$ with
+ $\Gamma_{pqrs}=\langle a_p^\dagger a_q^\dagger a_s a_r\rangle$ for $p<q$, $r<s$ only (the remaining elements follow from
+ $\Gamma_{pqrs}=-\Gamma_{qprs}=-\Gamma_{pqsr}$); the energy is
+ $E=\sum_{pq}h_{pq}\bar\gamma_{pq}+\tfrac12\sum_{pqrs}\langle pq|rs\rangle\Gamma_{pqrs}$;
+\end{itemize}
+both ended by an all-zero record. Indices are 1-based and in Kramers-pair order, $(1,2)=(\psi_1,\bar\psi_1)$,
+$(3,4)=(\psi_2,\bar\psi_2),\dots$: X2C and the positive-energy block of the 4-component run are numbered that way
+already, the non-relativistic spin-orbitals are renumbered $\alpha_k\to2k+1$, $\beta_k\to2k+2$. Frozen-core spinors are
+included with their mean-field contributions (they appear only through the one-body and mean-field terms of
+Section~9.4). Elements with $|\Gamma|$ below \texttt{CC\_RDM\_THRESHOLD} are omitted, and the energy recomputed from the
+written elements is printed next to $E_0+E_c$ as a check (the two agree to $10^{-9}$ Eh for the default $10^{-10}$).
+The 2-RDM is produced element by element from the $d$-blocks (never as a dense $n^4$ array); only the all-virtual
+block is formed slab by slab from $\bar\tau$ and $\lambda$. The densities are unrelaxed: no orbital response is included.
+
+\subsection{Numerical check}
+\label{sec:lambda-check}
+
+PySCF~2.14 (\texttt{GCCSD}) is the reference. All checks use complex integrals: a Hartree--Fock reference of LiH is rotated
+inside the occupied and virtual spaces by random unitaries $e^{A}$, $A=-A^\dagger$ complex (and, in a second set, with a
+small complex occupied--virtual mixing so that $f_{ov}\neq0$ and $E_c$ acquires a small imaginary part).
+\begin{itemize}
+\item The equations above, evaluated from the same data, reproduce PySCF's intermediates and one full $\Lambda$ update
+ to $10^{-15}$, and the $d$-blocks and $\mathcal R$ array to $10^{-16}$.
+\item $\partial\mathcal L/\partial t_\mu$ at PySCF's converged $(t,\lambda)$ vanishes to $3\times10^{-12}$ for all singles and
+ all antisymmetry-unique doubles.
+\item Central finite differences of $\operatorname{Re}E_{\rm CC}$ (amplitudes re-solved) with respect to a Hermitian
+ perturbation of $h$ and of the antisymmetrized integrals equal $\sum h'_{pq}\bar\gamma_{pq}$ and
+ $\tfrac14\sum\anti{p}{q}{r}{s}'\Gamma_{pqrs}$ to $10^{-8}$.
+\item $\sum h\bar\gamma+\tfrac14\sum\anti{p}{q}{r}{s}\Gamma_{pqrs}=\operatorname{Re}(E_0+E_c)$ to $10^{-14}$.
+\end{itemize}
+
+\section{Implementation (\texttt{src/CC/Uccsd.\{h,cpp\}})}
+\label{sec:impl}
+
+The code is a transcription of Section~4 with two reorganizations that do not change the equations. Every
+contraction is a two-operand einsum evaluated as one \texttt{zgemm}.
+
+\begin{itemize}
+\item \textbf{No stored $\langle ma\Vert ef\rangle$ or $\langle ab\Vert ef\rangle$ blocks.} The integrals are
+ supplied as a Coulomb factorization $(pq|rs)=\sum_P \mathrm{bra}_P(p,q)\,\mathrm{ket}_P(r,s)$ (RI: bra = ket = $B_P$;
+ Cholesky: $\mathrm{bra}_L(a,c)=V_L(c,a)$, $\mathrm{ket}_L(b,d)=V_L^*(b,d)$), and one slab with a fixed first index,
+ $\langle p\,a|e f\rangle$, is rebuilt by a single \texttt{zgemm} whenever it is needed. A loop over occupied $m$
+ accumulates every term containing $\langle ma\Vert ef\rangle$ ($F_{ae}$, the $T_1$ equation, $W_{mbej}$, the
+ $P(ij)\,t_i^e\langle ab\Vert ej\rangle$ term and the intermediate $Z$ below); a loop over virtual $a$ applies
+ the particle--particle ladder. Memory is $O(o^2v^2+N_{\rm aux}n^2)$, plus $O(N_{\rm aux}v^2)$ for the cached
+ second factor. For dense integrals the same slabs are read element by element.
+\item \textbf{The ladder is applied as $\sum_{ef}\tau_{ij}^{ef}\langle ab|ef\rangle$.} Because $\tau$ is antisymmetric
+ in $(ef)$, $\tfrac12\sum_{ef}\tau_{ij}^{ef}\anti{a}{b}{e}{f}=\sum_{ef}\tau_{ij}^{ef}\dir{a}{b}{e}{f}$, so no
+ antisymmetrized $vvvv$ slab is formed. The two other pieces of $\tfrac12\sum\tau W_{abef}$ are
+ $-P(ab)\sum_m t_m^b Z_{ijm}^a$ with $Z_{ijm}^a=\tfrac12\sum_{ef}\tau_{ij}^{ef}\anti{a}{m}{e}{f}$, and the
+ $\tau\tau$ term, which is moved into $W_{mnij}$ by doubling its coefficient there
+ ($\tfrac14\to\tfrac12$): $\tfrac12\cdot\tfrac14+\tfrac12\cdot\tfrac14=\tfrac12\cdot\tfrac12$.
+\end{itemize}
+
+Amplitudes are updated by Jacobi sweeps, $t\leftarrow(\mathrm{RHS}-\sigma t)/(D-\sigma)$ with level shift $\sigma$,
+accelerated by DIIS on the antisymmetry-unique amplitudes (real weights, \texttt{Utils/DIIS.h}). The Fock matrix
+is built from the integrals (frozen occupied spinors included), so $f_{ov}\neq0$ and non-canonical orbitals are
+handled. Checked against PySCF 2.14: LiH/6-31G, water/cc-pVDZ with frozen core and CO/cc-pVDZ with frozen core
+(dense and Cholesky agree to $10^{-10}$--$10^{-8}$~Eh with PySCF's RCCSD), and the $c\to\infty$ limit of the
+X2C and 4-component references reproduces the non-relativistic result.
+
+\end{document}
