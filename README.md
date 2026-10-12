@@ -74,17 +74,17 @@ are comments.
 | `HESSIAN_MEAN_FIELD` | bool | `FALSE` | Build and fully diagonalize the dense orbital-rotation Hessian (minimum expected for `NON_REL`/`X2C`, saddle for `C4_SPINOR`). O(n^5)-O(n^6), needs the dense tensor. |
 | `FCIDUMP` | bool | `FALSE` | `NON_RELATIVISTIC` + `FUNCTIONAL` only: write an `FCIDUMP` file of the MO integrals for an external CI/DMRG/FCI code. |
 | `AIMPAC` | bool | `FALSE` | Write AIMPAC WFN files over Cartesian Gaussian primitives: `hf_<input>_<nonrel\|x2c\|4c>.wfn` for the HF/DHF density, plus `<input>.wfn` (and `<input>_neg.wfn` for `FULL_OPTIMIZATION_4C_NEG`) for the `FUNCTIONAL` natural orbitals. For `C4_SPINOR`, Large/Small are diagonalized independently and the output lists both MO ranges. |
-| `UCCSD` | bool | `FALSE` | Run coupled cluster singles and doubles for complex spin-orbitals/spinors (`src/CC/Uccsd.h`, derivation in `doc/uccsd.tex`) right after each `NON_RELATIVISTIC`/`X2C`/`C4_SPINOR` SCF, with the run's own two-electron representation (`USE_RI` by default, `CHOLESKY`, or dense); `C4_SPINOR` correlates the positive-energy spinors only. |
-| `CC_RDM` | bool | `FALSE` | Requires `UCCSD TRUE`. After the amplitudes converge, solve the Lambda equations and write the 1-/2-RDM of the complex spin-orbital CCSD (`src/CC/lambda_Uccsd.h`, `doc/uccsd.tex` Sec. 9). Molecular basis: `<input>_MO.dm1` / `_MO.dm2` (binary records `int32 p q [r s], float64 re im`, 1-based, Kramers-pair order, `p<q`, `r<s` for the 2-RDM, ended by an all-zero record, frozen core included). Gaussian primitive basis (`CC_RDM_GAUSSIAN`): `<input>_GAU.basis` / `_GAU.dm1` / `_GAU.dm2` in the formats of `RHO2_OPS` (`src/CC/gauss_rdm.h`). With several methods the name becomes `<input>_nonrel/_x2c/_4c_MO...`. See `examples/lih_uccsd_rdm.inp` and `examples/read_cc_rdm.py`. |
-| `CC_RDM_GAUSSIAN` | bool | `TRUE` | With `CC_RDM`, also write the densities in the basis of the Cartesian Gaussian primitives (Large primitives, plus the raw RKB Small ones for `C4_SPINOR`), summed over spin/Large/Small components, real and symmetrized. |
-| `CC_RDM_MAXMEM` | float | `4` | Memory budget (GB) of the block buffers of the transform to the primitive basis (the transform is blocked over rows of primitives; more sweeps over the MO-basis 2-RDM when small). |
-| `CC_RDM_CNORM1` | bool | `FALSE` | `TRUE`: the primitive-basis 2-RDM contains the primitive normalization (`RHO2_OPS` keyword `$CNORM1`); `FALSE`: normalized primitives (the `RHO2_OPS` default). |
-| `CC_RDM_THRESHOLD` | float | `1e-10` | Density-matrix elements with a smaller absolute value are not written. |
-| `CC_FROZEN_CORE` | int | `0` | Number of lowest occupied spinors (even) kept frozen in the `UCCSD`. |
-| `CC_MAX_ITERATIONS` | int | `100` | Maximum `UCCSD` amplitude iterations. |
-| `CC_CONVERGENCE` | float | `1e-8` | `UCCSD` threshold on the correlation-energy change; the amplitude change must also be below 100 times it. |
-| `CC_DIIS_SIZE` | int | `8` | Amplitude vectors kept by the `UCCSD` DIIS (< 2 disables it). |
-| `CC_LEVEL_SHIFT` | float | `0` | Level shift (Hartree) on the `UCCSD` amplitude denominators. |
+| `UCCSD` | bool | `FALSE` | Complex spin-orbital CCSD (`src/CC`, `doc/uccsd.tex`) right after the `NON_RELATIVISTIC`/`X2C`/`C4_SPINOR` SCF, with the run's integrals (RI by default, Cholesky or dense); 4C correlates positive-energy spinors only. |
+| `CC_RDM` | bool | `FALSE` | Needs `UCCSD`; solves the Lambda equations and writes the 1-/2-RDM to `<input>_MO.dm1/.dm2` (molecular basis) and, by default, `<input>_GAU.basis/.dm1/.dm2` (Gaussian primitives, `RHO2_OPS` formats); formats in `doc/uccsd.tex`, example in `examples/lih_uccsd_rdm.inp`. |
+| `CC_RDM_GAUSSIAN` | bool | `TRUE` | Also write the `_GAU` files. |
+| `CC_RDM_MAXMEM` | float | `4` | Memory budget (GB) of the transform to primitives. |
+| `CC_RDM_CNORM1` | bool | `FALSE` | Put the primitive normalization into the 2-RDM (`RHO2_OPS` `$CNORM1`). |
+| `CC_RDM_THRESHOLD` | float | `1e-10` | Elements below this are not written. |
+| `CC_FROZEN_CORE` | int | `0` | Frozen occupied spinors (even number). |
+| `CC_MAX_ITERATIONS` | int | `100` | Maximum amplitude/Lambda iterations. |
+| `CC_CONVERGENCE` | float | `1e-8` | Energy-change threshold (amplitude change: 100x). |
+| `CC_DIIS_SIZE` | int | `8` | DIIS vectors (< 2 disables). |
+| `CC_LEVEL_SHIFT` | float | `0` | Denominator level shift (Hartree). |
 | `SPEED_OF_LIGHT` | double (> 0) | CODATA value | Override the speed of light (a.u.), to probe the nonrelativistic limit or exaggerate relativistic effects. |
 | `MIXING` | double, `(0,1]` | `0.4` | Linear density-mixing weight, used only with `DIIS FALSE`. |
 | `DIIS` | bool | `TRUE` | Pulay DIIS instead of linear mixing in every SCF loop. |
@@ -153,8 +153,8 @@ quietly becomes `FALSE` instead:
 | `USE_RI TRUE` + `DEBUG`/`HESSIAN_MEAN_FIELD TRUE` | Both need an actual dense two-electron tensor, which `USE_RI` never builds. |
 | `USE_RI TRUE` + an explicit `SCF_DIRECT_4C TRUE` | Two different, mutually exclusive SCF kernels for the same thing -- ambiguous. |
 | `USE_RI TRUE` + an explicit `FUNCTIONAL_DIRECT_4C TRUE` | Two different, mutually exclusive strategies for the same ADAM orbital-rotation sub-loop -- ambiguous. |
-| `CC_RDM TRUE` without `UCCSD TRUE` | The densities are built from the `UCCSD` amplitudes. |
-| `UCCSD TRUE` without any of `NON_RELATIVISTIC`/`X2C`/`C4_SPINOR TRUE`, or + `READ_RESTART TRUE` | It runs on a freshly converged SCF reference. |
+| `CC_RDM TRUE` without `UCCSD TRUE` | Built from the UCCSD amplitudes. |
+| `UCCSD TRUE` without `NON_RELATIVISTIC`/`X2C`/`C4_SPINOR`, or + `READ_RESTART` | Needs a freshly converged SCF reference. |
 | `FCIDUMP TRUE` without `NON_RELATIVISTIC TRUE`, or without `FUNCTIONAL` | Only NON_REL is supported; needs an RDMFT orbital order to write. |
 | `READ_OCCUPANCIES TRUE` without `FUNCTIONAL` | Nothing to read occupations into. |
 | `FUNCTIONAL_DIRECT_4C TRUE` without `C4_SPINOR TRUE`, `FUNCTIONAL`, or `FULL_OPTIMIZATION TRUE` | Nothing for it to change -- it only replaces `C4_SPINOR`'s own ADAM orbital-rotation sub-loop. |
@@ -170,8 +170,8 @@ harmless no-ops, not errors):
 | `USE_RI TRUE` + `READ_RESTART TRUE` | **Full effect** -- the `READ_RESTART` branch builds its own aux basis/3-center tensor fresh at the current geometry (shared with the ordinary SCF path's own cache when both run in the same process) and feeds it through the same `RiNonRelSpinMoEri`/`RiMoEri`/`UkbDirectSource` machinery the non-restart path uses; mutually exclusive with `SCF_DIRECT_4C TRUE` exactly as elsewhere. |
 | `USE_RI TRUE` + `FULL_OPTIMIZATION_4C_NEG TRUE` | **Full effect** -- the min-max stage's untrimmed, full-RKB-space `RiMoEri` is already built by the ordinary ground-state path (no separate rebuild needed, unlike `CholeskyEri`); just reused. |
 | `USE_RI TRUE` + `ORBITAL_OPTIMIZER NEO`/`ADAM_NEO` | **Full effect** -- all three methods (`NON_RELATIVISTIC`/`X2C`/`C4_SPINOR`) share a sigma-vector (matrix-free) Hessian-vector product derived directly against the RI 3-center tensor; see project memory `project-ri-hessian-neo-design`. |
-| `UCCSD TRUE` + `USE_RI`/`CHOLESKY`/dense | **Full effect** -- the `ovvv`/`vvvv` blocks are never stored; RI and Cholesky vectors are contracted with ZGEMM, dense integrals are read element by element (slow for large bases). |
-| `UCCSD TRUE` + `FUNCTIONAL` | Independent: the CC runs first, on the SCF reference. |
+| `UCCSD TRUE` + `USE_RI`/`CHOLESKY`/dense | **Full effect** -- `ovvv`/`vvvv` are never stored; dense integrals are slow for large bases. |
+| `UCCSD TRUE` + `FUNCTIONAL` | Independent: the CC runs first. |
 | `FUNCTIONAL_POS_CHO_4C TRUE` + `CHOLESKY FALSE` | No-op -- the dense path never touches `RkbCholesky` anyway. |
 | `FUNCTIONAL_POS_CHO_4C TRUE` + `CHOLESKY TRUE` + `SCF_DIRECT_4C FALSE` (no restart) | No-op -- `rkb_cholesky` is already needed by the ordinary Cholesky SCF loop; reused, not rebuilt. |
 | `FUNCTIONAL_POS_CHO_4C TRUE` + `CHOLESKY TRUE` + `SCF_DIRECT_4C TRUE` | **Full effect** -- `RkbCholesky`'s AO-basis vectors are never built at all for the whole run. The intended use case. |
