@@ -2604,6 +2604,11 @@ std::string scfAccelerationLabel(const rerdmft::Input& input) {
   return label.str();
 }
 
+// AIMPAC WFN of the CC density (defined after writeC4Aimpac): cc_<input>_<level>.wfn.
+void writeCcAimpac(const rerdmft::Input& input, const std::string& input_path, const std::string& level,
+                   const rerdmft::CartesianSpinors& cs, const rerdmft::Matrix<std::complex<double>>& gamma1,
+                   double total_energy, std::ostream& log);
+
 // UCCSD keyword: coupled cluster singles and doubles on the converged HF/DHF reference (CC/Uccsd.h). `eri` is whichever
 // MO-basis two-electron representation the run holds (RI / Cholesky vectors / unique elements); the report goes to `log`.
 template <typename T, typename Eri>
@@ -2636,7 +2641,13 @@ void runUccsdStage(const std::string& label, const rerdmft::Input& input, const 
   rdm.threshold = input.cc_rdm_threshold();
   rdm.dm1_path = base + "_MO.dm1";
   rdm.dm2_path = base + "_MO.dm2";
-  if (gauss != nullptr) {
+  if (input.aimpac() && gauss != nullptr) {
+    rdm.on_gamma1 = [&input, &input_path, &method_tag, gauss](const rerdmft::Matrix<std::complex<double>>& g1, double e_total,
+                                                              std::ostream& os) {
+      writeCcAimpac(input, input_path, method_tag, *gauss, g1, e_total, os);
+    };
+  }
+  if (gauss != nullptr && input.cc_rdm_gaussian()) {
     rdm.gauss = gauss;
     rdm.gauss_settings.basis_path = base + "_GAU.basis";
     rdm.gauss_settings.dm1_path = base + "_GAU.dm1";
@@ -3119,6 +3130,16 @@ std::string wfnOutputPath(const std::string& input_path, bool is_neg, const std:
   return dir + name + (is_neg ? "_neg.wfn" : ".wfn");
 }
 
+// "foo.inp" -> "cc_foo_<level>.wfn" (level: nonrel / x2c / 4c), the AIMPAC file of the UCCSD density.
+std::string ccWfnOutputPath(const std::string& input_path, const std::string& level) {
+  const auto slash = input_path.find_last_of("/\\");
+  const std::string dir = (slash == std::string::npos) ? std::string() : input_path.substr(0, slash + 1);
+  std::string name = (slash == std::string::npos) ? input_path : input_path.substr(slash + 1);
+  const auto dot = name.find_last_of('.');
+  if (dot != std::string::npos && dot != 0) name = name.substr(0, dot);
+  return dir + "cc_" + name + "_" + level + ".wfn";
+}
+
 // A RestartCapture standing for the converged HF/DHF 1-RDM itself (AIMPAC's HF/DHF files): identity rotation,
 // occupation 1 for `n_occupied` consecutive columns starting at `first_occupied`, 0 elsewhere, `n_columns` long.
 rerdmft::RestartCapture hartreeFockAimpacCapture(std::size_t n_columns, std::size_t first_occupied,
@@ -3359,6 +3380,74 @@ void writeC4Aimpac(const rerdmft::Input& input, const std::string& input_path,
   if (capture_neg.valid) {
     writeOne(capture_neg, wfnOutputPath(input_path, /*is_neg=*/true), "4C_NEG");
   }
+}
+
+// AIMPAC WFN of the CC density (UCCSD + CC_RDM + AIMPAC): "foo.inp" -> "cc_foo_<level>.wfn". gamma1 = <a_p^+ a_q> over the
+// columns of `cs` (all spinors, frozen core included). The density over the Gaussians is rho_c = sum_s conj(C_s) gamma C_s^T per
+// component c (Large / Small, s = alpha, beta); as for the HF files the components are diagonalized independently (no Large-Small
+// cross term in rho(r)) and merged, Large first. Occupations are written as they come, negative ones included.
+void writeCcAimpac(const rerdmft::Input& input, const std::string& input_path, const std::string& level,
+                   const rerdmft::CartesianSpinors& cs, const rerdmft::Matrix<std::complex<double>>& gamma1,
+                   double total_energy, std::ostream& log) {
+  using cplx = std::complex<double>;
+  const std::size_t n = gamma1.rows();
+  const auto componentDensity = [&](const rerdmft::Matrix<cplx>& ca, const rerdmft::Matrix<cplx>& cb) {
+    const std::size_t m = ca.rows();
+    rerdmft::Matrix<cplx> d(m, m, cplx(0.0));
+    for (const rerdmft::Matrix<cplx>* c : {&ca, &cb}) {
+      rerdmft::Matrix<cplx> cc(m, n);  // conj(C)
+      for (std::size_t i = 0; i < m; ++i)
+        for (std::size_t k = 0; k < n; ++k) cc(i, k) = std::conj((*c)(i, k));
+      rerdmft::Matrix<cplx> ct(n, m);  // C^T
+      for (std::size_t i = 0; i < m; ++i)
+        for (std::size_t k = 0; k < n; ++k) ct(k, i) = (*c)(i, k);
+      const rerdmft::Matrix<cplx> part = cc * gamma1 * ct;
+      for (std::size_t i = 0; i < m; ++i)
+        for (std::size_t j = 0; j < m; ++j) d(i, j) += part(i, j);
+    }
+    return d;
+  };
+  const std::size_t n_large_cart = cs.large_basis.size(), n_small_cart = cs.small_basis.size();
+  std::vector<rerdmft::BasisFunction> combined_basis = cs.large_basis;
+  combined_basis.insert(combined_basis.end(), cs.small_basis.begin(), cs.small_basis.end());
+  const auto pad = [&](std::vector<rerdmft::NaturalOrbital> orbs, std::size_t offset) {
+    for (auto& orb : orbs) {
+      std::vector<double> padded(n_large_cart + n_small_cart, 0.0);
+      for (std::size_t i = 0; i < orb.coefficients.size(); ++i) padded[offset + i] = orb.coefficients[i];
+      orb.coefficients = std::move(padded);
+    }
+    return orbs;
+  };
+  const auto d_large = componentDensity(cs.large_alpha, cs.large_beta);
+  auto orbitals = pad(rerdmft::naturalOrbitalsFromDensity(rerdmft::overlapMatrix(cs.large_basis), d_large, input.x_lin_dep_thrs_l()), 0);
+  std::size_t n_large_mo = 0, n_small_mo = 0;
+  double n_electrons_wfn = 0.0, min_occ = 0.0;
+  const auto account = [&](const std::vector<rerdmft::NaturalOrbital>& orbs, std::size_t& kept) {
+    for (const auto& o : orbs) {
+      if (std::abs(o.occupation) < rerdmft::kAimpacOccPrintThreshold) continue;
+      ++kept;
+      n_electrons_wfn += o.occupation;
+      min_occ = std::min(min_occ, o.occupation);
+    }
+  };
+  account(orbitals, n_large_mo);
+  if (n_small_cart > 0) {
+    const auto d_small = componentDensity(cs.small_alpha, cs.small_beta);
+    const auto small_orbitals =
+        pad(rerdmft::naturalOrbitalsFromDensity(rerdmft::overlapMatrix(cs.small_basis), d_small, input.x_lin_dep_thrs_s()), n_large_cart);
+    account(small_orbitals, n_small_mo);
+    orbitals.insert(orbitals.end(), small_orbitals.begin(), small_orbitals.end());
+  }
+  const std::string path = ccWfnOutputPath(input_path, level);
+  rerdmft::writeAimpacWfn(path, "RERDMFT " + level + " UCCSD WFN FILE", input.geometry(), combined_basis, orbitals,
+                           total_energy, 0.0, rerdmft::kAimpacOccPrintThreshold, /*keep_input_order=*/n_small_cart > 0);
+  log << "  AIMPAC WFN file written (UCCSD density, " << level << "): " << path << "\n";
+  if (n_small_cart > 0) {
+    log << "    Large-component orbitals: MO 1-" << n_large_mo << ", Small-component orbitals: MO " << n_large_mo + 1 << "-"
+        << n_large_mo + n_small_mo << "\n";
+  }
+  log << "    sum of the written occupations = " << std::fixed << std::setprecision(8) << n_electrons_wfn << " (N = " << input.n_electrons()
+      << "), most negative occupation " << std::scientific << std::setprecision(2) << min_occ << "\n";
 }
 
 // Writes the binary RESTART file (Utils/Restart.h) of one method ("NON_REL" | "X2C") from the
@@ -4641,7 +4730,7 @@ int main(int argc, char** argv) {
                                                        static_cast<std::size_t>(input.cc_frozen_core()));
         const double e_scf = nonrel_hf_result.total_energy;
         std::optional<rerdmft::CartesianSpinors> cs_gau;
-        if (input.cc_rdm() && input.cc_rdm_gaussian())
+        if (input.cc_rdm() && (input.cc_rdm_gaussian() || input.aimpac()))
           cs_gau = buildNonRelCartesianSpinors(large_basis.functions(), nonrel_hf_result.c_matrix, input.cartesian(), nonrel_transform,
                                                rerdmft::fileOrderGlobals(cc_spaces));
         const rerdmft::CartesianSpinors* cs_ptr = cs_gau ? &*cs_gau : nullptr;
@@ -5061,7 +5150,7 @@ int main(int argc, char** argv) {
                                                            static_cast<std::size_t>(input.cc_frozen_core()));
         const double e_scf = x2c_hf_result.total_energy;
         std::optional<rerdmft::CartesianSpinors> cs_gau;
-        if (input.cc_rdm() && input.cc_rdm_gaussian())
+        if (input.cc_rdm() && (input.cc_rdm_gaussian() || input.aimpac()))
           cs_gau = buildX2cCartesianSpinors(large_basis.functions(), large_transform_final, x2c_hf_result.c_matrix,
                                             rerdmft::fileOrderGlobals(cc_spaces));
         const rerdmft::CartesianSpinors* cs_ptr = cs_gau ? &*cs_gau : nullptr;
@@ -5553,7 +5642,7 @@ int main(int argc, char** argv) {
                                                            static_cast<std::size_t>(input.cc_frozen_core()));
         const double e_scf = dhf_result.total_energy;
         std::optional<rerdmft::CartesianSpinors> cs_gau;
-        if (input.cc_rdm() && input.cc_rdm_gaussian())
+        if (input.cc_rdm() && (input.cc_rdm_gaussian() || input.aimpac()))
           cs_gau = buildC4CartesianSpinors(large_basis.functions(), small_basis.functions(), large_transform_final, rkb_coefficients,
                                            dhf_result.c_dhf, rerdmft::fileOrderGlobals(cc_spaces));
         const rerdmft::CartesianSpinors* cs_ptr = cs_gau ? &*cs_gau : nullptr;

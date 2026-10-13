@@ -2,6 +2,7 @@
 #define RERDMFT_CC_LAMBDA_UCCSD_H
 
 #include <cstddef>
+#include <functional>
 #include <iomanip>
 #include <ostream>
 #include <string>
@@ -25,6 +26,9 @@ struct CcRdmSettings {
   std::string dm1_path, dm2_path;
   const CartesianSpinors* gauss = nullptr;  // when set, the density matrices are also written in the Gaussian primitive basis
   GaussRdmSettings gauss_settings;
+  // Called with the converged 1-RDM gamma_pq = <a_p^+ a_q> over the output spinors (the order of the density matrix files)
+  // and the CCSD total energy, once the molecular-basis files are written (main.cpp's AIMPAC WFN of the CC density).
+  std::function<void(const Matrix<CcScalar>&, double, std::ostream&)> on_gamma1;
   double reference_total_energy = 0.0;  // SCF total energy (E_0 + nuclear repulsion), to report the total energy from the densities
 };
 

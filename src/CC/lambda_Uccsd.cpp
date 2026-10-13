@@ -731,6 +731,17 @@ CcRdmResult runUccsdRdm(const Matrix<CcScalar>& h_mo, const CcIntegrals& ints, c
       << " Eh;  difference " << std::scientific << std::setprecision(2) << result.e_elec_rdm - result.e_elec_cc << "\n";
   log << "  CC_RDM (molecular basis) total time " << std::fixed << std::setprecision(1) << elapsed() << " s\n";
 
+  if (settings.on_gamma1) {
+    Matrix<cplx> g1(n_out, n_out);
+    for (std::size_t p = 0; p < n_out; ++p)
+      for (std::size_t q = 0; q < n_out; ++q) g1(p, q) = gammaBar(p, q);
+    try {
+      settings.on_gamma1(g1, settings.reference_total_energy + amps.e_corr, log);
+    } catch (const std::exception& ex) {
+      log << "  AIMPAC WFN of the CC density FAILED: " << ex.what() << "\n";
+    }
+  }
+
   // ---- the same densities in the basis of the Gaussian primitives (RHO2_OPS format) ----
   if (settings.gauss != nullptr) {
     Matrix<cplx> g1(n_out, n_out);
