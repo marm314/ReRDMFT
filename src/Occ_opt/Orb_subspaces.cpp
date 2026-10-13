@@ -130,8 +130,12 @@ OrbitalSubspaceTable buildOrbitalSubspaces(const std::vector<std::size_t>& pair_
         " DISJOINT unoccupied orbital pairs in total (every subspace's virtual pairs are "
         "separate from every other's), but this basis only has " +
         std::to_string(unoccupied_pairs.size()) +
-        " unoccupied pair(s) available -- reduce PNOF_SUBSPACES/PNOF_COUPLING or use a larger "
-        "basis");
+        " unoccupied pair(s) available (maximum PNOF_COUPLING with PNOF_SUBSPACES=" +
+        std::to_string(pnof_subspaces) + " is " +
+        std::to_string(1 + unoccupied_pairs.size() / n_subspaces) +
+        "; maximum PNOF_SUBSPACES with PNOF_COUPLING=" + std::to_string(pnof_coupling) + " is " +
+        std::to_string(unoccupied_pairs.size() / n_virtual_pairs_each) +
+        ") -- reduce PNOF_SUBSPACES/PNOF_COUPLING or use a larger basis");
   }
 
   OrbitalSubspaceTable table;
