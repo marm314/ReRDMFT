@@ -17,6 +17,8 @@ UccsdResult runUccsdReport(const std::string& label, const Matrix<T>& h_mo, cons
   log << "\n=== UCCSD (" << label << ") ===\n";
   const UccsdResult result = runUccsd(h, *source, spaces.occ_frozen, spaces.occ_active, spaces.vir, settings, log);
   log << std::fixed << std::setprecision(10);
+  log << "  UMP2 correlation energy  : " << result.e_mp2 << " Eh\n";
+  log << "  UMP2 total energy        : " << scf_total_energy + result.e_mp2 << " Eh\n";
   log << "  UCCSD correlation energy : " << result.e_corr << " Eh" << (result.converged ? "" : "   (NOT CONVERGED)") << "\n";
   log << "  SCF total energy         : " << scf_total_energy << " Eh\n";
   log << "  UCCSD total energy       : " << scf_total_energy + result.e_corr << " Eh\n";

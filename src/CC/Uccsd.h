@@ -124,7 +124,7 @@ struct UccsdSettings {
 struct UccsdResult {
   bool converged = false;
   int iterations = 0;
-  double e_mp2 = 0.0;       // first-iteration (MP2-like) correlation energy
+  double e_mp2 = 0.0;       // UMP2 correlation energy (T1 = 0, first-order T2)
   double e_corr = 0.0;      // Re of the CCSD correlation energy
   double e_corr_imag = 0.0; // Im (should vanish)
   double t1_diagnostic = 0.0;

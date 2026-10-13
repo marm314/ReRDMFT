@@ -411,7 +411,6 @@ UccsdResult runUccsd(const Matrix<CcScalar>& h_mo, const CcIntegrals& ints, cons
   for (std::size_t k = 0; k < t1.size(); ++k) t1.d[k] = f_vo_T.d[k] / D1.d[k];
   for (std::size_t k = 0; k < t2.size(); ++k) t2.d[k] = g_vvoo_c.d[k] / D2.d[k];
   result.e_mp2 = energy(Tensor({o, v}), t2).real();
-  log << "  MP2-like correlation energy (T1 = 0): " << std::fixed << std::setprecision(10) << result.e_mp2 << " Eh\n";
 
   // DIIS on the antisymmetry-unique amplitudes.
   std::vector<std::pair<std::size_t, std::size_t>> pij, pab;
