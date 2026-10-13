@@ -3999,9 +3999,13 @@ int main(int argc, char** argv) {
       // dimension keeps matching exactly, no matter how much further this safety net reduces the
       // large dimension -- see large_spherical's own construction above for why that ordering works.
       large_transform_final = large_spherical.transform;
+      // s_large_cart is already spherical-transformed for CARTESIAN FALSE (above): the relativistic
+      // transforms below need the raw Cartesian overlap, so rebuild it rather than transform twice.
+      const rerdmft::Matrix<double> s_large_raw_cart =
+          input.cartesian() ? s_large_cart : rerdmft::overlapMatrix(large_basis.functions());
       {
         const rerdmft::Matrix<double> s_large_spherical_only =
-            rerdmft::transformToSpherical(s_large_cart, large_spherical.transform);
+            rerdmft::transformToSpherical(s_large_raw_cart, large_spherical.transform);
         rerdmft::RankReductionReport large_lowdin_report;
         const rerdmft::Matrix<double> large_lowdin =
             rerdmft::canonicalOrthogonalize(s_large_spherical_only, input.x_lin_dep_thrs_l(), &large_lowdin_report);
@@ -4016,7 +4020,7 @@ int main(int argc, char** argv) {
         }
       }
 
-      s_large = rerdmft::transformToSpherical(s_large_cart, large_transform_final);
+      s_large = rerdmft::transformToSpherical(s_large_raw_cart, large_transform_final);
       x_large = rerdmft::inverseSqrt(s_large);
       {
         const rerdmft::Matrix<std::complex<double>> v_sph = rerdmft::sphericalLargeEmbedding(
