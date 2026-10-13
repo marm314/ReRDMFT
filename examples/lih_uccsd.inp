@@ -6,6 +6,9 @@
 # Reference (PySCF 2.14 RHF + CCSD, same geometry/basis): with USE_RI FALSE the NON_REL correlation energy is
 # -0.0189951968 Eh (PySCF -0.0189951969); with the default USE_RI it is -0.0189847241 Eh (the RI error of the
 # SCF + CC together). X2C / C4_SPINOR at SPEED_OF_LIGHT 100000 reproduce the NON_REL value to 1e-9 Eh.
+# The UMP2 energy printed before the UCCSD energies is validated the same way: with USE_RI FALSE the NON_REL UMP2
+# correlation energy is -0.0126020085 Eh (PySCF MP2 -0.0126020062); X2C / C4_SPINOR at SPEED_OF_LIGHT 100000 give
+# -0.0126020085 / -0.0126019791 Eh.
 NELEC 4
 BASIS lih-6-31g.gbs
 NON_RELATIVISTIC TRUE
