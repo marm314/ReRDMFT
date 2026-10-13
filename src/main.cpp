@@ -175,6 +175,36 @@ void logTiming(const std::string& label, std::chrono::steady_clock::time_point s
   since = now_steady;
 }
 
+// Collects every test-issue line ([FAIL], [NEEDS RE-PAIRING], WARNING) and every fix applied for one (the Kramers pairing correction report) that passes through std::cout, so
+// printTimings can list them all in an Issues section after the Timings. A tee on the stream instead of a call
+// at each check keeps every present and future check covered; output itself is forwarded unchanged.
+class IssueTee : public std::streambuf {
+ public:
+  explicit IssueTee(std::streambuf* target) : target_(target) {}
+  const std::vector<std::string>& issues() const { return issues_; }
+ protected:
+  int_type overflow(int_type c) override {
+    if (traits_type::eq_int_type(c, traits_type::eof())) return traits_type::not_eof(c);
+    if (c == '\n') {
+      if (line_.find("[FAIL]") != std::string::npos || line_.find("[NEEDS RE-PAIRING]") != std::string::npos ||
+          line_.find("WARNING") != std::string::npos || line_.find("pairing correction (exact re-pairing") != std::string::npos) {
+        const auto first = line_.find_first_not_of(' ');
+        issues_.push_back(line_.substr(first == std::string::npos ? 0 : first));
+      }
+      line_.clear();
+    } else {
+      line_.push_back(static_cast<char>(c));
+    }
+    return target_->sputc(static_cast<char>(c));
+  }
+  int sync() override { return target_->pubsync(); }
+ private:
+  std::streambuf* target_;
+  std::string line_;
+  std::vector<std::string> issues_;
+};
+IssueTee* g_issue_tee = nullptr;
+
 // Prints every checkpoint recorded by logTiming, in order, as one summary
 // block. Called at the very end of a run (success or failure) instead of
 // each logTiming call printing as it happens.
@@ -187,6 +217,11 @@ void printTimings(const std::vector<TimingRecord>& records) {
                << record.total_seconds << " s total)\n";
   }
   std::cout << std::setprecision(6);
+  if (g_issue_tee != nullptr && !g_issue_tee->issues().empty()) {
+    const std::vector<std::string> issues = g_issue_tee->issues();  // copy: the tee records these prints too
+    std::cout << "\nIssues:\n";
+    for (const auto& issue : issues) std::cout << "  " << issue << "\n";
+  }
 }
 
 // Prints one "  <label>: <value> Hartree" energy summary line with the
@@ -3698,6 +3733,9 @@ void printFarewell() {
 }  // namespace
 
 int main(int argc, char** argv) {
+  IssueTee issue_tee(std::cout.rdbuf());
+  g_issue_tee = &issue_tee;
+  std::cout.rdbuf(&issue_tee);
   // Line-buffered stdout (whatever is printed while working shows up at once, also when redirected to a file), and
   // the anchor of the live progress clock (Utils/Progress.h; progress lines go to the file name.live).
   std::setvbuf(stdout, nullptr, _IOLBF, 0);
