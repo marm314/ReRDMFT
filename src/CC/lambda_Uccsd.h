@@ -44,6 +44,9 @@ struct CcRdmResult {
   double e_elec_cc = 0.0;            // Re(E_0 + E_c) of the converged amplitudes
   double e_total_rdm = 0.0;          // e_elec_rdm + nuclear repulsion (= reference_total_energy - E_0)
   double trace_dm2 = 0.0;            // sum_pq Gamma_pqpq (= N(N-1))
+  double e_onebody = 0.0;            // Re sum h gamma (h-onebody)
+  double nuclear_repulsion = 0.0;    // reference_total_energy - E_0
+  double n_electrons = 0.0;          // number of occupied reference spinors (frozen core included)
 };
 
 // One-particle density gamma_pq = <a_p^+ a_q> (Hermitian part) written as records (int32 p, int32 q, float64 re, float64 im) and
@@ -53,6 +56,17 @@ struct CcRdmResult {
 // 1/2 sum <pq|rs> Gamma_pqrs.
 CcRdmResult runUccsdRdm(const Matrix<CcScalar>& h_mo, const CcIntegrals& ints, const CcOrbitalSpaces& spaces,
                         const UccsdResult& amplitudes, const CcRdmSettings& settings, std::ostream& log);
+
+// h-onebody / Vee / N-N breakdown of the UCCSD total energy from the Lambda (relaxed) 1-/2-RDM: h-onebody = Re Tr(h gamma),
+// Vee = E_total - h-onebody - N-N (it agrees with the two-body part of the 2-RDM energy).
+inline void printCcEnergyDecomposition(std::ostream& log, const CcRdmResult& rdm, double total_energy) {
+  const double exact = 0.5 * rdm.n_electrons * (rdm.n_electrons - 1.0);
+  log << std::setprecision(10) << "    h-onebody: " << rdm.e_onebody << " Hartree\n"
+      << "    Vee:       " << total_energy - rdm.e_onebody - rdm.nuclear_repulsion << " Hartree\n"
+      << "    N-N:       " << rdm.nuclear_repulsion << " Hartree\n"
+      << "    Tr(2-RDM): " << 0.5 * rdm.trace_dm2 << "  (exact N(N-1)/2 = " << exact << ", difference " << std::scientific
+      << std::setprecision(2) << 0.5 * rdm.trace_dm2 - exact << std::fixed << std::setprecision(10) << ")\n";
+}
 
 // UCCSD followed by the Lambda equations and the density matrix files (main.cpp's CC_RDM path); same report as
 // runUccsdReport plus the CC_RDM block.
@@ -67,13 +81,16 @@ UccsdResult runUccsdRdmReport(const std::string& label, const Matrix<T>& h_mo, c
   log << "\n=== UCCSD (" << label << ") ===\n";
   const UccsdResult result = runUccsd(h, *source, spaces.occ_frozen, spaces.occ_active, spaces.vir, settings, log);
   log << std::fixed << std::setprecision(10);
+  log << "  UMP2 correlation energy  : " << result.e_mp2 << " Eh\n";
+  log << "  UMP2 total energy        : " << scf_total_energy + result.e_mp2 << " Eh\n";
   log << "  UCCSD correlation energy : " << result.e_corr << " Eh" << (result.converged ? "" : "   (NOT CONVERGED)") << "\n";
   log << "  SCF total energy         : " << scf_total_energy << " Eh\n";
   log << "  UCCSD total energy       : " << scf_total_energy + result.e_corr << " Eh\n";
   if (result.converged) {
     CcRdmSettings rs = rdm_settings;
     rs.reference_total_energy = scf_total_energy;
-    runUccsdRdm(h, *source, spaces, result, rs, log);
+    const CcRdmResult rdm = runUccsdRdm(h, *source, spaces, result, rs, log);
+    printCcEnergyDecomposition(log, rdm, scf_total_energy + result.e_corr);
   }
   else log << "  CC_RDM skipped: the amplitudes did not converge\n";
   return result;

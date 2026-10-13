@@ -102,7 +102,7 @@ are comments.
 | `AUX_BASIS_TYPE` | string | `PAUTO` | Auxiliary basis recipe `USE_RI` builds internally (Yang, Rendell, Frisch, *J. Chem. Phys.* 127, 074102 (2007); MOLGW's `init_auxil_basis_set_auto`). `PAUTO` (default) considers every pair of orbital shells; `AUTO` only self-products (cruder, rarely needed). Only meaningful when `USE_RI` is active. |
 | `X_LIN_DEP_THRS_L` | double (> 0) | `1e-6` | Large-component linear-dependence threshold (LOWGEN-style safety net). |
 | `X_LIN_DEP_THRS_S` | double (> 0) | `1e-8` | Small-component linear-dependence threshold (`X2C`/`C4_SPINOR` only). |
-| `FUNCTIONAL` | string | *(none)* | Selects the RDMFT functional: JK-only (`SD`, `MULLER`/`MBB`, `BBC2`, `CA`, `RHFB`, `CGA`, `ML`, `MLSIC`, `GU`, `POWER`), PNOF (`PNOF5`, `PNOF7`, `PNOF7S`, `GNOF`), or `PCCD`. Unset skips the whole RDMFT step. |
+| `FUNCTIONAL` | string | *(none)* | Selects the RDMFT functional: JK-only (`SD`, `MULLER`/`MBB`, `CA`, `RHFB`, `CGA`, `ML`, `MLSIC`, `GU`, `POWER`), PNOF (`PNOF5`, `PNOF7`, `PNOF7S`, `GNOF`), or `PCCD`. Unset skips the whole RDMFT step. |
 | `OCCUPATION_INIT` | string | `PROPORTIONAL` | Initial occupations for a JK-only functional: `PROPORTIONAL` or `FERMI_DIRAC` (at `TEMPERATURE`). |
 | `JK_FROZEN_PAIRS` | int (>= 0) | `0` | JK-only: freeze the lowest `2*JK_FROZEN_PAIRS` spin-orbitals/spinors at occupation 1. |
 | `JK_ACTIVE_PAIRS` | int (>= 1) | all remaining | JK-only: size of the fractional-occupation window above the frozen core; above that is deep virtual (occupation 0). |
@@ -233,7 +233,7 @@ converges, using its orbitals/integrals as a fixed background:
    `sum(n_p) = NELEC` and `0 < n_p < 1`, with both members of each
    Kramers/spin pair tied to one variable.
 
-The output also prints `Tr(2-RDM)` next to its exact value N(N-1)/2. It is exact for MULLER, BBC2, CA, CGA, PNOF and pCCD; it deviates where the exchange coupling has f(n,n) != n (GU, ML, MLSIC, POWER, RHFB, SD at fractional occupations) and for MULLER_AS.
+The output also prints `Tr(2-RDM)` next to its exact value N(N-1)/2. It is exact for MULLER, CA, CGA, PNOF and pCCD; it deviates where the exchange coupling has f(n,n) != n (GU, ML, MLSIC, POWER, RHFB, SD at fractional occupations) and for MULLER_AS.
 
 For `C4_SPINOR` the negative-energy branch is excluded entirely
 (no-pair approximation); for `X2C` and `NON_RELATIVISTIC`, every
@@ -352,8 +352,8 @@ Build cost is NOT uniform across functionals -- this keyword is most valuable fo
 - **JK_only, SD/MBB/CA/CGA/POWER/MULLER_AS**: genuinely O(1-2) UKB-AO densities per Fock build,
   independent of system size -- runs at the same speed as the stored-tensor path (confirmed: LiH/
   6-31G SD finishes in the same wall time either way, converged energies identical).
-- **JK_only, BBC2/GU/ML/MLSIC**: no finite separable decomposition exists (a diagonal special case
-  for BBC2/GU, a non-separable rational form for ML/MLSIC) -- O(n_mo) UKB-AO densities per build,
+- **JK_only, GU/ML/MLSIC**: no finite separable decomposition exists (a diagonal special case
+  for GU, a non-separable rational form for ML/MLSIC) -- O(n_mo) UKB-AO densities per build,
   same order as PNOF/pCCD below.
 - **PNOF, pCCD**: the same-geminal/same-pair structure in their 2-RDM ansatz is NOT separable
   (confirmed against DoNOF's own `orbopt.f90` `ELAGaor`, which pays the identical O(n_gem) cost via

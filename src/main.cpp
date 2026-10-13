@@ -1739,6 +1739,11 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
       } catch (const std::exception& e) {
         out << "\n  FULL_OPTIMIZATION FAILED: " << e.what() << "\n";
       }
+      if (!full_result.occupations.empty()) {
+        printEnergyDecompositionMo(out, h, full_result.occupations, full_result.total_rotation,
+                                    full_result.electronic_energy, nuclear_repulsion_energy);
+        printJkTwoRdmTrace(out, functional, full_result.occupations, f_l);
+      }
       if (label == "C4_DHF" && full_optimization_4c_neg) {
         if (!(full_result.checks_passed && full_result.converged && full_result.total_rotation.rows() > 0)) {
           out << "\n  FULL_OPTIMIZATION_4C_NEG skipped: the positive-energy-only optimization did not converge"
@@ -2515,6 +2520,11 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
       } catch (const std::exception& e) {
         out << "\n  FULL_OPTIMIZATION FAILED: " << e.what() << "\n";
       }
+      if (!full_result.occupations.empty()) {
+        printEnergyDecompositionMo(out, h, full_result.occupations, full_result.total_rotation,
+                                    full_result.electronic_energy, nuclear_repulsion_energy);
+        printPnofTwoRdmTrace(out, functional, geminals, full_result.occupations, n_total, relativistic);
+      }
       if (label == "C4_DHF" && full_optimization_4c_neg) {
         if (!(full_result.checks_passed && full_result.converged && full_result.total_rotation.rows() > 0)) {
           out << "\n  FULL_OPTIMIZATION_4C_NEG skipped: the positive-energy-only optimization did not converge"
@@ -3004,6 +3014,11 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
           << " Hartree" << std::setprecision(6) << "\n";
       out << "  Optimized pCCD occupations after FULL_OPTIMIZATION:\n";
       printOcc(out, full_result.occupations);
+      if (!full_result.occupations.empty()) {
+        printEnergyDecompositionMo(out, h, full_result.occupations, full_result.total_rotation,
+                                    full_result.electronic_energy, nuclear_repulsion_energy);
+        printPccdTwoRdmTrace(out, reps, bar, n_core, n_occ, n_vir, pccdRdmFromState(full_result.occupation_state, n_occ, n_vir), full_result.occupations, n_total);
+      }
     } catch (const std::exception& e) {
       out << "\n  FULL_OPTIMIZATION FAILED: " << e.what() << "\n";
     }

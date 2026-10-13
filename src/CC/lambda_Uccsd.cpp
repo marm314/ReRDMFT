@@ -526,6 +526,8 @@ CcRdmResult runUccsdRdm(const Matrix<CcScalar>& h_mo, const CcIntegrals& ints, c
     w1.put(zero, 2, 0.0, 0.0);
     w1.close();
   }
+  result.e_onebody = e1.real();
+  result.n_electrons = static_cast<double>(n_occ_all);
   log << "  1-RDM written to " << settings.dm1_path << " (" << result.n_dm1 << " elements), trace = " << std::fixed << std::setprecision(10)
       << result.trace_dm1 << "\n";
 
@@ -723,7 +725,8 @@ CcRdmResult runUccsdRdm(const Matrix<CcScalar>& h_mo, const CcIntegrals& ints, c
   log << "  2-RDM written to " << settings.dm2_path << " (" << result.n_dm2 << " elements with p<q, r<s)\n";
   log << "  E_0 (reference determinant) = " << std::fixed << std::setprecision(10) << e0_ref << " Eh, E_c = " << amps.e_corr << " Eh\n";
   log << "  one-body part " << std::fixed << std::setprecision(10) << e1.real() << " Eh, two-body part " << e2.real() << " Eh\n";
-  result.e_total_rdm = result.e_elec_rdm + (settings.reference_total_energy - e0_ref);
+  result.nuclear_repulsion = settings.reference_total_energy - e0_ref;
+  result.e_total_rdm = result.e_elec_rdm + result.nuclear_repulsion;
   log << "  trace of the 2-RDM = " << std::fixed << std::setprecision(10) << result.trace_dm2 << "  (N(N-1) = " << static_cast<double>(n_occ_all) * (static_cast<double>(n_occ_all) - 1.0) << ")\n";
   log << "  UCCSD total energy from the density matrices: " << std::fixed << std::setprecision(10) << result.e_total_rdm << " Eh\n";
   log << "  energy from the density matrices (elements written, threshold " << std::scientific << std::setprecision(1) << thr << "): "
