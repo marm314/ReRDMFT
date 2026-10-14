@@ -1041,6 +1041,7 @@ inline rerdmft::FullOptSettings fullOptSettings(const rerdmft::Input& input) {
   settings.cholesky = input.cholesky();
   settings.cholesky_threshold = input.cholesky_threshold();
   settings.debug = input.debug();
+  settings.pccd_debug = input.pccd_debug();
   settings.orbital_optimizer = input.orbital_optimizer() == "NEO"      ? rerdmft::OrbitalOptimizer::kNeo
                               : input.orbital_optimizer() == "ADAM_NEO" ? rerdmft::OrbitalOptimizer::kAdamNeo
                                                                        : rerdmft::OrbitalOptimizer::kAdam;
@@ -2888,7 +2889,9 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
 
   rerdmft::PccdSettings amp_settings;
   amp_settings.solver = (amplitude_solver_name == "LBFGS") ? rerdmft::PccdAmplitudeSolver::kLbfgs
-                                                           : rerdmft::PccdAmplitudeSolver::kNewton;
+                        : (amplitude_solver_name == "DIIS") ? rerdmft::PccdAmplitudeSolver::kDiis
+                                                            : rerdmft::PccdAmplitudeSolver::kNewton;
+  amp_settings.debug = full_opt.pccd_debug;
 
   const auto coeff = rerdmft::buildPccdCoefficients(h, eri, reps, bar, n_core, n_occ, n_vir);
   rerdmft::Matrix<double> t0(n_occ, n_vir, 0.0), z0(n_occ, n_vir, 0.0);

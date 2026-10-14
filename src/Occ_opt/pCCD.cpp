@@ -1,13 +1,18 @@
 #include "pCCD.h"
 
+#include <algorithm>
 #include <cmath>
 #include <complex>
 #include <functional>
+#include <iostream>
+#include <string>
 #include <stdexcept>
 
 #include "CholeskyEri.h"
+#include "DIIS.h"
 #include "LBFGS.h"
 #include "LinearAlgebra.h"
+#include "Progress.h"
 #include "NonRelSpinRiMoEri.h"
 #include "RiMoEri.h"
 #include "SymmetricEri.h"
@@ -323,8 +328,55 @@ PccdAmplitudeResult solveResidual(
     const Matrix<double>& x0, const PccdSettings& settings) {
   const std::size_t n_occ = x0.rows(), n_vir = x0.cols();
   PccdAmplitudeResult result;
+  std::string diis_failure;  // set when DIIS failed and Newton takes over
 
-  if (settings.solver == PccdAmplitudeSolver::kNewton) {
+  if (settings.solver == PccdAmplitudeSolver::kDiis) {
+    const std::size_t n = n_occ * n_vir;
+    const Matrix<double> zero(n_occ, n_vir, 0.0);
+    const Matrix<double> j0 = jacobian(zero);
+    std::vector<double> denominator(n);
+    for (std::size_t k = 0; k < n; ++k) {
+      denominator[k] = j0(k, k);
+      if (std::abs(denominator[k]) < 1e-12) denominator[k] = (denominator[k] < 0.0 ? -1e-12 : 1e-12);
+    }
+    Matrix<double> x = x0;
+    bool cold = true;
+    for (std::size_t k = 0; k < n; ++k) cold = cold && x0.data()[k] == 0.0;
+    if (cold) {  // MP2-like start x = -R(0) / D
+      const std::vector<double> r0 = flatten(residual(zero));
+      std::vector<double> start(n);
+      for (std::size_t k = 0; k < n; ++k) start[k] = -r0[k] / denominator[k];
+      x = unflatten(start, n_occ, n_vir);
+    }
+    Diis<double> diis(static_cast<std::size_t>(std::max(settings.diis_size, 0)));
+    int iter = 0;
+    double rnorm = norm2(flatten(residual(x)));
+    while (iter < settings.max_iterations && rnorm >= settings.residual_tolerance) {
+      const std::vector<double> xflat = flatten(x), rflat = flatten(residual(x));
+      Matrix<double> x_new(1, n), err(1, n);
+      for (std::size_t k = 0; k < n; ++k) {
+        x_new(0, k) = xflat[k] - rflat[k] / denominator[k];
+        err(0, k) = x_new(0, k) - xflat[k];
+      }
+      const Matrix<double> next = settings.diis_size >= 2 ? diis.extrapolate(err, x_new) : x_new;
+      std::vector<double> nflat(n);
+      for (std::size_t k = 0; k < n; ++k) nflat[k] = next(0, k);
+      x = unflatten(nflat, n_occ, n_vir);
+      rnorm = norm2(flatten(residual(x)));
+      ++iter;
+    }
+    result.t = x;
+    result.t_converged = std::isfinite(rnorm) && rnorm < settings.residual_tolerance;
+    result.t_iterations = iter;
+    result.t_residual_norm = rnorm;
+    if (result.t_converged) return result;
+    // DIIS did not converge: Newton from the same starting point; if it fails too, stop.
+    diis_failure = "DIIS did not converge (" + std::to_string(iter) + " iterations, |R| = " + std::to_string(rnorm) + ")";
+    progress("pCCD amplitude solve: " + diis_failure + "; NEWTON reactivated");
+    std::cerr << "  pCCD amplitude solve: " << diis_failure << "; falling back to NEWTON\n";
+  }
+
+  if (settings.solver == PccdAmplitudeSolver::kNewton || !diis_failure.empty()) {
     Matrix<double> x = x0;
     Matrix<double> r = residual(x);
     double rnorm = norm2(flatten(r));
@@ -351,6 +403,10 @@ PccdAmplitudeResult solveResidual(
     result.t_converged = rnorm < settings.residual_tolerance;
     result.t_iterations = iter;
     result.t_residual_norm = rnorm;
+    if (!diis_failure.empty() && !result.t_converged) {
+      throw std::runtime_error("pCCD amplitude solve failed: " + diis_failure + " and the NEWTON fallback did not converge either (" +
+                               std::to_string(iter) + " iterations, |R| = " + std::to_string(rnorm) + ")");
+    }
     return result;
   }
 

@@ -73,6 +73,7 @@ struct FullOptSettings {
   // rotation, Kramers/spin structure of the integrals, Hessian-diagonal finite difference); without it
   // only tests that work on the (Cholesky) representation itself run.
   bool debug = false;
+  bool pccd_debug = false;  // PCCD_DEBUG: pCCD amplitude-solve diagnostics in the live file
   // ADAM (default) or NEO (Utils/NEO.h, second-order trust-region Newton, matrix-free
   // Hessian-vector products -- Hessian_opt/JkOnlyHessian.h's/HartreeExchangeHessian.h's
   // ...JointHessianVector or a plain symmetrized per-element sum for real orbitals, see

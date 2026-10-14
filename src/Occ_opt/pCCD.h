@@ -65,11 +65,17 @@ PccdCoefficients buildPccdCoefficients(const Matrix<T>& h, const Eri& eri,
 // kLbfgs: minimize 0.5*||residual||^2 (Utils/LBFGS.h) with the exact chain-rule gradient
 // J^T * residual -- never forms/solves the Jacobian, at the cost of needing many more
 // (cheap) iterations than Newton's quadratic convergence.
-enum class PccdAmplitudeSolver { kNewton, kLbfgs };
+// kDiis: the UCCSD iteration (CC/Uccsd.cpp): Jacobi update x <- x - R(x)/D with FIXED denominators D (the diagonal of the
+// Jacobian at x = 0 for t, of J(t)^T for z), an MP2-like starting point x = -R(0)/D when the caller gives x0 = 0, and DIIS
+// (Utils/DIIS.h, PccdSettings::diis_size vectors, the update x_new - x as error vector) on the iterates. If DIIS does not converge, the solve is repeated with kNewton from the same
+// starting point (a message goes to stderr); if Newton fails too, solvePccd*Amplitudes throws.
+enum class PccdAmplitudeSolver { kNewton, kLbfgs, kDiis };
 
 struct PccdSettings {
   PccdAmplitudeSolver solver = PccdAmplitudeSolver::kNewton;
   int max_iterations = 200;
+  bool debug = false;  // PCCD_DEBUG keyword: FULL_OPTIMIZATION prints one amplitude-solve diagnostic line per macro-iteration
+  int diis_size = 8;  // kDiis only; < 2 disables the extrapolation
   // Converged once the residual's 2-norm falls below this (kNewton) or the L-BFGS
   // gradient's inf-norm does (kLbfgs's own, separate `LbfgsOptions::gradient_tolerance`
   // is derived from this -- see the .cpp).

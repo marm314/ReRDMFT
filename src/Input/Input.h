@@ -141,6 +141,9 @@ class Input {
   // WFN.X2C or WFN.4C depending on which method produced it. Requires FUNCTIONAL (there is
   // otherwise no 1-RDM to write).
   bool aimpac() const { return aimpac_; }
+  // Optional; defaults to FALSE. FUNCTIONAL PCCD FULL_OPTIMIZATION: one amplitude-solve diagnostic line per macro-iteration in the
+  // live file (works with USE_RI and FUNCTIONAL_INIT CORE, unlike DEBUG).
+  bool pccd_debug() const { return pccd_debug_; }
   // Optional; defaults to false when the UCCSD keyword is absent. When true, right after the NON_REL / X2C /
   // C4_SPINOR Hartree-Fock (or Dirac-Hartree-Fock) SCF, runs coupled cluster singles and doubles with complex
   // spin-orbitals/spinors (CC/Uccsd.h, doc/uccsd.tex) on the converged reference, using the same two-electron
@@ -641,6 +644,7 @@ class Input {
   bool hessian_mean_field_ = false;
   bool fcidump_ = false;
   bool aimpac_ = false;
+  bool pccd_debug_ = false;
   bool uccsd_ = false;
   bool cc_rdm_ = false;
   double cc_rdm_threshold_ = 1e-10;

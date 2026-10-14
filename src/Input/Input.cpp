@@ -151,6 +151,8 @@ void Input::read(const std::string& filename) {
       fcidump_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "AIMPAC") {
       aimpac_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "PCCD_DEBUG") {
+      pccd_debug_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "UCCSD") {
       uccsd_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "CC_RDM") {
@@ -449,12 +451,12 @@ void Input::read(const std::string& filename) {
       std::string token;
       if (!(iss >> token)) {
         throw std::runtime_error("line " + std::to_string(line_number) +
-                                  ": expected NEWTON or LBFGS after PCCD_AMPLITUDE_SOLVER");
+                                  ": expected NEWTON, LBFGS or DIIS after PCCD_AMPLITUDE_SOLVER");
       }
       pccd_amplitude_solver_ = toUpper(token);
-      if (pccd_amplitude_solver_ != "NEWTON" && pccd_amplitude_solver_ != "LBFGS") {
+      if (pccd_amplitude_solver_ != "NEWTON" && pccd_amplitude_solver_ != "LBFGS" && pccd_amplitude_solver_ != "DIIS") {
         throw std::runtime_error("line " + std::to_string(line_number) +
-                                  ": PCCD_AMPLITUDE_SOLVER must be NEWTON or LBFGS");
+                                  ": PCCD_AMPLITUDE_SOLVER must be NEWTON, LBFGS or DIIS");
       }
     } else if (keyword == "PCCD_AMPLITUDE_GUESS") {
       std::string token;
@@ -786,6 +788,7 @@ void Input::print(std::ostream& out) const {
                              << (pccd_active_pairs_ < 0 ? " (default; all remaining orbitals)" : "")
                              << "\n";
   line("PCCD_AMPLITUDE_SOLVER") << pccd_amplitude_solver_ << "\n";
+  line("PCCD_DEBUG") << flag(pccd_debug_) << "\n";
   line("PCCD_AMPLITUDE_GUESS") << pccd_amplitude_guess_ << "\n";
 
   out.flags(saved_flags);

@@ -1258,6 +1258,30 @@ RdmftModel<T, Eri> makePccdModel(std::vector<std::size_t> reps, std::vector<std:
     }
     const auto t_result = solvePccdTAmplitudes(coeff, t0, amplitude_settings);
     const auto z_result = solvePccdZAmplitudes(coeff, t_result.t, z0, amplitude_settings);
+    if (amplitude_settings.debug) {  // PCCD_DEBUG: amplitude-solve diagnostics (live file): size of the amplitudes, residuals, and for DIIS the root Newton reaches from the same start
+      const auto max_abs = [](const Matrix<double>& m) {
+        double v = 0.0;
+        for (std::size_t k = 0; k < m.rows() * m.cols(); ++k) v = std::max(v, std::abs(m.data()[k]));
+        return v;
+      };
+      const double e_corr = pccdCorrelationEnergy(coeff, t_result.t);
+      std::ostringstream d;
+      d << std::scientific << std::setprecision(3) << "pCCD amplitudes: t " << t_result.t_iterations << " its |R| = " << t_result.t_residual_norm
+        << " max|t| = " << max_abs(t_result.t) << " E_corr = " << std::setprecision(10) << e_corr << std::setprecision(3)
+        << "; z " << z_result.z_iterations << " its |R| = " << z_result.z_residual_norm << " max|z| = " << max_abs(z_result.z)
+        << "; start max|t0| = " << max_abs(t0);
+      if (amplitude_settings.solver == PccdAmplitudeSolver::kDiis) {
+        PccdSettings newton = amplitude_settings;
+        newton.solver = PccdAmplitudeSolver::kNewton;
+        const auto t_newton = solvePccdTAmplitudes(coeff, t0, newton);
+        double diff = 0.0;
+        for (std::size_t k = 0; k < t0.rows() * t0.cols(); ++k) diff = std::max(diff, std::abs(t_newton.t.data()[k] - t_result.t.data()[k]));
+        d << "; NEWTON from the same start: " << (t_newton.t_converged ? "converged" : "NOT converged") << " " << t_newton.t_iterations
+          << " its max|t| = " << max_abs(t_newton.t) << " E_corr = " << std::setprecision(10) << pccdCorrelationEnergy(coeff, t_newton.t)
+          << std::setprecision(3) << " max|t_DIIS - t_NEWTON| = " << diff;
+      }
+      progress(d.str());
+    }
     const PccdRdm rdm = buildPccdRdm(t_result.t, z_result.z);
     cache->rdm = rdm;
     cache->valid = true;
