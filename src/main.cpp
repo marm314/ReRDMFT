@@ -2890,6 +2890,8 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
   rerdmft::PccdSettings amp_settings;
   amp_settings.solver = (amplitude_solver_name == "LBFGS") ? rerdmft::PccdAmplitudeSolver::kLbfgs
                         : (amplitude_solver_name == "DIIS") ? rerdmft::PccdAmplitudeSolver::kDiis
+                        : (amplitude_solver_name == "KRYLOV") ? rerdmft::PccdAmplitudeSolver::kKrylov
+                        : (amplitude_solver_name == "LM") ? rerdmft::PccdAmplitudeSolver::kLm
                                                             : rerdmft::PccdAmplitudeSolver::kNewton;
   amp_settings.debug = full_opt.pccd_debug;
 
@@ -2954,8 +2956,10 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
     }
     guess_mp2 = true;
   }
-  const auto t_result = rerdmft::solvePccdTAmplitudes(coeff, t0, amp_settings);
-  const auto z_result = rerdmft::solvePccdZAmplitudes(coeff, t_result.t, z0, amp_settings);
+  rerdmft::PccdSettings first_settings = amp_settings;
+  first_settings.lm_fallback = true;  // the first solve (outside the macro-iterations) may fall back to Levenberg-Marquardt
+  const auto t_result = rerdmft::solvePccdTAmplitudes(coeff, t0, first_settings);
+  const auto z_result = rerdmft::solvePccdZAmplitudes(coeff, t_result.t, z0, first_settings);
   logTiming(label + " pCCD t-/z-amplitudes solved (" + amplitude_solver_name + ")", t_start,
             t_checkpoint, timing_records);
   const rerdmft::PccdRdm rdm = rerdmft::buildPccdRdm(t_result.t, z_result.z);
@@ -2998,6 +3002,8 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
                                                                  : guess_mp2 ? std::string("MP2 (uncoupled first-order t; z = 0)")
                                                                  : std::string(full_opt.pccd_amplitude_guess == "PNOF" ? "cold start (t = z = 0; PCCD_AMPLITUDE_GUESS PNOF needs a PNOF restart file without amplitudes)" : "cold start (t = z = 0)"))
       << "\n";
+  if (!t_result.warning.empty()) out << "  " << t_result.warning << "\n";
+  if (!z_result.warning.empty() && z_result.warning != t_result.warning) out << "  " << z_result.warning << "\n";
   out << "  t-amplitudes " << (t_result.t_converged ? "converged" : "did NOT converge") << " ("
       << t_result.t_iterations << " iter., ||R|| = " << std::scientific << std::setprecision(2)
       << t_result.t_residual_norm << std::defaultfloat << std::setprecision(6) << ")\n";

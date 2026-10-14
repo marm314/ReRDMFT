@@ -67,13 +67,21 @@ PccdCoefficients buildPccdCoefficients(const Matrix<T>& h, const Eri& eri,
 // (cheap) iterations than Newton's quadratic convergence.
 // kDiis: the UCCSD iteration (CC/Uccsd.cpp): Jacobi update x <- x - R(x)/D with FIXED denominators D (the diagonal of the
 // Jacobian at x = 0 for t, of J(t)^T for z), an MP2-like starting point x = -R(0)/D when the caller gives x0 = 0, and DIIS
-// (Utils/DIIS.h, PccdSettings::diis_size vectors, the update x_new - x as error vector) on the iterates. If DIIS does not converge, the solve is repeated with kNewton from the same
-// starting point (a message goes to stderr); if Newton fails too, solvePccd*Amplitudes throws.
-enum class PccdAmplitudeSolver { kNewton, kLbfgs, kDiis };
+// (Utils/DIIS.h, PccdSettings::diis_size vectors, the update x_new - x as error vector) on the iterates. If DIIS diverges (NaN or infinity) or reaches diis_max_iterations, the solve is repeated with kNewton from the same
+// starting point (a message goes to the live file and stderr); if Newton fails too, or DIIS is still not converged after
+// diis_max_iterations, solvePccd*Amplitudes throws.
+// kKrylov: Jacobian-free Newton-Krylov (PyBEST's default, scipy's `krylov`): each Newton step solves J dx = -R by GMRES with
+// finite-difference J v products, followed by an Armijo backtracking line search; a solve that does not converge throws.
+// kLm: Levenberg-Marquardt on 0.5 ||R||^2 with the analytic Jacobian: (J^T J + lambda diag(J^T J)) dx = -J^T R, lambda adapted by the
+// gain ratio (Nielsen); steps that do not lower ||R|| are rejected. Meant for a (nearly) singular Jacobian.
+enum class PccdAmplitudeSolver { kNewton, kLbfgs, kDiis, kKrylov, kLm };
 
 struct PccdSettings {
   PccdAmplitudeSolver solver = PccdAmplitudeSolver::kNewton;
   int max_iterations = 200;
+  int krylov_max_iterations = 200;  // kKrylov only
+  bool lm_fallback = false;  // first solve only: after Newton (200 iterations) fails, Levenberg-Marquardt is tried
+  int diis_max_iterations = 1000;  // kDiis only (slowly converging, cheap iterations)
   bool debug = false;  // PCCD_DEBUG keyword: FULL_OPTIMIZATION prints one amplitude-solve diagnostic line per macro-iteration
   int diis_size = 8;  // kDiis only; < 2 disables the extrapolation
   // Converged once the residual's 2-norm falls below this (kNewton) or the L-BFGS
@@ -91,6 +99,8 @@ struct PccdAmplitudeResult {
   int z_iterations = 0;
   double t_residual_norm = 0.0;
   double z_residual_norm = 0.0;
+  // Non-empty when the solve did not converge and the unconverged amplitudes are returned anyway ("WARNING: ...", shown in Issues).
+  std::string warning;
 };
 
 // R_ia(T) itself (Eq. (tamp), boxed, of doc/kr_pccd.tex) -- exposed (not just used

@@ -1305,7 +1305,9 @@ RdmftModel<T, Eri> makePccdModel(std::vector<std::size_t> reps, std::vector<std:
         pccdReferenceEnergy(coeff) + pccdCorrelationEnergy(coeff, t_result.t);
     const bool converged = t_result.t_converged && z_result.z_converged;
     const int iterations = t_result.t_iterations + z_result.z_iterations;
-    return RdmftOccupationResult{occ, electronic_energy, converged, iterations};
+    std::string warning = t_result.warning;
+    if (!z_result.warning.empty() && z_result.warning != warning) warning += (warning.empty() ? "" : " | ") + z_result.warning;
+    return RdmftOccupationResult{occ, electronic_energy, converged, iterations, warning};
   };
   return model;
 }
@@ -2603,6 +2605,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
           break;
         }
         if (!occ_result.converged) ++n_occ_unconverged;
+        if (!occ_result.warning.empty()) log << "    " << occ_result.warning << "\n";
       }
       occ = occ_result.occupations;
       // Fresh occupations are in hand (and, for models like PCCD whose 2-RDM is cached per
@@ -3610,11 +3613,13 @@ FullOptResult runFullOptimizationPccd(const Matrix<T>& h, const Eri& eri,
     const Matrix<T> h_rot = oneElectronRotated(h, u0);
     const Eri eri_rot = rotateEri(eri, u0);
     const auto warm_up = model.optimize_occupations(h_rot, eri_rot, warm_state);
+    if (!warm_up.warning.empty()) log << "  " << warm_up.warning << "\n";
     return runFullOptimization<T, Eri>(h, eri, warm_up.occupations, warm_state, model, settings,
                                        kramers_restricted, nuclear_repulsion_energy, log,
                                        spin_partner, /*n_negative=*/0);
   }
   const auto warm_up = model.optimize_occupations(h, eri, warm_state);
+  if (!warm_up.warning.empty()) log << "  " << warm_up.warning << "\n";
   return runFullOptimization<T, Eri>(h, eri, warm_up.occupations, warm_state, model, settings,
                                      kramers_restricted, nuclear_repulsion_energy, log,
                                      spin_partner, /*n_negative=*/0);

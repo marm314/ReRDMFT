@@ -179,6 +179,7 @@ struct RdmftOccupationResult {
   double electronic_energy = 0.0;
   bool converged = false;
   int iterations = 0;
+  std::string warning;  // non-empty: the amplitude solve did not converge ("WARNING: ...")
 };
 
 // The functional-specific pieces the macro loop needs, all expressed for

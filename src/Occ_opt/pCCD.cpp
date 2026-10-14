@@ -2,9 +2,14 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <complex>
 #include <functional>
+#include <fstream>
 #include <iostream>
+#include <sstream>
+#include <iomanip>
+#include <limits>
 #include <string>
 #include <stdexcept>
 
@@ -315,6 +320,76 @@ double norm2(const std::vector<double>& v) {
   return std::sqrt(sum);
 }
 
+// Levenberg-Marquardt on 0.5 ||R||^2 with the analytic Jacobian (see PccdAmplitudeSolver::kLm); returns the best point reached.
+PccdAmplitudeResult solveLevenbergMarquardt(
+    const std::function<Matrix<double>(const Matrix<double>&)>& residual,
+    const std::function<Matrix<double>(const Matrix<double>&)>& jacobian,
+    const Matrix<double>& x0, const PccdSettings& settings) {
+  const std::size_t n_occ = x0.rows(), n_vir = x0.cols();
+  PccdAmplitudeResult result;
+    const std::size_t n = n_occ * n_vir;
+    std::vector<double> x = flatten(x0);
+    std::vector<double> f = flatten(residual(x0));
+    double fnorm = norm2(f);
+    double lambda = 1e-3, nu = 2.0;
+    int iter = 0;
+    while (iter < settings.max_iterations && std::isfinite(fnorm) && fnorm >= settings.residual_tolerance) {
+      const Matrix<double> j = jacobian(unflatten(x, n_occ, n_vir));
+      Matrix<double> jtj(n, n, 0.0);
+      std::vector<double> g(n, 0.0);  // J^T R
+      for (std::size_t a = 0; a < n; ++a) {
+        for (std::size_t b = a; b < n; ++b) {
+          double sum = 0.0;
+          for (std::size_t k = 0; k < n; ++k) sum += j(k, a) * j(k, b);
+          jtj(a, b) = jtj(b, a) = sum;
+        }
+        double sum = 0.0;
+        for (std::size_t k = 0; k < n; ++k) sum += j(k, a) * f[k];
+        g[a] = sum;
+      }
+      bool accepted = false;
+      for (int attempt = 0; attempt < 40 && !accepted; ++attempt) {
+        Matrix<double> a_mat = jtj;
+        for (std::size_t k = 0; k < n; ++k) a_mat(k, k) += lambda * std::max(jtj(k, k), 1e-12);
+        const Matrix<double> inv = invert(a_mat);
+        std::vector<double> dx(n, 0.0);
+        for (std::size_t r = 0; r < n; ++r) {
+          double sum = 0.0;
+          for (std::size_t c = 0; c < n; ++c) sum += inv(r, c) * g[c];
+          dx[r] = -sum;
+        }
+        std::vector<double> xn(n);
+        for (std::size_t k = 0; k < n; ++k) xn[k] = x[k] + dx[k];
+        const std::vector<double> fnew = flatten(residual(unflatten(xn, n_occ, n_vir)));
+        const double new_norm = norm2(fnew);
+        // predicted reduction of 0.5||R||^2 for the damped step: 0.5 dx^T (lambda D dx - J^T R)
+        double predicted = 0.0;
+        for (std::size_t k = 0; k < n; ++k) predicted += dx[k] * (lambda * std::max(jtj(k, k), 1e-12) * dx[k] - g[k]);
+        predicted *= 0.5;
+        const double actual = 0.5 * (fnorm * fnorm - new_norm * new_norm);
+        if (std::isfinite(new_norm) && predicted > 0.0 && actual > 0.0) {
+          const double rho = actual / predicted;
+          x = xn;
+          f = fnew;
+          fnorm = new_norm;
+          lambda *= std::max(1.0 / 3.0, 1.0 - std::pow(2.0 * rho - 1.0, 3));
+          nu = 2.0;
+          accepted = true;
+        } else {
+          lambda *= nu;
+          nu *= 2.0;
+        }
+      }
+      if (!accepted) break;  // no descent step found
+      ++iter;
+    }
+    result.t = unflatten(x, n_occ, n_vir);
+    result.t_converged = std::isfinite(fnorm) && fnorm < settings.residual_tolerance;
+    result.t_iterations = iter;
+    result.t_residual_norm = fnorm;
+    return result;
+}
+
 // Generic driver shared by the t- and z-amplitude solves: `residual`/`jacobian` give
 // R(x)/dR/dx (R linear in x for z, quadratic for t -- see pCCD.h). kNewton solves
 // J dx = -R directly (LinearAlgebra.h's `invert`) each iteration; for a linear R this
@@ -329,6 +404,118 @@ PccdAmplitudeResult solveResidual(
   const std::size_t n_occ = x0.rows(), n_vir = x0.cols();
   PccdAmplitudeResult result;
   std::string diis_failure;  // set when DIIS failed and Newton takes over
+
+  if (settings.solver == PccdAmplitudeSolver::kLm) {
+    PccdAmplitudeResult lm = solveLevenbergMarquardt(residual, jacobian, x0, settings);
+    if (!lm.t_converged) {
+      lm.warning = "WARNING: pCCD amplitude solve: LM did not converge (" + std::to_string(lm.t_iterations) + " iterations, |R| = " +
+                   std::to_string(lm.t_residual_norm) + "); the unconverged amplitudes are used";
+    }
+    return lm;
+  }
+
+  if (settings.solver == PccdAmplitudeSolver::kKrylov) {
+    // Jacobian-free Newton-Krylov (scipy's `krylov`): GMRES on J dx = -R with finite-difference J v, Armijo backtracking.
+    const std::size_t n = n_occ * n_vir;
+    std::vector<double> x = flatten(x0);
+    std::vector<double> f = flatten(residual(x0));
+    double fnorm = norm2(f);
+    int iter = 0;
+    const double rdiff = std::sqrt(std::numeric_limits<double>::epsilon());
+    const auto eval = [&](const std::vector<double>& xv) { return flatten(residual(unflatten(xv, n_occ, n_vir))); };
+    while (iter < settings.krylov_max_iterations && std::isfinite(fnorm) && fnorm >= settings.residual_tolerance) {
+      const double xnorm = norm2(x);
+      const auto matvec = [&](const std::vector<double>& v) {
+        const double vnorm = norm2(v);
+        if (vnorm == 0.0) return std::vector<double>(n, 0.0);
+        const double h = rdiff * std::max(1.0, xnorm) / vnorm;
+        std::vector<double> xp(n);
+        for (std::size_t k = 0; k < n; ++k) xp[k] = x[k] + h * v[k];
+        const std::vector<double> fp = eval(xp);
+        std::vector<double> jv(n);
+        for (std::size_t k = 0; k < n; ++k) jv[k] = (fp[k] - f[k]) / h;
+        return jv;
+      };
+      // GMRES (Arnoldi with modified Gram-Schmidt, Givens rotations), restarted every m vectors; forcing term eta.
+      const double eta = std::min(0.1, fnorm);
+      const std::size_t m = std::min<std::size_t>(n, 100);
+      std::vector<double> dx(n, 0.0);
+      std::vector<double> r(n);
+      for (std::size_t k = 0; k < n; ++k) r[k] = -f[k];
+      const double bnorm = norm2(r);
+      for (int restart = 0; restart < 10; ++restart) {
+        const double beta = norm2(r);
+        if (beta <= eta * bnorm) break;
+        std::vector<std::vector<double>> q(1, std::vector<double>(n));
+        for (std::size_t k = 0; k < n; ++k) q[0][k] = r[k] / beta;
+        std::vector<std::vector<double>> hess;  // hess[j] = column j (length j + 2)
+        std::vector<double> cs, sn, g(1, beta);
+        std::size_t used = 0;
+        for (std::size_t j = 0; j < m; ++j) {
+          std::vector<double> w = matvec(q[j]);
+          std::vector<double> col(j + 2, 0.0);
+          for (std::size_t i = 0; i <= j; ++i) {
+            double dot = 0.0;
+            for (std::size_t k = 0; k < n; ++k) dot += w[k] * q[i][k];
+            col[i] = dot;
+            for (std::size_t k = 0; k < n; ++k) w[k] -= dot * q[i][k];
+          }
+          const double wn = norm2(w);
+          col[j + 1] = wn;
+          for (std::size_t i = 0; i < j; ++i) {  // apply previous rotations
+            const double t1 = cs[i] * col[i] + sn[i] * col[i + 1];
+            col[i + 1] = -sn[i] * col[i] + cs[i] * col[i + 1];
+            col[i] = t1;
+          }
+          const double denom = std::hypot(col[j], col[j + 1]);
+          cs.push_back(denom > 0.0 ? col[j] / denom : 1.0);
+          sn.push_back(denom > 0.0 ? col[j + 1] / denom : 0.0);
+          col[j] = denom;
+          g.push_back(-sn[j] * g[j]);
+          g[j] = cs[j] * g[j];
+          hess.push_back(col);
+          used = j + 1;
+          if (std::abs(g[j + 1]) <= eta * bnorm || hess[j][j] == 0.0 || wn < 1e-14) break;
+          q.push_back(std::vector<double>(n));
+          for (std::size_t k = 0; k < n; ++k) q.back()[k] = w[k] / wn;
+        }
+        std::vector<double> y(used, 0.0);  // back substitution on the rotated Hessenberg
+        for (std::size_t ii = used; ii-- > 0;) {
+          double sum = g[ii];
+          for (std::size_t jj = ii + 1; jj < used; ++jj) sum -= hess[jj][ii] * y[jj];
+          y[ii] = hess[ii][ii] != 0.0 ? sum / hess[ii][ii] : 0.0;
+        }
+        for (std::size_t jj = 0; jj < used; ++jj)
+          for (std::size_t k = 0; k < n; ++k) dx[k] += y[jj] * q[jj][k];
+        const std::vector<double> jdx = matvec(dx);
+        for (std::size_t k = 0; k < n; ++k) r[k] = -f[k] - jdx[k];
+      }
+      // Armijo backtracking on 0.5 ||R||^2
+      double alpha = 1.0;
+      std::vector<double> xn(n), fn;
+      double fn_norm = 0.0;
+      for (int ls = 0; ls < 30; ++ls) {
+        for (std::size_t k = 0; k < n; ++k) xn[k] = x[k] + alpha * dx[k];
+        fn = eval(xn);
+        fn_norm = norm2(fn);
+        if (std::isfinite(fn_norm) && fn_norm * fn_norm <= (1.0 - 2e-4 * alpha) * fnorm * fnorm) break;
+        alpha *= 0.5;
+      }
+      x = xn;
+      f = fn;
+      fnorm = fn_norm;
+      ++iter;
+    }
+    result.t = unflatten(x, n_occ, n_vir);
+    result.t_converged = std::isfinite(fnorm) && fnorm < settings.residual_tolerance;
+    result.t_iterations = iter;
+    result.t_residual_norm = fnorm;
+    if (!result.t_converged) {
+      throw std::runtime_error("pCCD amplitude solve failed: KRYLOV did not converge (" + std::to_string(iter) +
+                               " iterations, |R| = " + std::to_string(fnorm) + ")");
+    }
+    return result;
+  }
 
   if (settings.solver == PccdAmplitudeSolver::kDiis) {
     const std::size_t n = n_occ * n_vir;
@@ -351,7 +538,7 @@ PccdAmplitudeResult solveResidual(
     Diis<double> diis(static_cast<std::size_t>(std::max(settings.diis_size, 0)));
     int iter = 0;
     double rnorm = norm2(flatten(residual(x)));
-    while (iter < settings.max_iterations && rnorm >= settings.residual_tolerance) {
+    while (iter < settings.diis_max_iterations && std::isfinite(rnorm) && rnorm >= settings.residual_tolerance) {
       const std::vector<double> xflat = flatten(x), rflat = flatten(residual(x));
       Matrix<double> x_new(1, n), err(1, n);
       for (std::size_t k = 0; k < n; ++k) {
@@ -370,8 +557,9 @@ PccdAmplitudeResult solveResidual(
     result.t_iterations = iter;
     result.t_residual_norm = rnorm;
     if (result.t_converged) return result;
-    // DIIS did not converge: Newton from the same starting point; if it fails too, stop.
-    diis_failure = "DIIS did not converge (" + std::to_string(iter) + " iterations, |R| = " + std::to_string(rnorm) + ")";
+    // DIIS diverged (NaN or infinity) or reached its iteration limit: Newton from the starting amplitudes.
+    diis_failure = std::isfinite(rnorm) ? "DIIS did not converge (" + std::to_string(iter) + " iterations, |R| = " + std::to_string(rnorm) + ")"
+                                        : "DIIS diverged (|R| not finite after " + std::to_string(iter) + " iterations)";
     progress("pCCD amplitude solve: " + diis_failure + "; NEWTON reactivated");
     std::cerr << "  pCCD amplitude solve: " << diis_failure << "; falling back to NEWTON\n";
   }
@@ -403,9 +591,20 @@ PccdAmplitudeResult solveResidual(
     result.t_converged = rnorm < settings.residual_tolerance;
     result.t_iterations = iter;
     result.t_residual_norm = rnorm;
-    if (!diis_failure.empty() && !result.t_converged) {
-      throw std::runtime_error("pCCD amplitude solve failed: " + diis_failure + " and the NEWTON fallback did not converge either (" +
-                               std::to_string(iter) + " iterations, |R| = " + std::to_string(rnorm) + ")");
+    if (!result.t_converged && settings.lm_fallback) {  // first solve only: Levenberg-Marquardt from the starting amplitudes
+      const std::string newton_text = "NEWTON did not converge (" + std::to_string(iter) + " iterations, |R| = " + std::to_string(rnorm) + ")";
+      progress("pCCD amplitude solve: " + newton_text + "; LM reactivated");
+      std::cerr << "  pCCD amplitude solve: " << newton_text << "; falling back to LM\n";
+      PccdAmplitudeResult lm = solveLevenbergMarquardt(residual, jacobian, x0, settings);
+      if (lm.t_converged || lm.t_residual_norm < result.t_residual_norm) result = lm;
+      if (!result.t_converged) {
+        result.warning = "WARNING: pCCD amplitude solve: " + (diis_failure.empty() ? std::string() : diis_failure + ", ") + newton_text +
+                         " and LM did not converge either (" + std::to_string(result.t_iterations) + " iterations, |R| = " +
+                         std::to_string(result.t_residual_norm) + "); the unconverged amplitudes are used";
+      }
+    } else if (!diis_failure.empty() && !result.t_converged) {
+      result.warning = "WARNING: pCCD amplitude solve: " + diis_failure + " and the NEWTON fallback did not converge either (" +
+                       std::to_string(iter) + " iterations, |R| = " + std::to_string(rnorm) + "); the unconverged amplitudes are used";
     }
     return result;
   }
@@ -487,7 +686,10 @@ PccdAmplitudeResult solvePccdZAmplitudes(const PccdCoefficients& coeff, const Ma
     return jt_transpose;
   };
 
-  PccdAmplitudeResult result = solveResidual(residual_fn, jacobian_fn, z0, settings);
+  // R_z is linear: the LM damping buys nothing, one exact Newton step solves it.
+  PccdSettings z_settings = settings;
+  if (z_settings.solver == PccdAmplitudeSolver::kLm) z_settings.solver = PccdAmplitudeSolver::kNewton;
+  PccdAmplitudeResult result = solveResidual(residual_fn, jacobian_fn, z0, z_settings);
   // solveResidual always writes its answer into `.t` (it is solver-agnostic); move it
   // into `.z` for the caller, matching solvePccdTAmplitudes' own `.t` convention.
   result.z = result.t;

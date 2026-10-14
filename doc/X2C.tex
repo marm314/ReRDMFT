@@ -1,0 +1,137 @@
+\documentclass[11pt]{article}
+\usepackage{amsmath,amssymb}
+\usepackage[margin=1in]{geometry}
+
+\newcommand{\bs}[1]{\boldsymbol{#1}}
+\newcommand{\dg}{^{\dagger}}
+
+\title{One-electron X2C: decoupling, the effective Hamiltonian, and the renormalization\\
+\large Equations behind \texttt{X2C\_DHF/X2C\_hamiltonian.\{h,cpp\}} and the keyword \texttt{X2C\_NORM}}
+\author{}
+\date{}
+
+\begin{document}
+\sloppy
+\maketitle
+
+\section*{1. Basis changes of a generalized eigenproblem}
+
+Everything below is one identity applied twice. Let $H\,C = S\,C\,e$ be a generalized eigenproblem and
+$U$ any matrix (it need \emph{not} be unitary, nor even square). Writing $C = U\,C_1$ and multiplying from
+the left by $U^\dagger$ gives
+\begin{equation}
+H_1 C_1 = S_1 C_1\, e,\qquad H_1 = U\dg H\,U,\quad S_1 = U\dg S\,U .
+\label{eq:basis}
+\end{equation}
+The eigenvalues $e$ are unchanged. For a square invertible $U$ the problems are equivalent; for a rectangular
+$U$ (more rows than columns) Eq.~\eqref{eq:basis} is a problem in the subspace spanned by the columns of $U$.
+What changes is the \emph{metric} $S_1$: it is the identity only if $U\dg S\,U=1$. This is the whole point of the
+renormalization of Sec.~4.
+
+\section*{2. Elimination of the small component}
+
+In the restricted-kinetic-balance basis (see \texttt{doc/RKB.tex}) the one-electron Dirac problem in the
+orthonormalizable $[\text{Large};\text{Small}]$ AO basis is $H\,C = S\,C\,e$ with
+\begin{equation}
+H = \begin{pmatrix} H_{LL} & H_{LS}\\ H_{SL} & H_{SS}\end{pmatrix},\qquad
+S = \begin{pmatrix} S_{LL} & 0\\ 0 & S_{SS}\end{pmatrix}.
+\end{equation}
+Every positive-energy eigenvector $C=(C_L;C_S)$ satisfies a \emph{linear relation} between its components,
+\begin{equation}
+C_S = X\,C_L,\qquad X = C_S\,C_L^{-1}
+\end{equation}
+(the same $X$ for every positive-energy eigenvector; in the code \texttt{X2CHamiltonianResult::r\_matrix} is this
+$X$, \emph{not} the $R$ of Sec.~4). Take the rectangular $U = \begin{pmatrix}1\\ X\end{pmatrix}$ in Eq.~\eqref{eq:basis}:
+\begin{align}
+H_1 &= U\dg H\,U = H_{LL} + H_{LS}X + (H_{LS}X)\dg + X\dg H_{SS}X \;\equiv\; h_{x2c},\label{eq:hx2c}\\
+S_1 &= U\dg S\,U = S_{LL} + X\dg S_{SS}X \;\equiv\; \Lambda,\label{eq:lambda}\\
+h_{x2c}\,C_L &= \Lambda\,C_L\, e. \label{eq:gen}
+\end{align}
+This $n\times n$ problem contains \emph{exactly} the positive-energy eigenvalues of the $2n\times 2n$ Dirac problem
+(no approximation: this is the exact, one-electron X2C, the ``X2C-1e'' of Ilias and Saue). It is verified in
+\texttt{main.cpp}'s X2C report: $\max|E_{X2C}-E_{DHF}|\approx 10^{-10}$ Ha.
+
+\paragraph{Meaning of $\Lambda$.}
+The 4-component eigenvectors are normalized in the full metric, $C_L\dg S_{LL}C_L + C_S\dg S_{SS}C_S = 1$,
+i.e.\ $C_L\dg\Lambda C_L = 1$. $\Lambda = S_{LL} + X\dg S_{SS}X$ exceeds the plain overlap $S_{LL}$ of the large AOs by the
+\emph{weight of the small component} ($S_{SS}\sim T/2c^2$, so $\Lambda-S_{LL}$ is of order $(v/c)^2$ and largest for
+core orbitals of heavy atoms).
+
+\section*{3. Why Eq.~\eqref{eq:gen} is not yet usable in a Hartree--Fock code}
+
+An SCF code evaluates densities and two-electron contractions assuming orbitals that are orthonormal in the
+\emph{AO overlap}, $C\dg S_{LL}C = 1$, and uses nonrelativistic two-electron integrals over the same AO functions
+(no two-electron picture change). The orbitals of Eq.~\eqref{eq:gen} instead satisfy $C_L\dg\Lambda C_L=1$. Using
+$h_{x2c}$ together with the metric $S_{LL}$ (orbitalizing with $S_{LL}^{-1/2}$, as an earlier version of this code
+did) is inconsistent: the Hamiltonian belongs to the metric $\Lambda$. For Ne/cc-pVDZ this error is $0.137$ Ha in
+the Hartree--Fock energy (Sec.~6).
+
+\section*{4. Renormalization: a second basis change}
+
+Apply Eq.~\eqref{eq:basis} once more, now with a \emph{square} invertible $R$ ($n\times n$) acting on $C_L = R\,C_2$:
+\begin{equation}
+H_2 = R\dg h_{x2c}\,R,\qquad S_2 = R\dg\Lambda\,R,\qquad H_2 C_2 = S_2 C_2\, e .
+\end{equation}
+Choose $R$ such that the new metric is the plain overlap,
+\begin{equation}
+R\dg \Lambda\, R = S_{LL}\qquad\Longrightarrow\qquad
+h_{FW}\,C_2 = S_{LL}\,C_2\, e,\quad C_2\dg S_{LL}C_2=1,\quad h_{FW}\equiv R\dg h_{x2c}R .
+\label{eq:hfw}
+\end{equation}
+The eigenvalues $e$ are still those of the Dirac problem, and the orbitals $C_2=R^{-1}C_L$ are orthonormal in
+$S_{LL}$. $h_{FW}$ is the Hamiltonian the SCF uses (\texttt{X2C\_NORM TRUE}).
+
+\paragraph{The symmetric choice.}
+$R\dg\Lambda R=S_{LL}$ does not fix $R$: $R\to RV$ with $V\dg S_{LL}V = S_{LL}$ gives the same eigenvalues, but
+mixes the AOs, which would spoil the two-electron integrals defined for the original functions. The standard
+choice is the one closest to the identity,
+\begin{equation}
+\boxed{\;R = S_{LL}^{-1/2}\,\bigl(S_{LL}^{-1/2}\,\Lambda\,S_{LL}^{-1/2}\bigr)^{-1/2}\,S_{LL}^{1/2}\;}
+\label{eq:R}
+\end{equation}
+with Hermitian matrix powers (diagonalization; eigenvalues of $S_{LL}$ below $10^{-14}$ are dropped).
+Check: with $M = S_{LL}^{-1/2}\Lambda S_{LL}^{-1/2}$,
+$R\dg\Lambda R = S_{LL}^{1/2}M^{-1/2}\,(S_{LL}^{-1/2}\Lambda S_{LL}^{-1/2})\,M^{-1/2}S_{LL}^{1/2}
+= S_{LL}^{1/2}M^{-1/2}MM^{-1/2}S_{LL}^{1/2} = S_{LL}$.
+To first order $R\simeq 1-\tfrac12 S_{LL}^{-1}(\Lambda-S_{LL})$, i.e.\ $R$ removes the small-component weight.
+
+\paragraph{The two steps as one transformation.}
+$U_{\text{tot}} = \begin{pmatrix}1\\X\end{pmatrix}R$ ($2n\times n$): $h_{FW}=U_{\text{tot}}\dg H\,U_{\text{tot}}$ and
+$U_{\text{tot}}\dg S\,U_{\text{tot}} = S_{LL}$.
+
+\section*{5. Implementation}
+
+\begin{itemize}
+\item \texttt{buildX2CHamiltonian} (\texttt{X2C\_hamiltonian.cpp}): $X$, $\Lambda$, $h_{x2c}$ of
+Eqs.~\eqref{eq:hx2c}--\eqref{eq:lambda}, and $h^{\text{ortho}}_{x2c}=\Lambda^{-1/2\dagger}h_{x2c}\Lambda^{-1/2}$, whose
+eigenvalues are the exact positive-energy spectrum (the report's check).
+\item \texttt{renormalizedX2CHamiltonian}: $h_{FW}=R\dg h_{x2c}R$ with $R$ of Eq.~\eqref{eq:R}. In \texttt{main.cpp} it
+replaces \texttt{x2c\_hamiltonian.h\_x2c} right after construction when \texttt{X2C\_NORM TRUE} (default); every later
+use (SCF, functional stage, restart, UCCSD) then sees $h_{FW}$.
+\item The SCF orthogonalizes with the large-component block of the RKB orthonormalization matrix, i.e.\ with
+$S_{LL}^{-1/2}$ (or LOWGEN), which is the correct metric for $h_{FW}$. With \texttt{X2C\_NORM FALSE} the raw $h_{x2c}$ is used
+in the same orthogonalization (old behaviour: not a consistent X2C; its eigenvalues are only close to the exact ones,
+the report prints the deviation).
+\item Two-electron integrals are the ordinary nonrelativistic ones over the large-component AOs; no picture-change
+correction is applied to them or to the density. Densities and natural orbitals (WFN files, RDMs) are the
+nonrelativistic form of the density built from $C_2$ and $S_{LL}$. A density with picture change would use
+$C_L=R\,C_2$ plus a small-component part, and is not implemented.
+\end{itemize}
+
+\section*{6. Validation}
+
+Ne, cc-pVDZ (spherical), point nucleus, $c=137.036$, X2C-HF energy (Hartree):
+\begin{center}
+\begin{tabular}{lr}
+\texttt{X2C\_NORM TRUE} (this code) & $-128.6328725$\\
+PySCF spinor X2C-1e (contracted decoupling) & $-128.6328725$\\
+\texttt{X2C\_NORM FALSE} (raw $h_{x2c}$) & $-128.7698416$\\
+4-component DHF (this code and PySCF) & $-128.6318$\\
+\end{tabular}
+\end{center}
+Water, STO-3G: total $-75.0057781$ (this code) vs.\ $-75.0057780$ (PySCF). Forcing $R=1$ in PySCF's own
+\texttt{sfx2c1e} reproduces the old value ($-128.7698325$ against $-128.7698416$ here), which identifies the missing
+renormalization as the entire discrepancy. X2C-HF lies $1.0$ mHa above DHF for Ne, the usual size of the
+missing two-electron picture-change error.
+
+\end{document}

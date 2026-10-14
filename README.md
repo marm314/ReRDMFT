@@ -101,7 +101,7 @@ Case-insensitive, one per line, optional `=` (`DEBUG TRUE` = `DEBUG=TRUE`);
 | `SQP_PNOF_OCC` | bool | `FALSE` | PNOF: `FALSE` = L-BFGS over gamma angles, `TRUE` = SQP over occupations. |
 | `PCCD_FROZEN_PAIRS` | int | `0` | pCCD: lowest pairs frozen at occupation 1. |
 | `PCCD_ACTIVE_PAIRS` | int | all remaining | pCCD: size of the amplitude window. |
-| `PCCD_AMPLITUDE_SOLVER` | string | `DIIS` | `DIIS` (UCCSD-style; falls back to `NEWTON` when it fails to converge), `NEWTON`, or `LBFGS`. |
+| `PCCD_AMPLITUDE_SOLVER` | string | `DIIS` | `DIIS` (UCCSD-style, up to 1000 iterations; falls back to `NEWTON`), `NEWTON`, `LBFGS` or `KRYLOV` (Newton-Krylov; stops if it fails). |
 | `PCCD_AMPLITUDE_GUESS` | string | `ZERO` | pCCD starting t without restart amplitudes: `ZERO`, `MP2` (uncoupled first-order) or `PNOF` (from the occupations of a PNOF `READ_RESTART`). |
 | `PCCD_DEBUG` | bool | `FALSE` | Print per-macro-iteration amplitude-solve diagnostics to the live file. |
 | `READ_OCCUPANCIES` | bool | `FALSE` | Read starting occupations from `OCC.in`. |
@@ -164,6 +164,7 @@ Case-insensitive, one per line, optional `=` (`DEBUG TRUE` = `DEBUG=TRUE`);
 `X2C` prints a one-electron X2C decoupling report and runs the X2C-HF SCF, independent of `NON_RELATIVISTIC`/`C4_SPINOR`. Both share an
 analytic restricted-kinetic-balance small component, a spherical large basis
 and a LOWGEN linear-dependence safety net.
+Derivation of the decoupling and the renormalization: `doc/X2C.tex`.
 
 1. Diagonalizing the orthonormalized 4-component Hamiltonian separates the
    positive- and negative-energy branches; eigenvalues, Kramers splitting and
@@ -224,6 +225,10 @@ amplitudes every macro-iteration (warm-started from the previous ones). Works on
 `NON_REL`/`X2C`/`C4_SPINOR`, including the min-max stage, and with `READ_RESTART`
 (amplitudes included). A restart file written by another functional (PNOF,
 JK-only) is also accepted: its orbitals are used and t, z start from zero.
+
+Amplitude solves use `DIIS` and switch to `NEWTON` if it diverges or reaches 1000
+iterations; the first solve may further use Levenberg-Marquardt. A solve that
+still fails is used unconverged and listed under *Issues*.
 
 The energy is not variational in the orbitals, so the orbital optimization can
 have several branches (e.g. stretched bonds). A cold start may land on a higher
