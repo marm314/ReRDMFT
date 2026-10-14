@@ -3170,14 +3170,16 @@ void writeNonRelFcidump(const rerdmft::Input& input, const rerdmft::Matrix<doubl
 // Derives the AIMPAC WFN output path from the input file's own name: "foo.inp" -> "foo.wfn" (same
 // directory, extension replaced); "_neg" is appended before the extension for the C4_DHF min-max
 // (FULL_OPTIMIZATION_4C_NEG) saddle-stage file, see writeC4Aimpac below.
-// With a non-empty `hf_level` ("nonrel"/"x2c"/"4c") it is instead the HF/DHF file: "foo.inp" -> "hf_foo_<level>.wfn".
-std::string wfnOutputPath(const std::string& input_path, bool is_neg, const std::string& hf_level = std::string()) {
+// With a non-empty `hf_level` ("nonrel"/"x2c"/"4c") it is instead the HF/DHF file: "foo.inp" -> "hf_foo_<level>.wfn"
+// (`prefix` "core" gives "core_foo_<level>.wfn", the core-Hamiltonian state of FUNCTIONAL_INIT CORE).
+std::string wfnOutputPath(const std::string& input_path, bool is_neg, const std::string& hf_level = std::string(),
+                          const std::string& prefix = "hf") {
   const auto slash = input_path.find_last_of("/\\");
   const std::string dir = (slash == std::string::npos) ? std::string() : input_path.substr(0, slash + 1);
   std::string name = (slash == std::string::npos) ? input_path : input_path.substr(slash + 1);
   const auto dot = name.find_last_of('.');
   if (dot != std::string::npos && dot != 0) name = name.substr(0, dot);
-  if (!hf_level.empty()) return dir + "hf_" + name + "_" + hf_level + ".wfn";
+  if (!hf_level.empty()) return dir + prefix + "_" + name + "_" + hf_level + ".wfn";
   return dir + name + (is_neg ? "_neg.wfn" : ".wfn");
 }
 
@@ -3211,7 +3213,7 @@ void writeNonRelAimpac(const rerdmft::Input& input, const std::string& input_pat
                         const rerdmft::Matrix<double>& c_base, const rerdmft::RestartCapture& capture,
                         const std::vector<rerdmft::BasisFunction>& large_basis_fns,
                         const rerdmft::Matrix<double>& nonrel_transform, double nuclear_repulsion_energy,
-                        std::ostream& log, bool hf = false) {
+                        std::ostream& log, bool hf = false, bool core = false) {
   if (!input.aimpac()) return;
   if (!capture.valid) {
     log << "\nAIMPAC WFN file (NON_REL): not written -- no RDMFT result was produced.\n";
@@ -3234,8 +3236,8 @@ void writeNonRelAimpac(const rerdmft::Input& input, const std::string& input_pat
     for (std::size_t j = 0; j < d_real.cols(); ++j) d_ao(i, j) = d_real(i, j);
   const rerdmft::Matrix<double> s_cart = rerdmft::overlapMatrix(large_basis_fns);
   const auto orbitals = rerdmft::naturalOrbitalsFromDensity(s_cart, d_ao, input.x_lin_dep_thrs_l());
-  const std::string path = wfnOutputPath(input_path, /*is_neg=*/false, hf ? "nonrel" : "");
-  const char* tag = hf ? "NON_REL HF" : "NON_REL";
+  const std::string path = wfnOutputPath(input_path, /*is_neg=*/false, (hf || core) ? "nonrel" : "", core ? "core" : "hf");
+  const char* tag = core ? "NON_REL CORE" : hf ? "NON_REL HF" : "NON_REL";
   rerdmft::writeAimpacWfn(path, std::string("RERDMFT ") + tag + " WFN FILE", input.geometry(), large_basis_fns, orbitals,
                            capture.electronic_energy + nuclear_repulsion_energy, 0.0);
   log << "\nAIMPAC WFN file written (" << tag << "): " << path << "\n";
@@ -3338,7 +3340,7 @@ void writeX2CAimpac(const rerdmft::Input& input, const std::string& input_path,
                      const rerdmft::Matrix<std::complex<double>>& c_scf, const rerdmft::RestartCapture& capture,
                      const std::vector<rerdmft::BasisFunction>& large_basis_fns,
                      const rerdmft::Matrix<double>& large_transform_final, double nuclear_repulsion_energy,
-                     std::ostream& log, bool hf = false) {
+                     std::ostream& log, bool hf = false, bool core = false) {
   if (!input.aimpac()) return;
   if (!capture.valid) {
     log << "\nAIMPAC WFN file (X2C): not written -- no RDMFT result was produced.\n";
@@ -3348,8 +3350,8 @@ void writeX2CAimpac(const rerdmft::Input& input, const std::string& input_path,
   const auto d_ao = largeComponentAimpacDensity(c_final, capture.occupations, /*occ_start=*/0, large_transform_final);
   const rerdmft::Matrix<double> s_cart = rerdmft::overlapMatrix(large_basis_fns);
   const auto orbitals = rerdmft::naturalOrbitalsFromDensity(s_cart, d_ao, input.x_lin_dep_thrs_l());
-  const std::string path = wfnOutputPath(input_path, /*is_neg=*/false, hf ? "x2c" : "");
-  const char* tag = hf ? "X2C HF" : "X2C";
+  const std::string path = wfnOutputPath(input_path, /*is_neg=*/false, (hf || core) ? "x2c" : "", core ? "core" : "hf");
+  const char* tag = core ? "X2C CORE" : hf ? "X2C HF" : "X2C";
   rerdmft::writeAimpacWfn(path, std::string("RERDMFT ") + tag + " WFN FILE", input.geometry(), large_basis_fns, orbitals,
                            capture.electronic_energy + nuclear_repulsion_energy, 0.0);
   log << "\nAIMPAC WFN file written (" << tag << "): " << path << "\n";
@@ -3371,7 +3373,7 @@ void writeC4Aimpac(const rerdmft::Input& input, const std::string& input_path,
                     const std::vector<rerdmft::BasisFunction>& small_basis_fns,
                     const rerdmft::Matrix<double>& large_transform_final,
                     const rerdmft::Matrix<std::complex<double>>& rkb_coefficients, double nuclear_repulsion_energy,
-                    std::ostream& log, bool hf = false) {
+                    std::ostream& log, bool hf = false, bool core = false) {
   if (!input.aimpac()) return;
   std::vector<rerdmft::BasisFunction> combined_basis = large_basis_fns;
   combined_basis.insert(combined_basis.end(), small_basis_fns.begin(), small_basis_fns.end());
@@ -3423,8 +3425,8 @@ void writeC4Aimpac(const rerdmft::Input& input, const std::string& input_path,
     log << "  (" << n_large_mo + n_small_mo << " orbitals with occupation >= " << rerdmft::kAimpacOccPrintThreshold << ")\n";
   };
 
-  if (hf) {
-    writeOne(capture, wfnOutputPath(input_path, /*is_neg=*/false, "4c"), "4C DHF");
+  if (hf || core) {
+    writeOne(capture, wfnOutputPath(input_path, /*is_neg=*/false, "4c", core ? "core" : "hf"), core ? "4C CORE" : "4C DHF");
     return;
   }
   writeOne(capture, wfnOutputPath(input_path, /*is_neg=*/false), "4C");
@@ -4753,6 +4755,15 @@ int main(int argc, char** argv) {
       const rerdmft::Matrix<double> nonrel_c_start = nonrel_core_start ? nonrel_c_initial : nonrel_hf_result.c_matrix;
       const std::vector<double>& nonrel_start_energies =
           nonrel_core_start ? h_core_nonrel_eig.eigenvalues : nonrel_hf_result.orbital_energies;
+      if (nonrel_core_start && input.aimpac()) {  // the core-Hamiltonian state's own WFN file (core_<input>_nonrel.wfn)
+        const std::size_t n_c = nonrel_c_initial.cols(), n_pairs_c = input.n_electrons() / 2;
+        double e_core = 0.0;
+        for (std::size_t k = 0; k < n_pairs_c; ++k) e_core += 2.0 * h_core_nonrel_eig.eigenvalues[k];
+        auto core_cap = hartreeFockAimpacCapture(2 * n_c, 0, n_pairs_c, e_core);
+        for (std::size_t k = 0; k < n_pairs_c; ++k) core_cap.occupations[n_c + k] = 1.0;  // beta copy
+        writeNonRelAimpac(input, input_path, nonrel_c_initial, core_cap, large_basis.functions(), nonrel_transform,
+                          nonrel_hf_result.nuclear_repulsion_energy, nonrel_restart_log, /*hf=*/false, /*core=*/true);
+      }
       // Transform h and the ERIs into the converged natural (canonical
       // HF, here) MO basis, then into spin-orbitals (see
       // MoIntegralTransform.h/ClosedShellSpinOrbitals.h) -- needed by
@@ -5158,8 +5169,12 @@ int main(int argc, char** argv) {
                                            : run_x2c_scf(large_spherical_active ? nonrel_eri_sph : nonrel_eri);
       logTiming("X2C-HF SCF complete", t_start, t_checkpoint, timing_records);
       if (x2c_core_start) {
-        x2c_scf_c = rerdmft::fixKramersPhaseLarge(x2c_hf_result.c_matrix, s_large);
         x2c_scf_oe = x2c_hf_result.orbital_energies;
+        // The SCF spinors as the ordinary pipeline leaves them (phase fix, then exact Kramers re-pairing), so
+        // everything built from them (HF report, hf_*.wfn, UCCSD) is identical to an FUNCTIONAL_INIT SCF run.
+        rerdmft::KramersPairingReport pairing_scf;
+        x2c_scf_c = rerdmft::fixKramersPairingLarge(rerdmft::fixKramersPhaseLarge(x2c_hf_result.c_matrix, s_large),
+                                                    x2c_scf_oe, s_large, 1e-4, &pairing_scf);
         x2c_hf_result.c_matrix = c_initial;  // Kramers pairing/phase are repaired below exactly as for SCF orbitals
         x2c_hf_result.orbital_energies = initial_eig.eigenvalues;
       }
@@ -5266,8 +5281,7 @@ int main(int argc, char** argv) {
         rerdmft::CholeskyEri<std::complex<double>> chol_cc;
         rerdmft::SymmetricEri<std::complex<double>> sym_cc;
         if (x2c_core_start) {
-          rerdmft::KramersPairingReport pairing_hf;
-          c_hf = rerdmft::fixKramersPairingLarge(x2c_scf_c, x2c_scf_oe, s_large, 1e-4, &pairing_hf);
+          c_hf = x2c_scf_c;
           buildX2cMoWith(c_hf, h_cc, ri_cc, chol_cc, sym_cc);
         }
         std::optional<rerdmft::CartesianSpinors> cs_gau;
@@ -5385,6 +5399,14 @@ int main(int argc, char** argv) {
                        hartreeFockAimpacCapture(c_hf_wfn.cols(), 0, input.n_electrons(), x2c_hf_result.electronic_energy),
                        large_basis.functions(), large_transform_final, x2c_hf_result.nuclear_repulsion_energy,
                        x2c_restart_log, /*hf=*/true);
+      }
+      if (x2c_core_start && input.aimpac()) {  // the core-Hamiltonian state's own WFN file (core_<input>_x2c.wfn)
+        double e_core = 0.0;
+        for (int k = 0; k < input.n_electrons(); ++k) e_core += x2c_hf_result.orbital_energies[k];
+        writeX2CAimpac(input, input_path, x2c_hf_result.c_matrix,
+                       hartreeFockAimpacCapture(x2c_hf_result.c_matrix.cols(), 0, input.n_electrons(), e_core),
+                       large_basis.functions(), large_transform_final, x2c_hf_result.nuclear_repulsion_energy,
+                       x2c_restart_log, /*hf=*/false, /*core=*/true);
       }
       if (input.has_functional()) {
         rerdmft::RestartCapture x2c_restart;
@@ -5622,8 +5644,12 @@ int main(int argc, char** argv) {
                                            : run_dhf_scf(c4_spinor_eri);
       logTiming("SCF loop complete", t_start, t_checkpoint, timing_records);
       if (c4_core_start) {
-        c4_scf_vecs = rerdmft::fixKramersPhase(dhf_result.fock_ortho_eigenvectors, rkb_coefficients, x_full, s_large, s_small_ukb);
         c4_scf_oe = dhf_result.orbital_energies;
+        // The SCF spinors as the ordinary pipeline leaves them (phase fix, then exact Kramers re-pairing).
+        rerdmft::KramersPairingReport pairing_scf;
+        c4_scf_vecs = rerdmft::fixKramersPairing(
+            rerdmft::fixKramersPhase(dhf_result.fock_ortho_eigenvectors, rkb_coefficients, x_full, s_large, s_small_ukb),
+            c4_scf_oe, rkb_coefficients, x_full, s_large, s_small_ukb, 1e-4, &pairing_scf);
         dhf_result.fock_ortho_eigenvectors = h_rkb_ortho_eig.eigenvectors;  // pairing/phase repaired below as for SCF spinors
         dhf_result.orbital_energies = h_rkb_ortho_eig.eigenvalues;
       }
@@ -5778,10 +5804,7 @@ int main(int argc, char** argv) {
         rerdmft::CholeskyEri<std::complex<double>> chol_cc;
         rerdmft::SymmetricEri<std::complex<double>> sym_cc;
         if (c4_core_start) {
-          rerdmft::KramersPairingReport pairing_hf;
-          const auto vecs_hf = rerdmft::fixKramersPairing(c4_scf_vecs, c4_scf_oe, rkb_coefficients, x_full, s_large,
-                                                          s_small_ukb, 1e-4, &pairing_hf);
-          c_hf = x_full * vecs_hf;
+          c_hf = x_full * c4_scf_vecs;
           h_cc = rerdmft::rkbMoOneElectronTransform(h_rkb, c_hf);
           if (input.use_ri()) ri_cc = rerdmft::buildRiMoEri(ri_direct_source, ri_direct_source.v_total * c_hf);
           else if (use_cholesky_integrals) chol_cc = rerdmft::rkbCholeskyToMo(rkb_cholesky, c_hf, h_cc.rows() / 2, input.cholesky_threshold());
@@ -5932,6 +5955,15 @@ int main(int argc, char** argv) {
                                                dhf_result.electronic_energy),
                       rerdmft::RestartCapture(), large_basis.functions(), small_basis.functions(), large_transform_final,
                       rkb_coefficients, dhf_result.nuclear_repulsion_energy, c4_restart_log, /*hf=*/true);
+      }
+      if (c4_core_start && input.aimpac()) {  // the core-Hamiltonian state's own WFN file (core_<input>_4c.wfn)
+        const std::size_t n_half = dhf_result.c_dhf.cols() / 2;
+        double e_core = 0.0;
+        for (int k = 0; k < input.n_electrons(); ++k) e_core += dhf_result.orbital_energies[n_half + k];
+        writeC4Aimpac(input, input_path, dhf_result.c_dhf,
+                      hartreeFockAimpacCapture(dhf_result.c_dhf.cols(), n_half, input.n_electrons(), e_core),
+                      rerdmft::RestartCapture(), large_basis.functions(), small_basis.functions(), large_transform_final,
+                      rkb_coefficients, dhf_result.nuclear_repulsion_energy, c4_restart_log, /*hf=*/false, /*core=*/true);
       }
       if (input.has_functional()) {
         const std::size_t n_negative = rkb_dim / 2;

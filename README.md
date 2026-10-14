@@ -104,7 +104,7 @@ Case-insensitive, one per line, optional `=` (`DEBUG TRUE` = `DEBUG=TRUE`);
 | `READ_OCCUPANCIES` | bool | `FALSE` | Read starting occupations from `OCC.in`. |
 | `READ_RESTART` | bool | `FALSE` | Skip the SCF and start from `RESTART.*` (see *Restart*). |
 | `FCIDUMP` | bool | `FALSE` | `NON_RELATIVISTIC` + `FUNCTIONAL`: write an `FCIDUMP` of the MO integrals. |
-| `AIMPAC` | bool | `FALSE` | Write AIMPAC `.wfn` files (HF/DHF density, functional natural orbitals, UCCSD density with `CC_RDM`). |
+| `AIMPAC` | bool | `FALSE` | Write AIMPAC `.wfn` files: `hf_<input>_<level>.wfn` (always the SCF density), `<input>.wfn` (functional natural orbitals), `cc_<input>_<level>.wfn` (UCCSD, with `CC_RDM`), and `core_<input>_<level>.wfn` (core-Hamiltonian state, with `FUNCTIONAL_INIT CORE`). |
 
 ### Orbital optimization
 
