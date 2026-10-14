@@ -1033,6 +1033,7 @@ inline std::vector<std::size_t> blockSpinPartner(std::size_t n_total) {
 inline rerdmft::FullOptSettings fullOptSettings(const rerdmft::Input& input) {
   rerdmft::FullOptSettings settings;
   settings.enabled = input.full_optimization();
+  settings.core_start = input.functional_init() == "CORE" && input.has_functional();
   settings.max_macro_iterations = input.max_macro_iterations();
   settings.energy_tolerance = input.macro_energy_tolerance();
   settings.gradient_tolerance = input.orbital_gradient_tolerance();
@@ -1316,7 +1317,7 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
   out << "\n"
       << label
       << " fractional-occupation RDMFT functional evaluation (Occ_opt/JK_only.h + "
-         "Occ_opt/OccupationInit.h, on the converged HF/DHF orbitals):\n";
+         "Occ_opt/OccupationInit.h, on the " << (full_opt.core_start ? "core-Hamiltonian" : "converged HF/DHF") << " orbitals):\n";
   out << "  Functional: " << functional_name << "   Occupation init: "
       << (occupations_from_restart ? std::string("READ_RESTART (occupation numbers of the restart file)") : occupation_init_name);
   if (occupation_init_method == rerdmft::OccupationInitMethod::kFermiDirac) {
@@ -2056,7 +2057,7 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
   out << "\n"
       << label
       << " PNOF fractional-occupation RDMFT functional evaluation (Occ_opt/PNOFs.h + "
-         "Occ_opt/Orb_subspaces.h, on the converged HF/DHF orbitals):\n";
+         "Occ_opt/Orb_subspaces.h, on the " << (full_opt.core_start ? "core-Hamiltonian" : "converged HF/DHF") << " orbitals):\n";
   out << "  Functional: " << functional_name << "   PNOF_SUBSPACES: " << pnof_subspaces
       << "   PNOF_COUPLING: " << pnof_coupling << "\n";
   if (occupations_from_restart) out << "  Starting occupations: READ_RESTART (occupation numbers / gammas of the restart file)\n";
@@ -2945,7 +2946,7 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
 
   std::ostringstream out;
   out << "\n" << label
-      << " pCCD RDMFT functional evaluation (Occ_opt/pCCD.h, on the converged HF/DHF orbitals):\n";
+      << " pCCD RDMFT functional evaluation (Occ_opt/pCCD.h, on the " << (full_opt.core_start ? "core-Hamiltonian" : "converged HF/DHF") << " orbitals):\n";
   out << "  Amplitude guess: " << (restart_amplitudes != nullptr ? "READ_RESTART (t-/z-amplitudes of the restart file)"
                                                                  : std::string("cold start (t = z = 0)"))
       << "\n";

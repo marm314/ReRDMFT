@@ -53,6 +53,8 @@ struct FullOptResult;
 
 struct FullOptSettings {
   bool enabled = false;
+  // FUNCTIONAL_INIT CORE: the functional stage starts from the core-Hamiltonian orbitals (output labels only).
+  bool core_start = false;
   // Periodic RESTART checkpoint: every `checkpoint_interval` macro-iterations (10, 20, 30, ...) the loop hands a snapshot of its
   // current state (occupations, occupation state, accumulated rotation, energy) to `checkpoint`, if set; the caller writes the RESTART file.
   int checkpoint_interval = 10;

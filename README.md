@@ -227,7 +227,11 @@ See `examples/water_X2C.inp` (plain) or `examples/water_X2C_debug.inp`
 ## RDMFT functional evaluation
 
 Setting `FUNCTIONAL` runs an RDMFT evaluation after each requested SCF
-converges, using its orbitals/integrals as a fixed background:
+converges, using its orbitals/integrals as a fixed background. By
+default these are the converged SCF orbitals; `FUNCTIONAL_INIT CORE` starts
+the functional stage from the eigenvectors of the one-electron Hamiltonian
+instead (the SCF still runs and reports its energy), which can land in a
+different basin of the orbital optimization:
 
 1. Generate initial fractional occupations (`OCCUPATION_INIT`).
 2. Evaluate the functional's energy.

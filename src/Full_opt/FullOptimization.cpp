@@ -2390,7 +2390,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
   double e_elec = model.energy(problem.h(), problem.eri(), occ);
   double e_old = e_elec;
   const double e_start = e_elec;
-  log << "    starting point (occupation-optimized HF orbitals): total energy " << std::setprecision(10)
+  log << "    starting point (occupation-optimized " << (settings.core_start ? "core-Hamiltonian" : "HF") << " orbitals): total energy " << std::setprecision(10)
       << e_elec + nuclear_repulsion_energy << std::setprecision(6) << " Hartree\n";
   if (saddle && !std::isnan(settings.saddle.start_energy)) {
     log << "    (rotating to the no-pair minimum's orbitals reproduces its energy to " << std::scientific << std::setprecision(2)
