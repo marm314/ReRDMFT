@@ -145,6 +145,8 @@ void Input::read(const std::string& filename) {
       c4_spinor_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "X2C") {
       x2c_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "X2C_NORM") {
+      x2c_norm_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "HESSIAN_MEAN_FIELD") {
       hessian_mean_field_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "FCIDUMP") {
@@ -721,6 +723,7 @@ void Input::print(std::ostream& out) const {
   line("NON_RELATIVISTIC") << flag(non_relativistic_) << "\n";
   line("C4_SPINOR") << flag(c4_spinor_) << "\n";
   line("X2C") << flag(x2c_) << "\n";
+  line("X2C_NORM") << flag(x2c_norm_) << "\n";
   line("HESSIAN_MEAN_FIELD") << flag(hessian_mean_field_) << "\n";
   line("FCIDUMP") << flag(fcidump_) << "\n";
   line("AIMPAC") << flag(aimpac_) << "\n";

@@ -70,6 +70,16 @@ X2CHamiltonianResult buildX2CHamiltonian(const Matrix<std::complex<double>>& h_r
                                           const Matrix<std::complex<double>>& s_full,
                                           const Matrix<std::complex<double>>& c_tmp);
 
+// The renormalized AO-basis X2C Hamiltonian h_fw = R^dagger h_x2c R, with the symmetric
+//   R = S^-1/2 (S^-1/2 Lambda S^-1/2)^-1/2 S^1/2,   R^dagger Lambda R = S,
+// S = `s_ll` the plain large-component overlap (Large block of the RKB metric, spin-doubled like h_x2c) and
+// Lambda = X2CHamiltonianResult::lambda: the standard X2C-1e effective Hamiltonian (PySCF's sfx2c1e, DIRAC), whose
+// orbitals are orthonormal in S. Use it as the fixed core of an SCF that orthogonalizes with the large-component
+// overlap; its spectrum in the S metric is the exact positive-energy one. Eigenvalues of S below 1e-14 are dropped.
+Matrix<std::complex<double>> renormalizedX2CHamiltonian(const Matrix<std::complex<double>>& h_x2c,
+                                                         const Matrix<std::complex<double>>& lambda,
+                                                         const Matrix<std::complex<double>>& s_ll);
+
 // An APPROXIMATE orthogonalization of the raw AO-basis X2C Hamiltonian
 // `h_x2c` (X2CHamiltonianResult::h_x2c above), using ONLY the plain
 // LARGE-component Loewdin orthogonalization -- `x_full`'s own upper-

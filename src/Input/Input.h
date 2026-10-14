@@ -117,6 +117,9 @@ class Input {
   // C4_SPINOR is on); this keyword only gates running/printing the
   // above. Independent of C4_SPINOR.
   bool x2c() const { return x2c_; }
+  // Optional; defaults to TRUE. X2C: the SCF/functional core is the renormalized X2C-1e Hamiltonian R^dagger h_x2c R
+  // (X2C_hamiltonian.h); FALSE uses the raw h_x2c with the plain large-component overlap (no renormalization).
+  bool x2c_norm() const { return x2c_norm_; }
   // Optional; defaults to false when the HESSIAN_MEAN_FIELD keyword is absent. When true, for every method that is
   // on (NON_RELATIVISTIC, X2C, C4_SPINOR) the FULL cheap (Hartree/exchange-ansatz,
   // Hessian_opt/HartreeExchangeHessian.h) real-step orbital-rotation Hessian of the converged HF/DHF solution
@@ -641,6 +644,7 @@ class Input {
   bool precondition_small_overlap_ = false;
   bool c4_spinor_ = false;
   bool x2c_ = false;
+  bool x2c_norm_ = true;
   bool hessian_mean_field_ = false;
   bool fcidump_ = false;
   bool aimpac_ = false;

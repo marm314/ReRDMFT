@@ -4167,6 +4167,11 @@ int main(int argc, char** argv) {
       // C4_DHF's own SCF initial guess).
       if (input.x2c()) {
         x2c_hamiltonian = rerdmft::buildX2CHamiltonian(h_rkb, s_full, x2c_c_tmp);
+        if (input.x2c_norm()) {  // X2C_NORM: standard renormalized X2C-1e core (R^dagger h_x2c R) for the SCF and functionals
+          x2c_hamiltonian.h_x2c = rerdmft::renormalizedX2CHamiltonian(
+              x2c_hamiltonian.h_x2c, x2c_hamiltonian.lambda,
+              rerdmft::extractLargeComponentBlock(s_full, x2c_hamiltonian.h_x2c.rows()));
+        }
       }
 
       f_small = rerdmft::rkbSmallVextMatrix(small_basis.functions(), rkb_coefficients,
@@ -6591,11 +6596,16 @@ int main(int argc, char** argv) {
           max_x2c_approx_deviation, std::abs(x2c_eig_approx.eigenvalues[i] - eigenvalues[n2 + i]));
     }
 
-    std::cout << "\nX2C_DHF/X2C_hamiltonian.h: APPROXIMATE X2C Hamiltonian eigenvalues\n"
-                 "(orthogonalized with ONLY the large-component overlap X_Large, NOT the\n"
-                 "exact renormalization metric Lambda -- Kramers pairs, even/odd indices\n"
-                 "side by side; expect CLOSE to, but not exactly equal to, the exact\n"
-                 "positive-energy branch above):\n";
+    std::cout << (input.x2c_norm()
+                      ? "\nX2C_DHF/X2C_hamiltonian.h: X2C-HF core h_fw = R^dagger h_x2c R eigenvalues\n"
+                        "(X2C_NORM TRUE; orthogonalized with the large-component overlap X_Large -- Kramers\n"
+                        "pairs, even/odd indices side by side; expect equal to the exact positive-energy\n"
+                        "branch above):\n"
+                      : "\nX2C_DHF/X2C_hamiltonian.h: APPROXIMATE X2C Hamiltonian eigenvalues\n"
+                        "(X2C_NORM FALSE; orthogonalized with ONLY the large-component overlap X_Large, NOT the\n"
+                        "exact renormalization metric Lambda -- Kramers pairs, even/odd indices\n"
+                        "side by side; expect CLOSE to, but not exactly equal to, the exact\n"
+                        "positive-energy branch above):\n");
     std::cout << "  " << std::setw(6) << "index" << std::setw(20) << "E (even)" << std::setw(10)
                << "index" << std::setw(20) << "E (odd)" << "\n";
     double max_x2c_approx_kramers_splitting = 0.0;
@@ -6609,12 +6619,13 @@ int main(int argc, char** argv) {
     }
     std::cout << "Max |E(even) - E(odd)| Kramers-pair splitting (expect ~0): "
                << max_x2c_approx_kramers_splitting << "\n";
-    std::cout << "Max |E_X2C_approx - E_DHF(positive-energy branch)| (expect small but NOT ~0): "
-               << max_x2c_approx_deviation << "\n";
+    std::cout << "Max |E_X2C_approx - E_DHF(positive-energy branch)| (expect "
+               << (input.x2c_norm() ? "~0" : "small but NOT ~0") << "): " << max_x2c_approx_deviation << "\n";
 
     // The AO Cholesky decomposition is reported with the first method that uses it (NON_REL prints it in its own section).
     if (!input.non_relativistic()) std::cout << ao_cholesky_report;
-    std::cout << "\nApproximate X2C-HF SCF (X2C_DHF/X2C_HF.h -- FIXED one-electron h_x2c, no\n"
+    std::cout << "\n" << (input.x2c_norm() ? "X2C-HF SCF (X2C_NORM TRUE, renormalized core" : "Approximate X2C-HF SCF (X2C_NORM FALSE, raw core")
+               << "; X2C_DHF/X2C_HF.h -- FIXED one-electron h_x2c, no\n"
                  "picture-change correction, ordinary non-relativistic two-electron integrals,\n"
                  "Fock matrix orthogonalized with only the large-component overlap X_Large at\n"
                  "every iteration; "

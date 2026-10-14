@@ -40,7 +40,8 @@ Case-insensitive, one per line, optional `=` (`DEBUG TRUE` = `DEBUG=TRUE`);
 | `UNIT_LENGTH` | string | `ANGS` | `ANGS` or `BOHR`/`AU`. |
 | `GEOMETRY` ... `END` | block | *required* | `<symbol> <x> <y> <z>` per atom. |
 | `NON_RELATIVISTIC` | bool | `FALSE` | Run the nonrelativistic HF SCF (`NON_REL`). |
-| `X2C` | bool | `FALSE` | Run the approximate X2C-HF SCF (see *X2C*). |
+| `X2C` | bool | `FALSE` | Run the X2C-HF SCF (see *X2C*). |
+| `X2C_NORM` | bool | `TRUE` | `X2C`: renormalized X2C-1e core `R†hR`; `FALSE` uses the raw `h` with the large-component overlap. |
 | `C4_SPINOR` | bool | `FALSE` | Run the 4-component DHF SCF (`C4_DHF`), Kramers-restricted, even `NELEC`. |
 | `CARTESIAN` | bool | `TRUE` | `NON_REL` only: Cartesian (`TRUE`) or spherical AOs; `X2C`/`C4_SPINOR` are always spherical. |
 | `SPEED_OF_LIGHT` | double | CODATA | Speed of light (a.u.). |
@@ -156,12 +157,11 @@ Case-insensitive, one per line, optional `=` (`DEBUG TRUE` = `DEBUG=TRUE`);
 | `FUNCTIONAL_POS_CHO_4C` + `CHOLESKY` + `SCF_DIRECT_4C` | Full effect: AO-basis `RkbCholesky` vectors are never built. |
 | `FUNCTIONAL_POS_CHO_4C` + `READ_RESTART` + `CHOLESKY` | Full effect only if the geometry is unchanged and `FULL_OPTIMIZATION_4C_NEG` is off. |
 | `FUNCTIONAL_POS_CHO_4C` otherwise (no `CHOLESKY`, SCF already needs `rkb_cholesky`, min-max, `DEBUG`) | No-op. |
-| `ON_DEMAND_ERI`/`CHOLESKY_THRESHOLD` without `CHOLESKY`; `CARTESIAN` with `X2C`/`C4_SPINOR`; `CHECK_HESS_NEO` with `ADAM` | No-op. |
+| `ON_DEMAND_ERI`/`CHOLESKY_THRESHOLD` without `CHOLESKY`; `CARTESIAN` with `X2C`/`C4_SPINOR`; `X2C_NORM` without `X2C`; `CHECK_HESS_NEO` with `ADAM` | No-op. |
 
 ## X2C
 
-`X2C` prints a one-electron X2C decoupling report and runs an approximate
-X2C-HF SCF, independent of `NON_RELATIVISTIC`/`C4_SPINOR`. Both share an
+`X2C` prints a one-electron X2C decoupling report and runs the X2C-HF SCF, independent of `NON_RELATIVISTIC`/`C4_SPINOR`. Both share an
 analytic restricted-kinetic-balance small component, a spherical large basis
 and a LOWGEN linear-dependence safety net.
 
@@ -169,10 +169,11 @@ and a LOWGEN linear-dependence safety net.
    positive- and negative-energy branches; eigenvalues, Kramers splitting and
    a partner check are printed.
 2. The exact X2C Hamiltonian eliminates the small component exactly.
-3. The approximate X2C Hamiltonian orthogonalizes with the large-component
-   overlap only.
+3. The X2C-HF core is the renormalized `R†hR` (`X2C_NORM TRUE`, matches PySCF's
+   spinor X2C-1e), or the raw `h` orthogonalized with the large-component
+   overlap only (`X2C_NORM FALSE`).
 4. The X2C-HF SCF uses it as a fixed core with nonrelativistic two-electron
-   integrals; it can converge below the 4-component energy (expected).
+   integrals; with `X2C_NORM FALSE` it can converge below the 4-component energy.
 5. The `Hessian_opt` gradient/Hessian tests run as for `C4_SPINOR`; X2C-HF is a
    genuine minimum.
 

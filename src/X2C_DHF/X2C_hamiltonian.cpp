@@ -1,5 +1,6 @@
 #include "X2C_hamiltonian.h"
 
+#include <cmath>
 #include <stdexcept>
 
 #include "LinearAlgebra.h"
@@ -68,6 +69,38 @@ X2CHamiltonianResult buildX2CHamiltonian(const Matrix<std::complex<double>>& h_r
   result.h_x2c_ortho = dagger(lambda_inv_sqrt) * (result.h_x2c * lambda_inv_sqrt);
 
   return result;
+}
+
+namespace {
+
+// a^p for a Hermitian positive matrix, eigenvalues <= cutoff dropped.
+Matrix<std::complex<double>> hermitianPower(const Matrix<std::complex<double>>& a, double p, double cutoff) {
+  const auto eig = diagonalizeHermitian(a);
+  const std::size_t n = a.rows();
+  Matrix<std::complex<double>> scaled(n, n);
+  for (std::size_t j = 0; j < n; ++j) {
+    const double w = eig.eigenvalues[j];
+    const double f = w > cutoff ? std::pow(w, p) : 0.0;
+    for (std::size_t i = 0; i < n; ++i) scaled(i, j) = eig.eigenvectors(i, j) * f;
+  }
+  return scaled * dagger(eig.eigenvectors);
+}
+
+}  // namespace
+
+Matrix<std::complex<double>> renormalizedX2CHamiltonian(const Matrix<std::complex<double>>& h_x2c,
+                                                         const Matrix<std::complex<double>>& lambda,
+                                                         const Matrix<std::complex<double>>& s_ll) {
+  const std::size_t n = h_x2c.rows();
+  if (h_x2c.cols() != n || lambda.rows() != n || lambda.cols() != n || s_ll.rows() != n || s_ll.cols() != n) {
+    throw std::runtime_error("renormalizedX2CHamiltonian: inconsistent dimensions");
+  }
+  const double cutoff = 1e-14;
+  const auto s_half = hermitianPower(s_ll, 0.5, cutoff);
+  const auto s_inv_half = hermitianPower(s_ll, -0.5, cutoff);
+  const auto mid = hermitianPower(s_inv_half * (lambda * s_inv_half), -0.5, cutoff);
+  const auto r = s_inv_half * (mid * s_half);
+  return dagger(r) * (h_x2c * r);
 }
 
 Matrix<std::complex<double>> approximateX2COrtho(const Matrix<std::complex<double>>& h_x2c,
