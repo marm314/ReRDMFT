@@ -1243,40 +1243,6 @@ RdmftModel<T, Eri> makePccdModel(std::vector<std::size_t> reps, std::vector<std:
     };
   }
 
-  model.sort_active = [=](const std::vector<double>& occ, std::vector<double>& state) -> std::vector<std::size_t> {
-    const std::size_t n_window = n_occ + n_vir;
-    if (occ.size() != n_total) return {};
-    std::vector<std::size_t> order(n_window);
-    for (std::size_t k = 0; k < n_window; ++k) order[k] = k;
-    // Occupations equal to 1e-8 keep their order (degenerate pairs must not swap on numerical noise).
-    const auto key = [&](std::size_t k) { return std::llround(occ[reps[n_core + k]] * 1e8); };
-    std::stable_sort(order.begin(), order.end(), [&](std::size_t x, std::size_t y) { return key(x) > key(y); });
-    bool identity = true;
-    for (std::size_t k = 0; k < n_window; ++k) identity = identity && order[k] == k;
-    if (identity) return {};
-    std::vector<std::size_t> perm(n_total);
-    for (std::size_t q = 0; q < n_total; ++q) perm[q] = q;
-    for (std::size_t k = 0; k < n_window; ++k) {
-      perm[reps[n_core + k]] = reps[n_core + order[k]];
-      perm[bar[n_core + k]] = bar[n_core + order[k]];
-    }
-    bool same_split = true;
-    for (std::size_t k = 0; k < n_occ; ++k) same_split = same_split && order[k] < n_occ;
-    if (same_split && state.size() == 2 * n_occ * n_vir) {
-      std::vector<double> next(state.size());
-      for (std::size_t i = 0; i < n_occ; ++i)
-        for (std::size_t a = 0; a < n_vir; ++a) {
-          const std::size_t oi = order[i], oa = order[n_occ + a] - n_occ;
-          next[i * n_vir + a] = state[oi * n_vir + oa];
-          next[n_occ * n_vir + i * n_vir + a] = state[n_occ * n_vir + oi * n_vir + oa];
-        }
-      state = next;
-    } else {
-      state.assign(2 * n_occ * n_vir, 0.0);  // the occupied/virtual split changed: amplitudes re-solved from t = z = 0
-    }
-    return perm;
-  };
-
   model.optimize_occupations = [=](const Matrix<T>& h, const Eri& eri, std::vector<double>& state) {
     const auto coeff = buildPccdCoefficients(h, eri, reps, bar, n_core, n_occ, n_vir);
     Matrix<double> t0(n_occ, n_vir, 0.0), z0(n_occ, n_vir, 0.0);
@@ -1398,12 +1364,6 @@ class RotationProblem : public AdamProblem<T> {
   }
   void rotate(const std::vector<T>& step) override {
     applyOrthogonal(spinorRotationMatrix(adamKappaMatrix(n_, pairs_, step)));
-  }
-  // New orbital k = old orbital perm[k]: the integrals and the accumulated rotation follow.
-  void permuteOrbitals(const std::vector<std::size_t>& perm) {
-    Matrix<T> u(n_, n_, T{});
-    for (std::size_t k = 0; k < n_; ++k) u(perm[k], k) = T(1.0);
-    applyOrthogonal(u);
   }
   void applyOrthogonal(const Matrix<T>& u) {
     // h_t_ is ALWAYS kept exactly up to date (a plain n x n rotation, O(n^3) -- cheap relative to
@@ -2472,25 +2432,6 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
   };
   constexpr int kMaxSaddleEscapeAttempts = 3;
 
-  // pCCD (RdmftModel::sort_active): right after the amplitudes are solved and the occupations built, the active-space
-  // orbitals are re-sorted by descending occupation -- the integrals and the accumulated rotation follow, then the
-  // amplitudes are re-solved in the new labelling (a no-op solve when only the order within each block changed).
-  const auto sortActiveOrbitals = [&](RdmftOccupationResult& occ_result_io) {
-    if (!model.sort_active || saddle || settings.fixed_occupancies) return;
-    const std::vector<std::size_t> perm = model.sort_active(occ_result_io.occupations, occ_state);
-    if (perm.empty() || perm.size() != problem.h().rows()) return;
-    problem.permuteOrbitals(perm);
-    problem.syncIntegrals();
-    log << "    active-space orbitals re-sorted by descending occupation\n";
-    occ_result_io = model.optimize_occupations(problem.h(), problem.eri(), occ_state);
-  };
-  {
-    RdmftOccupationResult start;
-    start.occupations = occ;
-    sortActiveOrbitals(start);
-    occ = start.occupations;
-  }
-
   int iter = 0;
   int n_occ_unconverged = 0;
   int total_macro_iterations = 0;
@@ -2578,6 +2519,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
       int orbital_iterations = 0;
       bool gradient_converged = false, orbital_restart_requested = false;
       double log_extra = 0.0;  // ADAM's learning rate, or NEO's final trust radius.
+      RdmftOccupationResult occ_result;
       if (run_neo) {
         neo_problem->setOccupations(occ);
         NeoResult nr;
@@ -2624,7 +2566,6 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
         log_extra = ar.learning_rate;
       }
 
-      RdmftOccupationResult occ_result;
       if (settings.fixed_occupancies) {
         // FIXED_OCCUPANCIES TRUE: occupations stay exactly at the pre-loop optimization's result
         // (or RESTART/READ_RESTART's) -- this macro-iteration only re-optimized the orbitals above.
@@ -2638,7 +2579,6 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
           break;
         }
         if (!occ_result.converged) ++n_occ_unconverged;
-        sortActiveOrbitals(occ_result);
       }
       occ = occ_result.occupations;
       // Fresh occupations are in hand (and, for models like PCCD whose 2-RDM is cached per
