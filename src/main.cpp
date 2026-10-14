@@ -3014,7 +3014,7 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
           << " Hartree" << std::setprecision(6) << "\n";
       out << "  Optimized pCCD occupations after FULL_OPTIMIZATION:\n";
       printOcc(out, full_result.occupations);
-      if (!full_result.occupations.empty()) {
+      if (!full_result.occupations.empty() && !full_result.occupation_state.empty()) {  // state is empty when the start-up checks failed and the loop never ran
         printEnergyDecompositionMo(out, h, full_result.occupations, full_result.total_rotation,
                                     full_result.electronic_energy, nuclear_repulsion_energy);
         printPccdTwoRdmTrace(out, reps, bar, n_core, n_occ, n_vir, pccdRdmFromState(full_result.occupation_state, n_occ, n_vir), full_result.occupations, n_total);

@@ -99,8 +99,9 @@ PccdFullTwoRdm buildPccdFullTwoRdm(const std::vector<std::size_t>& reps,
           // (tests/test_pccd_fock.cpp's gd_sum cross-check: the naive D/2 choice gave
           // EXACTLY 2x the correct pair energy), the same factor-of-2 PNOF's own
           // history hit (see PnofFock.cpp's own comment) for the identical reason.
-          const double l1_pq = matching_parity ? (pv.d_ba / 4.0) : (-pv.d_ba / 4.0);
-          const double l1_qp = matching_parity ? (pv.d_ab / 4.0) : (-pv.d_ab / 4.0);
+          const double d_sym = 0.5 * (pv.d_ab + pv.d_ba);
+          const double l1_pq = matching_parity ? (d_sym / 4.0) : (-d_sym / 4.0);
+          const double l1_qp = l1_pq;
           result.two_rdm_l1(P, Q) = l1_pq;
           result.two_rdm_l1(Q, P) = l1_qp;
           result.two_rdm_l2(P, Q) = -l1_pq;
