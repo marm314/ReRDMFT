@@ -1,444 +1,321 @@
 # ReRDMFT
 
-Relativistic Reduced Density Matrix Functional Theory, implemented in
-C++17. Includes a 4-component Dirac-Hartree-Fock SCF (restricted
-kinetic balance spinor basis, `C4_DHF`) and a standard nonrelativistic
-Hartree-Fock SCF (`NON_REL`) for comparison/validation.
+Relativistic Reduced Density Matrix Functional Theory in C++17. Includes a
+4-component Dirac-Hartree-Fock SCF (`C4_DHF`), an approximate X2C-HF SCF,
+and a nonrelativistic Hartree-Fock SCF (`NON_REL`) for comparison.
 
-## Prerequisites
+## Build
 
-- A C++17 compiler (`g++`; the Makefile assumes GCC-style flags).
-- [LIBCINT](https://github.com/sunqm/libcint), built as a static
-  library (`libcint.a`) with its headers in an `include/` directory
-  next to it -- exactly what libcint's own CMake build produces, e.g.:
-
-  ```sh
-  git clone https://github.com/sunqm/libcint.git
-  cd libcint && mkdir build && cd build
-  cmake .. && make
-  ```
-
-  This gives you `libcint/build/libcint.a` and `libcint/build/include/`.
-- LAPACKE, LAPACK, and BLAS (e.g. on Debian/Ubuntu:
-  `sudo apt install liblapacke-dev liblapack-dev libblas-dev`).
-- OpenMP support in your compiler (bundled with GCC).
-
-## Building
+Requirements: a C++17 compiler (GCC), OpenMP, LAPACKE/LAPACK/BLAS
+(`sudo apt install liblapacke-dev liblapack-dev libblas-dev`), and a static
+[LIBCINT](https://github.com/sunqm/libcint) (`libcint.a` with its `include/`
+next to it; recipe at the end).
 
 ```sh
-make LIBCINT=/path/to/libcint/build/libcint.a
+make LIBCINT=/path/to/libcint/build/libcint.a   # produces ./rerdmft
 ```
 
-If your libcint headers live somewhere other than
-`$(dirname LIBCINT)/include`, also set `LIBCINT_INC`. This produces
-the `rerdmft` binary in the repository root.
-
-To avoid retyping `LIBCINT=...`, create a git-ignored `Makefile.local`:
-
-```make
-LIBCINT := /path/to/libcint/build/libcint.a
-```
-
+Set `LIBCINT_INC` if the headers are elsewhere, or put
+`LIBCINT := /path/to/libcint.a` in a git-ignored `Makefile.local`.
 `make clean` removes build artifacts.
 
-## Running
+## Run
 
 ```sh
 ./rerdmft examples/water.inp
+tail -f examples/water.live      # live progress: phases, SCF and macro-iterations
 ```
 
-See `examples/*.inp` for sample input files. While a run is in
-progress, `examples/name.live` (truncated at the start of every run)
-shows live progress -- each phase, every SCF iteration, Cholesky
-decomposition progress, and every `FULL_OPTIMIZATION` macro-iteration.
-Follow it with `tail -f examples/name.live`.
+## Input keywords
 
-## Input file keywords
+Case-insensitive, one per line, optional `=` (`DEBUG TRUE` = `DEBUG=TRUE`);
+`#` starts a comment. See `examples/*.inp`.
 
-Keywords are case-insensitive, one per line, optionally followed by
-`=` before the value (`DEBUG TRUE`, `DEBUG = TRUE`, `DEBUG=TRUE` are
-all equivalent). Lines starting with `#` (or a `#` anywhere on a line)
-are comments.
+### System and SCF
 
 | Keyword | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `NELEC` (or `NELECTRONS`) | int | *required* | Number of electrons. |
-| `BASIS` | string | *required* | Gaussian basis set file name. `src/Utils/download_basis.py <input_file.inp>` fetches it automatically from Basis Set Exchange for the elements in `GEOMETRY`. |
-| `UNIT_LENGTH` | string | `ANGS` | Units of `GEOMETRY`'s coordinates: `ANGS` or `BOHR`/`AU`. |
-| `GEOMETRY` ... `END` | block | *required* | Molecular geometry, `<symbol> <x> <y> <z>` lines, one atom per line. |
-| `NON_RELATIVISTIC` | bool | `FALSE` | Run the standard nonrelativistic Hartree-Fock SCF (`NON_REL`). |
-| `CARTESIAN` | bool | `TRUE` | Only `NON_RELATIVISTIC`: `TRUE` uses the raw Cartesian AO basis; `FALSE` uses the spherical basis (as `X2C`/`C4_SPINOR` always do). |
-| `PRECONDITION_SMALL_OVERLAP` | bool | `FALSE` | Jacobi-precondition the RKB Small-component overlap before inverting it (`X2C`/`C4_SPINOR`). Rarely needed with the current analytic RKB basis; kept for extreme bases. |
-| `C4_SPINOR` | bool | `FALSE` | Run the 4-component Dirac-Hartree-Fock SCF (`C4_DHF`). Kramers-restricted like `X2C`, for even `NELEC`. |
-| `DEBUG` | bool | `FALSE` | Extra diagnostics: internal gradient cross-checks, finite-difference tests, dense-vs-Cholesky comparisons. Builds the dense two-electron tensor on demand. |
-| `HESSIAN_MEAN_FIELD` | bool | `FALSE` | Build and fully diagonalize the dense orbital-rotation Hessian (minimum expected for `NON_REL`/`X2C`, saddle for `C4_SPINOR`). O(n^5)-O(n^6), needs the dense tensor. |
-| `FCIDUMP` | bool | `FALSE` | `NON_RELATIVISTIC` + `FUNCTIONAL` only: write an `FCIDUMP` file of the MO integrals for an external CI/DMRG/FCI code. |
-| `AIMPAC` | bool | `FALSE` | Write AIMPAC WFN files over Cartesian Gaussian primitives: `hf_<input>_<nonrel\|x2c\|4c>.wfn` for the HF/DHF density, plus `<input>.wfn` (and `<input>_neg.wfn` for `FULL_OPTIMIZATION_4C_NEG`) for the `FUNCTIONAL` natural orbitals, and `cc_<input>_<nonrel\|x2c\|4c>.wfn` for the `UCCSD` density (needs `CC_RDM`). For `C4_SPINOR`, Large/Small are diagonalized independently and the output lists both MO ranges. |
-| `UCCSD` | bool | `FALSE` | Complex spin-orbital CCSD (`src/CC`, `doc/uccsd.tex`) right after the `NON_RELATIVISTIC`/`X2C`/`C4_SPINOR` SCF, with the run's integrals (RI by default, Cholesky or dense); 4C correlates positive-energy spinors only. |
-| `CC_RDM` | bool | `FALSE` | Needs `UCCSD`; solves the Lambda equations and writes the 1-/2-RDM to `<input>_MO.dm1/.dm2` (molecular basis) and, by default, `<input>_GAU.basis/.dm1/.dm2` (Gaussian primitives, `RHO2_OPS` formats); formats in `doc/uccsd.tex`, example in `examples/lih_uccsd_rdm.inp`; with `AIMPAC` also `cc_<input>_<level>.wfn`. |
+| `BASIS` | string | *required* | Basis file; `src/Utils/download_basis.py <input.inp>` fetches it from Basis Set Exchange. |
+| `UNIT_LENGTH` | string | `ANGS` | `ANGS` or `BOHR`/`AU`. |
+| `GEOMETRY` ... `END` | block | *required* | `<symbol> <x> <y> <z>` per atom. |
+| `NON_RELATIVISTIC` | bool | `FALSE` | Run the nonrelativistic HF SCF (`NON_REL`). |
+| `X2C` | bool | `FALSE` | Run the approximate X2C-HF SCF (see *X2C*). |
+| `C4_SPINOR` | bool | `FALSE` | Run the 4-component DHF SCF (`C4_DHF`), Kramers-restricted, even `NELEC`. |
+| `CARTESIAN` | bool | `TRUE` | `NON_REL` only: Cartesian (`TRUE`) or spherical AOs; `X2C`/`C4_SPINOR` are always spherical. |
+| `SPEED_OF_LIGHT` | double | CODATA | Speed of light (a.u.). |
+| `DIIS` | bool | `TRUE` | Pulay DIIS in every SCF loop; `FALSE` = linear density mixing. |
+| `DIIS_SIZE` | int (>= 2) | `5` | DIIS vectors. |
+| `MIXING` | double (0,1] | `0.4` | Mixing weight, `DIIS FALSE` only. |
+| `MAX_ITERATIONS` | int | `100` | Maximum SCF cycles. |
+| `ENERGY_TOLERANCE` | double | `1e-8` | SCF energy convergence. |
+| `DENSITY_TOLERANCE` | double | `1e-6` | SCF density convergence. |
+| `X_LIN_DEP_THRS_L` | double | `1e-6` | Large-component linear-dependence threshold. |
+| `X_LIN_DEP_THRS_S` | double | `1e-8` | Small-component threshold (`X2C`/`C4_SPINOR`). |
+| `PRECONDITION_SMALL_OVERLAP` | bool | `FALSE` | Jacobi-precondition the RKB Small overlap (rarely needed). |
+| `DEBUG` | bool | `FALSE` | Extra cross-checks and dense-vs-Cholesky tests (builds the dense tensor). |
+| `HESSIAN_MEAN_FIELD` | bool | `FALSE` | Build and diagonalize the dense orbital Hessian (needs the dense tensor). |
+
+### Two-electron integrals
+
+| Keyword | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `USE_RI` | bool | `TRUE` when an SCF method is active and nothing else picked a kernel | Resolution-of-identity 3-center tensor for the SCF and the whole functional stage (all functionals, ADAM/NEO, min-max); accuracy ~1e-7 to 1e-4 Ha. `FALSE` forces the dense/Cholesky path. |
+| `AUX_BASIS_TYPE` | string | `PAUTO` | RI auxiliary basis recipe: `PAUTO` (all shell pairs) or `AUTO` (self-products). |
+| `CHOLESKY` | bool | `FALSE` | Hold the integrals as Cholesky vectors (SCF, MO integrals, `FULL_OPTIMIZATION`). |
+| `CHOLESKY_THRESHOLD` | double | `1e-10` | Decomposition cutoff. |
+| `ON_DEMAND_ERI` | bool | `TRUE` | With `CHOLESKY`: evaluate AO quadruplets on demand (O(n^2) memory). |
+| `SCF_DIRECT_4C` | bool | `TRUE` for `C4_SPINOR` unless `READ_RESTART`/`DEBUG`/`HESSIAN_MEAN_FIELD`/`USE_RI` | `C4_SPINOR`: integral-direct SCF, O(n^2) memory. |
+| `FUNCTIONAL_POS_CHO_4C` | bool | `TRUE` for `C4_SPINOR` + `FUNCTIONAL` | With `CHOLESKY`: build the positive-energy MO Cholesky vectors in one fused pass (only acts when the full AO vector set is not otherwise built). |
+| `FUNCTIONAL_DIRECT_4C` | bool | `FALSE` | `C4_SPINOR` + `FULL_OPTIMIZATION`: ADAM builds its Fock matrix directly from UKB AO integrals (see below). |
+
+### UCCSD
+
+| Keyword | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `UCCSD` | bool | `FALSE` | Complex spin-orbital CCSD (`src/CC`, `doc/uccsd.tex`) on the SCF reference; 4C correlates positive-energy spinors only. |
+| `CC_RDM` | bool | `FALSE` | Solve Lambda; write `<input>_MO.dm1/.dm2` and `<input>_GAU.*` (see `doc/uccsd.tex`, `examples/lih_uccsd_rdm.inp`). |
 | `CC_RDM_GAUSSIAN` | bool | `TRUE` | Also write the `_GAU` files. |
-| `CC_RDM_MAXMEM` | float | `4` | Memory budget (GB) of the transform to primitives. |
-| `CC_RDM_CNORM1` | bool | `FALSE` | Put the primitive normalization into the 2-RDM (`RHO2_OPS` `$CNORM1`). |
+| `CC_RDM_MAXMEM` | float | `4` | Memory (GB) for the transform to primitives. |
+| `CC_RDM_CNORM1` | bool | `FALSE` | Put primitive normalization into the 2-RDM (`$CNORM1`). |
 | `CC_RDM_THRESHOLD` | float | `1e-10` | Elements below this are not written. |
-| `CC_FROZEN_CORE` | int | `0` | Frozen occupied spinors (even number). |
-| `CC_MAX_ITERATIONS` | int | `100` | Maximum amplitude/Lambda iterations. |
-| `CC_CONVERGENCE` | float | `1e-8` | Energy-change threshold (amplitude change: 100x). |
+| `CC_FROZEN_CORE` | int | `0` | Frozen occupied spinors (even). |
+| `CC_MAX_ITERATIONS` | int | `100` | Amplitude/Lambda iterations. |
+| `CC_CONVERGENCE` | float | `1e-8` | Energy-change threshold. |
 | `CC_DIIS_SIZE` | int | `8` | DIIS vectors (< 2 disables). |
 | `CC_LEVEL_SHIFT` | float | `0` | Denominator level shift (Hartree). |
-| `SPEED_OF_LIGHT` | double (> 0) | CODATA value | Override the speed of light (a.u.), to probe the nonrelativistic limit or exaggerate relativistic effects. |
-| `MIXING` | double, `(0,1]` | `0.4` | Linear density-mixing weight, used only with `DIIS FALSE`. |
-| `DIIS` | bool | `TRUE` | Pulay DIIS instead of linear mixing in every SCF loop. |
-| `DIIS_SIZE` | int (>= 2) | `5` | Number of (error, Fock) pairs kept by DIIS. |
-| `MAX_ITERATIONS` | int (> 0) | `100` | Maximum `C4_DHF` SCF cycles. |
-| `ENERGY_TOLERANCE` | double (> 0) | `1e-8` | `C4_DHF` SCF energy-change convergence threshold. |
-| `DENSITY_TOLERANCE` | double (> 0) | `1e-6` | `C4_DHF` SCF density-change convergence threshold. |
-| `CHOLESKY` | bool | `FALSE` | Hold the two-electron integrals as Cholesky vectors instead of a dense/packed tensor -- SCF, MO integrals, and `FULL_OPTIMIZATION` all work from the vectors. |
-| `CHOLESKY_THRESHOLD` | double (> 0) | `1e-10` | Residual-diagonal cutoff for the decomposition; looser = fewer vectors (faster, less accurate). |
-| `ON_DEMAND_ERI` | bool | `TRUE` | With `CHOLESKY TRUE`: evaluate each AO quadruplet on demand during decomposition (memory O(n^2)) instead of building the full packed tensor first. |
-| `SCF_DIRECT_4C` | bool | `TRUE` if `C4_SPINOR TRUE`, none of `READ_RESTART`/`DEBUG`/`HESSIAN_MEAN_FIELD`, and `USE_RI` didn't already take over; else `FALSE` | `C4_SPINOR` only: run the SCF fully integral-direct (no two-electron representation held during SCF, O(n^2) memory). Only affects the SCF loop itself -- the post-SCF representation for `FUNCTIONAL`/`FULL_OPTIMIZATION` still follows `CHOLESKY` alone (dense if `CHOLESKY FALSE`, including for `FULL_OPTIMIZATION_4C_NEG`). An explicit `TRUE` against `READ_RESTART`/`DEBUG`/`HESSIAN_MEAN_FIELD` still throws; the smart default just silently stays `FALSE` instead. |
-| `FUNCTIONAL_POS_CHO_4C` | bool | `TRUE` if `C4_SPINOR TRUE` and `FUNCTIONAL` is given; else `FALSE` | `C4_SPINOR` only: with `CHOLESKY TRUE` (works with `READ_RESTART` too), build `FUNCTIONAL`/`FULL_OPTIMIZATION`'s positive-energy MO Cholesky vectors in one fused pass, without ever holding the full AO-basis RKB vector set. Only takes effect when that vector set genuinely wouldn't otherwise be built (see *Keyword compatibility* below for the exact conditions) -- otherwise a harmless no-op, reusing whatever was already built rather than redundantly rebuilding it. Memory benefit confirmed on small systems only so far -- not yet validated at heavy-element scale. |
-| `FUNCTIONAL_DIRECT_4C` | bool | `FALSE` | `C4_SPINOR` + `FULL_OPTIMIZATION` only: the ADAM orbital-rotation sub-loop builds its generalized Fock (and, via a double-counting trace identity, its energy) directly from UKB AO integrals at the current orbitals, instead of a stored MO-basis two-electron tensor that the ordinary path re-expresses in the rotated basis on every ADAM step. That per-step re-expression is skipped while ADAM drives and resynced once, right after each ADAM run -- same final numbers, far fewer O(n^5)/O(n_chol n^2) integral rotations. Requires `FUNCTIONAL`; incompatible with `ORBITAL_OPTIMIZER NEO`/`ADAM_NEO` and `FULL_OPTIMIZATION_4C_NEG` (no UKB-direct orbital-rotation Hessian exists yet). |
-| `USE_RI` | bool | `TRUE` if `NON_RELATIVISTIC`/`X2C`/`C4_SPINOR` is active and nothing else already picked a kernel (explicit `CHOLESKY`, explicit `SCF_DIRECT_4C`/`FUNCTIONAL_DIRECT_4C TRUE`, or `DEBUG`/`HESSIAN_MEAN_FIELD`); else `FALSE` | Builds the SCF Fock matrices, and (for `FUNCTIONAL` + `FULL_OPTIMIZATION`) the ADAM/NEO sub-loop's generalized Fock, Hessian-vector product, and the occupation/amplitude optimizer, from a resolution-of-identity (RI) 3-center tensor instead of a dense or Cholesky two-electron representation -- for all three methods, all three functional families (PNOF, JK_only, pCCD), both orbital optimizers (ADAM/NEO), and the `FULL_OPTIMIZATION_4C_NEG` min-max stage. Typical accuracy vs. the exact/dense result is ~1e-7-1e-4 Ha, basis-dependent (a crude/minimal basis can reach ~1e-3 Ha). Also works with `READ_RESTART` (the aux basis/3-center tensor is rebuilt fresh at whatever geometry `READ_RESTART`'s run uses -- nothing RI-related is ever cached in the restart file itself), the natural way to RI-accelerate a potential-energy-curve scan. `ORBITAL_OPTIMIZER NEO`/`ADAM_NEO` are fully supported and covered by the smart default -- see project memory `project-ri-hessian-neo-design`. Set `USE_RI FALSE` explicitly to force the classic dense/Cholesky path. See project memory `project-ri-pauto-kr-validation` for the SCF-level implementation. |
-| `AUX_BASIS_TYPE` | string | `PAUTO` | Auxiliary basis recipe `USE_RI` builds internally (Yang, Rendell, Frisch, *J. Chem. Phys.* 127, 074102 (2007); MOLGW's `init_auxil_basis_set_auto`). `PAUTO` (default) considers every pair of orbital shells; `AUTO` only self-products (cruder, rarely needed). Only meaningful when `USE_RI` is active. |
-| `X_LIN_DEP_THRS_L` | double (> 0) | `1e-6` | Large-component linear-dependence threshold (LOWGEN-style safety net). |
-| `X_LIN_DEP_THRS_S` | double (> 0) | `1e-8` | Small-component linear-dependence threshold (`X2C`/`C4_SPINOR` only). |
-| `FUNCTIONAL` | string | *(none)* | Selects the RDMFT functional: JK-only (`SD`, `MULLER`/`MBB`, `CA`, `RHFB`, `CGA`, `ML`, `MLSIC`, `GU`, `POWER`), PNOF (`PNOF5`, `PNOF7`, `PNOF7S`, `GNOF`), or `PCCD`. Unset skips the whole RDMFT step. |
-| `OCCUPATION_INIT` | string | `PROPORTIONAL` | Initial occupations for a JK-only functional: `PROPORTIONAL` or `FERMI_DIRAC` (at `TEMPERATURE`). |
-| `FUNCTIONAL_INIT` | string | `SCF` | Starting orbitals of the `FUNCTIONAL` stage: the converged `SCF` (HF/DHF) orbitals, or `CORE`, the eigenvectors of the one-electron Hamiltonian (the SCF still runs and reports its energy). |
-| `JK_FROZEN_PAIRS` | int (>= 0) | `0` | JK-only: freeze the lowest `2*JK_FROZEN_PAIRS` spin-orbitals/spinors at occupation 1. |
-| `JK_ACTIVE_PAIRS` | int (>= 1) | all remaining | JK-only: size of the fractional-occupation window above the frozen core; above that is deep virtual (occupation 0). |
-| `TEMPERATURE` | double (> 0) | `1000` K | Smearing temperature for `OCCUPATION_INIT FERMI_DIRAC`. |
-| `PNOF_SUBSPACES` | int (>= 1) | `1` | PNOF: number of independent coupling subspaces. |
-| `PNOF_COUPLING` | int (>= 2) | `2` | PNOF: pairs per subspace (1 occupied + the rest unoccupied). |
-| `SQP_PNOF_OCC` | bool | `FALSE` | PNOF: `FALSE` optimizes unconstrained gamma angles via L-BFGS; `TRUE` optimizes occupations directly via SQP. |
-| `PCCD_FROZEN_PAIRS` | int (>= 0) | `0` | pCCD: freeze the lowest pairs at occupation 1 (no amplitudes). |
-| `PCCD_ACTIVE_PAIRS` | int (>= 1) | all remaining | pCCD: size of the active t-/z-amplitude window. |
-| `PCCD_AMPLITUDE_SOLVER` | string | `NEWTON` | pCCD amplitude solver: `NEWTON` (exact Jacobian) or `LBFGS`. |
-| `FULL_OPTIMIZATION` | bool | `FALSE` | After occupation optimization, macro-iterate orbital rotation + occupation re-optimization to convergence. Works for `NON_REL`, `X2C`, `C4_SPINOR`. |
+
+### Functionals
+
+| Keyword | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `FUNCTIONAL` | string | *(none)* | JK-only (`SD`, `MULLER`/`MBB`, `CA`, `RHFB`, `CGA`, `ML`, `MLSIC`, `GU`, `POWER`), PNOF (`PNOF5`, `PNOF7`, `PNOF7S`, `GNOF`) or `PCCD`. Unset skips the RDMFT step. |
+| `FUNCTIONAL_INIT` | string | `SCF` | Starting orbitals of the functional stage: converged `SCF` orbitals, or `CORE` (eigenvectors of the one-electron Hamiltonian; the SCF still runs and reports its energy). |
+| `OCCUPATION_INIT` | string | `PROPORTIONAL` | JK-only initial occupations: `PROPORTIONAL` or `FERMI_DIRAC`. |
+| `TEMPERATURE` | double | `1000` K | Smearing for `FERMI_DIRAC`. |
+| `JK_FROZEN_PAIRS` | int | `0` | JK-only: lowest pairs frozen at occupation 1. |
+| `JK_ACTIVE_PAIRS` | int | all remaining | JK-only: size of the fractional-occupation window; above it, occupation 0. |
+| `PNOF_SUBSPACES` | int | `1` | PNOF: number of coupling subspaces. |
+| `PNOF_COUPLING` | int (>= 2) | `2` | PNOF: pairs per subspace. |
+| `SQP_PNOF_OCC` | bool | `FALSE` | PNOF: `FALSE` = L-BFGS over gamma angles, `TRUE` = SQP over occupations. |
+| `PCCD_FROZEN_PAIRS` | int | `0` | pCCD: lowest pairs frozen at occupation 1. |
+| `PCCD_ACTIVE_PAIRS` | int | all remaining | pCCD: size of the amplitude window. |
+| `PCCD_AMPLITUDE_SOLVER` | string | `NEWTON` | `NEWTON` or `LBFGS`. |
+| `READ_OCCUPANCIES` | bool | `FALSE` | Read starting occupations from `OCC.in`. |
+| `READ_RESTART` | bool | `FALSE` | Skip the SCF and start from `RESTART.*` (see *Restart*). |
+| `FCIDUMP` | bool | `FALSE` | `NON_RELATIVISTIC` + `FUNCTIONAL`: write an `FCIDUMP` of the MO integrals. |
+| `AIMPAC` | bool | `FALSE` | Write AIMPAC `.wfn` files (HF/DHF density, functional natural orbitals, UCCSD density with `CC_RDM`). |
+
+### Orbital optimization
+
+| Keyword | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `FULL_OPTIMIZATION` | bool | `FALSE` | Macro-iterate orbital rotation and occupation re-optimization (`NON_REL`, `X2C`, `C4_SPINOR`). |
+| `ORBITAL_OPTIMIZER` | string | `ADAM` | `ADAM`, `NEO` (matrix-free Newton) or `ADAM_NEO` (switches by `|dE|`). |
 | `MAX_MACRO_ITERATIONS` | int | `1000` | Macro-iteration cap. |
-| `MACRO_ENERGY_TOLERANCE` | float | `1e-9` | Macro-loop energy convergence threshold. |
-| `ORBITAL_GRADIENT_TOLERANCE` | float | `1e-5` | ADAM/NEO orbital-gradient convergence threshold. |
-| `ORBITAL_OPTIMIZER` | string | `ADAM` | Orbital-rotation driver: `ADAM` (first-order), `NEO` (matrix-free Newton, fewer iterations), or `ADAM_NEO` (ADAM for the first `ADAM_NEO_INITIAL_ADAM_ITERATIONS` macro-iterations, then switches between them by `|dE|`). |
-| `NEO_MAX_ITERATIONS` | int | `20` | Cap on Newton steps per macro-iteration for `NEO`/`ADAM_NEO`. |
-| `ADAM_NEO_SWITCH_TOLERANCE` | double | `2e-3` | `|dE|` threshold that switches `ADAM_NEO` between drivers (after the initial ADAM iterations). |
-| `ADAM_NEO_INITIAL_ADAM_ITERATIONS` | int | `3` | Number of initial macro-iterations `ADAM_NEO` always runs with ADAM before the `|dE|` selector acts. |
-| `ADAM_NEO_MIN_ADAM_ITERATIONS` | int | `3` | Minimum consecutive ADAM macro-iterations `ADAM_NEO` runs after switching from NEO before it may switch back; `ADAM_NEO` also never converges on an ADAM macro-iteration, only on a NEO one. |
-| `NEO_DAVIDSON_STAGNATION_WINDOW` | int | `5` | NEO's Davidson solve gives up (step reported not converged, trust-region ratio test still guards it) when its residual is still above `NEO_DAVIDSON_STAGNATION_FACTOR` times its value this many iterations ago; `0` disables the rule. Stops the near-degenerate-root crawl (e.g. atoms) that otherwise costs hundreds of Hessian products per step. |
-| `NEO_DAVIDSON_STAGNATION_MIN_ITERATIONS` | int | `10` | Davidson iterations per solve before the stagnation rule may fire. |
-| `NEO_DAVIDSON_STAGNATION_FACTOR` | double | `0.5` | Required residual improvement over the window; the rule fires if `residual > factor * residual(window iterations ago)`. |
-| `CHECK_HESS_NEO` | bool | `FALSE` | After a NEO-driven macro loop converges, verify it's a genuine minimum (matrix-free Hessian check) and auto-escape a saddle if found. |
-| `FIXED_OCCUPANCIES` | bool | `FALSE` | `FULL_OPTIMIZATION`: keep occupations (and, for pCCD, the full 2-RDM) fixed through the macro loop -- pure orbital optimization. |
-| `READ_OCCUPANCIES` | bool | `FALSE` | Read starting occupations from `OCC.in` instead of optimizing them from scratch. |
-| `READ_RESTART` | bool | `FALSE` | Skip the SCF and start the functional calculation from a previous run's `RESTART.*` file (see *Restart file* below). |
-| `FULL_OPTIMIZATION_4C_NEG` | bool | `FALSE` | `C4_SPINOR` + `FULL_OPTIMIZATION`: after the positive-energy-only minimum converges, run the genuine relativistic min-max stage (see below). |
-| `X2C` | bool | `FALSE` | Run the approximate X2C-HF SCF alongside `NON_RELATIVISTIC`/`C4_SPINOR` (see below). |
+| `MACRO_ENERGY_TOLERANCE` | float | `1e-9` | Macro-loop energy convergence. |
+| `ORBITAL_GRADIENT_TOLERANCE` | float | `1e-5` | Orbital-gradient convergence. |
+| `NEO_MAX_ITERATIONS` | int | `20` | Newton steps per macro-iteration. |
+| `ADAM_NEO_SWITCH_TOLERANCE` | double | `2e-3` | `|dE|` threshold for switching drivers. |
+| `ADAM_NEO_INITIAL_ADAM_ITERATIONS` | int | `3` | Initial macro-iterations always run with ADAM. |
+| `ADAM_NEO_MIN_ADAM_ITERATIONS` | int | `3` | Minimum ADAM macro-iterations after a switch from NEO. |
+| `NEO_DAVIDSON_STAGNATION_WINDOW` | int | `5` | Davidson gives up if the residual has not improved by the factor below over this many iterations; `0` disables. |
+| `NEO_DAVIDSON_STAGNATION_MIN_ITERATIONS` | int | `10` | Iterations before the rule may fire. |
+| `NEO_DAVIDSON_STAGNATION_FACTOR` | double | `0.5` | Required residual improvement over the window. |
+| `CHECK_HESS_NEO` | bool | `FALSE` | After a NEO/`ADAM_NEO` loop, verify a genuine minimum and escape a saddle. |
+| `FIXED_OCCUPANCIES` | bool | `FALSE` | Keep occupations (and pCCD's 2-RDM) fixed: pure orbital optimization. |
+| `FULL_OPTIMIZATION_4C_NEG` | bool | `FALSE` | `C4_SPINOR`: after the positive-energy minimum, run the min-max stage (see below). |
 
 ## Keyword compatibility
 
-`SCF_DIRECT_4C` and `FUNCTIONAL_POS_CHO_4C` both have smart-conditional defaults (see their own
-table rows above): they default to `TRUE` only when applicable and non-conflicting, so most
-inputs never need to mention them at all. Existing examples that are specifically meant to
-exercise the *other* path (dense, or the plain Cholesky-vector one) set them explicitly to
-`FALSE` to keep doing that.
-
-Hard errors (incompatible, Input.cpp throws at parse time) -- for the `USE_RI` rows below, this
-only fires when `USE_RI TRUE` is written explicitly; left unset, `USE_RI`'s own smart default
-quietly becomes `FALSE` instead:
+**Errors** (raised when the input is read; the `USE_RI` rows only when `USE_RI TRUE` is written explicitly):
 
 | Combination | Why |
 | --- | --- |
-| `SCF_DIRECT_4C TRUE` + `READ_RESTART TRUE` | The restart branch has its own, separate Fock-build logic, not wired to the integral-direct kernel. |
-| `SCF_DIRECT_4C TRUE` + `DEBUG TRUE` | DEBUG's dense-vs-Cholesky comparison needs an actual dense tensor, which `SCF_DIRECT_4C` never builds. |
-| `SCF_DIRECT_4C TRUE` + `HESSIAN_MEAN_FIELD TRUE` | Same -- needs a dense tensor. |
-| `USE_RI TRUE` without any of `NON_RELATIVISTIC`/`X2C`/`C4_SPINOR TRUE` | Nothing for it to change -- there is no SCF loop for it to affect. |
-| `USE_RI TRUE` + `DEBUG`/`HESSIAN_MEAN_FIELD TRUE` | Both need an actual dense two-electron tensor, which `USE_RI` never builds. |
-| `USE_RI TRUE` + an explicit `SCF_DIRECT_4C TRUE` | Two different, mutually exclusive SCF kernels for the same thing -- ambiguous. |
-| `USE_RI TRUE` + an explicit `FUNCTIONAL_DIRECT_4C TRUE` | Two different, mutually exclusive strategies for the same ADAM orbital-rotation sub-loop -- ambiguous. |
-| `CC_RDM TRUE` without `UCCSD TRUE` | Built from the UCCSD amplitudes. |
-| `UCCSD TRUE` without `NON_RELATIVISTIC`/`X2C`/`C4_SPINOR`, or + `READ_RESTART` | Needs a freshly converged SCF reference. |
-| `FUNCTIONAL_INIT CORE` without `FUNCTIONAL`, or + `READ_RESTART`/`DEBUG`/`HESSIAN_MEAN_FIELD` | Needs a functional stage to start; the restart file already supplies the orbitals; the diagnostics validate the HF orbitals. (`UCCSD` is fine: it always runs on the SCF orbitals, building its own MO integrals when the functional starts from the core ones.) |
-| `FCIDUMP TRUE` without `NON_RELATIVISTIC TRUE`, or without `FUNCTIONAL` | Only NON_REL is supported; needs an RDMFT orbital order to write. |
-| `READ_OCCUPANCIES TRUE` without `FUNCTIONAL` | Nothing to read occupations into. |
-| `FUNCTIONAL_DIRECT_4C TRUE` without `C4_SPINOR TRUE`, `FUNCTIONAL`, or `FULL_OPTIMIZATION TRUE` | Nothing for it to change -- it only replaces `C4_SPINOR`'s own ADAM orbital-rotation sub-loop. |
-| `FUNCTIONAL_DIRECT_4C TRUE` + `FULL_OPTIMIZATION_4C_NEG TRUE`, or + `ORBITAL_OPTIMIZER NEO`/`ADAM_NEO` | No UKB-direct orbital-rotation Hessian exists yet (NEO needs one); use `ORBITAL_OPTIMIZER ADAM` (the default). |
+| `SCF_DIRECT_4C` + `READ_RESTART`/`DEBUG`/`HESSIAN_MEAN_FIELD` | The restart branch has its own Fock build; the others need a dense tensor. |
+| `USE_RI` without `NON_RELATIVISTIC`/`X2C`/`C4_SPINOR` | No SCF to affect. |
+| `USE_RI` + `DEBUG`/`HESSIAN_MEAN_FIELD` | They need a dense tensor. |
+| `USE_RI` + explicit `SCF_DIRECT_4C` or `FUNCTIONAL_DIRECT_4C` | Mutually exclusive kernels. |
+| `CC_RDM` without `UCCSD` | Built from the UCCSD amplitudes. |
+| `UCCSD` without an SCF method, or + `READ_RESTART` | Needs a fresh SCF reference. |
+| `FUNCTIONAL_INIT CORE` without `FUNCTIONAL`, or + `READ_RESTART`/`DEBUG`/`HESSIAN_MEAN_FIELD` | Needs a functional stage; the restart supplies the orbitals; the diagnostics validate HF orbitals. |
+| `FCIDUMP` without `NON_RELATIVISTIC` + `FUNCTIONAL` | NON_REL only. |
+| `READ_OCCUPANCIES` without `FUNCTIONAL` | Nothing to read into. |
+| `FUNCTIONAL_DIRECT_4C` without `C4_SPINOR` + `FUNCTIONAL` + `FULL_OPTIMIZATION` | Replaces only that ADAM sub-loop. |
+| `FUNCTIONAL_DIRECT_4C` + `FULL_OPTIMIZATION_4C_NEG` or `NEO`/`ADAM_NEO` | No UKB-direct Hessian exists. |
 
-Everything else combines freely; the ones below are worth knowing exactly what they do (mostly
-harmless no-ops, not errors):
+**Worth knowing** (everything else combines freely):
 
 | Combination | Effect |
 | --- | --- |
-| `SCF_DIRECT_4C TRUE` + `CHOLESKY` (either) | Independent: the post-SCF representation for `FUNCTIONAL`/`FULL_OPTIMIZATION` follows `CHOLESKY` alone, including for `FULL_OPTIMIZATION_4C_NEG` (dense fallback when `CHOLESKY FALSE`). |
-| Explicit `USE_RI TRUE` + explicit `CHOLESKY` (either) | Independent and both honored -- `USE_RI` only changes the two-electron representation; `CHOLESKY`'s own vectors, if anything downstream still needs them, are unaffected. |
-| `USE_RI TRUE` + `READ_RESTART TRUE` | **Full effect** -- the `READ_RESTART` branch builds its own aux basis/3-center tensor fresh at the current geometry (shared with the ordinary SCF path's own cache when both run in the same process) and feeds it through the same `RiNonRelSpinMoEri`/`RiMoEri`/`UkbDirectSource` machinery the non-restart path uses; mutually exclusive with `SCF_DIRECT_4C TRUE` exactly as elsewhere. |
-| `USE_RI TRUE` + `FULL_OPTIMIZATION_4C_NEG TRUE` | **Full effect** -- the min-max stage's untrimmed, full-RKB-space `RiMoEri` is already built by the ordinary ground-state path (no separate rebuild needed, unlike `CholeskyEri`); just reused. |
-| `USE_RI TRUE` + `ORBITAL_OPTIMIZER NEO`/`ADAM_NEO` | **Full effect** -- all three methods (`NON_RELATIVISTIC`/`X2C`/`C4_SPINOR`) share a sigma-vector (matrix-free) Hessian-vector product derived directly against the RI 3-center tensor; see project memory `project-ri-hessian-neo-design`. |
-| `UCCSD TRUE` + `USE_RI`/`CHOLESKY`/dense | **Full effect** -- `ovvv`/`vvvv` are never stored; dense integrals are slow for large bases. |
-| `UCCSD TRUE` + `FUNCTIONAL` | Independent: the CC runs first. |
-| `FUNCTIONAL_POS_CHO_4C TRUE` + `CHOLESKY FALSE` | No-op -- the dense path never touches `RkbCholesky` anyway. |
-| `FUNCTIONAL_POS_CHO_4C TRUE` + `CHOLESKY TRUE` + `SCF_DIRECT_4C FALSE` (no restart) | No-op -- `rkb_cholesky` is already needed by the ordinary Cholesky SCF loop; reused, not rebuilt. |
-| `FUNCTIONAL_POS_CHO_4C TRUE` + `CHOLESKY TRUE` + `SCF_DIRECT_4C TRUE` | **Full effect** -- `RkbCholesky`'s AO-basis vectors are never built at all for the whole run. The intended use case. |
-| `FUNCTIONAL_POS_CHO_4C TRUE` + `FULL_OPTIMIZATION_4C_NEG TRUE` | No-op -- MINMAX needs the untrimmed transform, which still goes through `RkbCholesky`. |
-| `FUNCTIONAL_POS_CHO_4C TRUE` + `READ_RESTART TRUE` + `CHOLESKY TRUE`, MINMAX not running, restart geometry unchanged | **Full effect** -- the AO-basis build is deferred and skipped entirely. |
-| `FUNCTIONAL_POS_CHO_4C TRUE` + `READ_RESTART TRUE` + `CHOLESKY TRUE`, geometry changed from the restart file | No-op -- `rkb_cholesky` is needed anyway for the one-shot Fock rebuild that re-establishes the positive-energy space; built once, reused. |
-| `FUNCTIONAL_POS_CHO_4C TRUE` + `DEBUG`/`HESSIAN_MEAN_FIELD TRUE` | No-op -- falls back to the dense-tensor path those need. |
-| `ON_DEMAND_ERI`/`CHOLESKY_THRESHOLD` + `CHOLESKY FALSE` | No-op -- neither is read unless `CHOLESKY TRUE`. |
-| `CARTESIAN` + `C4_SPINOR`/`X2C` | No-op -- those always use the spherical basis regardless. |
-| `CHECK_HESS_NEO TRUE` + `ORBITAL_OPTIMIZER ADAM` | No-op -- needs NEO capability (`NEO` or `ADAM_NEO`). |
+| `USE_RI` + `READ_RESTART`/`FULL_OPTIMIZATION_4C_NEG`/`NEO`/`ADAM_NEO` | Full effect; the RI tensor is rebuilt at the current geometry, never stored in the restart file. |
+| `SCF_DIRECT_4C` + `CHOLESKY` | Independent; the post-SCF representation follows `CHOLESKY` alone. |
+| `UCCSD` + `FUNCTIONAL` | CC runs first, always on the SCF orbitals (also with `FUNCTIONAL_INIT CORE`). |
+| `FUNCTIONAL_POS_CHO_4C` + `CHOLESKY` + `SCF_DIRECT_4C` | Full effect: AO-basis `RkbCholesky` vectors are never built. |
+| `FUNCTIONAL_POS_CHO_4C` + `READ_RESTART` + `CHOLESKY` | Full effect only if the geometry is unchanged and `FULL_OPTIMIZATION_4C_NEG` is off. |
+| `FUNCTIONAL_POS_CHO_4C` otherwise (no `CHOLESKY`, SCF already needs `rkb_cholesky`, min-max, `DEBUG`) | No-op. |
+| `ON_DEMAND_ERI`/`CHOLESKY_THRESHOLD` without `CHOLESKY`; `CARTESIAN` with `X2C`/`C4_SPINOR`; `CHECK_HESS_NEO` with `ADAM` | No-op. |
 
-## X2C decoupling and X2C-HF
+## X2C
 
-Setting `X2C` prints a one-electron X2C decoupling report and runs an
-approximate X2C-HF SCF, between the `NON_RELATIVISTIC` and `C4_SPINOR`
-reports, independent of whether either of those is itself set.
+`X2C` prints a one-electron X2C decoupling report and runs an approximate
+X2C-HF SCF, independent of `NON_RELATIVISTIC`/`C4_SPINOR`. Both share an
+analytic restricted-kinetic-balance small component, a spherical large basis
+and a LOWGEN linear-dependence safety net.
 
-Both `X2C` and `C4_SPINOR` share the same relativistic machinery
-(`X2C_DHF/`, `RKB/`): an analytic restricted-kinetic-balance small
-component (one small-component function per large-component function,
-built in closed form, no numerical projection), a spherical
-large-component basis (`Utils/SphericalTransform.h`), and a DIRAC-style
-LOWGEN safety net for any residual linear dependence
-(`Linear_Algebra/LinearAlgebra.h`).
+1. Diagonalizing the orthonormalized 4-component Hamiltonian separates the
+   positive- and negative-energy branches; eigenvalues, Kramers splitting and
+   a partner check are printed.
+2. The exact X2C Hamiltonian eliminates the small component exactly.
+3. The approximate X2C Hamiltonian orthogonalizes with the large-component
+   overlap only.
+4. The X2C-HF SCF uses it as a fixed core with nonrelativistic two-electron
+   integrals; it can converge below the 4-component energy (expected).
+5. The `Hessian_opt` gradient/Hessian tests run as for `C4_SPINOR`; X2C-HF is a
+   genuine minimum.
 
-1. **Decoupling**: diagonalizing the orthonormalized 4-component
-   Hamiltonian block-diagonalizes the Dirac equation into
-   positive-/negative-energy branches. Eigenvalues, Kramers-pair
-   splitting, and a Kramers-partner check are always printed.
-2. **Exact X2C Hamiltonian**: eliminates the small component exactly,
-   reproducing the positive-energy spectrum from step 1 with no
-   approximation -- the no-pair approximation is simply using this
-   Hamiltonian alone.
-3. **Approximate X2C Hamiltonian**: the same Hamiltonian orthogonalized
-   with only the plain large-component overlap -- a common
-   simplification, close to but not identical to the exact spectrum.
-4. **Approximate X2C-HF SCF**: full SCF using step 2's Hamiltonian as a
-   *fixed* one-electron core (no picture-change correction as the
-   density changes) and ordinary nonrelativistic two-electron
-   integrals. Genuine opposite-spin exchange appears because the core
-   already mixes spins. Can converge below the exact 4-component
-   energy (the usual variational bound no longer applies once the
-   metric isn't exact) -- expected, not a bug.
-5. **Gradient/Hessian tests**: the same `Hessian_opt` test suite
-   `C4_SPINOR` runs is run here too. Unlike `C4_DHF`'s saddle, X2C-HF's
-   solution is a genuine minimum.
-
-See `examples/water_X2C.inp` (plain) or `examples/water_X2C_debug.inp`
-(`DEBUG TRUE`).
+Examples: `examples/water_X2C.inp`, `examples/water_X2C_debug.inp`.
 
 ## RDMFT functional evaluation
 
-Setting `FUNCTIONAL` runs an RDMFT evaluation after each requested SCF
-converges, using its orbitals/integrals as a fixed background. By
-default these are the converged SCF orbitals; `FUNCTIONAL_INIT CORE` starts
-the functional stage from the eigenvectors of the one-electron Hamiltonian
-instead (the SCF still runs and reports its energy), which can land in a
-different basin of the orbital optimization:
+`FUNCTIONAL` runs after each SCF, with its orbitals and integrals as a fixed
+background: initial occupations (`OCCUPATION_INIT`), the functional energy,
+then occupations optimized by SQP with `sum(n_p) = NELEC`, `0 < n_p < 1`,
+both members of each Kramers/spin pair tied together. `C4_SPINOR` excludes the
+negative-energy branch (no-pair); `X2C` and `NON_RELATIVISTIC` let every
+orbital compete.
 
-1. Generate initial fractional occupations (`OCCUPATION_INIT`).
-2. Evaluate the functional's energy.
-3. Optimize the occupations via SQP (`Occ_opt/SQP.h`), subject to
-   `sum(n_p) = NELEC` and `0 < n_p < 1`, with both members of each
-   Kramers/spin pair tied to one variable.
+`FUNCTIONAL_INIT CORE` starts the functional stage from the core-Hamiltonian
+eigenvectors instead of the SCF orbitals; it can end in a different basin of the
+orbital optimization. UCCSD is unaffected.
 
-The output also prints `Tr(2-RDM)` next to its exact value N(N-1)/2. It is exact for MULLER, CA, CGA, PNOF and pCCD; it deviates where the exchange coupling has f(n,n) != n (GU, ML, MLSIC, POWER, RHFB, SD at fractional occupations) and for MULLER_AS.
+`Tr(2-RDM)` is printed next to N(N-1)/2: exact for MULLER, CA, CGA, PNOF and
+pCCD; it deviates for GU, ML, MLSIC, POWER, RHFB, SD at fractional occupations
+and for MULLER_AS.
 
-For `C4_SPINOR` the negative-energy branch is excluded entirely
-(no-pair approximation); for `X2C` and `NON_RELATIVISTIC`, every
-orbital competes for occupation.
-
-See `examples/water_muller.inp`, `examples/co-sto-3g_muller.inp`, or
+Examples: `examples/water_muller.inp`, `examples/co-sto-3g_muller.inp`,
 `examples/water_X2C_muller.inp`.
 
 ## PNOF functionals
 
-`FUNCTIONAL PNOF5`/`PNOF7`/`PNOF7S`/`GNOF` (`Occ_opt/PNOFs.h`) runs a
-subspace-based geminal occupation-number optimization instead of the
-JK-only one:
+`PNOF5`/`PNOF7`/`PNOF7S`/`GNOF` (`Occ_opt/PNOFs.h`): occupied and unoccupied
+pairs are partitioned into `PNOF_SUBSPACES` coupling subspaces, each with one
+principal pair and `PNOF_COUPLING - 1` unoccupied pairs, and occupations are
+optimized from a feasible gamma-angle guess (`SQP_PNOF_OCC` selects L-BFGS or SQP;
+both agree when converged). `GNOF`'s inter-subspace coupling needs a
+finite-difference Hessian for SQP; the others are analytic. The default
+(`1` subspace, coupling `2`) converges cleanly; larger settings may hit the
+iteration cap at a correct point, so cross-check with the other `SQP_PNOF_OCC`.
 
-1. Partition occupied/unoccupied pairs into `PNOF_SUBSPACES` coupling
-   subspaces (`Occ_opt/Orb_subspaces.h`), each with one occupied
-   ("principal") pair and `PNOF_COUPLING - 1` unoccupied pairs.
-2. Build a feasible starting guess via the same trigonometric
-   ("gamma angle") parameterization DoNOF uses.
-3. Optimize via `SQP_PNOF_OCC`: `FALSE` (default) uses L-BFGS over the
-   unconstrained gamma angles; `TRUE` uses SQP over the occupations
-   directly with explicit box+equality constraints. Both agree to full
-   precision when both converge.
-4. `GNOF`'s inter-subspace coupling needs a finite-difference Hessian
-   for the `SQP_PNOF_OCC TRUE` path; `PNOF5`/`7`/`7S` are fully
-   analytic.
-
-The default (`PNOF_SUBSPACES 1`, `PNOF_COUPLING 2`) converges cleanly
-for all three SCF paths. Larger subspace counts can hit an optimizer's
-iteration cap without its `converged` flag firing even at a correct
-stationary point -- cross-check with the other `SQP_PNOF_OCC` setting
-if that happens.
-
-See `examples/water_gnof.inp`, `examples/co-sto-3g_gnof.inp`, or
+Examples: `examples/water_gnof.inp`, `examples/co-sto-3g_gnof.inp`,
 `examples/water_X2C_gnof.inp`.
 
 ## pCCD functional
 
-`FUNCTIONAL PCCD` (`Occ_opt/pCCD.h`) runs Kramers-restricted
-pair-coupled-cluster doubles (Henderson, Bulik, Stein, Scuseria,
-*J. Chem. Phys.* **141**, 244104 (2014), generalized to a spinor basis
--- derivation in `doc/kr_pccd.tex`):
+`FUNCTIONAL PCCD` (`Occ_opt/pCCD.h`, derivation in `doc/kr_pccd.tex`) is
+Kramers-restricted pair-CCD (Henderson et al., *J. Chem. Phys.* **141**, 244104
+(2014)): pairs are split into frozen-core, active and deep-virtual windows, the
+t-/z-amplitudes are solved at fixed orbitals, and with `FULL_OPTIMIZATION` the
+resulting RDM feeds the same ADAM/NEO machinery as PNOF, re-solving the
+amplitudes every macro-iteration (warm-started from the previous ones). Works on
+`NON_REL`/`X2C`/`C4_SPINOR`, including the min-max stage, and with `READ_RESTART`
+(amplitudes included).
 
-1. Partition pairs into frozen-core (`PCCD_FROZEN_PAIRS`), active, and
-   deep-virtual windows (same convention as `JK_FROZEN_PAIRS`).
-2. Solve the t-/z-amplitude equations at fixed orbitals
-   (`PCCD_AMPLITUDE_SOLVER`), building the pair-level 1-/2-RDM.
-3. With `FULL_OPTIMIZATION TRUE`, the RDM feeds the same generalized
-   Fock/Hessian machinery PNOF uses, so `ADAM`/`NEO` optimize pCCD
-   orbitals through the identical code path; each macro-iteration
-   re-solves the amplitudes at the new orbitals.
+The energy is not variational in the orbitals, so the orbital optimization can
+have several branches (e.g. stretched bonds). A cold start may land on a higher
+one: follow the curve with a restart chain from a shorter bond length, or try
+`FUNCTIONAL_INIT CORE`.
 
-Validated end to end on `NON_REL`/`X2C`/`C4_SPINOR`, including the
-`FULL_OPTIMIZATION_4C_NEG` min-max stage. See
-`examples/ne_pccd_full_optimization.inp`, `examples/ne_pccd_x2c.inp`,
-`examples/ne_pccd_c4.inp`, `examples/ne_pccd_c4_neg.inp`.
-`READ_RESTART` works for pCCD too, including the amplitudes as a warm
-start.
+Examples: `examples/ne_pccd_full_optimization.inp`, `ne_pccd_x2c.inp`,
+`ne_pccd_c4.inp`, `ne_pccd_c4_neg.inp`.
 
-## FULL_OPTIMIZATION for C4_SPINOR: positive-energy-only orbital rotations
+## FULL_OPTIMIZATION for C4_SPINOR
 
-Relativistic SCF is a min-max problem, not a plain minimization
-(Talman, *Phys. Rev. Lett.* 57, 1091 (1986); Saue, ChemPhysChem 12,
-3077 (2011)): a minimum over rotations among positive-energy spinors,
-but a maximum over rotations that mix in the negative-energy (Dirac
-sea) branch. `FULL_OPTIMIZATION` therefore excludes every rotation
-pair touching a negative-energy index from the parameter space
-entirely (for both `ORBITAL_OPTIMIZER ADAM` and `NEO`), turning
-`C4_SPINOR`'s own optimization into an ordinary minimization, just
-like `NON_REL`/`X2C`.
+The relativistic SCF is a min-max problem (Talman, *PRL* 57, 1091 (1986); Saue,
+*ChemPhysChem* 12, 3077 (2011)): a minimum over positive-energy rotations, a
+maximum over rotations mixing in the negative-energy branch. `FULL_OPTIMIZATION`
+therefore excludes every rotation touching a negative-energy index (for `ADAM`
+and `NEO`), which makes it an ordinary minimization like `NON_REL`/`X2C`.
+`CHOLESKY` for `C4_SPINOR` decomposes the real AO Coulomb matrix over
+Large-Large and Small-Small pairs (`C4_DHF/RkbCholesky.h`) and recompresses the
+MO vectors to the positive-energy block.
 
-`CHOLESKY TRUE` for `C4_SPINOR`: one decomposition of the real AO
-Coulomb matrix over `{Large-Large} u {Small-Small}` pairs
-(`C4_DHF/RkbCholesky.h`), projected into the RKB spinor basis; the SCF
-and MO-basis vectors follow from it, recompressed to the positive-
-energy block since the negative branch never has nonzero occupation.
+Examples: `examples/lih_gnof_c4_full_optimization.inp` (dense),
+`lih_gnof_c4_neo_full_optimization.inp` (NEO),
+`lih_gnof_c4_full_optimization_cholesky.inp` (Cholesky); all give the same energy.
 
-See `examples/lih_gnof_c4_full_optimization.inp` (dense),
-`examples/lih_gnof_c4_neo_full_optimization.inp` (NEO), or
-`examples/lih_gnof_c4_full_optimization_cholesky.inp` (Cholesky) --
-all converge to the same energy.
+### FULL_OPTIMIZATION_4C_NEG
 
-### `FULL_OPTIMIZATION_4C_NEG`: the min-max stage
-
-With `FULL_OPTIMIZATION_4C_NEG TRUE`, after the positive-energy-only
-minimum converges, a second stage solves the genuine min-max problem:
-minimizing over positive-energy rotations, maximizing over
-electron-positron rotations (occupied positive-energy <-> negative-
-energy spinor), to a saddle point of the expected order. Driven by NEO
-with a dynamic saddle order and a sector partition that keeps the
-electron-positron curvature separate from ordinary Davidson search
-directions; occupations are fully re-minimized at each new orbital set.
-`DEBUG TRUE` adds an exact dense-Hessian check of the saddle order
-(memory-bound for larger bases).
-
-For light systems this moves the energy negligibly (~1e-10 Hartree) --
-it's primarily a check that the no-pair minimum is also the min-max
-point. See `examples/lih_gnof_c4_neg_full_optimization.inp` or
+After the positive-energy minimum converges, a second stage finds the true
+min-max point: minimize over positive-energy rotations, maximize over
+electron-positron rotations, with NEO using a dynamic saddle order and a sector
+partition; occupations are fully re-minimized each step. `DEBUG` adds an exact
+dense-Hessian check. For light systems it moves the energy by ~1e-10 Ha, so it
+mostly confirms the no-pair minimum. Examples:
+`examples/lih_gnof_c4_neg_full_optimization.inp`,
 `examples/lih_muller_c4_neg_full_optimization_cholesky.inp`.
 
-### `FUNCTIONAL_DIRECT_4C`: UKB-AO-integral-direct ADAM
+### FUNCTIONAL_DIRECT_4C
 
-With `FUNCTIONAL_DIRECT_4C TRUE`, the ADAM orbital-rotation sub-loop builds the generalized Fock
-(and, via a double-counting trace identity, the energy ADAM's own accept/converge logic needs)
-directly from UKB AO integrals at the current orbitals (`Hessian_opt/UkbJkOnlyFock.h`/
-`UkbJkOnlyFockFast.h`/`UkbPnofFock.h`/`UkbPccdFock.h`), instead of reading a stored MO-basis
-two-electron tensor that the ordinary path re-expresses in the rotated basis on every ADAM step
-(`IntegralRotation.h`'s `rotateIntegralsExact`, O(n^5) dense or O(n_chol n^2) Cholesky). That
-per-step re-expression is skipped entirely while ADAM drives and resynced once, right after each
-ADAM run -- same final numbers (verified: converged energy and the orbital gradient both match the
-ordinary stored-tensor path to machine precision on every functional family, see below), far fewer
-expensive integral rotations per macro-iteration.
+ADAM builds its generalized Fock (and, through a double-counting trace identity,
+its energy) directly from UKB AO integrals at the current orbitals
+(`Hessian_opt/Ukb*Fock*.h`), instead of re-expressing a stored MO tensor in the
+rotated basis at every step (O(n^5) dense, O(n_chol n^2) Cholesky). The final
+numbers are identical. Cost per Fock build depends on the functional:
 
-Build cost is NOT uniform across functionals -- this keyword is most valuable for the systems
-`CHOLESKY`/dense storage cannot handle at all, not a universal speedup:
-- **JK_only, SD/MBB/CA/CGA/POWER/MULLER_AS**: genuinely O(1-2) UKB-AO densities per Fock build,
-  independent of system size -- runs at the same speed as the stored-tensor path (confirmed: LiH/
-  6-31G SD finishes in the same wall time either way, converged energies identical).
-- **JK_only, GU/ML/MLSIC**: no finite separable decomposition exists (a diagonal special case
-  for GU, a non-separable rational form for ML/MLSIC) -- O(n_mo) UKB-AO densities per build,
-  same order as PNOF/pCCD below.
-- **PNOF, pCCD**: the same-geminal/same-pair structure in their 2-RDM ansatz is NOT separable
-  (confirmed against DoNOF's own `orbopt.f90` `ELAGaor`, which pays the identical O(n_gem) cost via
-  its own `DO lg=1,NDOC` geminal loops) -- O(n_total) UKB-AO densities per build. Still faster than
-  the generic baseline (Hartree and exchange share one density here, not two, since
-  `two_rdm_h(s,q)==two_rdm_x(q,s)` identically for both), but not O(1).
-- For a heavy-element, large-basis system where `CHOLESKY`'s AO-pair decomposition does not
-  converge in any affordable vector count (e.g. a dense, near-degenerate diagonal spectrum from
-  high atomic symmetry) and the dense tensor is categorically too large to hold, `FUNCTIONAL_DIRECT_4C`
-  turns an otherwise infeasible (never-finishing, or `std::bad_alloc`) `FULL_OPTIMIZATION` into a
-  finite one -- but for PNOF/pCCD that is likely still "finite and slow" (plausibly days, extrapolated
-  from the O(n_total) build cost and how long a single UKB-AO-integral-direct Fock build already
-  takes for such a system via `SCF_DIRECT_4C`), not "fast." Only `ORBITAL_OPTIMIZER ADAM` is
-  supported (no UKB-AO-direct orbital-rotation Hessian exists yet, so `NEO`/`ADAM_NEO`/
-  `FULL_OPTIMIZATION_4C_NEG` are rejected together with this keyword).
+- `SD`/`MBB`/`CA`/`CGA`/`POWER`/`MULLER_AS`: O(1) UKB densities, the same speed as the stored path.
+- `GU`/`ML`/`MLSIC`, `PNOF`, pCCD: O(n_mo) to O(n_total) densities (not separable).
 
-## Restart file
+It pays off where `CHOLESKY` and the dense tensor are infeasible (heavy elements,
+big bases), but for PNOF/pCCD it is then still slow. Only `ORBITAL_OPTIMIZER ADAM`
+is supported.
 
-At the end of a run with a `FUNCTIONAL`, the final RDMFT state is
-written in binary to `RESTART.NON_REL`, `RESTART.X2C`, and/or
-`RESTART.4C` (`Utils/Restart.h`), read back immediately as an identity
-check. With `FULL_OPTIMIZATION` the file is also rewritten every 10 macro-iterations; the `FULL_OPTIMIZATION_4C_NEG` min-max result goes to
-`RESTART.4C_NEG` (write-only). Contents: occupation numbers, the resolved frozen/active window
-(JK-only/pCCD), gamma angles (PNOF), t-/z-amplitudes (pCCD), the final
-MO coefficients, and metadata (basis fingerprint, electron count,
-converged energy, convergence flags).
+## Restart
 
-### `READ_RESTART TRUE`
+A run with a `FUNCTIONAL` writes the final state to `RESTART.NON_REL`,
+`RESTART.X2C` and/or `RESTART.4C` (`Utils/Restart.h`), read back as an identity
+check; `FULL_OPTIMIZATION` rewrites it every 10 macro-iterations, and the min-max
+result goes to `RESTART.4C_NEG` (write-only). It holds occupations, the frozen/
+active window, gamma angles (PNOF), t-/z-amplitudes (pCCD), the MO coefficients
+and metadata.
 
-Skips the SCF for every requested method and starts from the restart
-file's state:
+`READ_RESTART TRUE` skips the SCF and starts from that file:
 
-1. Read `RESTART.<method>` and check it against the run (method,
-   `NELEC`, coefficient shape) -- not the geometry, so this also
-   supports potential-energy scans.
-2. Re-orthonormalize the coefficients against the *current* geometry's
-   overlap (Loewdin) if they aren't already orthonormal.
-3. Re-establish exact Kramers pairing (`X2C`/`C4_SPINOR`) after that
-   step.
-4. For `C4_SPINOR`, re-establish the positive-energy space at the
-   current geometry (one Fock build from the restart density, no SCF
-   iteration) -- the old geometry's positive space otherwise carries a
-   small negative-energy admixture.
-5. Occupations/amplitudes from the file seed the occupation
-   optimization (still run once before `FULL_OPTIMIZATION`) instead of
-   the usual cold start; a file that doesn't fit the current window
-   (`JK_*`/`PCCD_*`) is refused with a clear error.
+1. Check method, `NELEC` and coefficient shape (not the geometry, so scans work).
+2. Löwdin-orthonormalize against the current overlap if needed.
+3. Re-establish exact Kramers pairing (`X2C`/`C4_SPINOR`).
+4. `C4_SPINOR`: re-establish the positive-energy space with one Fock build.
+5. Occupations/amplitudes seed the occupation optimization; a file that does not
+   fit the current `JK_*`/`PCCD_*` window is refused.
 
-The new results overwrite `RESTART.*`, so a geometry scan is a chain:
-run the first point, then edit the geometry, add `READ_RESTART TRUE`,
-and repeat. See `examples/lih_gnof_read_restart.inp`.
+A geometry scan is a chain: run the first point, then change the geometry, add
+`READ_RESTART TRUE`, repeat (the new results overwrite `RESTART.*`; copy it per
+point to keep a backup). Example: `examples/lih_gnof_read_restart.inp`.
 
 ## Environment variables
 
 | Variable | Effect |
 |---|---|
-| `OMP_NUM_THREADS` | Standard OpenMP thread count; also governs the threaded BLAS (OpenBLAS) calls. |
-| `RERDMFT_RI_HV_REFERENCE` | If set (any value), the `USE_RI` generalized-Fock and sigma-vector Hessian-vector products use the original element-by-element implementations instead of the GEMM ones -- a validation A/B switch, same results to roundoff but much slower. |
-| `SWITCH_SIGN_ERI` | If set (any value), every electron-repulsion integral changes sign -- a diagnostic. Valid only for the dense integrals: refused with `USE_RI`, `CHOLESKY`, `SCF_DIRECT_4C` or `FUNCTIONAL_DIRECT_4C` (set them `FALSE`). |
+| `OMP_NUM_THREADS` | OpenMP threads (also the threaded BLAS). |
+| `RERDMFT_RI_HV_REFERENCE` | Any value: `USE_RI` products use the element-by-element reference code (same results, much slower). |
+| `SWITCH_SIGN_ERI` | Any value: flips the sign of every electron-repulsion integral (diagnostic; dense integrals only). |
 
 ## Compiling LIBCINT
 
-ReRDMFT links LIBCINT statically and only uses its Cartesian (`_cart`) kernels. The recipe below is the one used for development (the same build [MOLGW](https://www.molgw.org/tuto_compilation/) asks for, so one build serves both codes):
+ReRDMFT links LIBCINT statically and only uses its Cartesian kernels. The
+recipe below also serves [MOLGW](https://www.molgw.org/tuto_compilation/):
 
 ```sh
-git clone https://github.com/sunqm/libcint.git     # or unpack a release tarball, e.g. libcint-5.1.6
+git clone https://github.com/sunqm/libcint.git
 cd libcint && mkdir build && cd build
 cmake -DWITH_RANGE_COULOMB=1 -DPYPZPX=1 -DBUILD_SHARED_LIBS=0 \
-      -DENABLE_EXAMPLE=0 -DENABLE_TEST=0 \
-      -DCMAKE_BUILD_TYPE=Release ..
+      -DENABLE_EXAMPLE=0 -DENABLE_TEST=0 -DCMAKE_BUILD_TYPE=Release ..
 make -j
 ```
 
-Then point ReRDMFT at `libcint/build/libcint.a` (see Building above); its headers are in `libcint/build/include/`.
-
-- `BUILD_SHARED_LIBS=0`: a static `libcint.a` is required (the Makefile links it directly).
-- `PYPZPX=1` and `WITH_RANGE_COULOMB=1`: needed by MOLGW; harmless for ReRDMFT, which never uses libcint's spherical functions (it has its own Cartesian-to-spherical transform), so the p-orbital order flag does not affect results.
-- Leave `WITH_CINT2_INTERFACE` at its default (ON): `Integrals.cpp` calls `cint1e_ovlp_cart`, which that interface provides.
-- A `Fortran` compiler is not needed by ReRDMFT; if cmake complains about one, add `-DWITH_FORTRAN=0`.
+Then use `libcint/build/libcint.a` (headers in `libcint/build/include/`).
+`BUILD_SHARED_LIBS=0` is required; keep `WITH_CINT2_INTERFACE` on (default); add
+`-DWITH_FORTRAN=0` if cmake asks for a Fortran compiler.
 
 ## Contributors
 
