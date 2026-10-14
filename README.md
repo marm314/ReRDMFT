@@ -156,7 +156,7 @@ quietly becomes `FALSE` instead:
 | `USE_RI TRUE` + an explicit `FUNCTIONAL_DIRECT_4C TRUE` | Two different, mutually exclusive strategies for the same ADAM orbital-rotation sub-loop -- ambiguous. |
 | `CC_RDM TRUE` without `UCCSD TRUE` | Built from the UCCSD amplitudes. |
 | `UCCSD TRUE` without `NON_RELATIVISTIC`/`X2C`/`C4_SPINOR`, or + `READ_RESTART` | Needs a freshly converged SCF reference. |
-| `FUNCTIONAL_INIT CORE` without `FUNCTIONAL`, or + `READ_RESTART`/`DEBUG`/`HESSIAN_MEAN_FIELD`, or + `UCCSD` with `X2C`/`C4_SPINOR` | Needs a functional stage to start; the restart file already supplies the orbitals; the diagnostics validate the HF orbitals; X2C/4C UCCSD runs on the SCF spinors (NON_REL UCCSD builds its own HF-orbital integrals). |
+| `FUNCTIONAL_INIT CORE` without `FUNCTIONAL`, or + `READ_RESTART`/`DEBUG`/`HESSIAN_MEAN_FIELD` | Needs a functional stage to start; the restart file already supplies the orbitals; the diagnostics validate the HF orbitals. (`UCCSD` is fine: it always runs on the SCF orbitals, building its own MO integrals when the functional starts from the core ones.) |
 | `FCIDUMP TRUE` without `NON_RELATIVISTIC TRUE`, or without `FUNCTIONAL` | Only NON_REL is supported; needs an RDMFT orbital order to write. |
 | `READ_OCCUPANCIES TRUE` without `FUNCTIONAL` | Nothing to read occupations into. |
 | `FUNCTIONAL_DIRECT_4C TRUE` without `C4_SPINOR TRUE`, `FUNCTIONAL`, or `FULL_OPTIMIZATION TRUE` | Nothing for it to change -- it only replaces `C4_SPINOR`'s own ADAM orbital-rotation sub-loop. |

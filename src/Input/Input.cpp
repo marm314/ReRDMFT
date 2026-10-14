@@ -554,9 +554,6 @@ void Input::read(const std::string& filename) {
     if (read_restart_) {
       throw std::runtime_error("FUNCTIONAL_INIT CORE with READ_RESTART TRUE is not supported (the restart file supplies the orbitals)");
     }
-    if (uccsd_ && (x2c_ || c4_spinor_)) {
-      throw std::runtime_error("FUNCTIONAL_INIT CORE with UCCSD is supported for NON_RELATIVISTIC only (X2C/C4_SPINOR UCCSD runs on the SCF spinors)");
-    }
     if (debug_ || hessian_mean_field_) {
       throw std::runtime_error("FUNCTIONAL_INIT CORE is not supported together with DEBUG/HESSIAN_MEAN_FIELD (they validate or build on the HF orbitals)");
     }

@@ -5185,8 +5185,12 @@ int main(int argc, char** argv) {
       rerdmft::SymmetricEri<std::complex<double>> x2c_mo_sym;           // unique elements (no CHOLESKY, or DEBUG)
       rerdmft::CholeskyEri<std::complex<double>> x2c_mo_chol;           // CHOLESKY TRUE: MO-basis vectors
       rerdmft::RiMoEri ri_x2c_mo_eri;                                   // USE_RI TRUE: RI-MO tensor, no AO Cholesky/dense at all
-      const auto transformX2cToMo = [&]() {
-        h_x2c_mo = rerdmft::x2cMoOneElectronTransform(x2c_hamiltonian.h_x2c, x2c_hf_result.c_matrix);
+      // The X2C MO-basis integrals in the orbitals c_mo, written into the given outputs (the functional stage's own are
+      // the members above; UCCSD under FUNCTIONAL_INIT CORE builds a second, HF-orbital set with this).
+      const auto buildX2cMoWith = [&](const rerdmft::Matrix<std::complex<double>>& c_mo, rerdmft::Matrix<std::complex<double>>& h_out,
+                                       rerdmft::RiMoEri& ri_out, rerdmft::CholeskyEri<std::complex<double>>& chol_out,
+                                       rerdmft::SymmetricEri<std::complex<double>>& sym_out) {
+        h_out = rerdmft::x2cMoOneElectronTransform(x2c_hamiltonian.h_x2c, c_mo);
         // Only actually consumed below under DEBUG/HESSIAN_MEAN_FIELD or FUNCTIONAL (see NON_REL's identical
         // comment) -- skip it for a bare X2C-HF run. USE_RI TRUE skips this AO-vector-to-MO transform
         // entirely (DEBUG/HESSIAN_MEAN_FIELD are mutually exclusive with USE_RI, so x2c_dense is always
@@ -5204,16 +5208,19 @@ int main(int argc, char** argv) {
           rerdmft::Matrix<std::complex<double>> v_identity(n_ukb, n_ukb, std::complex<double>(0.0));
           for (std::size_t i = 0; i < n_ukb; ++i) v_identity(i, i) = 1.0;
           shim.v_total = v_identity;
-          ri_x2c_mo_eri = rerdmft::buildRiMoEri(shim, x2c_hf_result.c_matrix);
+          ri_out = rerdmft::buildRiMoEri(shim, c_mo);
         } else if (input.cholesky() && (x2c_dense || input.has_functional() || input.uccsd())) {
-          x2c_mo_chol = rerdmft::aoCholeskyToMoSpinor(ao_cholesky_sph, x2c_hf_result.c_matrix);
+          chol_out = rerdmft::aoCholeskyToMoSpinor(ao_cholesky_sph, c_mo);
         }
         if (!input.use_ri() && (!input.cholesky() || input.debug())) {
-          x2c_mo_sym = rerdmft::x2cMoTwoElectronSymmetric(large_spherical_active ? nonrel_eri_sph : nonrel_eri,
-                                                           x2c_hf_result.c_matrix);
+          sym_out = rerdmft::x2cMoTwoElectronSymmetric(large_spherical_active ? nonrel_eri_sph : nonrel_eri,
+                                                           c_mo);
         } else if (!input.use_ri() && input.hessian_mean_field()) {
-          x2c_mo_sym = rerdmft::symmetricFromCholesky(x2c_mo_chol);
+          sym_out = rerdmft::symmetricFromCholesky(chol_out);
         }
+      };
+      const auto transformX2cToMo = [&]() {
+        buildX2cMoWith(x2c_hf_result.c_matrix, h_x2c_mo, ri_x2c_mo_eri, x2c_mo_chol, x2c_mo_sym);
         if (x2c_dense) eri_x2c_mo = rerdmft::denseOf(x2c_mo_sym);
       };
       transformX2cToMo();
@@ -5251,14 +5258,26 @@ int main(int argc, char** argv) {
         const auto cc_spaces = rerdmft::contiguousCcSpaces(0, x2c_dim, static_cast<std::size_t>(input.n_electrons()),
                                                            static_cast<std::size_t>(input.cc_frozen_core()));
         const double e_scf = x2c_hf_result.total_energy;
+        // UCCSD always runs on the SCF reference. With FUNCTIONAL_INIT CORE the MO integrals above are in the core
+        // orbitals, so a second set is built here in the (Kramers-paired) SCF spinors.
+        rerdmft::Matrix<std::complex<double>> c_hf = x2c_hf_result.c_matrix;
+        rerdmft::Matrix<std::complex<double>> h_cc = h_x2c_mo;
+        rerdmft::RiMoEri ri_cc;
+        rerdmft::CholeskyEri<std::complex<double>> chol_cc;
+        rerdmft::SymmetricEri<std::complex<double>> sym_cc;
+        if (x2c_core_start) {
+          rerdmft::KramersPairingReport pairing_hf;
+          c_hf = rerdmft::fixKramersPairingLarge(x2c_scf_c, x2c_scf_oe, s_large, 1e-4, &pairing_hf);
+          buildX2cMoWith(c_hf, h_cc, ri_cc, chol_cc, sym_cc);
+        }
         std::optional<rerdmft::CartesianSpinors> cs_gau;
         if (input.cc_rdm() && (input.cc_rdm_gaussian() || input.aimpac()))
-          cs_gau = buildX2cCartesianSpinors(large_basis.functions(), large_transform_final, x2c_hf_result.c_matrix,
+          cs_gau = buildX2cCartesianSpinors(large_basis.functions(), large_transform_final, c_hf,
                                             rerdmft::fileOrderGlobals(cc_spaces));
         const rerdmft::CartesianSpinors* cs_ptr = cs_gau ? &*cs_gau : nullptr;
-        if (input.use_ri()) runUccsdStage("X2C", input, input_path, "x2c", h_x2c_mo, ri_x2c_mo_eri, 0, cc_spaces, e_scf, uccsd_x2c_log, cs_ptr);
-        else if (input.cholesky()) runUccsdStage("X2C", input, input_path, "x2c", h_x2c_mo, x2c_mo_chol, 0, cc_spaces, e_scf, uccsd_x2c_log, cs_ptr);
-        else runUccsdStage("X2C", input, input_path, "x2c", h_x2c_mo, x2c_mo_sym, 0, cc_spaces, e_scf, uccsd_x2c_log, cs_ptr);
+        if (input.use_ri()) runUccsdStage("X2C", input, input_path, "x2c", h_cc, x2c_core_start ? ri_cc : ri_x2c_mo_eri, 0, cc_spaces, e_scf, uccsd_x2c_log, cs_ptr);
+        else if (input.cholesky()) runUccsdStage("X2C", input, input_path, "x2c", h_cc, x2c_core_start ? chol_cc : x2c_mo_chol, 0, cc_spaces, e_scf, uccsd_x2c_log, cs_ptr);
+        else runUccsdStage("X2C", input, input_path, "x2c", h_cc, x2c_core_start ? sym_cc : x2c_mo_sym, 0, cc_spaces, e_scf, uccsd_x2c_log, cs_ptr);
         logTiming("X2C UCCSD complete", t_start, t_checkpoint, timing_records);
       }
 
@@ -5749,14 +5768,31 @@ int main(int argc, char** argv) {
         const auto cc_spaces = rerdmft::contiguousCcSpaces(n_neg, h_mo.rows(), static_cast<std::size_t>(input.n_electrons()),
                                                            static_cast<std::size_t>(input.cc_frozen_core()));
         const double e_scf = dhf_result.total_energy;
+        // UCCSD always runs on the SCF reference. With FUNCTIONAL_INIT CORE the MO integrals above are in the core
+        // spinors, so a second set is built here in the (Kramers-paired) SCF spinors.
+        rerdmft::Matrix<std::complex<double>> c_hf = dhf_result.c_dhf;
+        rerdmft::Matrix<std::complex<double>> h_cc = h_mo;
+        rerdmft::RiMoEri ri_cc;
+        rerdmft::CholeskyEri<std::complex<double>> chol_cc;
+        rerdmft::SymmetricEri<std::complex<double>> sym_cc;
+        if (c4_core_start) {
+          rerdmft::KramersPairingReport pairing_hf;
+          const auto vecs_hf = rerdmft::fixKramersPairing(c4_scf_vecs, c4_scf_oe, rkb_coefficients, x_full, s_large,
+                                                          s_small_ukb, 1e-4, &pairing_hf);
+          c_hf = x_full * vecs_hf;
+          h_cc = rerdmft::rkbMoOneElectronTransform(h_rkb, c_hf);
+          if (input.use_ri()) ri_cc = rerdmft::buildRiMoEri(ri_direct_source, ri_direct_source.v_total * c_hf);
+          else if (use_cholesky_integrals) chol_cc = rerdmft::rkbCholeskyToMo(rkb_cholesky, c_hf, h_cc.rows() / 2, input.cholesky_threshold());
+          else sym_cc = rerdmft::rkbMoTwoElectronSymmetric(c4_spinor_eri, c_hf);
+        }
         std::optional<rerdmft::CartesianSpinors> cs_gau;
         if (input.cc_rdm() && (input.cc_rdm_gaussian() || input.aimpac()))
           cs_gau = buildC4CartesianSpinors(large_basis.functions(), small_basis.functions(), large_transform_final, rkb_coefficients,
-                                           dhf_result.c_dhf, rerdmft::fileOrderGlobals(cc_spaces));
+                                           c_hf, rerdmft::fileOrderGlobals(cc_spaces));
         const rerdmft::CartesianSpinors* cs_ptr = cs_gau ? &*cs_gau : nullptr;
-        if (input.use_ri()) runUccsdStage("C4_SPINOR", input, input_path, "4c", h_mo, ri_dhf_mo_eri, 0, cc_spaces, e_scf, uccsd_c4_log, cs_ptr);
-        else if (use_cholesky_integrals) runUccsdStage("C4_SPINOR", input, input_path, "4c", h_mo, c4_mo_chol, 0, cc_spaces, e_scf, uccsd_c4_log, cs_ptr);
-        else runUccsdStage("C4_SPINOR", input, input_path, "4c", h_mo, c4_mo_sym, 0, cc_spaces, e_scf, uccsd_c4_log, cs_ptr);
+        if (input.use_ri()) runUccsdStage("C4_SPINOR", input, input_path, "4c", h_cc, c4_core_start ? ri_cc : ri_dhf_mo_eri, 0, cc_spaces, e_scf, uccsd_c4_log, cs_ptr);
+        else if (use_cholesky_integrals) runUccsdStage("C4_SPINOR", input, input_path, "4c", h_cc, c4_core_start ? chol_cc : c4_mo_chol, 0, cc_spaces, e_scf, uccsd_c4_log, cs_ptr);
+        else runUccsdStage("C4_SPINOR", input, input_path, "4c", h_cc, c4_core_start ? sym_cc : c4_mo_sym, 0, cc_spaces, e_scf, uccsd_c4_log, cs_ptr);
         logTiming("C4_SPINOR UCCSD complete", t_start, t_checkpoint, timing_records);
       }
 
