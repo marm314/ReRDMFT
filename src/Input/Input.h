@@ -475,6 +475,11 @@ class Input {
   // Jacobian ever solved). Case-insensitive, validated against this exact list, throws
   // otherwise. Only meaningful for FUNCTIONAL PCCD.
   const std::string& pccd_amplitude_solver() const { return pccd_amplitude_solver_; }
+  // Optional; defaults to "ZERO" when PCCD_AMPLITUDE_GUESS is absent. Starting t-amplitudes of a pCCD run without
+  // amplitudes from READ_RESTART: ZERO (t = 0); MP2 (t_ia = -R_ia(0) / D_ia, the uncoupled first-order amplitude with
+  // D_ia the diagonal of the t-Jacobian at t = 0, damped by 1 - exp(-1e8 D^2) against vanishing denominators); PNOF
+  // (needs READ_RESTART from a PNOF file: t_ia = -sqrt(n_a / n_i) for the PNOF-coupled occupied/virtual pairs, 0 elsewhere).
+  const std::string& pccd_amplitude_guess() const { return pccd_amplitude_guess_; }
   // Optional; defaults to 1 when PNOF_SUBSPACES is absent. How many
   // independent PNOF-style (Piris) coupling subspaces to build
   // (Occ_opt/Orb_subspaces.h), one per occupied orbital PAIR outward
@@ -697,6 +702,7 @@ class Input {
   int pccd_frozen_pairs_ = 0;
   int pccd_active_pairs_ = -1;
   std::string pccd_amplitude_solver_ = "NEWTON";
+  std::string pccd_amplitude_guess_ = "ZERO";
 };
 
 }  // namespace rerdmft

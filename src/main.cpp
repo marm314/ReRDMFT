@@ -1034,6 +1034,7 @@ inline rerdmft::FullOptSettings fullOptSettings(const rerdmft::Input& input) {
   rerdmft::FullOptSettings settings;
   settings.enabled = input.full_optimization();
   settings.core_start = input.functional_init() == "CORE" && input.has_functional();
+  settings.pccd_amplitude_guess = input.pccd_amplitude_guess();
   settings.max_macro_iterations = input.max_macro_iterations();
   settings.energy_tolerance = input.macro_energy_tolerance();
   settings.gradient_tolerance = input.orbital_gradient_tolerance();
@@ -2831,7 +2832,8 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
                                        const std::vector<double>* restart_amplitudes = nullptr,
                                        const rerdmft::UkbDirectSource* ukb_direct = nullptr,
                                        const RiNonRelDirectSource* ri_nonrel_direct = nullptr,
-                                       rerdmft::RestartCapture* restart_neg = nullptr) {
+                                       rerdmft::RestartCapture* restart_neg = nullptr,
+                                       const rerdmft::RestartData* restart_data = nullptr) {
   rerdmft::progressContext() = liveProgressLabel(label);
   const std::size_t n_total = h.rows();
   const std::size_t n_spatial = n_active / 2;
@@ -2912,6 +2914,43 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
       }
     }
   }
+  // READ_RESTART from a PNOF restart file (no amplitudes): the cold t = 0 start can fall into the
+  // wrong pCCD branch for stretched bonds. The PNOF subspace wavefunction
+  // sqrt(n_i)|i> - sum_a sqrt(n_a)|a> (HOMO-side occupied pair first, its PNOF_COUPLING-1 virtual
+  // pairs consecutive, exactly buildOrbitalSubspaces' layout) is the pCCD state with
+  // t_ia = -sqrt(n_a / n_i) for the coupled (i,a), zero elsewhere: use it as the t guess.
+  bool guess_from_pnof = false;
+  if (full_opt.pccd_amplitude_guess == "PNOF" && restart_data != nullptr &&
+      (restart_amplitudes == nullptr || restart_amplitudes->empty()) && restart_data->kind == "GAMMAS" && restart_data->pnof_coupling >= 2 &&
+      restart_data->pnof_subspaces >= 1 && restart_data->occupations.size() >= n_total) {  // frozen-core pairs below the window are skipped (PNOF's frozen occupied pairs)
+    const std::size_t n_sub = std::min<std::size_t>(static_cast<std::size_t>(restart_data->pnof_subspaces), n_occ);
+    const std::size_t per_sub = static_cast<std::size_t>(restart_data->pnof_coupling - 1);
+    for (std::size_t s = 0; s < n_sub; ++s) {
+      const std::size_t i = n_occ - 1 - s;
+      const double n_i = restart_data->occupations[reps[n_core + i]];
+      if (n_i <= 1e-12) continue;
+      for (std::size_t j = 0; j < per_sub; ++j) {
+        const std::size_t a = s * per_sub + j;
+        if (a >= n_vir) break;
+        const double n_a = restart_data->occupations[reps[n_core + n_occ + a]];
+        t0(i, a) = -std::sqrt(std::max(0.0, n_a) / n_i);
+        guess_from_pnof = true;
+      }
+    }
+  }
+  bool guess_mp2 = false;
+  if (full_opt.pccd_amplitude_guess == "MP2" && (restart_amplitudes == nullptr || restart_amplitudes->empty())) {
+    const rerdmft::Matrix<double> zero_t(n_occ, n_vir, 0.0);
+    const rerdmft::Matrix<double> r0 = rerdmft::pccdTResidual(coeff, zero_t);
+    const rerdmft::Matrix<double> jac0 = rerdmft::pccdTJacobian(coeff, zero_t);
+    for (std::size_t i = 0; i < n_occ; ++i) {
+      for (std::size_t a = 0; a < n_vir; ++a) {
+        const double d = jac0(i * n_vir + a, i * n_vir + a);
+        if (std::abs(d) > 0.0) t0(i, a) = -r0(i, a) * (1.0 - std::exp(-1e8 * d * d)) / d;
+      }
+    }
+    guess_mp2 = true;
+  }
   const auto t_result = rerdmft::solvePccdTAmplitudes(coeff, t0, amp_settings);
   const auto z_result = rerdmft::solvePccdZAmplitudes(coeff, t_result.t, z0, amp_settings);
   logTiming(label + " pCCD t-/z-amplitudes solved (" + amplitude_solver_name + ")", t_start,
@@ -2952,7 +2991,9 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
   out << "\n" << label
       << " pCCD RDMFT functional evaluation (Occ_opt/pCCD.h, on the " << (full_opt.core_start ? "core-Hamiltonian" : "converged HF/DHF") << " orbitals):\n";
   out << "  Amplitude guess: " << (restart_amplitudes != nullptr && !restart_amplitudes->empty() ? "READ_RESTART (t-/z-amplitudes of the restart file)"
-                                                                 : std::string("cold start (t = z = 0)"))
+                                                                 : guess_from_pnof ? std::string("PNOF occupations of the restart file (t_ia = -sqrt(n_a/n_i) for the coupled pairs)")
+                                                                 : guess_mp2 ? std::string("MP2 (uncoupled first-order t; z = 0)")
+                                                                 : std::string(full_opt.pccd_amplitude_guess == "PNOF" ? "cold start (t = z = 0; PCCD_AMPLITUDE_GUESS PNOF needs a PNOF restart file without amplitudes)" : "cold start (t = z = 0)"))
       << "\n";
   out << "  t-amplitudes " << (t_result.t_converged ? "converged" : "did NOT converge") << " ("
       << t_result.t_iterations << " iter., ||R|| = " << std::scientific << std::setprecision(2)
@@ -4341,7 +4382,7 @@ int main(int argc, char** argv) {
                 restart_nuclear_repulsion, input.pccd_frozen_pairs(), input.pccd_active_pairs(),
                 input.pccd_amplitude_solver(), fullOptSettings(input), input.full_optimization_4c_neg(),
                 t_start, t_checkpoint, timing_records, &nonrel_restart,
-                {}, &ro.data.amplitudes, nullptr, ri_nonrel_direct_ptr);
+                {}, &ro.data.amplitudes, nullptr, ri_nonrel_direct_ptr, nullptr, &ro.data);
           }
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(
@@ -4436,7 +4477,7 @@ int main(int argc, char** argv) {
                 "X2C_HF", h_x2c_mo, eri_any, dim, 0, input.n_electrons(), restart_nuclear_repulsion,
                 input.pccd_frozen_pairs(), input.pccd_active_pairs(), input.pccd_amplitude_solver(),
                 fullOptSettings(input), input.full_optimization_4c_neg(), t_start, t_checkpoint,
-                timing_records, &x2c_restart, {}, &ro.data.amplitudes, x2c_ukb_direct_ptr);
+                timing_records, &x2c_restart, {}, &ro.data.amplitudes, x2c_ukb_direct_ptr, nullptr, nullptr, &ro.data);
           }
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(
@@ -4650,7 +4691,7 @@ int main(int argc, char** argv) {
                 restart_nuclear_repulsion, input.pccd_frozen_pairs(), input.pccd_active_pairs(),
                 input.pccd_amplitude_solver(), fullOptSettings(input), input.full_optimization_4c_neg(),
                 t_start, t_checkpoint, timing_records, &c4_restart, eri_full_factory, &ro.data.amplitudes, ukb_direct_ptr_r,
-                nullptr, &c4_restart_neg);
+                nullptr, &c4_restart_neg, &ro.data);
           }
           if (isPnofFunctionalName(input.functional())) {
             return buildPnofFunctionalReport(

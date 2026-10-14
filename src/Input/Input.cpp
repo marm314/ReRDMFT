@@ -456,6 +456,17 @@ void Input::read(const std::string& filename) {
         throw std::runtime_error("line " + std::to_string(line_number) +
                                   ": PCCD_AMPLITUDE_SOLVER must be NEWTON or LBFGS");
       }
+    } else if (keyword == "PCCD_AMPLITUDE_GUESS") {
+      std::string token;
+      if (!(iss >> token)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": expected ZERO, MP2 or PNOF after PCCD_AMPLITUDE_GUESS");
+      }
+      pccd_amplitude_guess_ = toUpper(token);
+      if (pccd_amplitude_guess_ != "ZERO" && pccd_amplitude_guess_ != "MP2" && pccd_amplitude_guess_ != "PNOF") {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": PCCD_AMPLITUDE_GUESS must be ZERO, MP2 or PNOF");
+      }
     } else if (keyword == "SPEED_OF_LIGHT") {
       speed_of_light_ = parseDouble(iss, line_number, keyword);
       if (!(speed_of_light_ > 0.0)) {
@@ -546,6 +557,9 @@ void Input::read(const std::string& filename) {
   // instead, since USE_RI is the more specific, explicitly requested choice.
   if (cc_rdm_ && !uccsd_) {
     throw std::runtime_error("CC_RDM TRUE requires UCCSD TRUE (the density matrices are built from the UCCSD amplitudes)");
+  }
+  if (pccd_amplitude_guess_ == "PNOF" && !read_restart_) {
+    throw std::runtime_error("PCCD_AMPLITUDE_GUESS PNOF requires READ_RESTART TRUE (it builds t from the PNOF occupations of the restart file)");
   }
   if (functional_init_ == "CORE") {
     if (!has_functional_) {
@@ -772,6 +786,7 @@ void Input::print(std::ostream& out) const {
                              << (pccd_active_pairs_ < 0 ? " (default; all remaining orbitals)" : "")
                              << "\n";
   line("PCCD_AMPLITUDE_SOLVER") << pccd_amplitude_solver_ << "\n";
+  line("PCCD_AMPLITUDE_GUESS") << pccd_amplitude_guess_ << "\n";
 
   out.flags(saved_flags);
   out.precision(saved_precision);

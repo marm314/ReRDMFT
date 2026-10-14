@@ -55,6 +55,8 @@ struct FullOptSettings {
   bool enabled = false;
   // FUNCTIONAL_INIT CORE: the functional stage starts from the core-Hamiltonian orbitals (output labels only).
   bool core_start = false;
+  // PCCD_AMPLITUDE_GUESS (ZERO | MP2 | PNOF): starting t-amplitudes of a pCCD run without restart amplitudes.
+  std::string pccd_amplitude_guess = "ZERO";
   // Periodic RESTART checkpoint: every `checkpoint_interval` macro-iterations (10, 20, 30, ...) the loop hands a snapshot of its
   // current state (occupations, occupation state, accumulated rotation, energy) to `checkpoint`, if set; the caller writes the RESTART file.
   int checkpoint_interval = 10;
@@ -194,6 +196,12 @@ struct RdmftModel {
   // L-BFGS: gamma angles; PNOF SQP: frontier occupations), updated in place.
   std::function<RdmftOccupationResult(const Matrix<T>&, const Eri&, std::vector<double>&)>
       optimize_occupations;
+  // Optional (pCCD): called right after `optimize_occupations` with its occupations and warm-start `state`.
+  // Returns the orbital permutation (new orbital k = old orbital perm[k], length = number of orbitals) that sorts
+  // the ACTIVE-space pairs by descending occupation (frozen core untouched), or an empty vector when the order is
+  // already sorted. `state` is permuted to the new labelling in place (cleared if the occupied/virtual split changed).
+  // The caller rotates the integrals by the permutation and calls `optimize_occupations` again.
+  std::function<std::vector<std::size_t>(const std::vector<double>&, std::vector<double>&)> sort_active;
   // Optional (PNOF): the energy through the Kramers/spin-pair-SYMMETRIC shortcut
   // (Occ_opt/PNOFs.h's pnofElectronicEnergy), valid only while the integrals keep
   // that symmetry. The end-of-run check compares it with `energy`: agreement
