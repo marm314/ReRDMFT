@@ -470,10 +470,10 @@ class Input {
   // pair pCCD ever builds coefficients for). Counted in pairs, same reasoning as
   // jk_active_pairs()'s own comment. Must be at least 1 when explicitly given.
   int pccd_active_pairs() const { return pccd_active_pairs_; }
-  // Optional; defaults to "NEWTON" when PCCD_AMPLITUDE_SOLVER is absent. Selects how
+  // Optional; defaults to "DIIS" when PCCD_AMPLITUDE_SOLVER is absent. Selects how
   // Occ_opt/pCCD.h's solvePccdTAmplitudes/solvePccdZAmplitudes drive the t-/z-amplitude residue
   // equations to zero: NEWTON (exact Newton-Raphson, rebuilding and directly solving the
-  // analytic Jacobian every iteration -- quadratically convergent, the default) or LBFGS
+  // analytic Jacobian every iteration -- quadratically convergent; also DIIS's fallback) or LBFGS
   // (Utils/LBFGS.h minimizing 0.5*||residual||^2 with the exact chain-rule gradient, no
   // Jacobian ever solved). Case-insensitive, validated against this exact list, throws
   // otherwise. Only meaningful for FUNCTIONAL PCCD.
@@ -705,7 +705,7 @@ class Input {
   bool full_optimization_4c_neg_ = false;
   int pccd_frozen_pairs_ = 0;
   int pccd_active_pairs_ = -1;
-  std::string pccd_amplitude_solver_ = "NEWTON";
+  std::string pccd_amplitude_solver_ = "DIIS";
   std::string pccd_amplitude_guess_ = "ZERO";
 };
 

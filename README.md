@@ -100,7 +100,7 @@ Case-insensitive, one per line, optional `=` (`DEBUG TRUE` = `DEBUG=TRUE`);
 | `SQP_PNOF_OCC` | bool | `FALSE` | PNOF: `FALSE` = L-BFGS over gamma angles, `TRUE` = SQP over occupations. |
 | `PCCD_FROZEN_PAIRS` | int | `0` | pCCD: lowest pairs frozen at occupation 1. |
 | `PCCD_ACTIVE_PAIRS` | int | all remaining | pCCD: size of the amplitude window. |
-| `PCCD_AMPLITUDE_SOLVER` | string | `NEWTON` | `NEWTON`, `LBFGS`, or `DIIS` (UCCSD-style; falls back to `NEWTON` when it fails to converge). |
+| `PCCD_AMPLITUDE_SOLVER` | string | `DIIS` | `DIIS` (UCCSD-style; falls back to `NEWTON` when it fails to converge), `NEWTON`, or `LBFGS`. |
 | `PCCD_AMPLITUDE_GUESS` | string | `ZERO` | pCCD starting t without restart amplitudes: `ZERO`, `MP2` (uncoupled first-order) or `PNOF` (from the occupations of a PNOF `READ_RESTART`). |
 | `PCCD_DEBUG` | bool | `FALSE` | Print per-macro-iteration amplitude-solve diagnostics to the live file. |
 | `READ_OCCUPANCIES` | bool | `FALSE` | Read starting occupations from `OCC.in`. |
