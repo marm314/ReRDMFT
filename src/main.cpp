@@ -1828,6 +1828,7 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
     out << "    FAILED: " << e.what() << "\n";
   }
 
+  logTiming(label + " JK-only functional report complete", t_start, t_checkpoint, timing_records);
   return out.str();
 }
 
@@ -2620,6 +2621,7 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
     }
   }
 
+  logTiming(label + " PNOF functional report complete", t_start, t_checkpoint, timing_records);
   return out.str();
 }
 
