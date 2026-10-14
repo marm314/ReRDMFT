@@ -5379,8 +5379,10 @@ int main(int argc, char** argv) {
       // already eliminated the negative-energy branch entirely, so
       // there is nothing left to hold at exactly zero.
       if (input.aimpac()) {  // X2C-HF density's own WFN file (hf_<input>_x2c.wfn); no sea: the first N spinors are occupied
-        writeX2CAimpac(input, input_path, x2c_hf_result.c_matrix,
-                       hartreeFockAimpacCapture(x2c_hf_result.c_matrix.cols(), 0, input.n_electrons(), x2c_hf_result.electronic_energy),
+        // The HF density always comes from the SCF spinors (not the core ones FUNCTIONAL_INIT CORE swapped in).
+        const auto& c_hf_wfn = x2c_core_start ? x2c_scf_c : x2c_hf_result.c_matrix;
+        writeX2CAimpac(input, input_path, c_hf_wfn,
+                       hartreeFockAimpacCapture(c_hf_wfn.cols(), 0, input.n_electrons(), x2c_hf_result.electronic_energy),
                        large_basis.functions(), large_transform_final, x2c_hf_result.nuclear_repulsion_energy,
                        x2c_restart_log, /*hf=*/true);
       }
@@ -5923,8 +5925,10 @@ int main(int argc, char** argv) {
       // no-pair convention (occupiedPositiveEnergyDensity) rather than
       // relying on it being numerically negligible.
       if (input.aimpac()) {  // DHF density's own WFN file (hf_<input>_4c.wfn); no-pair: N occupied above the Dirac sea
-        writeC4Aimpac(input, input_path, dhf_result.c_dhf,
-                      hartreeFockAimpacCapture(dhf_result.c_dhf.cols(), dhf_result.c_dhf.cols() / 2, input.n_electrons(),
+        // The HF density always comes from the SCF spinors (not the core ones FUNCTIONAL_INIT CORE swapped in).
+        const rerdmft::Matrix<std::complex<double>> c_hf_wfn = c4_core_start ? x_full * c4_scf_vecs : dhf_result.c_dhf;
+        writeC4Aimpac(input, input_path, c_hf_wfn,
+                      hartreeFockAimpacCapture(c_hf_wfn.cols(), c_hf_wfn.cols() / 2, input.n_electrons(),
                                                dhf_result.electronic_energy),
                       rerdmft::RestartCapture(), large_basis.functions(), small_basis.functions(), large_transform_final,
                       rkb_coefficients, dhf_result.nuclear_repulsion_energy, c4_restart_log, /*hf=*/true);
