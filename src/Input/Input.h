@@ -419,6 +419,12 @@ class Input {
   // functional() is (Input.h stays independent of Occ_opt). Only
   // meaningful when has_functional() is true.
   const std::string& occupation_init() const { return occupation_init_; }
+  // Optional; "SCF" (default) or "CORE". Which orbitals the FUNCTIONAL stage starts from: the
+  // converged HF/DHF SCF orbitals, or the eigenvectors of the one-electron (core) Hamiltonian
+  // (NON_REL, X2C or 4-component). The SCF itself still runs and reports its energy either way;
+  // only the orbitals handed to the functional (and their orbital energies) change. Requires a
+  // FUNCTIONAL; not combined with READ_RESTART (the restart file supplies the orbitals).
+  const std::string& functional_init() const { return functional_init_; }
   // Optional; defaults to 0 when JK_FROZEN_PAIRS is absent. Only meaningful for a JK-only
   // FUNCTIONAL (Occ_opt/JK_only.h) -- a PNOF name uses pnof_subspaces()/pnof_coupling() instead,
   // this is ignored (but still validated) for those. Freezes the 2*JK_FROZEN_PAIRS LOWEST-energy
@@ -666,6 +672,7 @@ class Input {
   bool has_functional_ = false;
   double temperature_ = 1000.0;
   std::string occupation_init_ = "PROPORTIONAL";
+  std::string functional_init_ = "SCF";
   int jk_frozen_pairs_ = 0;
   int jk_active_pairs_ = -1;
   int pnof_subspaces_ = 1;

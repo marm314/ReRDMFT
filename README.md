@@ -104,6 +104,7 @@ are comments.
 | `X_LIN_DEP_THRS_S` | double (> 0) | `1e-8` | Small-component linear-dependence threshold (`X2C`/`C4_SPINOR` only). |
 | `FUNCTIONAL` | string | *(none)* | Selects the RDMFT functional: JK-only (`SD`, `MULLER`/`MBB`, `CA`, `RHFB`, `CGA`, `ML`, `MLSIC`, `GU`, `POWER`), PNOF (`PNOF5`, `PNOF7`, `PNOF7S`, `GNOF`), or `PCCD`. Unset skips the whole RDMFT step. |
 | `OCCUPATION_INIT` | string | `PROPORTIONAL` | Initial occupations for a JK-only functional: `PROPORTIONAL` or `FERMI_DIRAC` (at `TEMPERATURE`). |
+| `FUNCTIONAL_INIT` | string | `SCF` | Starting orbitals of the `FUNCTIONAL` stage: the converged `SCF` (HF/DHF) orbitals, or `CORE`, the eigenvectors of the one-electron Hamiltonian (the SCF still runs and reports its energy). |
 | `JK_FROZEN_PAIRS` | int (>= 0) | `0` | JK-only: freeze the lowest `2*JK_FROZEN_PAIRS` spin-orbitals/spinors at occupation 1. |
 | `JK_ACTIVE_PAIRS` | int (>= 1) | all remaining | JK-only: size of the fractional-occupation window above the frozen core; above that is deep virtual (occupation 0). |
 | `TEMPERATURE` | double (> 0) | `1000` K | Smearing temperature for `OCCUPATION_INIT FERMI_DIRAC`. |
@@ -155,6 +156,7 @@ quietly becomes `FALSE` instead:
 | `USE_RI TRUE` + an explicit `FUNCTIONAL_DIRECT_4C TRUE` | Two different, mutually exclusive strategies for the same ADAM orbital-rotation sub-loop -- ambiguous. |
 | `CC_RDM TRUE` without `UCCSD TRUE` | Built from the UCCSD amplitudes. |
 | `UCCSD TRUE` without `NON_RELATIVISTIC`/`X2C`/`C4_SPINOR`, or + `READ_RESTART` | Needs a freshly converged SCF reference. |
+| `FUNCTIONAL_INIT CORE` without `FUNCTIONAL`, or + `READ_RESTART`/`DEBUG`/`HESSIAN_MEAN_FIELD`, or + `UCCSD` with `X2C`/`C4_SPINOR` | Needs a functional stage to start; the restart file already supplies the orbitals; the diagnostics validate the HF orbitals; X2C/4C UCCSD runs on the SCF spinors (NON_REL UCCSD builds its own HF-orbital integrals). |
 | `FCIDUMP TRUE` without `NON_RELATIVISTIC TRUE`, or without `FUNCTIONAL` | Only NON_REL is supported; needs an RDMFT orbital order to write. |
 | `READ_OCCUPANCIES TRUE` without `FUNCTIONAL` | Nothing to read occupations into. |
 | `FUNCTIONAL_DIRECT_4C TRUE` without `C4_SPINOR TRUE`, `FUNCTIONAL`, or `FULL_OPTIMIZATION TRUE` | Nothing for it to change -- it only replaces `C4_SPINOR`'s own ADAM orbital-rotation sub-loop. |

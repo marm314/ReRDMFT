@@ -315,6 +315,18 @@ void Input::read(const std::string& filename) {
                                   "' (expected one of PROPORTIONAL, FERMI_DIRAC)");
       }
       occupation_init_ = upper;
+    } else if (keyword == "FUNCTIONAL_INIT") {
+      std::string token;
+      if (!(iss >> token)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": expected SCF or CORE after FUNCTIONAL_INIT");
+      }
+      const std::string upper = toUpper(token);
+      if (upper != "SCF" && upper != "CORE") {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": unrecognized FUNCTIONAL_INIT '" + token + "' (expected SCF or CORE)");
+      }
+      functional_init_ = upper;
     } else if (keyword == "JK_FROZEN_PAIRS") {
       jk_frozen_pairs_ = parseInt(iss, line_number, keyword);
       if (jk_frozen_pairs_ < 0) {
@@ -535,6 +547,20 @@ void Input::read(const std::string& filename) {
   if (cc_rdm_ && !uccsd_) {
     throw std::runtime_error("CC_RDM TRUE requires UCCSD TRUE (the density matrices are built from the UCCSD amplitudes)");
   }
+  if (functional_init_ == "CORE") {
+    if (!has_functional_) {
+      throw std::runtime_error("FUNCTIONAL_INIT CORE requires a FUNCTIONAL (it selects the functional stage's starting orbitals)");
+    }
+    if (read_restart_) {
+      throw std::runtime_error("FUNCTIONAL_INIT CORE with READ_RESTART TRUE is not supported (the restart file supplies the orbitals)");
+    }
+    if (uccsd_ && (x2c_ || c4_spinor_)) {
+      throw std::runtime_error("FUNCTIONAL_INIT CORE with UCCSD is supported for NON_RELATIVISTIC only (X2C/C4_SPINOR UCCSD runs on the SCF spinors)");
+    }
+    if (debug_ || hessian_mean_field_) {
+      throw std::runtime_error("FUNCTIONAL_INIT CORE is not supported together with DEBUG/HESSIAN_MEAN_FIELD (they validate or build on the HF orbitals)");
+    }
+  }
   if (uccsd_) {
     if (!(non_relativistic_ || x2c_ || c4_spinor_)) {
       throw std::runtime_error("UCCSD TRUE requires at least one of NON_RELATIVISTIC/X2C/C4_SPINOR TRUE (it runs on their SCF reference)");
@@ -719,6 +745,7 @@ void Input::print(std::ostream& out) const {
                       << "\n";
   line("TEMPERATURE") << temperature_ << "\n";
   line("OCCUPATION_INIT") << occupation_init_ << "\n";
+  line("FUNCTIONAL_INIT") << functional_init_ << "\n";
   line("JK_FROZEN_PAIRS") << jk_frozen_pairs_ << "\n";
   line("JK_ACTIVE_PAIRS") << jk_active_pairs_
                            << (jk_active_pairs_ < 0 ? " (default; all remaining orbitals)" : "")

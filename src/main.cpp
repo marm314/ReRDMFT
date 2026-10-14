@@ -3839,6 +3839,12 @@ int main(int argc, char** argv) {
   double max_generalized_eigenproblem_residual = 0.0;
   rerdmft::X2CHamiltonianResult x2c_hamiltonian;
   rerdmft::X2CHartreeFockResult x2c_hf_result;
+  // FUNCTIONAL_INIT CORE (X2C): x2c_hf_result.c_matrix / orbital_energies are replaced by the core-Hamiltonian
+  // eigenvectors / eigenvalues right after the SCF (so the functional stage and every restart/FCIDUMP/AIMPAC writer
+  // start from them); the SCF's own (Kramers-phase-fixed) orbitals and energies are kept here for the HF report.
+  bool x2c_core_start = false;  // set right after input.read()
+  rerdmft::Matrix<std::complex<double>> x2c_scf_c;
+  std::vector<double> x2c_scf_oe;
   double max_kramers_partner_deviation = 0.0;
   rerdmft::Matrix<std::complex<double>> f_small;
   rerdmft::Matrix<std::complex<double>> h_positive_energy;
@@ -3912,12 +3918,19 @@ int main(int argc, char** argv) {
   bool dhf_rdmft_gradient_computed = false;
   rerdmft::Matrix<std::complex<double>> fock_matrix;
   rerdmft::DiracHartreeFockResult dhf_result;
+  // FUNCTIONAL_INIT CORE (4-component): dhf_result's Fock_ortho eigenvectors/orbital energies are replaced by those of
+  // H_RKB_ortho (the SCF's own initial-guess diagonalization) right after the SCF, so the functional stage and every
+  // restart/AIMPAC writer start from them; the SCF's own (Kramers-phase-fixed) ones are kept for the HF report.
+  bool c4_core_start = false;  // set right after input.read()
+  rerdmft::Matrix<std::complex<double>> c4_scf_vecs;
+  std::vector<double> c4_scf_oe;
   const auto t_start = std::chrono::steady_clock::now();
   auto t_checkpoint = t_start;
   std::vector<TimingRecord> timing_records;
   const std::string input_path = argv[1];  // AIMPAC's own output naming (wfnOutputPath): "<input>.wfn"
   try {
     input.read(argv[1]);
+    x2c_core_start = c4_core_start = input.functional_init() == "CORE" && input.has_functional();
     basis_set.read(input.basis_file());
     if (std::getenv("SWITCH_SIGN_ERI") != nullptr) {
       if (input.use_ri() || input.cholesky() || input.scf_direct_4c() || input.functional_direct_4c()) {
@@ -4731,6 +4744,14 @@ int main(int argc, char** argv) {
                           nonrel_hf_result.nuclear_repulsion_energy, nonrel_restart_log, /*hf=*/true);
       }
 
+      // FUNCTIONAL_INIT: the orbitals (and orbital energies) the FUNCTIONAL stage starts from. SCF (default): the
+      // converged HF orbitals. CORE: the eigenvectors of the core Hamiltonian diagonalized above. The SCF itself
+      // has run either way (its energy and HF density are still reported); UCCSD/DEBUG/HESSIAN_MEAN_FIELD, which
+      // validate or build on the HF orbitals, are rejected together with CORE in Input.cpp.
+      const bool nonrel_core_start = input.functional_init() == "CORE" && input.has_functional();
+      const rerdmft::Matrix<double> nonrel_c_start = nonrel_core_start ? nonrel_c_initial : nonrel_hf_result.c_matrix;
+      const std::vector<double>& nonrel_start_energies =
+          nonrel_core_start ? h_core_nonrel_eig.eigenvalues : nonrel_hf_result.orbital_energies;
       // Transform h and the ERIs into the converged natural (canonical
       // HF, here) MO basis, then into spin-orbitals (see
       // MoIntegralTransform.h/ClosedShellSpinOrbitals.h) -- needed by
@@ -4739,7 +4760,7 @@ int main(int argc, char** argv) {
       // transform as before; unlike a Fock-matrix-reuse shortcut, this
       // is unavoidable if the gradient is built directly from
       // Hessian_opt/HartreeExchangeGradient.h's simplified sums.
-      const auto h_mo = rerdmft::moOneElectronTransform(h_core_nonrel, nonrel_hf_result.c_matrix);
+      const auto h_mo = rerdmft::moOneElectronTransform(h_core_nonrel, nonrel_c_start);
       // CHOLESKY TRUE: the MO-basis spin-orbital integrals are the AO vectors transformed to the MO basis --
       // no dense tensor. A dense tensor (exact transform of the packed AO integrals) is built only where it is
       // needed: without CHOLESKY (unchanged), and under DEBUG (dense-vs-Cholesky checks, dense validation
@@ -4757,7 +4778,7 @@ int main(int argc, char** argv) {
       // are mutually exclusive with USE_RI (Input.cpp's own check), so `nonrel_dense` is always
       // false here whenever USE_RI is active.
       if (!input.use_ri() && input.cholesky() && (nonrel_dense || input.has_functional() || input.uccsd())) {
-        eri_spin_chol = rerdmft::aoCholeskyToMoSpinOrbital(ao_cholesky, nonrel_hf_result.c_matrix);
+        eri_spin_chol = rerdmft::aoCholeskyToMoSpinOrbital(ao_cholesky, nonrel_c_start);
       }
       logTiming("NON_REL MO integral transform complete", t_start, t_checkpoint, timing_records);
 
@@ -4767,7 +4788,7 @@ int main(int argc, char** argv) {
       rerdmft::SymmetricEri<double> eri_spin_sym;
       if (!input.use_ri() && (!input.cholesky() || input.debug())) {
         eri_spin_sym = rerdmft::closedShellSpinOrbitalTwoElectron(
-            rerdmft::moTwoElectronSymmetric(nonrel_eri, nonrel_hf_result.c_matrix), n_spatial);
+            rerdmft::moTwoElectronSymmetric(nonrel_eri, nonrel_c_start), n_spatial);
       } else if (!input.use_ri() && input.hessian_mean_field()) {
         eri_spin_sym = rerdmft::symmetricFromCholesky(eri_spin_chol);
       }
@@ -4778,7 +4799,7 @@ int main(int argc, char** argv) {
       // buildFunctionalReport/buildPnofFunctionalReport/buildPccdFunctionalReport call below.
       rerdmft::RiNonRelSpinMoEri ri_nonrel_mo_eri;
       if (input.use_ri()) {
-        ri_nonrel_mo_eri = rerdmft::buildRiNonRelSpinMoEri(ri_nonrel_source.eri3_L, n_spatial, nonrel_hf_result.c_matrix);
+        ri_nonrel_mo_eri = rerdmft::buildRiNonRelSpinMoEri(ri_nonrel_source.eri3_L, n_spatial, nonrel_c_start);
       }
       rerdmft::Tensor4<double> eri_spin;
       if (nonrel_dense) eri_spin = rerdmft::denseOf(eri_spin_sym);
@@ -4791,9 +4812,26 @@ int main(int argc, char** argv) {
           cs_gau = buildNonRelCartesianSpinors(large_basis.functions(), nonrel_hf_result.c_matrix, input.cartesian(), nonrel_transform,
                                                rerdmft::fileOrderGlobals(cc_spaces));
         const rerdmft::CartesianSpinors* cs_ptr = cs_gau ? &*cs_gau : nullptr;
-        if (input.use_ri()) runUccsdStage("NON_REL", input, input_path, "nonrel", h_spin, ri_nonrel_mo_eri, 0, cc_spaces, e_scf, uccsd_nonrel_log, cs_ptr);
-        else if (input.cholesky()) runUccsdStage("NON_REL", input, input_path, "nonrel", h_spin, eri_spin_chol, 0, cc_spaces, e_scf, uccsd_nonrel_log, cs_ptr);
-        else runUccsdStage("NON_REL", input, input_path, "nonrel", h_spin, eri_spin_sym, 0, cc_spaces, e_scf, uccsd_nonrel_log, cs_ptr);
+        // UCCSD always runs on the HF reference. With FUNCTIONAL_INIT CORE, h_spin/eri_* above are in the core
+        // orbitals (the functional's start), so the HF-orbital integrals are built separately for it.
+        const auto& c_hf = nonrel_hf_result.c_matrix;
+        const auto h_spin_cc = nonrel_core_start
+            ? rerdmft::closedShellSpinOrbitalOneElectron(rerdmft::moOneElectronTransform(h_core_nonrel, c_hf), n_spatial)
+            : h_spin;
+        if (input.use_ri()) {
+          rerdmft::RiNonRelSpinMoEri ri_hf;
+          if (nonrel_core_start) ri_hf = rerdmft::buildRiNonRelSpinMoEri(ri_nonrel_source.eri3_L, n_spatial, c_hf);
+          runUccsdStage("NON_REL", input, input_path, "nonrel", h_spin_cc, nonrel_core_start ? ri_hf : ri_nonrel_mo_eri, 0, cc_spaces, e_scf, uccsd_nonrel_log, cs_ptr);
+        } else if (input.cholesky()) {
+          rerdmft::CholeskyEri<double> chol_hf;
+          if (nonrel_core_start) chol_hf = rerdmft::aoCholeskyToMoSpinOrbital(ao_cholesky, c_hf);
+          runUccsdStage("NON_REL", input, input_path, "nonrel", h_spin_cc, nonrel_core_start ? chol_hf : eri_spin_chol, 0, cc_spaces, e_scf, uccsd_nonrel_log, cs_ptr);
+        } else {
+          rerdmft::SymmetricEri<double> sym_hf;
+          if (nonrel_core_start)
+            sym_hf = rerdmft::closedShellSpinOrbitalTwoElectron(rerdmft::moTwoElectronSymmetric(nonrel_eri, c_hf), n_spatial);
+          runUccsdStage("NON_REL", input, input_path, "nonrel", h_spin_cc, nonrel_core_start ? sym_hf : eri_spin_sym, 0, cc_spaces, e_scf, uccsd_nonrel_log, cs_ptr);
+        }
         logTiming("NON_REL UCCSD complete", t_start, t_checkpoint, timing_records);
       }
       if (input.cholesky() && input.debug()) {
@@ -4949,7 +4987,7 @@ int main(int argc, char** argv) {
       if (input.has_functional()) {
         std::vector<double> nonrel_orbital_energies_spin(2 * n_spatial);
         for (std::size_t p = 0; p < 2 * n_spatial; ++p) {
-          nonrel_orbital_energies_spin[p] = nonrel_hf_result.orbital_energies[p % n_spatial];
+          nonrel_orbital_energies_spin[p] = nonrel_start_energies[p % n_spatial];
         }
         rerdmft::RestartCapture nonrel_restart;
         // USE_RI + FULL_OPTIMIZATION (NON_REL): the SAME eri3_L already built for the SCF above
@@ -4964,8 +5002,8 @@ int main(int argc, char** argv) {
           rerdmft::Matrix<double> ri_nonrel_c0(n_spatial, 2 * n_spatial);
           for (std::size_t mu = 0; mu < n_spatial; ++mu) {
             for (std::size_t p = 0; p < n_spatial; ++p) {
-              ri_nonrel_c0(mu, p) = nonrel_hf_result.c_matrix(mu, p);
-              ri_nonrel_c0(mu, n_spatial + p) = nonrel_hf_result.c_matrix(mu, p);
+              ri_nonrel_c0(mu, p) = nonrel_c_start(mu, p);
+              ri_nonrel_c0(mu, n_spatial + p) = nonrel_c_start(mu, p);
             }
           }
           ri_nonrel_direct_storage =
@@ -5013,7 +5051,7 @@ int main(int argc, char** argv) {
         };
         nonrel_restart.checkpoint_writer = [&](const rerdmft::RestartCapture& c) {
           std::ostringstream sink;  // periodic FULL_OPTIMIZATION checkpoint: the verification printout is discarded
-          writeRestartFile<double>(sink, input, "NON_REL", c, blockDiagTwice(nonrel_hf_result.c_matrix),
+          writeRestartFile<double>(sink, input, "NON_REL", c, blockDiagTwice(nonrel_c_start),
                                  blockDiagTwice(h_core_nonrel), blockDiagTwice(s_large_cart), h_spin,
                                  rerdmft::basisFingerprint(large_basis.functions()),
                                  nonrel_hf_result.nuclear_repulsion_energy);
@@ -5021,13 +5059,13 @@ int main(int argc, char** argv) {
         nonrel_functional_report = input.use_ri()     ? nonrel_functional(ri_nonrel_mo_eri)
                                     : input.cholesky() ? nonrel_functional(eri_spin_chol)
                                                         : nonrel_functional(eri_spin_sym);
-        writeRestartFile<double>(nonrel_restart_log, input, "NON_REL", nonrel_restart, blockDiagTwice(nonrel_hf_result.c_matrix),
+        writeRestartFile<double>(nonrel_restart_log, input, "NON_REL", nonrel_restart, blockDiagTwice(nonrel_c_start),
                                  blockDiagTwice(h_core_nonrel), blockDiagTwice(s_large_cart), h_spin,
                                  rerdmft::basisFingerprint(large_basis.functions()),
                                  nonrel_hf_result.nuclear_repulsion_energy);
-        writeNonRelFcidump(input, nonrel_hf_result.c_matrix, h_core_nonrel, nonrel_eri, ao_cholesky, nonrel_restart,
+        writeNonRelFcidump(input, nonrel_c_start, h_core_nonrel, nonrel_eri, ao_cholesky, nonrel_restart,
                            nonrel_hf_result.nuclear_repulsion_energy, nonrel_restart_log);
-        writeNonRelAimpac(input, input_path, nonrel_hf_result.c_matrix, nonrel_restart, large_basis.functions(),
+        writeNonRelAimpac(input, input_path, nonrel_c_start, nonrel_restart, large_basis.functions(),
                            nonrel_transform, nonrel_hf_result.nuclear_repulsion_energy, nonrel_restart_log);
       }
     }
@@ -5118,6 +5156,12 @@ int main(int argc, char** argv) {
                       : input.cholesky()   ? run_x2c_scf(ao_cholesky_sph)
                                            : run_x2c_scf(large_spherical_active ? nonrel_eri_sph : nonrel_eri);
       logTiming("X2C-HF SCF complete", t_start, t_checkpoint, timing_records);
+      if (x2c_core_start) {
+        x2c_scf_c = rerdmft::fixKramersPhaseLarge(x2c_hf_result.c_matrix, s_large);
+        x2c_scf_oe = x2c_hf_result.orbital_energies;
+        x2c_hf_result.c_matrix = c_initial;  // Kramers pairing/phase are repaired below exactly as for SCF orbitals
+        x2c_hf_result.orbital_energies = initial_eig.eigenvalues;
+      }
 
       // Canonicalize each converged Kramers pair's relative phase
       // (Theta|even> = |odd> EXACTLY -- see Utils/KramersSymmetry.h's
@@ -5555,6 +5599,12 @@ int main(int argc, char** argv) {
                    : input.cholesky()      ? run_dhf_scf(rkb_cholesky)
                                            : run_dhf_scf(c4_spinor_eri);
       logTiming("SCF loop complete", t_start, t_checkpoint, timing_records);
+      if (c4_core_start) {
+        c4_scf_vecs = rerdmft::fixKramersPhase(dhf_result.fock_ortho_eigenvectors, rkb_coefficients, x_full, s_large, s_small_ukb);
+        c4_scf_oe = dhf_result.orbital_energies;
+        dhf_result.fock_ortho_eigenvectors = h_rkb_ortho_eig.eigenvectors;  // pairing/phase repaired below as for SCF spinors
+        dhf_result.orbital_energies = h_rkb_ortho_eig.eigenvalues;
+      }
 
       // Canonicalize each converged Kramers pair's relative phase
       // (Theta|even> = |odd> EXACTLY, not merely up to an arbitrary
@@ -6485,7 +6535,7 @@ int main(int argc, char** argv) {
     std::cout << "  " << std::setw(6) << "index" << std::setw(20) << "E (even)" << std::setw(10)
                << "index" << std::setw(20) << "E (odd)" << "\n";
     double max_x2c_hf_kramers_splitting = 0.0;
-    const auto& x2c_hf_oe = x2c_hf_result.orbital_energies;
+    const auto& x2c_hf_oe = x2c_core_start ? x2c_scf_oe : x2c_hf_result.orbital_energies;
     for (std::size_t i = 0; i + 1 < x2c_hf_oe.size(); i += 2) {
       std::cout << "  " << std::setw(6) << i << std::setw(20) << energyText(x2c_hf_oe[i]) << std::setw(10)
                  << (i + 1) << std::setw(20) << energyText(x2c_hf_oe[i + 1]) << "\n";
@@ -6495,7 +6545,7 @@ int main(int argc, char** argv) {
     std::cout << "Max |E(even) - E(odd)| Kramers-pair splitting (expect ~0): "
                << max_x2c_hf_kramers_splitting << "\n";
     const double x2c_hf_kramers_partner_deviation =
-        rerdmft::maxKramersPartnerDeviationLarge(x2c_hf_result.c_matrix, s_large);
+        rerdmft::maxKramersPartnerDeviationLarge(x2c_core_start ? x2c_scf_c : x2c_hf_result.c_matrix, s_large);
     std::cout << "Max Kramers eigenvector-partner deviation, 1-|<odd|Theta even>_S| (expect ~0): "
                << x2c_hf_kramers_partner_deviation << "\n";
 
@@ -6653,7 +6703,7 @@ int main(int argc, char** argv) {
     std::cout << "  " << std::setw(6) << "index" << std::setw(20) << "E (even)" << std::setw(10)
                << "index" << std::setw(20) << "E (odd)" << "\n";
     double max_fock_kramers_splitting = 0.0;
-    const auto& final_oe = dhf_result.orbital_energies;
+    const auto& final_oe = c4_core_start ? c4_scf_oe : dhf_result.orbital_energies;
     for (std::size_t i = 0; i + 1 < final_oe.size(); i += 2) {
       std::cout << "  " << std::setw(6) << i << std::setw(20) << energyText(final_oe[i]) << std::setw(10)
                  << (i + 1) << std::setw(20) << energyText(final_oe[i + 1]) << "\n";
@@ -6661,7 +6711,7 @@ int main(int argc, char** argv) {
           std::max(max_fock_kramers_splitting, std::abs(final_oe[i] - final_oe[i + 1]));
     }
     const double fock_kramers_partner_deviation = rerdmft::maxKramersPartnerDeviation(
-        dhf_result.fock_ortho_eigenvectors, rkb_coefficients, x_full, s_large, s_small_ukb);
+        c4_core_start ? c4_scf_vecs : dhf_result.fock_ortho_eigenvectors, rkb_coefficients, x_full, s_large, s_small_ukb);
     std::cout << "  Fock_ortho Max |E(even) - E(odd)| Kramers-pair splitting (expect ~0): "
                << max_fock_kramers_splitting << "\n";
     std::cout << "  Fock_ortho Max Kramers eigenvector-partner deviation, "
