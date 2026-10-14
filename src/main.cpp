@@ -2893,7 +2893,9 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
   // FullOptimization.cpp). The window (n_occ, n_vir) is re-derived above from THIS run's own
   // PCCD_FROZEN_PAIRS/PCCD_ACTIVE_PAIRS, not stored in the file, so a mismatched window shows up
   // here as a size mismatch rather than silently misreading the vector.
-  if (restart_amplitudes != nullptr) {
+  // A restart file from another functional (PNOF gamma angles, JK-only occupations) carries no amplitudes: its
+  // orbitals are used and t, z start cold (t = z = 0). Only a non-empty vector must match this run's window.
+  if (restart_amplitudes != nullptr && !restart_amplitudes->empty()) {
     if (restart_amplitudes->size() != 2 * n_occ * n_vir) {
       throw std::runtime_error(label + ": READ_RESTART amplitudes have " +
                                 std::to_string(restart_amplitudes->size()) + " entries but this run's PCCD window (" +
@@ -2947,7 +2949,7 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
   std::ostringstream out;
   out << "\n" << label
       << " pCCD RDMFT functional evaluation (Occ_opt/pCCD.h, on the " << (full_opt.core_start ? "core-Hamiltonian" : "converged HF/DHF") << " orbitals):\n";
-  out << "  Amplitude guess: " << (restart_amplitudes != nullptr ? "READ_RESTART (t-/z-amplitudes of the restart file)"
+  out << "  Amplitude guess: " << (restart_amplitudes != nullptr && !restart_amplitudes->empty() ? "READ_RESTART (t-/z-amplitudes of the restart file)"
                                                                  : std::string("cold start (t = z = 0)"))
       << "\n";
   out << "  t-amplitudes " << (t_result.t_converged ? "converged" : "did NOT converge") << " ("

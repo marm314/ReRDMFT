@@ -219,7 +219,8 @@ t-/z-amplitudes are solved at fixed orbitals, and with `FULL_OPTIMIZATION` the
 resulting RDM feeds the same ADAM/NEO machinery as PNOF, re-solving the
 amplitudes every macro-iteration (warm-started from the previous ones). Works on
 `NON_REL`/`X2C`/`C4_SPINOR`, including the min-max stage, and with `READ_RESTART`
-(amplitudes included).
+(amplitudes included). A restart file written by another functional (PNOF,
+JK-only) is also accepted: its orbitals are used and t, z start from zero.
 
 The energy is not variational in the orbitals, so the orbital optimization can
 have several branches (e.g. stretched bonds). A cold start may land on a higher
