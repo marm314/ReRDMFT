@@ -14,9 +14,9 @@
 #    machinery the non-restart RI path uses.
 #
 # Compared against a from-scratch USE_RI TRUE run at 1.70 bohr (no READ_RESTART): NON_REL agrees to
-# all displayed digits (-7.998509088 Ha), X2C_HF to ~1.5e-8 Ha (-8.000273099 vs -8.000273084 Ha), and
-# 4C to ~1e-9 Ha (-7.999250484 vs -7.999250485 Ha) -- the same restart-fidelity level the dense/
-# Cholesky READ_RESTART path already has, confirmed 2026-10-07.
+# all displayed digits (-7.998509088 Ha), X2C_HF to all displayed digits (-7.999318952 Ha), and
+# 4C to ~4e-9 Ha (-7.999250487 vs -7.999250483 Ha) -- the same restart-fidelity level the dense/
+# Cholesky READ_RESTART path already has, confirmed 2026-10-14.
 NELEC 4
 BASIS lih-6-31g.gbs
 NON_RELATIVISTIC TRUE

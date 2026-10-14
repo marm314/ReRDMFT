@@ -1,6 +1,6 @@
 # Example ReRDMFT input file: water molecule, evaluating the MULLER
 # (Muller/Buijse-Baerends, Occ_opt/JK_only.h) JK-only RDMFT functional
-# on the converged approximate X2C-HF spinors -- same idea as
+# on the converged X2C-HF spinors -- same idea as
 # water_muller.inp/co-sto-3g_muller.inp's own NON_REL/C4_DHF runs, just
 # for X2C (see README.md's "X2C decoupling and X2C-HF" section): the
 # converged X2C-HF orbitals/MO-basis integrals are held FIXED, initial

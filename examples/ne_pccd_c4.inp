@@ -1,16 +1,16 @@
 # Example ReRDMFT input file: Ne, cc-pVDZ, NON_REL + X2C + C4_SPINOR (4-component DHF), FUNCTIONAL
 # PCCD, FULL_OPTIMIZATION TRUE -- the physically meaningful relativistic pCCD reference for Ne
-# (unlike X2C's own approximate picture change, see ne_pccd_x2c.inp's header comment; 4-component
-# is exact, no-pair). CHOLESKY TRUE: C4_DHF's RKB dimension here is 4x the spatial basis (60), so
+# (4-component is exact, no-pair; X2C-HF has no two-electron picture change, see ne_pccd_x2c.inp). CHOLESKY TRUE: C4_DHF's RKB dimension here is 4x the spatial basis (60), so
 # the dense two-electron tensor is sizable -- Cholesky keeps this example cheap (a few minutes).
 #
 # Converged total energies:
-#   NON_REL : -128.5596739 Hartree (HF -128.4888662;      pCCD correlation -0.0708077)
-#   C4_DHF  : -128.7027634 Hartree (DHF -128.6319599;     pCCD correlation -0.0708035)
-# The pCCD correlation energy recovered on top of the HF/DHF reference agrees between NON_REL and
-# the exact relativistic treatment to ~4e-6 Hartree -- the relativistic correction here is almost
-# entirely in the one-particle (HF/DHF) reference, not in the pair-correlation treatment itself,
-# exactly the expected physical picture for a light atom like Ne.
+#   NON_REL : -128.5596739 Hartree (HF -128.4888662;      pCCD correlation -0.0708077; Cartesian AOs)
+#   X2C     : -128.7019321 Hartree (X2C-HF -128.6328725;  pCCD correlation -0.0690596)
+#   C4_DHF  : -128.7008622 Hartree (DHF -128.6318161;     pCCD correlation -0.0690461)
+# X2C and C4_SPINOR always use the spherical basis (HF/DHF and X2C-HF agree with PySCF to 1e-7 Hartree), so
+# their correlation energy is to be compared with spherical NON_REL (ne_pccd_nonrel_cartesian_false.inp:
+# -0.0690947); the Cartesian NON_REL one is ~1.8 mHartree larger. The relativistic correction is almost
+# entirely in the one-particle reference (~5e-5 Hartree in the correlation), as expected for a light atom.
 NELEC 10
 BASIS ne-cc-pvdz.gbs
 NON_RELATIVISTIC TRUE

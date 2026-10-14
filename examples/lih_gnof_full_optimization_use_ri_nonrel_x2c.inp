@@ -2,9 +2,9 @@
 # NON_RELATIVISTIC and X2C (same molecule run twice, as in lih_gnof_full_optimization.inp).
 # Confirms USE_RI's extension to NON_REL/X2C's FULL_OPTIMIZATION (not just SCF):
 # compare the two FULL_OPTIMIZATION final total energies against lih_gnof_full_optimization.inp's
-# own dense ones -- NON_REL: -7.997608947 Hartree (matches to displayed precision for this
-# PAUTO aux basis); X2C: -7.999383262 Hartree dense vs ~-7.999383130 Hartree here (~1.3e-7
-# Hartree, USE_RI's expected approximation level).
+# own dense ones -- NON_REL: -7.997608947 Hartree dense vs -7.997653357 Hartree here; X2C:
+# -7.998422007 Hartree dense vs -7.998466415 Hartree here (~4.4e-5 Hartree each, USE_RI's expected
+# approximation level for this PAUTO aux basis).
 NELEC 4
 BASIS lih-6-31g.gbs
 NON_RELATIVISTIC TRUE

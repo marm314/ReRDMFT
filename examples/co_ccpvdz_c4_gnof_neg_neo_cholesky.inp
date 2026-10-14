@@ -1,7 +1,7 @@
 # Example ReRDMFT input file: carbon monoxide (R = 1.128 Angstrom), cc-pVDZ basis, GNOF (3 coupling subspaces of
 # 2 orbitals), 4-component with the MIN-MAX stage (FULL_OPTIMIZATION_4C_NEG), NEO and CHOLESKY TRUE.
 # Same first stage as co_ccpvdz_c4_gnof_neo_cholesky.inp (no-pair minimization over the 56 positive-energy
-# spinors, -113.0044414 Ha). FULL_OPTIMIZATION_4C_NEG TRUE then continues from that minimum with rotations that also
+# spinors, -113.0029198 Ha). FULL_OPTIMIZATION_4C_NEG TRUE then continues from that minimum with rotations that also
 # mix the 20 occupied positive-energy spinors (occupation > 1e-6) with the 60 negative-energy ones: NEO converges the
 # orbitals to the saddle point of order 1200 (energy maximized along those electron-positron directions, minimized
 # along the rest), alternating with the full re-minimization of the occupation numbers. The stage needs the

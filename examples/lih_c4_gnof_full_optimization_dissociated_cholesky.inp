@@ -3,7 +3,7 @@
 # C4_SPINOR in one run, C4_SPINOR rotations restricted to the positive-energy spinors). It doubles as a
 # regression test: with Cholesky-decomposed integrals the 4-component SCF used to drift into a
 # Kramers-broken solution here (E = -7.930 Ha); the Kramers-restricted SCF keeps it time-reversal
-# symmetric, and the energies match the dense example (X2C -7.932412191, C4 -7.931505041 Ha).
+# symmetric, and the energies match the dense example (X2C -7.931510918, C4 -7.931505041 Ha).
 # Use DIIS FALSE (linear mixing) as in the dense example.
 NELEC 4
 BASIS lih-6-31g.gbs

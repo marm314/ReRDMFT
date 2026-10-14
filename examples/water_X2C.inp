@@ -1,6 +1,6 @@
 # Example ReRDMFT input file: water molecule. X2C TRUE prints the
 # one-electron X2C decoupling/Hamiltonian report and runs the
-# approximate X2C-HF SCF (printed between the NON_RELATIVISTIC and
+# X2C-HF SCF (printed between the NON_RELATIVISTIC and
 # C4_SPINOR final reports); see water_X2C_debug.inp for the same run
 # with DEBUG TRUE (extra cross-checks) and HESSIAN_MEAN_FIELD.
 NELEC 10
