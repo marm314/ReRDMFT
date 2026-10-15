@@ -1054,6 +1054,10 @@ inline rerdmft::FullOptSettings fullOptSettings(const rerdmft::Input& input) {
   settings.neo_stagnation_factor = input.neo_stagnation_factor();
   settings.check_hess_neo = input.check_hess_neo();
   settings.fixed_occupancies = input.fixed_occupancies();
+  if (input.read_occupancies() && input.has_functional() && input.functional() == "PCCD") {
+    for (const auto& line : readOccIn("OCC.in")) settings.pccd_fixed_occupations.push_back(line.occupation);
+    settings.pccd_fix_amplitudes = std::getenv("RERDMFT_PCCD_FIX_AMPLITUDES") != nullptr;
+  }
   return settings;
 }
 
@@ -2894,6 +2898,7 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
                         : (amplitude_solver_name == "LM") ? rerdmft::PccdAmplitudeSolver::kLm
                                                             : rerdmft::PccdAmplitudeSolver::kNewton;
   amp_settings.debug = full_opt.pccd_debug;
+  if (full_opt.pccd_fix_amplitudes) amp_settings.fixed_window_occupations = full_opt.pccd_fixed_occupations;
 
   const auto coeff = rerdmft::buildPccdCoefficients(h, eri, reps, bar, n_core, n_occ, n_vir);
   rerdmft::Matrix<double> t0(n_occ, n_vir, 0.0), z0(n_occ, n_vir, 0.0);
@@ -2904,18 +2909,37 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
   // here as a size mismatch rather than silently misreading the vector.
   // A restart file from another functional (PNOF gamma angles, JK-only occupations) carries no amplitudes: its
   // orbitals are used and t, z start cold (t = z = 0). Only a non-empty vector must match this run's window.
+  // A restart file written with MORE frozen pairs than this run (e.g. PCCD_FROZEN_PAIRS 4 -> 0): its former core pairs become
+  // the lowest occupied pairs of the larger window, with t = z = 0 (occupation exactly 1); the stored amplitudes shift to the
+  // HOMO-side block. Needs the same virtual count.
   if (restart_amplitudes != nullptr && !restart_amplitudes->empty()) {
-    if (restart_amplitudes->size() != 2 * n_occ * n_vir) {
+    std::size_t shift = 0;
+    std::size_t n_occ_r = n_occ;
+    if (restart_amplitudes->size() != 2 * n_occ * n_vir && restart_data != nullptr && restart_data->jk_frozen_pairs >= 0) {
+      const double occ_pairs_total = n_electrons / 2.0;
+      const double occ_r = occ_pairs_total - static_cast<double>(restart_data->jk_frozen_pairs);
+      if (occ_r >= 1.0 && static_cast<std::size_t>(std::lround(occ_r)) < n_occ &&
+          restart_amplitudes->size() == 2 * static_cast<std::size_t>(std::lround(occ_r)) * n_vir) {
+        n_occ_r = static_cast<std::size_t>(std::lround(occ_r));
+        shift = n_occ - n_occ_r;
+      }
+    }
+    if (restart_amplitudes->size() != 2 * n_occ_r * n_vir) {
       throw std::runtime_error(label + ": READ_RESTART amplitudes have " +
                                 std::to_string(restart_amplitudes->size()) + " entries but this run's PCCD window (" +
                                 std::to_string(n_occ) + " occupied x " + std::to_string(n_vir) +
                                 " virtual pairs) needs " + std::to_string(2 * n_occ * n_vir) +
                                 " -- a different PCCD_FROZEN_PAIRS/PCCD_ACTIVE_PAIRS than the restart file's?");
     }
-    for (std::size_t i = 0; i < n_occ; ++i) {
+    if (shift > 0) {
+      rerdmft::progress(label + ": READ_RESTART: the restart file's " + std::to_string(shift) +
+                        " frozen pair(s) become occupied pairs of the amplitude window (t = z = 0), the stored amplitudes start from HOMO-" +
+                        std::to_string(n_occ_r - 1));
+    }
+    for (std::size_t i = 0; i < n_occ_r; ++i) {
       for (std::size_t a = 0; a < n_vir; ++a) {
-        t0(i, a) = (*restart_amplitudes)[i * n_vir + a];
-        z0(i, a) = (*restart_amplitudes)[n_occ * n_vir + i * n_vir + a];
+        t0(i + shift, a) = (*restart_amplitudes)[i * n_vir + a];
+        z0(i + shift, a) = (*restart_amplitudes)[n_occ_r * n_vir + i * n_vir + a];
       }
     }
   }
@@ -2925,6 +2949,9 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
   // pairs consecutive, exactly buildOrbitalSubspaces' layout) is the pCCD state with
   // t_ia = -sqrt(n_a / n_i) for the coupled (i,a), zero elsewhere: use it as the t guess.
   bool guess_from_pnof = false;
+  if (!full_opt.pccd_fixed_occupations.empty()) {  // READ_OCCUPANCIES: overrides the restart amplitudes, like the other functionals' occupations
+    rerdmft::pccdAmplitudesFromOccupations(full_opt.pccd_fixed_occupations, n_occ, n_vir, t0, z0);
+  }
   if (full_opt.pccd_amplitude_guess == "PNOF" && restart_data != nullptr &&
       (restart_amplitudes == nullptr || restart_amplitudes->empty()) && restart_data->kind == "GAMMAS" && restart_data->pnof_coupling >= 2 &&
       restart_data->pnof_subspaces >= 1 && restart_data->occupations.size() >= n_total) {  // frozen-core pairs below the window are skipped (PNOF's frozen occupied pairs)
@@ -2944,7 +2971,7 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
     }
   }
   bool guess_mp2 = false;
-  if (full_opt.pccd_amplitude_guess == "MP2" && (restart_amplitudes == nullptr || restart_amplitudes->empty())) {
+  if (full_opt.pccd_amplitude_guess == "MP2" && full_opt.pccd_fixed_occupations.empty() && (restart_amplitudes == nullptr || restart_amplitudes->empty())) {
     const rerdmft::Matrix<double> zero_t(n_occ, n_vir, 0.0);
     const rerdmft::Matrix<double> r0 = rerdmft::pccdTResidual(coeff, zero_t);
     const rerdmft::Matrix<double> jac0 = rerdmft::pccdTJacobian(coeff, zero_t);
@@ -2955,6 +2982,28 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
       }
     }
     guess_mp2 = true;
+  }
+  if (full_opt.pccd_debug) {  // PCCD_DEBUG: how far the starting t is from a root of the t-equations
+    const rerdmft::Matrix<double> r0 = rerdmft::pccdTResidual(coeff, t0);
+    double sq = 0.0, max_coupled = 0.0, max_other = 0.0;
+    std::ostringstream coupled;
+    coupled << std::scientific << std::setprecision(3);
+    for (std::size_t i = 0; i < n_occ; ++i) {
+      for (std::size_t a = 0; a < n_vir; ++a) {
+        const double r = r0(i, a);
+        sq += r * r;
+        if (t0(i, a) != 0.0) {
+          max_coupled = std::max(max_coupled, std::abs(r));
+          coupled << " R(" << i << "," << a << ")=" << r << " [t0=" << std::defaultfloat << t0(i, a) << std::scientific << "]";
+        } else {
+          max_other = std::max(max_other, std::abs(r));
+        }
+      }
+    }
+    std::ostringstream d;
+    d << std::scientific << std::setprecision(3) << "pCCD starting t: ||R(t0)|| = " << std::sqrt(sq) << ", max|R| on the t0 != 0 elements = "
+      << max_coupled << ", on the others = " << max_other << ";" << coupled.str();
+    rerdmft::progress(d.str());
   }
   rerdmft::PccdSettings first_settings = amp_settings;
   first_settings.lm_fallback = true;  // the first solve (outside the macro-iterations) may fall back to Levenberg-Marquardt
@@ -2997,7 +3046,15 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
   std::ostringstream out;
   out << "\n" << label
       << " pCCD RDMFT functional evaluation (Occ_opt/pCCD.h, on the " << (full_opt.core_start ? "core-Hamiltonian" : "converged HF/DHF") << " orbitals):\n";
-  out << "  Amplitude guess: " << (restart_amplitudes != nullptr && !restart_amplitudes->empty() ? "READ_RESTART (t-/z-amplitudes of the restart file)"
+  if (!full_opt.pccd_fixed_occupations.empty() && full_opt.pccd_fix_amplitudes) {
+    out << "  WARNING (READ_OCCUPANCIES with PCCD, RERDMFT_PCCD_FIX_AMPLITUDES set): t and z were BUILT from the occupations of OCC.in\n"
+           "  (t = -sqrt(n_a/n_i), z = -sqrt(n_i n_a), HOMO-k paired with LUMO+k) and are FIXED for the whole calculation: the t-/z-equations\n"
+           "  are never solved, so the energy is NOT the pCCD stationary value and the occupations stay as given.\n";
+  } else if (!full_opt.pccd_fixed_occupations.empty()) {
+    out << "  READ_OCCUPANCIES with PCCD: the starting t, z were built from the occupations of OCC.in (t = -sqrt(n_a/n_i), z = -sqrt(n_i n_a),\n"
+           "  HOMO-k paired with LUMO+k) and are then solved the standard way (set RERDMFT_PCCD_FIX_AMPLITUDES to keep them fixed instead).\n";
+  }
+  out << "  Amplitude guess: " << (!full_opt.pccd_fixed_occupations.empty() ? std::string("READ_OCCUPANCIES (OCC.in)") : restart_amplitudes != nullptr && !restart_amplitudes->empty() ? "READ_RESTART (t-/z-amplitudes of the restart file)"
                                                                  : guess_from_pnof ? std::string("PNOF occupations of the restart file (t_ia = -sqrt(n_a/n_i) for the coupled pairs)")
                                                                  : guess_mp2 ? std::string("MP2 (uncoupled first-order t; z = 0)")
                                                                  : std::string(full_opt.pccd_amplitude_guess == "PNOF" ? "cold start (t = z = 0; PCCD_AMPLITUDE_GUESS PNOF needs a PNOF restart file without amplitudes)" : "cold start (t = z = 0)"))

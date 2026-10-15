@@ -617,6 +617,8 @@ class Input {
   // READ_RESTART is also TRUE, orbitals still come from the RESTART file as usual, but these
   // occupations override the RESTART file's own. FULL_OPTIMIZATION's own macro loop (if it runs)
   // is unaffected -- combine with FIXED_OCCUPANCIES TRUE to also keep it from re-optimizing them.
+  // FUNCTIONAL PCCD: the lines are the amplitude window's occupations (occupied lowest..HOMO, then virtuals) and build the
+  // starting t, z (pccdAmplitudesFromOccupations), solved as usual; env RERDMFT_PCCD_FIX_AMPLITUDES keeps them fixed instead.
   bool read_occupancies() const { return read_occupancies_; }
   // Optional; defaults to FALSE. Only meaningful for C4_SPINOR + FULL_OPTIMIZATION: once the
   // positive-energy-only optimization has converged, runs the genuine min-max saddle-point stage

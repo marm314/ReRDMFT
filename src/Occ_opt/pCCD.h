@@ -88,7 +88,17 @@ struct PccdSettings {
   // gradient's inf-norm does (kLbfgs's own, separate `LbfgsOptions::gradient_tolerance`
   // is derived from this -- see the .cpp).
   double residual_tolerance = 1e-10;
+  // READ_OCCUPANCIES with FUNCTIONAL PCCD: the n_occ + n_vir window occupations of OCC.in (occupied lowest..HOMO, then
+  // virtuals lowest..highest). Non-empty = the t-/z-solves are SKIPPED and t, z are built from them (see
+  // pccdAmplitudesFromOccupations) and kept FIXED for the whole run.
+  std::vector<double> fixed_window_occupations;
 };
+
+// Builds the pCCD amplitudes that reproduce the given window occupations: pair k couples occupied n_occ-1-k (HOMO-k) with
+// virtual k (LUMO+k), as in the PNOF guess; t = -sqrt(n_a/n_i), z = -sqrt(n_i n_a), so that n_i = 1 - t z and n_a = t z.
+// Throws unless every pair has n_i + n_a = 1, unpaired occupied have n = 1 and unpaired virtuals n = 0.
+void pccdAmplitudesFromOccupations(const std::vector<double>& window_occupations, std::size_t n_occ, std::size_t n_vir,
+                                   Matrix<double>& t, Matrix<double>& z);
 
 struct PccdAmplitudeResult {
   Matrix<double> t;  // n_occ x n_vir

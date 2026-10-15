@@ -644,8 +644,47 @@ PccdAmplitudeResult solveResidual(
 
 }  // namespace
 
+void pccdAmplitudesFromOccupations(const std::vector<double>& window_occupations, std::size_t n_occ, std::size_t n_vir,
+                                   Matrix<double>& t, Matrix<double>& z) {
+  if (window_occupations.size() != n_occ + n_vir) {
+    throw std::runtime_error("READ_OCCUPANCIES (pCCD): OCC.in has " + std::to_string(window_occupations.size()) +
+                             " line(s) but the amplitude window has " + std::to_string(n_occ) + " occupied + " +
+                             std::to_string(n_vir) + " virtual = " + std::to_string(n_occ + n_vir) + " pairs");
+  }
+  constexpr double kTol = 1e-8;
+  t = Matrix<double>(n_occ, n_vir, 0.0);
+  z = Matrix<double>(n_occ, n_vir, 0.0);
+  for (std::size_t k = 0; k < std::max(n_occ, n_vir); ++k) {
+    const bool has_i = k < n_occ, has_a = k < n_vir;
+    const double n_i = has_i ? window_occupations[n_occ - 1 - k] : 0.0;
+    const double n_a = has_a ? window_occupations[n_occ + k] : 1.0;
+    if (has_i && has_a) {
+      if (std::abs(n_i + n_a - 1.0) > kTol || n_i < -kTol || n_a < -kTol || n_i < kTol) {
+        throw std::runtime_error("READ_OCCUPANCIES (pCCD): pair " + std::to_string(k) + " (occupied HOMO-" + std::to_string(k) +
+                                 " with virtual LUMO+" + std::to_string(k) + ") has occupations " + std::to_string(n_i) + " and " +
+                                 std::to_string(n_a) + "; pCCD needs n_occupied + n_virtual = 1 (and n_occupied > 0)");
+      }
+      const std::size_t i = n_occ - 1 - k;
+      t(i, k) = -std::sqrt(std::max(0.0, n_a) / n_i);
+      z(i, k) = -std::sqrt(std::max(0.0, n_a) * n_i);
+    } else if (has_i && std::abs(n_i - 1.0) > kTol) {
+      throw std::runtime_error("READ_OCCUPANCIES (pCCD): occupied HOMO-" + std::to_string(k) + " has no virtual partner and needs occupation 1, got " + std::to_string(n_i));
+    } else if (has_a && std::abs(n_a) > kTol) {
+      throw std::runtime_error("READ_OCCUPANCIES (pCCD): virtual LUMO+" + std::to_string(k) + " has no occupied partner and needs occupation 0, got " + std::to_string(n_a));
+    }
+  }
+}
+
 PccdAmplitudeResult solvePccdTAmplitudes(const PccdCoefficients& coeff, const Matrix<double>& t0,
                                           const PccdSettings& settings) {
+  if (!settings.fixed_window_occupations.empty()) {  // READ_OCCUPANCIES: no solve, t built from the occupations
+    PccdAmplitudeResult r;
+    Matrix<double> z_unused;
+    pccdAmplitudesFromOccupations(settings.fixed_window_occupations, coeff.n_occ, coeff.n_vir, r.t, z_unused);
+    r.z = z_unused;
+    r.t_converged = true;
+    return r;
+  }
   const auto residual_fn = [&](const Matrix<double>& t) { return pccdTResidual(coeff, t); };
   const auto jacobian_fn = [&](const Matrix<double>& t) { return pccdTJacobian(coeff, t); };
   return solveResidual(residual_fn, jacobian_fn, t0, settings);
@@ -657,6 +696,14 @@ PccdAmplitudeResult solvePccdZAmplitudes(const PccdCoefficients& coeff, const Ma
   // CONVERGED, now-fixed t, is a genuine constant here). See pCCD.h's own header
   // comment on `solvePccdZAmplitudes` for why this is exactly the CC-Lambda equation.
   const std::size_t n_occ = coeff.n_occ, n_vir = coeff.n_vir;
+  if (!settings.fixed_window_occupations.empty()) {  // READ_OCCUPANCIES: no solve, z built from the occupations
+    PccdAmplitudeResult r;
+    Matrix<double> t_unused;
+    pccdAmplitudesFromOccupations(settings.fixed_window_occupations, n_occ, n_vir, t_unused, r.z);
+    r.t = t;
+    r.z_converged = true;
+    return r;
+  }
   const Matrix<double> j_t = pccdTJacobian(coeff, t);
   const PccdBlocks b = buildBlocks(coeff);
 

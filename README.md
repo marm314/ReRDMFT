@@ -104,7 +104,7 @@ Case-insensitive, one per line, optional `=` (`DEBUG TRUE` = `DEBUG=TRUE`);
 | `PCCD_AMPLITUDE_SOLVER` | string | `DIIS` | `DIIS` (UCCSD-style, up to 1000 iterations; falls back to `NEWTON`), `NEWTON`, `LBFGS` or `KRYLOV` (Newton-Krylov; stops if it fails). |
 | `PCCD_AMPLITUDE_GUESS` | string | `ZERO` | pCCD starting t without restart amplitudes: `ZERO`, `MP2` (uncoupled first-order) or `PNOF` (from the occupations of a PNOF `READ_RESTART`). |
 | `PCCD_DEBUG` | bool | `FALSE` | Print per-macro-iteration amplitude-solve diagnostics to the live file. |
-| `READ_OCCUPANCIES` | bool | `FALSE` | Read starting occupations from `OCC.in`. |
+| `READ_OCCUPANCIES` | bool | `FALSE` | Read starting occupations from `OCC.in`; for pCCD they set the starting t, z (see *pCCD functional*). |
 | `READ_RESTART` | bool | `FALSE` | Skip the SCF and start from `RESTART.*` (see *Restart*). |
 | `FCIDUMP` | bool | `FALSE` | `NON_RELATIVISTIC` + `FUNCTIONAL`: write an `FCIDUMP` of the MO integrals. |
 | `AIMPAC` | bool | `FALSE` | Write AIMPAC `.wfn` files: `hf_<input>_<level>.wfn` (always the SCF density), `<input>.wfn` (functional natural orbitals), `cc_<input>_<level>.wfn` (UCCSD, with `CC_RDM`), and `core_<input>_<level>.wfn` (core-Hamiltonian state, with `FUNCTIONAL_INIT CORE`). |
@@ -235,6 +235,13 @@ have several branches (e.g. stretched bonds). A cold start may land on a higher
 one: follow the curve with a restart chain from a shorter bond length, or try
 `FUNCTIONAL_INIT CORE`.
 
+`READ_OCCUPANCIES` with pCCD: `OCC.in` lists the window occupations (occupied lowest..HOMO, then
+virtuals; frozen pairs not listed), pair k couples HOMO-k with LUMO+k (n_occ + n_vir = 1), and the starting
+t = -sqrt(n_a/n_i), z = -sqrt(n_i n_a) are then solved as usual. With the environment variable
+`RERDMFT_PCCD_FIX_AMPLITUDES` they are never solved and stay fixed (a warning is printed).
+A restart written with more frozen pairs than the new run (e.g. 4 -> 0) is embedded: the former core pairs
+enter the window with t = z = 0. `PCCD_DEBUG` also prints ||R(t0)|| of the starting amplitudes.
+
 Examples: `examples/ne_pccd_full_optimization.inp`, `ne_pccd_x2c.inp`,
 `ne_pccd_c4.inp`, `ne_pccd_c4_neg.inp`.
 
@@ -306,6 +313,7 @@ point to keep a backup). Example: `examples/lih_gnof_read_restart.inp`.
 | Variable | Effect |
 |---|---|
 | `OMP_NUM_THREADS` | OpenMP threads (also the threaded BLAS). |
+| `RERDMFT_PCCD_FIX_AMPLITUDES` | Any value, with `READ_OCCUPANCIES` + `FUNCTIONAL PCCD`: t, z built from `OCC.in` are never solved. |
 | `RERDMFT_RI_HV_REFERENCE` | Any value: `USE_RI` products use the element-by-element reference code (same results, much slower). |
 | `SWITCH_SIGN_ERI` | Any value: flips the sign of every electron-repulsion integral (diagnostic; dense integrals only). |
 

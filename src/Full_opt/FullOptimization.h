@@ -57,6 +57,11 @@ struct FullOptSettings {
   bool core_start = false;
   // PCCD_AMPLITUDE_GUESS (ZERO | MP2 | PNOF): starting t-amplitudes of a pCCD run without restart amplitudes.
   std::string pccd_amplitude_guess = "ZERO";
+  // READ_OCCUPANCIES with FUNCTIONAL PCCD: OCC.in's window occupations; non-empty = the starting t, z are built from them
+  // (pccdAmplitudesFromOccupations) and then solved the standard way. With `pccd_fix_amplitudes` (environment variable
+  // RERDMFT_PCCD_FIX_AMPLITUDES) they are instead never solved (PccdSettings::fixed_window_occupations).
+  std::vector<double> pccd_fixed_occupations;
+  bool pccd_fix_amplitudes = false;
   // Periodic RESTART checkpoint: every `checkpoint_interval` macro-iterations (10, 20, 30, ...) the loop hands a snapshot of its
   // current state (occupations, occupation state, accumulated rotation, energy) to `checkpoint`, if set; the caller writes the RESTART file.
   int checkpoint_interval = 10;
