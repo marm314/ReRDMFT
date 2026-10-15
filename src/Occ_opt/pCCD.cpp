@@ -561,7 +561,6 @@ PccdAmplitudeResult solveResidual(
     diis_failure = std::isfinite(rnorm) ? "DIIS did not converge (" + std::to_string(iter) + " iterations, |R| = " + std::to_string(rnorm) + ")"
                                         : "DIIS diverged (|R| not finite after " + std::to_string(iter) + " iterations)";
     progress("pCCD amplitude solve: " + diis_failure + "; NEWTON reactivated");
-    std::cerr << "  pCCD amplitude solve: " << diis_failure << "; falling back to NEWTON\n";
   }
 
   if (settings.solver == PccdAmplitudeSolver::kNewton || !diis_failure.empty()) {
@@ -594,7 +593,6 @@ PccdAmplitudeResult solveResidual(
     if (!result.t_converged && settings.lm_fallback) {  // first solve only: Levenberg-Marquardt from the starting amplitudes
       const std::string newton_text = "NEWTON did not converge (" + std::to_string(iter) + " iterations, |R| = " + std::to_string(rnorm) + ")";
       progress("pCCD amplitude solve: " + newton_text + "; LM reactivated");
-      std::cerr << "  pCCD amplitude solve: " << newton_text << "; falling back to LM\n";
       PccdAmplitudeResult lm = solveLevenbergMarquardt(residual, jacobian, x0, settings);
       if (lm.t_converged || lm.t_residual_norm < result.t_residual_norm) result = lm;
       if (!result.t_converged) {
