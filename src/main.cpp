@@ -6487,7 +6487,7 @@ int main(int argc, char** argv) {
                << scfAccelerationLabel(input) << "):\n";
     for (const auto& it : nonrel_hf_result.history) {
       std::cout << "  Iteration " << std::setw(3) << it.iteration << "  E = " << std::setw(16) << std::fixed
-                 << std::setprecision(9) << it.energy;
+                 << std::setprecision(9) << it.energy + nonrel_hf_result.nuclear_repulsion_energy;
       if (it.iteration > 1) {
         std::cout << "  dE = " << it.energy_change << "  dP = " << it.density_change;
       }
@@ -6695,7 +6695,7 @@ int main(int argc, char** argv) {
                << scfAccelerationLabel(input) << "):\n";
     for (const auto& it : x2c_hf_result.history) {
       std::cout << "  Iteration " << std::setw(3) << it.iteration << "  E = " << std::setw(16) << std::fixed
-                 << std::setprecision(9) << it.energy;
+                 << std::setprecision(9) << it.energy + x2c_hf_result.nuclear_repulsion_energy;
       if (it.iteration > 1) {
         std::cout << "  dE = " << it.energy_change << "  dP = " << it.density_change;
       }
@@ -6862,7 +6862,7 @@ int main(int argc, char** argv) {
     std::cout << "\n4-component Dirac-Hartree-Fock SCF (" << scfAccelerationLabel(input) << "):\n";
     for (const auto& it : dhf_result.history) {
       std::cout << "  Iteration " << std::setw(3) << it.iteration << "  E = " << std::setw(16) << std::fixed
-                 << std::setprecision(9) << it.energy;
+                 << std::setprecision(9) << it.energy + dhf_result.nuclear_repulsion_energy;
       if (it.iteration > 1) {
         std::cout << "  dE = " << it.energy_change << "  dP = " << it.density_change;
       }
