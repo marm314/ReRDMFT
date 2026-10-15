@@ -814,14 +814,14 @@ NeoResult neoOptimize(NeoProblem<T>& problem, const NeoOptions& o) {
       }
       const NeoTrustDecision decision = neoTrustDecision(solver.targetOrder(), ratio, radius, o.trust);
       if (o.progress) {
-        ProgressLine() << "  NEO Newton step " << iteration + 1 << ": E = " << std::setprecision(10) << e0 << std::scientific
+        ProgressLine() << "  NEO Newton step " << iteration + 1 << ": E = " << std::setprecision(10) << e0 + o.energy_offset << std::scientific
                        << std::setprecision(2) << "  max|g| = " << gmax << "  radius = " << radius << "  |d| = " << step.step_norm
                        << "  ratio = " << ratio << (decision.accept ? "" : "  REJECTED") << "  Hessian products = "
                        << solver.hessianProducts();
       }
       if (o.verbose) {
         std::cout << "  NEO it " << std::setw(3) << iteration + 1 << "  E = " << std::setprecision(12)
-                  << e0 << "  |g|max = " << std::scientific << std::setprecision(3) << gmax
+                  << e0 + o.energy_offset << "  |g|max = " << std::scientific << std::setprecision(3) << gmax
                   << "  h = " << std::fixed << std::setprecision(3) << radius
                   << "  |d| = " << step.step_norm << "  shift = " << std::scientific
                   << step.shift << "  alpha = " << std::fixed << step.alpha

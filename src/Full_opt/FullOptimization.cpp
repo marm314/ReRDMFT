@@ -2264,6 +2264,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
   // Tolerance = min(residual_tolerance, 0.1*|g|), so it still tightens as the gradient falls.
   neo_options.step.residual_tolerance = 1e-3;
   neo_options.progress = true;  // one live line per Newton step (Utils/Progress.h)
+  neo_options.energy_offset = nuclear_repulsion_energy;  // printed NEO step energies are TOTAL energies
   // Minimum (target_order 0) for the ordinary loop. Min-max stage: a saddle of order m = number of
   // (occupied positive, negative) rotation parameters in the space NEO searches (the Kramers-reduced
   // one when kr is set) -- the electron-positron rotations are maximized, everything else minimized.

@@ -302,6 +302,7 @@ struct NeoOptions {
   // requested order (Sec. 8, step 2). Costs extra Hessian products.
   bool verify_index = false;
   double verify_tolerance = 1e-6;
+  double energy_offset = 0.0;  // constant added to the PRINTED energies only (e.g. nuclear repulsion); never enters the optimization
   bool verbose = false;  // one line per macro-iteration on std::cout
   bool progress = false; // one live line per Newton step on stderr (Utils/Progress.h)
 };
