@@ -5,9 +5,11 @@
 #include <functional>
 #include <iomanip>
 #include <ostream>
+#include <sstream>
 #include <string>
 
 #include "Matrix.h"
+#include "OutputFormat.h"
 #include "Uccsd.h"
 #include "gauss_rdm.h"
 
@@ -61,11 +63,11 @@ CcRdmResult runUccsdRdm(const Matrix<CcScalar>& h_mo, const CcIntegrals& ints, c
 // Vee = E_total - h-onebody - N-N (it agrees with the two-body part of the 2-RDM energy).
 inline void printCcEnergyDecomposition(std::ostream& log, const CcRdmResult& rdm, double total_energy) {
   const double exact = 0.5 * rdm.n_electrons * (rdm.n_electrons - 1.0);
-  log << std::setprecision(10) << "    h-onebody: " << rdm.e_onebody << " Hartree\n"
-      << "    Vee:       " << total_energy - rdm.e_onebody - rdm.nuclear_repulsion << " Hartree\n"
-      << "    N-N:       " << rdm.nuclear_repulsion << " Hartree\n"
-      << "    Tr(2-RDM): " << 0.5 * rdm.trace_dm2 << "  (exact N(N-1)/2 = " << exact << ", difference " << std::scientific
-      << std::setprecision(2) << 0.5 * rdm.trace_dm2 - exact << std::fixed << std::setprecision(10) << ")\n";
+  printEnergyComponents(log, 2, rdm.e_onebody, total_energy - rdm.e_onebody - rdm.nuclear_repulsion, rdm.nuclear_repulsion);
+  printEnergyLine(log, 2, "Tr(2-RDM)", 0.5 * rdm.trace_dm2, "");
+  printEnergyLine(log, 2, "exact N(N-1)/2", exact, "");
+  printScientificLine(log, 2, "Tr(2-RDM) - exact", 0.5 * rdm.trace_dm2 - exact);
+  log << std::fixed << std::setprecision(10);
 }
 
 // UCCSD followed by the Lambda equations and the density matrix files (main.cpp's CC_RDM path); same report as
@@ -87,10 +89,13 @@ UccsdResult runUccsdRdmReport(const std::string& label, const Matrix<T>& h_mo, c
   log << "  SCF total energy         : " << scf_total_energy << " Eh\n";
   log << "  UCCSD total energy       : " << scf_total_energy + result.e_corr << " Eh\n";
   if (result.converged) {
+    // The density matrices are built first (their report goes to a buffer) so that the energy components can follow the energies directly.
     CcRdmSettings rs = rdm_settings;
     rs.reference_total_energy = scf_total_energy;
-    const CcRdmResult rdm = runUccsdRdm(h, *source, spaces, result, rs, log);
+    std::ostringstream rdm_log;
+    const CcRdmResult rdm = runUccsdRdm(h, *source, spaces, result, rs, rdm_log);
     printCcEnergyDecomposition(log, rdm, scf_total_energy + result.e_corr);
+    log << rdm_log.str();
   }
   else log << "  CC_RDM skipped: the amplitudes did not converge\n";
   return result;

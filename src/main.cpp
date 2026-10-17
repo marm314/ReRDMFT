@@ -7132,6 +7132,7 @@ int main(int argc, char** argv) {
   // initial guess) -- X2C being true here already guarantees that, so
   // this only gates the report/SCF run itself, not the construction.
   if (input.x2c()) {
+    rerdmft::printSectionTitle(std::cout, "Preparation (X2C)");
     std::cout << "\nX2C_DHF/X2C_decoupling.h: one-electron X2C decoupling (eigenvalues of\n"
                  "H_RKB_ortho, Kramers pairs, even/odd indices side by side):\n";
     std::cout << "  " << std::setw(6) << "index" << std::setw(20) << "E (even)" << std::setw(10)
@@ -7423,6 +7424,7 @@ int main(int argc, char** argv) {
       std::cout << "  Max |F - F^dagger| (Hermiticity check): " << max_herm_err << "\n";
     }
 
+    rerdmft::printSectionTitle(std::cout, "Preparation (4-component)");
     std::cout << c4_pre_log.str();
     rerdmft::printSectionTitle(std::cout, "Dirac-Hartree-Fock");
     std::cout << "\n4-component Dirac-Hartree-Fock SCF (" << scfAccelerationLabel(input) << "):\n";

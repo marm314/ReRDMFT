@@ -2902,10 +2902,6 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
       << " macro-iteration(s).\n";
   printEnergyLine(log, 4, "Final total energy", e_elec + nuclear_repulsion_energy);
   printScientificLine(log, 4, "Change from occupation-only opt.", e_elec - e_start, " Hartree");
-  if (model.print_occupations) {
-    log << "  Occupation numbers after the macro-iteration loop:\n";
-    model.print_occupations(occ, log);
-  }
   {
     // h-onebody = sum_p n_p h_pp in the final (rotated) orbitals unless the model has its own, Vee = E - h-onebody, then the 2-RDM trace check
     double h_onebody = 0.0;
@@ -2913,16 +2909,19 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
       h_onebody = 0.0;
       for (std::size_t p = 0; p < occ.size() && p < problem.h().rows(); ++p) h_onebody += occ[p] * std::real(std::complex<double>(problem.h()(p, p)));
     }
-    log << "  Energy components of the final energy:\n";
     printEnergyComponents(log, 4, h_onebody, e_elec - h_onebody, nuclear_repulsion_energy);
     if (settings.print_two_rdm_trace) settings.print_two_rdm_trace(occ, occ_state, log);
   }
+  log << "    Final max |orbital gradient entry|: " << std::scientific << std::setprecision(3) << g_max
+      << std::defaultfloat << std::setprecision(6) << "\n";
   if (n_occ_unconverged > 0) {
     log << "    Note: the occupation optimizer reported no convergence in " << n_occ_unconverged
         << " of the macro-iterations (its own iteration limit).\n";
   }
-  log << "    Final max |orbital gradient entry|: " << std::scientific << std::setprecision(3) << g_max
-      << std::defaultfloat << std::setprecision(6) << "\n";
+  if (model.print_occupations) {
+    log << "  Occupation numbers after the macro-iteration loop:\n";
+    model.print_occupations(occ, log);
+  }
   // Final test: are the optimized orbitals still Kramers pairs (and is the PNOF
   // pair-symmetric energy shortcut still valid)?
   bool final_ok = true;
@@ -3861,13 +3860,14 @@ FullOptResult runFullOptimizationCas(const Matrix<T>& h, const Eri& eri, const s
     r.occupation_state = state;
     r.electronic_energy = model.energy(h, eri, warm_up.occupations);
     log << "\n  CASCI: single CI solve on the fixed starting orbitals (no orbital optimization).\n"
-        << "\n  Active-space natural occupation numbers:\n";
-    model.print_occupations(r.occupations, log);
+        << "\n";
+    printEnergyLine(log, 4, "Final total energy", r.electronic_energy + nuclear_repulsion_energy);
     double h_onebody = 0.0;
     if (model.one_body_energy && model.one_body_energy(h_onebody)) {
-      log << "  Energy components of the final energy:\n";
       printEnergyComponents(log, 4, h_onebody, r.electronic_energy - h_onebody, nuclear_repulsion_energy);
     }
+    log << "  Active-space natural occupation numbers:\n";
+    model.print_occupations(r.occupations, log);
     return r;
   }
   FullOptResult result = runFullOptimization<T, Eri>(h, eri, warm_up.occupations, state, model, settings, kramers_restricted,
