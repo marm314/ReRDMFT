@@ -4,6 +4,8 @@
 // Included at the end of Uccsd.h.
 #include <iomanip>
 
+#include "OutputFormat.h"
+
 namespace rerdmft {
 
 template <typename T, typename Eri>
@@ -16,12 +18,11 @@ UccsdResult runUccsdReport(const std::string& label, const Matrix<T>& h_mo, cons
   const auto source = makeCcIntegrals(eri, eri_shift);
   log << "\n=== UCCSD (" << label << ") ===\n";
   const UccsdResult result = runUccsd(h, *source, spaces.occ_frozen, spaces.occ_active, spaces.vir, settings, log);
-  log << std::fixed << std::setprecision(10);
-  log << "  UMP2 correlation energy  : " << result.e_mp2 << " Eh\n";
-  log << "  UMP2 total energy        : " << scf_total_energy + result.e_mp2 << " Eh\n";
-  log << "  UCCSD correlation energy : " << result.e_corr << " Eh" << (result.converged ? "" : "   (NOT CONVERGED)") << "\n";
-  log << "  SCF total energy         : " << scf_total_energy << " Eh\n";
-  log << "  UCCSD total energy       : " << scf_total_energy + result.e_corr << " Eh\n";
+  printEnergyLine(log, 2, "UMP2 correlation energy", result.e_mp2);
+  printEnergyLine(log, 2, "UMP2 total energy", scf_total_energy + result.e_mp2);
+  printEnergyLine(log, 2, "UCCSD correlation energy", result.e_corr, result.converged ? " Hartree" : " Hartree   (NOT CONVERGED)");
+  printEnergyLine(log, 2, "SCF total energy", scf_total_energy);
+  printEnergyLine(log, 2, "UCCSD total energy", scf_total_energy + result.e_corr);
   return result;
 }
 

@@ -443,7 +443,7 @@ UccsdResult runUccsd(const Matrix<CcScalar>& h_mo, const CcIntegrals& ints, cons
   Diis<cplx> diis(static_cast<std::size_t>(std::max(settings.diis_size, 0)));
   const cplx shift(settings.level_shift, 0.0);
 
-  log << "  iter      E_corr (Eh)        dE            |dT|        time (s)\n";
+  log << std::setw(6) << "iter" << std::setw(20) << "E_corr (Ha)" << std::setw(12) << "dE" << std::setw(12) << "|dT|" << std::setw(12) << "time (s)" << "\n";
   cplx e_old = energy(t1, t2);
   for (int iter = 1; iter <= settings.max_iterations; ++iter) {
     Tensor n1, n2;
@@ -468,7 +468,7 @@ UccsdResult runUccsd(const Matrix<CcScalar>& h_mo, const CcIntegrals& ints, cons
     }
     const cplx e_new = energy(t1, t2);
     const double de = e_new.real() - e_old.real();
-    log << std::setw(6) << iter << std::fixed << std::setprecision(10) << std::setw(20) << e_new.real() << std::scientific << std::setprecision(2)
+    log << kTableRow << std::setw(6) << iter << std::fixed << std::setprecision(10) << std::setw(20) << e_new.real() << std::scientific << std::setprecision(2)
         << std::setw(12) << de << std::setw(12) << dt << std::fixed << std::setprecision(1) << std::setw(12) << elapsed() << "\n";
     {
       std::ostringstream line;

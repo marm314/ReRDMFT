@@ -419,7 +419,7 @@ CcRdmResult runUccsdRdm(const Matrix<CcScalar>& h_mo, const CcIntegrals& ints, c
   Tensor l1 = env["t1"], l2 = env["t2"];
   Diis<cplx> diis(static_cast<std::size_t>(std::max(settings.diis_size, 0)));
   const cplx shift(settings.level_shift, 0.0);
-  log << "  Lambda iterations:  iter      |dLambda|      time (s)\n";
+  log << "  Lambda iterations:\n    " << std::setw(4) << "iter" << std::setw(14) << "|dLambda|" << std::setw(12) << "time (s)" << "\n";
   for (int iter = 1; iter <= settings.max_iterations; ++iter) {
     Tensor n1, n2;
     numerators(l1, l2, n1, n2);
@@ -436,7 +436,7 @@ CcRdmResult runUccsdRdm(const Matrix<CcScalar>& h_mo, const CcIntegrals& ints, c
     const double dt = std::sqrt(dt2);
     if (settings.diis_size >= 2) unpack(diis.extrapolate(err, vec_new), l1, l2);
     else unpack(vec_new, l1, l2);
-    log << "                      " << std::setw(4) << iter << std::scientific << std::setprecision(2) << std::setw(14) << dt << std::fixed
+    log << "    " << kTableRow << std::setw(4) << iter << std::scientific << std::setprecision(2) << std::setw(14) << dt << std::fixed
         << std::setprecision(1) << std::setw(12) << elapsed() << "\n";
     {
       std::ostringstream line;
@@ -723,15 +723,20 @@ CcRdmResult runUccsdRdm(const Matrix<CcScalar>& h_mo, const CcIntegrals& ints, c
     e0_ref = e0.real();
   }
   log << "  2-RDM written to " << settings.dm2_path << " (" << result.n_dm2 << " elements with p<q, r<s)\n";
-  log << "  E_0 (reference determinant) = " << std::fixed << std::setprecision(10) << e0_ref << " Eh, E_c = " << amps.e_corr << " Eh\n";
-  log << "  one-body part " << std::fixed << std::setprecision(10) << e1.real() << " Eh, two-body part " << e2.real() << " Eh\n";
+  printEnergyLine(log, 2, "E_0 (reference determinant)", e0_ref);
+  printEnergyLine(log, 2, "E_c (correlation)", amps.e_corr);
+  printEnergyLine(log, 2, "One-body part", e1.real());
+  printEnergyLine(log, 2, "Two-body part", e2.real());
   result.nuclear_repulsion = settings.reference_total_energy - e0_ref;
   result.e_total_rdm = result.e_elec_rdm + result.nuclear_repulsion;
-  log << "  trace of the 2-RDM = " << std::fixed << std::setprecision(10) << result.trace_dm2 << "  (N(N-1) = " << static_cast<double>(n_occ_all) * (static_cast<double>(n_occ_all) - 1.0) << ")\n";
-  log << "  UCCSD total energy from the density matrices: " << std::fixed << std::setprecision(10) << result.e_total_rdm << " Eh\n";
-  log << "  energy from the density matrices (elements written, threshold " << std::scientific << std::setprecision(1) << thr << "): "
-      << std::fixed << std::setprecision(10) << result.e_elec_rdm << " Eh (electronic);  E_0 + E_c = " << result.e_elec_cc
-      << " Eh;  difference " << std::scientific << std::setprecision(2) << result.e_elec_rdm - result.e_elec_cc << "\n";
+  printEnergyLine(log, 2, "Trace of the 2-RDM", result.trace_dm2, "");
+  printEnergyLine(log, 2, "N(N-1)", static_cast<double>(n_occ_all) * (static_cast<double>(n_occ_all) - 1.0), "");
+  printEnergyLine(log, 2, "Total energy (density matrices)", result.e_total_rdm);
+  log << "  Energy from the density matrices (elements written, threshold " << std::scientific << std::setprecision(1) << thr << "):\n"
+      << std::defaultfloat << std::setprecision(6);
+  printEnergyLine(log, 4, "Electronic energy", result.e_elec_rdm);
+  printEnergyLine(log, 4, "E_0 + E_c", result.e_elec_cc);
+  printScientificLine(log, 4, "Difference", result.e_elec_rdm - result.e_elec_cc, " Hartree");
   log << "  CC_RDM (molecular basis) total time " << std::fixed << std::setprecision(1) << elapsed() << " s\n";
 
   if (settings.on_gamma1) {
@@ -778,9 +783,12 @@ CcRdmResult runUccsdRdm(const Matrix<CcScalar>& h_mo, const CcIntegrals& ints, c
           << "),  sum D S S = " << gr.trace_dm2 << " (N(N-1) = " << static_cast<double>(n_occ_all) * (static_cast<double>(n_occ_all) - 1.0)
           << "),  max |Im D_sym| = " << std::scientific << std::setprecision(2) << gr.max_imag << "\n";
       if (!std::isnan(gr.vee_primitives))
-        log << "  [check] V_ee from the primitive-basis 2-RDM and primitive integrals = " << std::fixed << std::setprecision(10)
-            << gr.vee_primitives << " Eh  (MO basis: " << e2.real() << " Eh, difference " << std::scientific << std::setprecision(2)
-            << gr.vee_primitives - e2.real() << ")\n";
+      {
+        log << "  [check] V_ee from the primitive-basis 2-RDM and primitive integrals:\n";
+        printEnergyLine(log, 4, "V_ee (primitive basis)", gr.vee_primitives);
+        printEnergyLine(log, 4, "V_ee (MO basis)", e2.real());
+        printScientificLine(log, 4, "Difference", gr.vee_primitives - e2.real(), " Hartree");
+      }
       log << "  CC_RDM (Gaussian basis) total time " << std::fixed << std::setprecision(1) << gr.seconds << " s\n";
     } catch (const std::exception& ex) {
       log << "  CC_RDM (Gaussian basis) FAILED: " << ex.what() << "\n";

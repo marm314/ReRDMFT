@@ -1335,12 +1335,9 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
   out << "\n";
   out << "  Sum of fractional occupations (expect " << n_electrons
       << "): " << std::setprecision(10) << occupation_sum << std::setprecision(6) << "\n";
-  out << "  Electronic energy: " << std::setprecision(10) << electronic_energy
-      << std::setprecision(6) << " Hartree\n";
-  out << "  Nuclear repulsion energy: " << std::setprecision(10) << nuclear_repulsion_energy
-      << std::setprecision(6) << " Hartree\n";
-  out << "  Total " << functional_name << " (fractional-occupation) energy: "
-      << std::setprecision(10) << total_energy << std::setprecision(6) << " Hartree\n";
+  rerdmft::printEnergyLine(out, 2, "Electronic energy", electronic_energy);
+  rerdmft::printEnergyLine(out, 2, "Nuclear repulsion energy", nuclear_repulsion_energy);
+  rerdmft::printEnergyLine(out, 2, "Total energy (" + functional_name + ")", total_energy);
 
   // Occupation-number OPTIMIZATION (Utils/SQP.h), at FIXED orbitals
   // and one-/two-electron integrals (h/eri never change below) --
@@ -1549,17 +1546,14 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
     out << "    Optimized sum of occupations (expect " << n_electrons_active
         << "): " << std::setprecision(10) << optimized_occupation_sum << std::setprecision(6)
         << "\n";
-    out << "    Optimized electronic energy: " << std::setprecision(10)
-        << sqp_result.objective_value << std::setprecision(6) << " Hartree\n";
+    rerdmft::printEnergyLine(out, 4, "Optimized electronic energy", sqp_result.objective_value);
     if (occ_in != nullptr) {
-      out << "    Total " << functional_name << " energy at these occupations: "
-          << std::setprecision(10) << optimized_total_energy << std::setprecision(6)
-          << " Hartree (READ_OCCUPANCIES: no occupation-number optimization performed)\n";
+      rerdmft::printEnergyLine(out, 4, "Total energy (" + functional_name + ")", optimized_total_energy,
+                               " Hartree (READ_OCCUPANCIES: no occupation-number optimization performed)");
     } else {
-      out << "    Optimized total " << functional_name << " energy: " << std::setprecision(10)
-          << optimized_total_energy << std::setprecision(6) << " Hartree ("
-          << (optimized_total_energy <= total_energy ? "<=" : ">")
-          << " the initial-occupations value above, as expected for a minimization)\n";
+      rerdmft::printEnergyLine(out, 4, "Optimized total energy", optimized_total_energy,
+                               std::string(" Hartree (") + (optimized_total_energy <= total_energy ? "<=" : ">") +
+                                   " the initial-occupations value above, as expected for a minimization)");
     }
     printEnergyDecompositionMo(out, h, embed(sqp_result.x), rerdmft::Matrix<std::complex<double>>(),
                                 sqp_result.objective_value, nuclear_repulsion_energy);
@@ -1783,9 +1777,6 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
                 h, eri_full_block, full_result.occupations, full_result.occupation_state, functional, f_l,
                 n_electrons_active, n_total, n_frozen, n_inactive_below, n_active, /*two_columns=*/true, saddle_settings,
                 /*kramers_restricted=*/true, nuclear_repulsion_energy, out, std::vector<std::size_t>{}, /*n_negative=*/0);
-            out << "  FULL_OPTIMIZATION_4C_NEG " << (saddle_result.checks_passed && saddle_result.converged ? "converged" : "did NOT converge") << ":\n";
-            rerdmft::printEnergyLine(out, 4, "Total energy", saddle_result.electronic_energy + nuclear_repulsion_energy);
-            rerdmft::printScientificLine(out, 4, "Change from the no-pair minimum", saddle_result.electronic_energy - full_result.electronic_energy, " Hartree");
             // AIMPAC WFN (<input>_neg.wfn): the saddle-stage result itself is NOT persisted into
             // `restart` above (that stays the positive-energy-only minimum, see its own comment) --
             // this is the only place the saddle-stage occupations/rotation/energy are available, so
@@ -2070,11 +2061,8 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
   out << restart_note;
   out << "  Frozen-occupied (core) geminals: " << n_core
       << "   Frontier geminals: " << n_frontier << "\n";
-  out << "  Initial electronic energy: " << std::setprecision(10) << initial_electronic_energy
-      << std::setprecision(6) << " Hartree\n";
-  out << "  Initial total " << functional_name
-      << " energy: " << std::setprecision(10) << initial_total_energy << std::setprecision(6)
-      << " Hartree\n";
+  rerdmft::printEnergyLine(out, 2, "Initial electronic energy", initial_electronic_energy);
+  rerdmft::printEnergyLine(out, 2, "Initial total energy", initial_total_energy);
 
   if (occ_in != nullptr) {
     // READ_OCCUPANCIES TRUE: x0 already holds OCC.in's (normalized) occupations -- use them
@@ -2100,11 +2088,9 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
       }
     }
     const double optimized_total_energy = optimized_electronic_energy + nuclear_repulsion_energy;
-    out << "    Optimized electronic energy: " << std::setprecision(10) << optimized_electronic_energy
-        << std::setprecision(6) << " Hartree\n";
-    out << "    Optimized total " << functional_name << " energy: " << std::setprecision(10)
-        << optimized_total_energy << std::setprecision(6)
-        << " Hartree (READ_OCCUPANCIES: no occupation-number optimization performed)\n";
+    rerdmft::printEnergyLine(out, 4, "Optimized electronic energy", optimized_electronic_energy);
+    rerdmft::printEnergyLine(out, 4, "Optimized total energy", optimized_total_energy,
+                             " Hartree (READ_OCCUPANCIES: no occupation-number optimization performed)");
     printEnergyDecompositionMo(out, h, optimized_occ, rerdmft::Matrix<std::complex<double>>(),
                                 optimized_electronic_energy, nuclear_repulsion_energy);
     printPnofTwoRdmTrace(out, functional, geminals, optimized_occ, n_total, relativistic);
@@ -2180,12 +2166,10 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
       const double optimized_total_energy = sqp_result.objective_value + nuclear_repulsion_energy;
       out << "    " << (sqp_result.converged ? "Converged" : "Did NOT converge") << " after "
           << sqp_result.iterations << " iteration(s)\n";
-      out << "    Optimized electronic energy: " << std::setprecision(10)
-          << sqp_result.objective_value << std::setprecision(6) << " Hartree\n";
-      out << "    Optimized total " << functional_name << " energy: " << std::setprecision(10)
-          << optimized_total_energy << std::setprecision(6) << " Hartree ("
-          << (optimized_total_energy <= initial_total_energy ? "<=" : ">")
-          << " the initial-occupations value above, as expected for a minimization)\n";
+      rerdmft::printEnergyLine(out, 4, "Optimized electronic energy", sqp_result.objective_value);
+      rerdmft::printEnergyLine(out, 4, "Optimized total energy", optimized_total_energy,
+                               std::string(" Hartree (") + (optimized_total_energy <= initial_total_energy ? "<=" : ">") +
+                                   " the initial-occupations value above, as expected for a minimization)");
       printEnergyDecompositionMo(out, h, embed(sqp_result.x), rerdmft::Matrix<std::complex<double>>(),
                                   sqp_result.objective_value, nuclear_repulsion_energy);
       printPnofTwoRdmTrace(out, functional, geminals, embed(sqp_result.x), n_total, relativistic);
@@ -2307,12 +2291,10 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
           lbfgs_result.objective_value + nuclear_repulsion_energy;
       out << "    " << (lbfgs_result.converged ? "Converged" : "Did NOT converge") << " after "
           << lbfgs_result.iterations << " iteration(s)\n";
-      out << "    Optimized electronic energy: " << std::setprecision(10)
-          << lbfgs_result.objective_value << std::setprecision(6) << " Hartree\n";
-      out << "    Optimized total " << functional_name << " energy: " << std::setprecision(10)
-          << optimized_total_energy << std::setprecision(6) << " Hartree ("
-          << (optimized_total_energy <= initial_total_energy ? "<=" : ">")
-          << " the initial-occupations value above, as expected for a minimization)\n";
+      rerdmft::printEnergyLine(out, 4, "Optimized electronic energy", lbfgs_result.objective_value);
+      rerdmft::printEnergyLine(out, 4, "Optimized total energy", optimized_total_energy,
+                               std::string(" Hartree (") + (optimized_total_energy <= initial_total_energy ? "<=" : ">") +
+                                   " the initial-occupations value above, as expected for a minimization)");
       const auto final_occ = embedGammas(lbfgs_result.x);
       printEnergyDecompositionMo(out, h, final_occ, rerdmft::Matrix<std::complex<double>>(),
                                   lbfgs_result.objective_value, nuclear_repulsion_energy);
@@ -2557,9 +2539,6 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
                 h, eri_full_block, full_result.occupations, full_result.occupation_state, functional, geminals, n_core,
                 pnof_subspaces, pnof_coupling, relativistic, sqp_pnof_occ, n_total, saddle_settings,
                 /*kramers_restricted=*/true, nuclear_repulsion_energy, out, std::vector<std::size_t>{}, /*n_negative=*/0);
-            out << "  FULL_OPTIMIZATION_4C_NEG " << (saddle_result.checks_passed && saddle_result.converged ? "converged" : "did NOT converge") << ":\n";
-            rerdmft::printEnergyLine(out, 4, "Total energy", saddle_result.electronic_energy + nuclear_repulsion_energy);
-            rerdmft::printScientificLine(out, 4, "Change from the no-pair minimum", saddle_result.electronic_energy - full_result.electronic_energy, " Hartree");
             // AIMPAC WFN (<input>_neg.wfn): see buildFunctionalReport's own comment -- the
             // saddle-stage result is only available here, so capture it separately for main.cpp.
             if (restart_neg != nullptr && saddle_result.checks_passed) {
@@ -2725,8 +2704,7 @@ void writeRdmOutputs(const RdmRequest& req, const rerdmft::RdmSource& src, const
                      std::ostream& log) {
   log << "\n  Density matrices (" << req.base << "_MO.dm1/.dm2 : " << src.n << " spinors, record format of CC_RDM):\n";
   const auto mo = rerdmft::writeMoRdmFiles(src, req.base + "_MO.dm1", req.base + "_MO.dm2", req.threshold, log);
-  log << "  h-onebody from the 1-RDM file: " << std::fixed << std::setprecision(10) << mo.e_onebody << " Hartree\n"
-      << std::defaultfloat << std::setprecision(6);
+  rerdmft::printEnergyLine(log, 2, "h-onebody from the 1-RDM file", mo.e_onebody);
   if (!req.spinors) return;
   try {
     const auto cs = req.spinors(total_rotation);
@@ -2849,11 +2827,13 @@ void runCasscfStage(const std::string& label, const rerdmft::Input& input, const
   log << "\n  CASSCF (" << label << "): " << input.casscf_electrons() << " electrons in " << n_active << " active "
       << (nonrel ? "spin-orbitals" : "spinors") << ", " << n_core_spinors << " core " << (nonrel ? "spin-orbitals" : "spinors")
       << ", starting from the " << (restart != nullptr ? "RESTART file" : input.core_start() ? "core-Hamiltonian" : "SCF")
-      << " orbitals (" << (restart != nullptr ? "total energy of the restart file" : "SCF total energy") << " " << std::fixed
-      << std::setprecision(10) << scf_total_energy << " Hartree).\n" << std::defaultfloat << std::setprecision(6);
+      << " orbitals:\n";
+  rerdmft::printEnergyLine(log, 4, restart != nullptr ? "Total energy of the restart file" : "SCF total energy", scf_total_energy);
   try {
     rerdmft::FullOptSettings settings = fullOptSettings(input);
     settings.checkpoint = nullptr;
+    settings.reference_total_energy = scf_total_energy;
+    if (restart != nullptr) settings.reference_label = "Relative to restart file energy";
     rerdmft::CasciOptions ci_options;
     ci_options.symmetric_start = input.casscf_ci_start() == "SYMMETRIC";
     ci_options.time_reversal_projection = !nonrel && (input.casscf_ci_time_reversal_set() ? input.casscf_ci_time_reversal() : true);
@@ -2885,16 +2865,7 @@ void runCasscfStage(const std::string& label, const rerdmft::Input& input, const
       log << "\n  CASSCF: a validation check failed -- the orbital optimization did not run; see above.\n";
       return;
     }
-    const double total = result.electronic_energy + nuclear_repulsion_energy;
-    if (input.casci()) {
-      log << "\n  CASCI " << (result.converged ? "converged" : "did NOT converge") << " (orbitals fixed):\n";
-    } else {
-      log << "\n  CASSCF " << (result.converged ? "converged" : "did NOT converge") << " after " << result.iterations
-          << " macro-iteration(s):\n";
-    }
-    rerdmft::printEnergyLine(log, 4, "Total energy", total);
-    rerdmft::printEnergyLine(log, 4, restart != nullptr ? "Relative to restart file energy" : "Relative to the SCF energy",
-                             total - scf_total_energy);
+    // the final energy and its components were printed by the optimization loop above
     // CASSCF_4C_NEG: the min-max stage (ADAM descent-ascent; the CAS model has no Hessian-vector for NEO) from the no-pair
     // CASSCF above, on the full (negative-energy block included) integrals. Report only: the restart/RDM/WFN outputs stay the no-pair ones.
     if (!nonrel && first_spinor > 0 && input.casscf_4c_neg() && !input.casci()) {
@@ -2915,9 +2886,6 @@ void runCasscfStage(const std::string& label, const rerdmft::Input& input, const
           const rerdmft::FullOptResult saddle_result = rerdmft::runFullOptimizationCas<T, Eri>(
               h_mo, eri, core, active, static_cast<std::size_t>(input.casscf_electrons()), active_spin, n, saddle_settings,
               /*kramers_restricted=*/true, nuclear_repulsion_energy, log, std::vector<std::size_t>{}, /*n_negative=*/0, ci_options, &ci_start, false);
-          log << "  CASSCF_4C_NEG " << (saddle_result.checks_passed && saddle_result.converged ? "converged" : "did NOT converge") << ":\n";
-          rerdmft::printEnergyLine(log, 4, "Total energy", saddle_result.electronic_energy + nuclear_repulsion_energy);
-          rerdmft::printScientificLine(log, 4, "Change from the no-pair CASSCF", saddle_result.electronic_energy - result.electronic_energy, " Hartree");
         } catch (const std::exception& e) {
           log << "\n  CASSCF_4C_NEG FAILED: " << e.what() << "\n";
         }
@@ -3406,8 +3374,7 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
       << z_result.z_iterations << " iter., ||R|| = " << std::scientific << std::setprecision(2)
       << z_result.z_residual_norm << std::defaultfloat << std::setprecision(6) << ")\n";
   printOcc(out, occupations);
-  out << "  Total pCCD energy (fixed orbitals): " << std::setprecision(10) << total_energy
-      << " Hartree (electronic " << electronic_energy << ")" << std::setprecision(6) << "\n";
+  rerdmft::printEnergyLine(out, 4, "Total energy (fixed orbitals)", total_energy);
   printEnergyDecompositionMo(out, h, occupations, rerdmft::Matrix<std::complex<double>>(), electronic_energy,
                               nuclear_repulsion_energy);
   printPccdTwoRdmTrace(out, reps, bar, n_core, n_occ, n_vir, rdm, occupations, n_total);
@@ -3459,12 +3426,6 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
           full_opt_run, kramers_restricted, nuclear_repulsion_energy, out,
           label == "NON_REL" ? blockSpinPartner(n_total) : std::vector<std::size_t>{},
           /*n_negative=*/n_inactive_below, ukb_direct, extra_direct_pccd_fock, extra_direct_c0);
-      out << "\n  FULL_OPTIMIZATION " << (full_result.checks_passed && full_result.converged ? "converged" : "did NOT converge")
-          << " after " << full_result.iterations << " macro-iteration(s): total energy "
-          << std::setprecision(10) << full_result.electronic_energy + nuclear_repulsion_energy
-          << " Hartree" << std::setprecision(6) << "\n";
-      out << "  Optimized pCCD occupations after FULL_OPTIMIZATION:\n";
-      printOcc(out, full_result.occupations);
     } catch (const std::exception& e) {
       out << "\n  FULL_OPTIMIZATION FAILED: " << e.what() << "\n";
     }
@@ -3507,9 +3468,6 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
               n_core, n_occ, n_vir, n_total, amp_settings, saddle_settings,
               /*kramers_restricted=*/true, nuclear_repulsion_energy, out, std::vector<std::size_t>{},
               /*n_negative=*/0);
-          out << "  FULL_OPTIMIZATION_4C_NEG " << (saddle_result.checks_passed && saddle_result.converged ? "converged" : "did NOT converge") << ":\n";
-          rerdmft::printEnergyLine(out, 4, "Total energy", saddle_result.electronic_energy + nuclear_repulsion_energy);
-          rerdmft::printScientificLine(out, 4, "Change from the no-pair minimum", saddle_result.electronic_energy - full_result.electronic_energy, " Hartree");
           // AIMPAC WFN (<input>_neg.wfn): see buildFunctionalReport's own comment -- the
           // saddle-stage result is only available here, so capture it separately for main.cpp.
           if (restart_neg != nullptr && saddle_result.checks_passed) {
@@ -4122,7 +4080,7 @@ void writeRestartFile(std::ostream& out, const rerdmft::Input& input, const std:
                      (data.orbitals_optimized ? "orbitals from FULL_OPTIMIZATION" : "SCF orbitals") +
                      ", final total energy " + [&] {
                        std::ostringstream e;
-                       e << std::setprecision(10) << data.total_energy << " Hartree";
+                       e << std::fixed << std::setprecision(10) << data.total_energy << " Hartree";
                        return e.str();
                      }() + "\n";
     out << "  read back: " << (same ? "[PASS] identical to what was written" : "[FAIL] differs from what was written")
@@ -7046,8 +7004,8 @@ int main(int argc, char** argv) {
     std::cout << "\nNonrelativistic (restricted, closed-shell) Hartree-Fock SCF (NON_REL, "
                << scfAccelerationLabel(input) << "):\n";
     for (const auto& it : nonrel_hf_result.history) {
-      std::cout << "  Iteration " << std::setw(3) << it.iteration << "  E = " << std::setw(16) << std::fixed
-                 << std::setprecision(9) << it.energy + nonrel_hf_result.nuclear_repulsion_energy;
+      std::cout << "  Iteration " << std::setw(3) << it.iteration << "  E = " << std::setw(17) << std::fixed
+                 << std::setprecision(10) << it.energy + nonrel_hf_result.nuclear_repulsion_energy;
       if (it.iteration > 1) {
         std::cout << "  dE = " << it.energy_change << "  dP = " << it.density_change;
       }
@@ -7258,8 +7216,8 @@ int main(int argc, char** argv) {
                  "every iteration; "
                << scfAccelerationLabel(input) << "):\n";
     for (const auto& it : x2c_hf_result.history) {
-      std::cout << "  Iteration " << std::setw(3) << it.iteration << "  E = " << std::setw(16) << std::fixed
-                 << std::setprecision(9) << it.energy + x2c_hf_result.nuclear_repulsion_energy;
+      std::cout << "  Iteration " << std::setw(3) << it.iteration << "  E = " << std::setw(17) << std::fixed
+                 << std::setprecision(10) << it.energy + x2c_hf_result.nuclear_repulsion_energy;
       if (it.iteration > 1) {
         std::cout << "  dE = " << it.energy_change << "  dP = " << it.density_change;
       }
@@ -7429,8 +7387,8 @@ int main(int argc, char** argv) {
     rerdmft::printSectionTitle(std::cout, "Dirac-Hartree-Fock");
     std::cout << "\n4-component Dirac-Hartree-Fock SCF (" << scfAccelerationLabel(input) << "):\n";
     for (const auto& it : dhf_result.history) {
-      std::cout << "  Iteration " << std::setw(3) << it.iteration << "  E = " << std::setw(16) << std::fixed
-                 << std::setprecision(9) << it.energy + dhf_result.nuclear_repulsion_energy;
+      std::cout << "  Iteration " << std::setw(3) << it.iteration << "  E = " << std::setw(17) << std::fixed
+                 << std::setprecision(10) << it.energy + dhf_result.nuclear_repulsion_energy;
       if (it.iteration > 1) {
         std::cout << "  dE = " << it.energy_change << "  dP = " << it.density_change;
       }

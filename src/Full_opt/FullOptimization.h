@@ -67,6 +67,9 @@ struct FullOptSettings {
   // current state (occupations, occupation state, accumulated rotation, energy) to `checkpoint`, if set; the caller writes the RESTART file.
   int checkpoint_interval = 10;
   std::function<void(const FullOptResult&)> checkpoint;
+  // Reference total energy (CASSCF: the SCF or restart-file energy): when set, the final-energy block also gives the energy relative to it.
+  double reference_total_energy = std::numeric_limits<double>::quiet_NaN();
+  std::string reference_label = "Relative to the SCF energy";
   // Functionals: printed right after the h-onebody / Vee / N-N block of the final energy (the trace of the 2-RDM against N(N-1)/2).
   // It receives the occupations of the FULL orbital space (the no-pair trimming is undone before the call) and the occupation state (pCCD t, z).
   std::function<void(const std::vector<double>&, const std::vector<double>&, std::ostream&)> print_two_rdm_trace;  // (occupations, occupation state, log)

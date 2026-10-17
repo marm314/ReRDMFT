@@ -7,6 +7,7 @@
 #include <stdexcept>
 
 #include "LinearAlgebra.h"
+#include "OutputFormat.h"
 
 namespace rerdmft {
 
@@ -111,8 +112,9 @@ RestartOrbitals readRestartOrbitals(const std::string& path, const std::string& 
     log << std::scientific << std::setprecision(2);
     log << "  READ_RESTART (" << method << "): " << path << ": " << d.functional << " (" << d.kind << "), "
         << d.occupations.size() << " orbitals, " << (d.orbitals_optimized ? "FULL_OPTIMIZATION" : "SCF")
-        << " orbitals, energy written " << std::fixed << std::setprecision(10) << d.total_energy << std::scientific
-        << std::setprecision(2) << " Hartree" << (d.converged ? "" : " (that run had not converged)") << "\n";
+        << " orbitals" << (d.converged ? "" : " (that run had not converged)") << ":\n";
+    printEnergyLine(log, 4, "Energy written", d.total_energy);
+    log << std::scientific << std::setprecision(2);
     log << "    S_check = C_read^dagger S C_read (leading " << block_size << " x " << block_size << " block, tiled "
         << k << "x): max |S_check - 1| = " << out.overlap_deviation_read << "  ";
     if (out.lowdin_applied) {
@@ -139,8 +141,9 @@ RestartOrbitals readRestartOrbitals(const std::string& path, const std::string& 
   log << std::scientific << std::setprecision(2);
   log << "  READ_RESTART (" << method << "): " << path << ": " << d.functional << " (" << d.kind << "), "
       << d.occupations.size() << " orbitals, " << (d.orbitals_optimized ? "FULL_OPTIMIZATION" : "SCF")
-      << " orbitals, energy written " << std::fixed << std::setprecision(10) << d.total_energy << std::scientific
-      << std::setprecision(2) << " Hartree" << (d.converged ? "" : " (that run had not converged)") << "\n";
+      << " orbitals" << (d.converged ? "" : " (that run had not converged)") << ":\n";
+  printEnergyLine(log, 4, "Energy written", d.total_energy);
+  log << std::scientific << std::setprecision(2);
   log << "    S_check = C_read^dagger S C_read: max |S_check - 1| = " << out.overlap_deviation_read << "  ";
   if (out.lowdin_applied) {
     log << "-> Loewdin orthonormalization C = C_read S_check^(-1/2) (S_check eigenvalues down to " << out.min_overlap_eigenvalue

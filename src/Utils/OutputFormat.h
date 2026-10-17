@@ -9,6 +9,10 @@
 
 namespace rerdmft {
 
+// First character of a table row after its indentation: LineWrapBuf then leaves the row alone (a table may be wider than the page,
+// wrapping it would break the columns). Always append it as its own literal: out << "    " << kTableRow << ...
+inline const char* const kTableRow = "\x03";
+
 // Section title: a blank line, the title and an underline of the same length.
 // The leading '\x01' is consumed by SectionIndentBuf (it marks the title); a stream without that filter would show it.
 inline void printSectionTitle(std::ostream& out, const std::string& title) {
@@ -28,13 +32,14 @@ inline void printEnergyLine(std::ostream& out, std::size_t indent, const std::st
   out.precision(precision);
 }
 
-// A small number (energy change, residual, gradient) in scientific notation, right-aligned so that the mantissa dots line up.
+// A small number (energy change, residual, gradient) in scientific notation, placed so that its mantissa dot is in the column of the
+// decimal dots of printEnergyLine (the 'e-XX' exponent takes 7 characters after the dot against 10 decimals: 3 trailing blanks).
 inline void printScientificLine(std::ostream& out, std::size_t indent, const std::string& label, double value,
                                 const std::string& unit = "") {
   const std::ios_base::fmtflags flags = out.flags();
   const std::streamsize precision = out.precision();
   out << std::string(indent, ' ') << std::setw(static_cast<int>(37 - indent)) << std::left << (label + ":") << std::right
-      << std::scientific << std::setprecision(3) << std::setw(20) << value << unit << "\n";
+      << std::scientific << std::setprecision(3) << std::setw(17) << value << "   " << unit << "\n";
   out.flags(flags);
   out.precision(precision);
 }
@@ -126,6 +131,12 @@ class LineWrapBuf : public std::streambuf {
     std::string rest = line_;
     line_.clear();
     const std::size_t indent = rest.find_first_not_of(' ') == std::string::npos ? 0 : rest.find_first_not_of(' ');
+    if (indent < rest.size() && rest[indent] == '\x03') {  // table row (kTableRow): never wrapped, so the columns stay aligned
+      rest.erase(indent, 1);
+      sink_->sputn(rest.data(), static_cast<std::streamsize>(rest.size()));
+      if (newline) sink_->sputc('\n');
+      return;
+    }
     bool first = true;
     while (rest.size() > width_) {
       std::size_t cut = rest.rfind(' ', width_);

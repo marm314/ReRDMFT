@@ -1868,9 +1868,10 @@ bool runChecks(const Matrix<T>& h, const Eri& eri, const std::vector<double>& oc
     // functional, else the two alternating stages would optimize different things.
     const double e_full = model.energy(h, eri, occ);
     const double e_sym = model.symmetric_shortcut_energy(h, eri, occ);
-    log << std::setprecision(10) << std::defaultfloat << "    energy used by the orbital stage (full two-RDM) " << e_full
-        << ", by the occupation optimizer (pair-symmetric) " << e_sym << std::scientific << std::setprecision(2)
-        << " (|diff| = " << std::abs(e_full - e_sym) << ")\n";
+    log << "    energy of the orbital stage (full two-RDM) against the occupation optimizer's (pair-symmetric):\n";
+    printEnergyLine(log, 6, "Full two-RDM", e_full);
+    printEnergyLine(log, 6, "Pair-symmetric", e_sym);
+    printScientificLine(log, 6, "Difference", std::abs(e_full - e_sym), " Hartree");
     verdict(std::abs(e_full - e_sym) < 1e-8,
             "orbital-stage and occupation-stage energies are the same functional");
   }
@@ -2474,17 +2475,23 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
   double e_elec = model.energy(problem.h(), problem.eri(), occ);
   double e_old = e_elec;
   const double e_start = e_elec;
-  log << "    starting point (occupation-optimized " << (settings.core_start ? "core-Hamiltonian" : "HF") << " orbitals): total energy " << std::setprecision(10)
-      << e_elec + nuclear_repulsion_energy << std::setprecision(6) << " Hartree\n";
+  log << "    starting point (occupation-optimized " << (settings.core_start ? "core-Hamiltonian" : "HF") << " orbitals):\n";
+  printEnergyLine(log, 4, "Total energy", e_elec + nuclear_repulsion_energy);
   if (saddle && !std::isnan(settings.saddle.start_energy)) {
     log << "    (rotating to the no-pair minimum's orbitals reproduces its energy to " << std::scientific << std::setprecision(2)
         << std::abs(settings.saddle.start_energy - e_elec) << std::defaultfloat << std::setprecision(6) << " Ha)\n";
   }
-  if (settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo && !saddle) {
-    log << "    iter      total energy (Ha)          dE        max|grad|  driver  steps    radius/lr\n";
-  } else {
-    log << (neo_available ? "    iter      total energy (Ha)          dE        max|grad|  NEO steps    trust radius\n"
-                          : "    iter      total energy (Ha)          dE        max|grad|  ADAM steps  learning rate\n");
+  // Iteration table: the header is built with the same column widths as the rows printed below (the last two columns are the
+  // number of orbital steps and the learning rate / trust radius).
+  const bool table_driver = settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo && !saddle;
+  const int steps_width = table_driver ? 5 : 10, radius_width = table_driver ? 9 : 13;
+  {
+    const std::string steps_title = table_driver ? "steps" : (neo_available ? "NEO steps" : "ADAM steps");
+    const std::string radius_title = table_driver ? "radius/lr" : (neo_available ? "trust radius" : "learning rate");
+    log << "    " << std::setw(4) << "iter" << "  " << std::setw(20) << "total energy (Ha)" << "  " << std::setw(10) << "dE" << "  "
+        << std::setw(10) << "max|grad|" << "  ";
+    if (table_driver) log << std::setw(6) << "driver" << "  ";
+    log << std::setw(steps_width) << steps_title << "  " << std::setw(radius_width) << radius_title << "\n";
   }
 
   // NEO only, when target_order = 0 (ground state) was requested: is the point the macro loop
@@ -2675,14 +2682,12 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
       // optimizer's own value can differ for a non-symmetric eri).
       e_elec = model.energy(problem.h(), problem.eri(), occ);
       const double d_e = e_elec - e_old;
-      log << "    " << std::setw(4) << iter << "  " << std::fixed << std::setprecision(10) << std::setw(20)
+      log << "    " << kTableRow << std::setw(4) << iter << "  " << std::fixed << std::setprecision(10) << std::setw(20)
           << e_elec + nuclear_repulsion_energy << "  " << std::scientific << std::setprecision(2) << std::setw(10)
           << d_e << "  " << std::setw(10) << max_gradient << "  ";
-      if (settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo && !saddle) {
-        log << std::setw(4) << (run_neo ? "NEO" : "ADAM") << "  ";
-      }
-      log << std::defaultfloat << std::setw(6) << orbital_iterations << "      " << std::scientific
-          << std::setprecision(2) << log_extra << (orbital_restart_requested ? "  restart" : "")
+      if (table_driver) log << std::setw(6) << (run_neo ? "NEO" : "ADAM") << "  ";
+      log << std::defaultfloat << std::setw(steps_width) << orbital_iterations << "  " << std::scientific
+          << std::setprecision(2) << std::setw(radius_width) << log_extra << (orbital_restart_requested ? "  restart" : "")
           << (gradient_converged ? "  gradient-converged" : "")
           << (settings.fixed_occupancies ? "  occupations-fixed"
                                           : (occ_result.converged ? "" : "  occupations-not-converged"))
@@ -2842,8 +2847,8 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
         const double e_minus = reduced.trialEnergy(step_minus);
         log << "    Escaping the saddle (eigenvalue " << std::scientific << std::setprecision(3)
             << eig.eigenvalues.front() << std::defaultfloat << std::setprecision(6)
-            << "): perturbing along its eigenvector, sign chosen by trial energy (" << std::setprecision(10)
-            << e_plus << " vs " << e_minus << ", from " << e0 << std::setprecision(6) << "), attempt "
+            << "): perturbing along its eigenvector, sign chosen by trial energy (" << std::fixed << std::setprecision(10)
+            << e_plus << " vs " << e_minus << ", from " << e0 << std::defaultfloat << std::setprecision(6) << "), attempt "
             << (escape_attempt + 1) << "/" << kMaxSaddleEscapeAttempts << "; re-optimizing.\n";
         reduced.accept(e_plus <= e_minus ? step_plus : step_minus);
         escaping = true;
@@ -2901,7 +2906,10 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
   log << "  " << (result.converged ? "CONVERGED" : "NOT converged") << " after " << result.iterations
       << " macro-iteration(s).\n";
   printEnergyLine(log, 4, "Final total energy", e_elec + nuclear_repulsion_energy);
-  printScientificLine(log, 4, "Change from occupation-only opt.", e_elec - e_start, " Hartree");
+  printEnergyLine(log, 4, "Change from occupation-only opt.", e_elec - e_start);
+  if (!std::isnan(settings.reference_total_energy)) {
+    printEnergyLine(log, 4, settings.reference_label, e_elec + nuclear_repulsion_energy - settings.reference_total_energy);
+  }
   {
     // h-onebody = sum_p n_p h_pp in the final (rotated) orbitals unless the model has its own, Vee = E - h-onebody, then the 2-RDM trace check
     double h_onebody = 0.0;
@@ -3005,9 +3013,10 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
   if (settings.debug && model.symmetric_shortcut_energy) {
     const double e_full = model.energy(problem.h(), problem.eri(), occ);
     const double e_sym = model.symmetric_shortcut_energy(problem.h(), problem.eri(), occ);
-    log << "    energy, full two-RDM vs pair-symmetric shortcut (pnofElectronicEnergy): " << std::setprecision(10)
-        << std::defaultfloat << e_full << " vs " << e_sym << std::scientific << std::setprecision(2)
-        << "  (|diff| = " << std::abs(e_full - e_sym) << ")\n";
+    log << "    energy, full two-RDM vs pair-symmetric shortcut (pnofElectronicEnergy):\n";
+    printEnergyLine(log, 6, "Full two-RDM", e_full);
+    printEnergyLine(log, 6, "Pair-symmetric", e_sym);
+    printScientificLine(log, 6, "Difference", std::abs(e_full - e_sym), " Hartree");
     final_verdict(std::abs(e_full - e_sym) < 1e-8, "integrals still have the Kramers/spin-pair symmetry the PNOF shortcut assumes");
   }
   log << "  Final test: " << (final_ok ? "all checks PASSED" : "a check FAILED -- inspect the values above") << "\n";
@@ -3862,6 +3871,9 @@ FullOptResult runFullOptimizationCas(const Matrix<T>& h, const Eri& eri, const s
     log << "\n  CASCI: single CI solve on the fixed starting orbitals (no orbital optimization).\n"
         << "\n";
     printEnergyLine(log, 4, "Final total energy", r.electronic_energy + nuclear_repulsion_energy);
+    if (!std::isnan(settings.reference_total_energy)) {
+      printEnergyLine(log, 4, settings.reference_label, r.electronic_energy + nuclear_repulsion_energy - settings.reference_total_energy);
+    }
     double h_onebody = 0.0;
     if (model.one_body_energy && model.one_body_energy(h_onebody)) {
       printEnergyComponents(log, 4, h_onebody, r.electronic_energy - h_onebody, nuclear_repulsion_energy);
