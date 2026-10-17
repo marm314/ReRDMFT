@@ -12,6 +12,7 @@
 #include "HartreeExchangeHessian.h"
 #include "IntegralRotation.h"
 #include "JK_only.h"
+#include "Casci.h"
 #include "CholeskyEri.h"
 #include "Matrix.h"
 #include "PNOFs.h"
@@ -472,6 +473,22 @@ FullOptResult runFullOptimizationPccd(const Matrix<T>& h, const Eri& eri,
                                       std::function<Matrix<T>(const Matrix<T>&, const std::vector<double>&, const PccdRdm&)>
                                           extra_direct_pccd_fock = nullptr,
                                       Matrix<T> extra_direct_c0 = Matrix<T>());
+
+
+// CASSCF (MCSCF/CasModel.h): the same macro loop with a CI solve in place of the occupation re-optimization. `core`/`active` are index
+// lists into the (h, eri) basis (positive-energy block already identified by `n_negative`, exactly like pCCD's reps/bar: the
+// loop runs on the trimmed block and the result is embedded back); `n_active_electrons` electrons in |active| spinors;
+// `active_spin` (NON_REL only, optional) the alpha/beta label of each active index for the Ms = 0 starting determinant.
+// Covers NON_REL / X2C / C4_SPINOR with every Eri type, like runFullOptimizationPccd.
+template <typename T, typename Eri = Tensor4<T>>
+FullOptResult runFullOptimizationCas(const Matrix<T>& h, const Eri& eri, const std::vector<std::size_t>& core,
+                                     const std::vector<std::size_t>& active, std::size_t n_active_electrons,
+                                     const std::vector<int>& active_spin, std::size_t n_total,
+                                     const FullOptSettings& settings, bool kramers_restricted,
+                                     double nuclear_repulsion_energy, std::ostream& log,
+                                     const std::vector<std::size_t>& spin_partner = {}, std::size_t n_negative = 0,
+                                     const CasciOptions& ci_options = {}, const std::vector<double>* initial_state = nullptr,
+                                     bool ci_only = false);
 
 // The same two entry points for integrals that ALREADY are Cholesky vectors (AO vectors transformed to the
 // MO basis, Utils/AoCholesky.h): no dense tensor is formed, decomposed or verified here.

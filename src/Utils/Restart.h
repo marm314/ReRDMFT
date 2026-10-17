@@ -52,6 +52,13 @@ namespace rerdmft {
 //   uint8     complex_coefficients (0: real orbitals, 1: complex spinors)
 //   uint64    rows, cols of the coefficient matrix
 //   doubles   rows*cols coefficients, ROW-major; complex: (real, imag) pairs
+//   --- version 3 only (a version-2 file simply has no CASSCF section) ---
+//   int64     cas_electrons, cas_spinors   (CASSCF_ELECTRONS / CASSCF_SPINORS of the run; 0 for RDMFT files)
+//   vector    cas_state     (uint64 count + doubles): CASSCF only, the CI vector over the C(cas_spinors, cas_electrons)
+//                            determinants in Casci's order, in the model's `state` convention: real orbitals [c],
+//                            complex spinors [Re c; Im c]; empty for RDMFT files
+// kind "CASSCF": `occupations` is the diagonal of the total 1-RDM in the stored orbitals (core 1, active the diagonal of the
+// active 1-RDM, virtual 0); the stored orbitals are NOT natural orbitals, the CI vector is expressed in them.
 //
 // The coefficient matrix C maps the MO basis to the AO SPIN-ORBITAL basis of the method:
 //   NON_REL: rows 2 n_ao   ordered [alpha AO_0..AO_{n-1}, beta AO_0..AO_{n-1}],
@@ -68,7 +75,7 @@ namespace rerdmft {
 struct RestartData {
   std::string method;
   std::string functional;
-  std::string kind;  // "OCCUPATIONS" or "GAMMAS"
+  std::string kind;  // "OCCUPATIONS", "GAMMAS", "PCCD" or "CASSCF"
   std::uint64_t basis_fingerprint = 0;
   std::int64_t n_electrons = 0;
   std::int64_t pnof_subspaces = 0;
@@ -86,6 +93,9 @@ struct RestartData {
   std::uint64_t rows = 0;
   std::uint64_t cols = 0;
   std::vector<double> coefficients;  // row-major; complex: interleaved (re, im)
+  std::int64_t cas_electrons = 0;    // CASSCF (version 3)
+  std::int64_t cas_spinors = 0;
+  std::vector<double> cas_state;     // CASSCF: CI vector, see the file-layout comment above
 
   // Stores `c` (real or complex) as the coefficient matrix.
   void setCoefficients(const Matrix<double>& c);
@@ -98,7 +108,7 @@ struct RestartData {
 // of one method, before the SCF coefficients are attached.
 struct RestartCapture {
   bool valid = false;
-  std::string kind;                  // "OCCUPATIONS", "GAMMAS" or "PCCD"
+  std::string kind;                  // "OCCUPATIONS", "GAMMAS", "PCCD" or "CASSCF"
   std::vector<double> occupations;   // full occupation vector
   std::vector<double> gammas;        // PNOF
   std::vector<double> amplitudes;    // PCCD: flattened [t; z]
@@ -109,12 +119,25 @@ struct RestartCapture {
   bool orbitals_optimized = false;
   bool converged = false;
   Matrix<std::complex<double>> total_rotation;  // FULL_OPTIMIZATION rotation; empty = identity
+  std::int64_t cas_electrons = 0;                // CASSCF: active electrons / spinors and the CI vector (model state convention)
+  std::int64_t cas_spinors = 0;
+  std::vector<double> cas_state;
+  // CASSCF only (filled for AIMPAC): the same state in NATURAL orbitals -- occupations = natural occupation numbers of the
+  // active space (core 1, virtual 0), rotation = total_rotation times the active-space natural-orbital rotation. Empty otherwise.
+  std::vector<double> natural_occupations;
+  Matrix<std::complex<double>> natural_rotation;
+  // RDMFT functionals only (FUNCTIONAL_RDM): the final two-body ansatz in the natural orbitals,
+  //   Gamma_pqrs/2 = 1/2 [h(p,q) d_pr d_qs - x(p,q) d_ps d_qr], plus the pair terms Gamma(p,pbar,q,qbar)/2 = l1(p,q), Gamma(p,pbar,qbar,q)/2 = l2(p,q)
+  // (l1, l2 and pair_of empty for JK_only), pair_of[p] = the bar (Kramers/spin) partner. rdm_valid marks it as filled.
+  bool rdm_valid = false;
+  Matrix<double> rdm_h, rdm_x, rdm_l1, rdm_l2;
+  std::vector<std::size_t> rdm_pair_of;
   // Set by the caller that owns the SCF coefficients: writes the RESTART file for a (snapshot) capture. Used for the periodic
   // FULL_OPTIMIZATION checkpoints; the final file is written the usual way.
   std::function<void(const RestartCapture&)> checkpoint_writer;
 };
 
-constexpr std::uint32_t kRestartVersion = 2;  // v2: adds the `amplitudes` vector (PCCD)
+constexpr std::uint32_t kRestartVersion = 3;  // v2: adds the `amplitudes` vector (PCCD); v3: adds the CASSCF section (version-2 files are still read)
 
 // Writes `data` to `path` (overwriting). Throws std::runtime_error if the file cannot be
 // written or the data are inconsistent (empty/mismatched sizes, unknown kind).

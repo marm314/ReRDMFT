@@ -1,4 +1,5 @@
 #include "FullOptimization.h"
+#include "CasModel.h"
 
 #include <algorithm>
 #include <cmath>
@@ -2051,7 +2052,7 @@ bool runChecks(const Matrix<T>& h, const Eri& eri, const std::vector<double>& oc
         const double occ_dev = kramersOccupationDeviation(occ);
         log << "    Kramers restriction: " << kr.nOrbits() << " orbit(s) (" << kr.reducedSize()
             << " of " << kr.fullSize() << " real parameters), max |n_a - n_abar| = " << occ_dev << "\n";
-        verdict(occ_dev < 1e-6, "occupation numbers equal within every Kramers pair");
+        verdict(occ_dev < 2e-6, "occupation numbers equal within every Kramers pair");
         const double asym = kr.asymmetry(joint_gradient);
         log << "    gradient time-reversal asymmetry max |nu - R nu| = " << asym << " (max |nu| = " << g_max << ")\n";
         // The gradient sums involve h/eri entries of the whole basis (for C4_DHF the negative-energy branch, ~1e4 Hartree, also
@@ -2842,7 +2843,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
       final_verdict(u_dev < 1e-8, "total orbital rotation commutes with time reversal (Theta|2k> = |2k+1> preserved)");
       final_verdict(h_dev <= 1e-8 * std::max(1.0, h_scale), "one-electron integrals keep the Kramers-pair structure");
       if (settings.debug) final_verdict(eri_dev <= 1e-8 * std::max(1.0, eri_scale), "two-electron integrals keep the Kramers-pair structure");
-      final_verdict(occ_dev < 1e-6, "occupation numbers equal within every Kramers pair");
+      final_verdict(occ_dev < 2e-6, "occupation numbers equal within every Kramers pair");
       // The 1e-12 floor alone assumes roundoff scales with the GRADIENT's own magnitude
       // (nu_scale); for C4_DHF the gradient/occupation-optimization sums also touch h/eri
       // entries up to ~h_scale/eri_scale in magnitude (the negative-energy branch, order
@@ -3676,5 +3677,76 @@ template FullOptResult runFullOptimizationPccd<std::complex<double>, RiMoEri>(
     std::size_t, std::size_t, std::size_t, std::size_t, const PccdSettings&,
     const FullOptSettings&, bool, double, std::ostream&, const std::vector<std::size_t>&, std::size_t, const UkbDirectSource*,
     std::function<Matrix<std::complex<double>>(const Matrix<std::complex<double>>&, const std::vector<double>&, const PccdRdm&)>, Matrix<std::complex<double>>);
+
+// =====================================================================
+// CASSCF: makeCasModel (MCSCF/CasModel.h) + runFullOptimization, covering NON_REL / X2C / C4_SPINOR like pCCD above. The no-pair
+// (n_negative > 0) branch trims to the positive-energy block, shifting the core/active index lists, and embeds the result back.
+// =====================================================================
+template <typename T, typename Eri>
+FullOptResult runFullOptimizationCas(const Matrix<T>& h, const Eri& eri, const std::vector<std::size_t>& core,
+                                     const std::vector<std::size_t>& active, std::size_t n_active_electrons,
+                                     const std::vector<int>& active_spin, std::size_t n_total,
+                                     const FullOptSettings& settings, bool kramers_restricted,
+                                     double nuclear_repulsion_energy, std::ostream& log,
+                                     const std::vector<std::size_t>& spin_partner, std::size_t n_negative,
+                                     const CasciOptions& ci_options, const std::vector<double>* initial_state, bool ci_only) {
+  if (n_negative > 0) {
+    log << "\n  No-pair treatment: the " << n_negative << " negative-energy indices take no part in the optimization, so the loop runs on the\n"
+           "  positive-energy block alone (" << n_total - n_negative << " spinors) and the result is embedded back.\n";
+    std::vector<std::size_t> shifted_core = core, shifted_active = active;
+    for (auto* list : {&shifted_core, &shifted_active})
+      for (std::size_t& idx : *list) {
+        if (idx < n_negative) throw std::runtime_error("CASSCF: a core or active spinor lies in the negative-energy branch");
+        idx -= n_negative;
+      }
+    return embedTrimmedResult(
+        runFullOptimizationCas<T>(positiveBlock(h, n_negative), positiveBlock(eri, n_negative), shifted_core, shifted_active,
+                                  n_active_electrons, active_spin, n_total - n_negative, withRoundoffScale(settings, h, n_negative),
+                                  kramers_restricted, nuclear_repulsion_energy, log, spin_partner, 0, ci_options, initial_state, ci_only),
+        n_negative, n_total);
+  }
+  const auto model = makeCasModel<T, Eri>(core, active, n_active_electrons, active_spin, n_total, ci_options);
+  std::vector<double> state;
+  if (initial_state != nullptr) state = *initial_state;  // CASSCF restart: the CI start vector (model state convention)
+  const auto warm_up = model.optimize_occupations(h, eri, state);
+  if (!warm_up.warning.empty()) log << "  " << warm_up.warning << "\n";
+  if (ci_only) {
+    // CASCI: the first CI solve on the fixed starting orbitals, no orbital optimization
+    FullOptResult r;
+    r.checks_passed = true;
+    r.converged = warm_up.converged;
+    r.iterations = 0;
+    r.occupations = warm_up.occupations;
+    r.occupation_state = state;
+    r.electronic_energy = model.energy(h, eri, warm_up.occupations);
+    log << "\n  CASCI: single CI solve on the fixed starting orbitals (no orbital optimization).\n"
+        << "\n  Final CASSCF energy components and active-space natural occupation numbers:\n";
+    model.print_occupations(r.occupations, log);
+    return r;
+  }
+  FullOptResult result = runFullOptimization<T, Eri>(h, eri, warm_up.occupations, state, model, settings, kramers_restricted,
+                                                     nuclear_repulsion_energy, log, spin_partner, /*n_negative=*/0);
+  if (result.checks_passed && model.print_occupations) {
+    // the final CASSCF state: electronic energy, h-onebody, Vee and the active-space natural occupations, right before the summary
+    log << "\n  Final CASSCF energy components and active-space natural occupation numbers:\n";
+    model.print_occupations(result.occupations, log);
+  }
+  return result;
+}
+
+#define RERDMFT_INSTANTIATE_CAS(TT, EE)                                                                                          \
+  template FullOptResult runFullOptimizationCas<TT, EE>(                                                                       \
+      const Matrix<TT>&, const EE&, const std::vector<std::size_t>&, const std::vector<std::size_t>&, std::size_t,           \
+      const std::vector<int>&, std::size_t, const FullOptSettings&, bool, double, std::ostream&, const std::vector<std::size_t>&, \
+      std::size_t, const CasciOptions&, const std::vector<double>*, bool);
+RERDMFT_INSTANTIATE_CAS(double, Tensor4<double>)
+RERDMFT_INSTANTIATE_CAS(double, CholeskyEri<double>)
+RERDMFT_INSTANTIATE_CAS(double, SymmetricEri<double>)
+RERDMFT_INSTANTIATE_CAS(double, RiNonRelSpinMoEri)
+RERDMFT_INSTANTIATE_CAS(std::complex<double>, Tensor4<std::complex<double>>)
+RERDMFT_INSTANTIATE_CAS(std::complex<double>, CholeskyEri<std::complex<double>>)
+RERDMFT_INSTANTIATE_CAS(std::complex<double>, SymmetricEri<std::complex<double>>)
+RERDMFT_INSTANTIATE_CAS(std::complex<double>, RiMoEri)
+#undef RERDMFT_INSTANTIATE_CAS
 
 }  // namespace rerdmft

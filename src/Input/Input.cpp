@@ -157,6 +157,40 @@ void Input::read(const std::string& filename) {
       pccd_debug_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "UCCSD") {
       uccsd_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "CASSCF") {
+      casscf_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "CASCI") {
+      casci_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "CASSCF_RDM") {
+      casscf_rdm_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "FUNCTIONAL_RDM") {
+      functional_rdm_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "CASSCF_RDM_THRESHOLD" || keyword == "FUNCTIONAL_RDM_THRESHOLD") {
+      const double v = parseDouble(iss, line_number, keyword);
+      if (!(v >= 0.0)) throw std::runtime_error("line " + std::to_string(line_number) + ": " + keyword + " must be non-negative");
+      (keyword[0] == 'C' ? casscf_rdm_threshold_ : functional_rdm_threshold_) = v;
+      (keyword[0] == 'C' ? casscf_rdm_options_set_ : functional_rdm_options_set_) = true;
+    } else if (keyword == "CASSCF_RDM_GAUSSIAN" || keyword == "FUNCTIONAL_RDM_GAUSSIAN") {
+      (keyword[0] == 'C' ? casscf_rdm_gaussian_ : functional_rdm_gaussian_) = parseBool(iss, line_number, keyword);
+      (keyword[0] == 'C' ? casscf_rdm_options_set_ : functional_rdm_options_set_) = true;
+    } else if (keyword == "CASSCF_RDM_MAXMEM" || keyword == "FUNCTIONAL_RDM_MAXMEM") {
+      const double v = parseDouble(iss, line_number, keyword);
+      if (!(v > 0.0)) throw std::runtime_error("line " + std::to_string(line_number) + ": " + keyword + " must be positive");
+      (keyword[0] == 'C' ? casscf_rdm_maxmem_ : functional_rdm_maxmem_) = v;
+      (keyword[0] == 'C' ? casscf_rdm_options_set_ : functional_rdm_options_set_) = true;
+    } else if (keyword == "CASSCF_RDM_CNORM1" || keyword == "FUNCTIONAL_RDM_CNORM1") {
+      (keyword[0] == 'C' ? casscf_rdm_cnorm1_ : functional_rdm_cnorm1_) = parseBool(iss, line_number, keyword);
+      (keyword[0] == 'C' ? casscf_rdm_options_set_ : functional_rdm_options_set_) = true;
+    } else if (keyword == "CASSCF_ELECTRONS") {
+      casscf_electrons_ = parseInt(iss, line_number, keyword);
+      if (casscf_electrons_ < 2 || casscf_electrons_ % 2 != 0) {
+        throw std::runtime_error("line " + std::to_string(line_number) + ": CASSCF_ELECTRONS must be a positive even number");
+      }
+    } else if (keyword == "CASSCF_SPINORS") {
+      casscf_spinors_ = parseInt(iss, line_number, keyword);
+      if (casscf_spinors_ < 2 || casscf_spinors_ % 2 != 0 || casscf_spinors_ > 64) {
+        throw std::runtime_error("line " + std::to_string(line_number) + ": CASSCF_SPINORS must be an even number between 2 and 64");
+      }
     } else if (keyword == "CC_RDM") {
       cc_rdm_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "CC_RDM_THRESHOLD") {
@@ -331,6 +365,39 @@ void Input::read(const std::string& filename) {
                                   ": unrecognized FUNCTIONAL_INIT '" + token + "' (expected SCF or CORE)");
       }
       functional_init_ = upper;
+    } else if (keyword == "CASSCF_CI_START") {
+      std::string token;
+      if (!(iss >> token)) {
+        throw std::runtime_error("line " + std::to_string(line_number) + ": expected SYMMETRIC or LOWEST after CASSCF_CI_START");
+      }
+      const std::string upper = toUpper(token);
+      if (upper != "SYMMETRIC" && upper != "LOWEST") {
+        throw std::runtime_error("line " + std::to_string(line_number) + ": unrecognized CASSCF_CI_START '" + token +
+                                  "' (expected SYMMETRIC or LOWEST)");
+      }
+      casscf_ci_start_ = upper;
+    } else if (keyword == "CASSCF_CI_TIME_REVERSAL") {
+      casscf_ci_time_reversal_ = parseBool(iss, line_number, keyword);
+      casscf_ci_time_reversal_set_ = true;
+    } else if (keyword == "CASSCF_CI_STAGNATION") {
+      casscf_ci_stagnation_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "CASSCF_CI_KEEP") {
+      casscf_ci_keep_ = parseInt(iss, line_number, keyword);
+      if (casscf_ci_keep_ < 1 || casscf_ci_keep_ > 16) {
+        throw std::runtime_error("line " + std::to_string(line_number) + ": CASSCF_CI_KEEP must be between 1 and 16");
+      }
+    } else if (keyword == "CASSCF_INIT") {
+      std::string token;
+      if (!(iss >> token)) {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": expected SCF or CORE after CASSCF_INIT");
+      }
+      const std::string upper = toUpper(token);
+      if (upper != "SCF" && upper != "CORE") {
+        throw std::runtime_error("line " + std::to_string(line_number) +
+                                  ": unrecognized CASSCF_INIT '" + token + "' (expected SCF or CORE)");
+      }
+      casscf_init_ = upper;
     } else if (keyword == "JK_FROZEN_PAIRS") {
       jk_frozen_pairs_ = parseInt(iss, line_number, keyword);
       if (jk_frozen_pairs_ < 0) {
@@ -513,8 +580,8 @@ void Input::read(const std::string& filename) {
   if (fcidump_ && !non_relativistic_) {
     throw std::runtime_error("FCIDUMP TRUE requires NON_RELATIVISTIC TRUE (the only case currently supported)");
   }
-  if (fcidump_ && !has_functional_) {
-    throw std::runtime_error("FCIDUMP TRUE requires FUNCTIONAL (there is otherwise no RDMFT orbital order to write)");
+  if (fcidump_ && !has_functional_ && !casscf_) {
+    throw std::runtime_error("FCIDUMP TRUE requires FUNCTIONAL or CASSCF (there is otherwise no optimized orbital order to write)");
   }
   if (read_occupancies_ && !has_functional_) {
     throw std::runtime_error("READ_OCCUPANCIES TRUE requires FUNCTIONAL (there are otherwise no occupations to read into)");
@@ -583,6 +650,52 @@ void Input::read(const std::string& filename) {
     }
     if (read_restart_) {
       throw std::runtime_error("UCCSD TRUE with READ_RESTART TRUE is not supported (UCCSD runs on a converged SCF reference)");
+    }
+  }
+  if (casscf_rdm_options_set_ && !casscf_rdm_) throw std::runtime_error("CASSCF_RDM_* settings require CASSCF_RDM TRUE");
+  if (functional_rdm_options_set_ && !functional_rdm_) throw std::runtime_error("FUNCTIONAL_RDM_* settings require FUNCTIONAL_RDM TRUE");
+  if (casscf_rdm_ && !casscf_) throw std::runtime_error("CASSCF_RDM TRUE requires CASSCF TRUE");
+  if (functional_rdm_ && !has_functional_) throw std::runtime_error("FUNCTIONAL_RDM TRUE requires a FUNCTIONAL");
+  if ((casscf_rdm_ || functional_rdm_) && read_restart_) {
+    throw std::runtime_error("CASSCF_RDM/FUNCTIONAL_RDM with READ_RESTART TRUE is not supported yet (the RDM files are written by the SCF-start runs)");
+  }
+  if (casci_ && !casscf_) {
+    throw std::runtime_error("CASCI TRUE requires CASSCF TRUE (it defines the active space and the starting orbitals; CASCI then stops after the first CI solve)");
+  }
+  if ((casscf_electrons_ > 0 || casscf_spinors_ > 0 || casscf_init_ != "SCF" || casscf_ci_start_ != "SYMMETRIC" ||
+       casscf_ci_time_reversal_set_ || casscf_ci_stagnation_ || casscf_ci_keep_ != 4) && !casscf_) {
+    throw std::runtime_error("CASSCF_ELECTRONS/CASSCF_SPINORS/CASSCF_INIT/CASSCF_CI_* require CASSCF TRUE");
+  }
+  if (casscf_ && casscf_ci_time_reversal_set_ && casscf_ci_time_reversal_ && !(x2c_ || c4_spinor_)) {
+    throw std::runtime_error("CASSCF_CI_TIME_REVERSAL TRUE needs complex spinors (X2C or C4_SPINOR)");
+  }
+  if (casscf_ && casscf_init_ == "CORE" && (debug_ || hessian_mean_field_)) {
+    throw std::runtime_error("CASSCF_INIT CORE is not supported together with DEBUG/HESSIAN_MEAN_FIELD (they validate or build on the HF orbitals)");
+  }
+  if (casscf_) {
+    if (!(non_relativistic_ || x2c_ || c4_spinor_)) {
+      throw std::runtime_error("CASSCF TRUE requires at least one of NON_RELATIVISTIC/X2C/C4_SPINOR TRUE (it starts from their SCF orbitals)");
+    }
+    if (has_functional_ || uccsd_) {
+      throw std::runtime_error("CASSCF TRUE is mutually exclusive with FUNCTIONAL and UCCSD (run them as separate calculations)");
+    }
+    if (full_optimization_ || full_optimization_4c_neg_) {
+      throw std::runtime_error("CASSCF TRUE does not combine with FULL_OPTIMIZATION/FULL_OPTIMIZATION_4C_NEG (it has its own orbital optimization)");
+    }
+    if (read_restart_ && casscf_init_ == "CORE") {
+      throw std::runtime_error("CASSCF_INIT CORE with READ_RESTART TRUE is not supported (the restart file supplies the orbitals)");
+    }
+    if (read_restart_ && (debug_ || hessian_mean_field_)) {
+      throw std::runtime_error("CASSCF with READ_RESTART TRUE is not supported together with DEBUG/HESSIAN_MEAN_FIELD");
+    }
+    if (casscf_electrons_ == 0 || casscf_spinors_ == 0) {
+      throw std::runtime_error("CASSCF TRUE requires CASSCF_ELECTRONS and CASSCF_SPINORS");
+    }
+    if (casscf_electrons_ > casscf_spinors_) {
+      throw std::runtime_error("CASSCF_ELECTRONS cannot exceed CASSCF_SPINORS");
+    }
+    if (casscf_electrons_ > n_electrons_ || (n_electrons_ - casscf_electrons_) % 2 != 0) {
+      throw std::runtime_error("CASSCF_ELECTRONS must not exceed NELEC, and NELEC - CASSCF_ELECTRONS (the core electrons) must be even");
     }
   }
   if (use_ri_ && !(non_relativistic_ || x2c_ || c4_spinor_)) {
@@ -729,6 +842,25 @@ void Input::print(std::ostream& out) const {
   line("FCIDUMP") << flag(fcidump_) << "\n";
   line("AIMPAC") << flag(aimpac_) << "\n";
   line("UCCSD") << flag(uccsd_) << "\n";
+  line("CASSCF") << flag(casscf_) << "\n";
+  line("CASCI") << flag(casci_) << "\n";
+  line("CASSCF_RDM") << flag(casscf_rdm_) << "\n";
+  line("CASSCF_RDM_THRESHOLD") << casscf_rdm_threshold_ << "\n";
+  line("CASSCF_RDM_GAUSSIAN") << flag(casscf_rdm_gaussian_) << "\n";
+  line("CASSCF_RDM_MAXMEM") << casscf_rdm_maxmem_ << "\n";
+  line("CASSCF_RDM_CNORM1") << flag(casscf_rdm_cnorm1_) << "\n";
+  line("FUNCTIONAL_RDM") << flag(functional_rdm_) << "\n";
+  line("FUNCTIONAL_RDM_THRESHOLD") << functional_rdm_threshold_ << "\n";
+  line("FUNCTIONAL_RDM_GAUSSIAN") << flag(functional_rdm_gaussian_) << "\n";
+  line("FUNCTIONAL_RDM_MAXMEM") << functional_rdm_maxmem_ << "\n";
+  line("FUNCTIONAL_RDM_CNORM1") << flag(functional_rdm_cnorm1_) << "\n";
+  line("CASSCF_ELECTRONS") << casscf_electrons_ << "\n";
+  line("CASSCF_SPINORS") << casscf_spinors_ << "\n";
+  line("CASSCF_INIT") << casscf_init_ << "\n";
+  line("CASSCF_CI_START") << casscf_ci_start_ << "\n";
+  line("CASSCF_CI_TIME_REVERSAL") << (casscf_ci_time_reversal_set_ ? flag(casscf_ci_time_reversal_) : std::string("AUTO (TRUE for X2C/C4_SPINOR)")) << "\n";
+  line("CASSCF_CI_STAGNATION") << flag(casscf_ci_stagnation_) << "\n";
+  line("CASSCF_CI_KEEP") << casscf_ci_keep_ << "\n";
   line("CC_RDM") << flag(cc_rdm_) << "\n";
   line("CC_RDM_THRESHOLD") << cc_rdm_threshold_ << "\n";
   line("CC_RDM_GAUSSIAN") << flag(cc_rdm_gaussian_) << "\n";

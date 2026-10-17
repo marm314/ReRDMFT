@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cctype>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -43,6 +44,7 @@
 #include "JK_only.h"
 #include "KramersPairing.h"
 #include "KramersRestriction.h"
+#include "RdmFiles.h"
 #include "Restart.h"
 #include "RestartLoader.h"
 #include "NuclearRepulsion.h"
@@ -1033,7 +1035,7 @@ inline std::vector<std::size_t> blockSpinPartner(std::size_t n_total) {
 inline rerdmft::FullOptSettings fullOptSettings(const rerdmft::Input& input) {
   rerdmft::FullOptSettings settings;
   settings.enabled = input.full_optimization();
-  settings.core_start = input.functional_init() == "CORE" && input.has_functional();
+  settings.core_start = input.core_start();
   settings.pccd_amplitude_guess = input.pccd_amplitude_guess();
   settings.max_macro_iterations = input.max_macro_iterations();
   settings.energy_tolerance = input.macro_energy_tolerance();
@@ -1829,6 +1831,9 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
         restart->orbitals_optimized = true;
         restart->total_rotation = full_result.total_rotation;
       }
+      restart->rdm_h = rerdmft::jkHartreeCoupling(functional, restart->occupations, f_l);
+      restart->rdm_x = rerdmft::jkExchangeCoupling(functional, restart->occupations, f_l);
+      restart->rdm_valid = true;
     }
   } catch (const std::exception& e) {
     out << "    FAILED: " << e.what() << "\n";
@@ -2622,6 +2627,13 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
     try {
       addGammas(*restart);
       restart->valid = true;
+      const auto rdm_full = rerdmft::buildPnofFullTwoRdm(functional, geminals, restart->occupations, n_total, relativistic);
+      restart->rdm_h = rdm_full.two_rdm_h;
+      restart->rdm_x = rdm_full.two_rdm_x;
+      restart->rdm_l1 = rdm_full.two_rdm_l1;
+      restart->rdm_l2 = rdm_full.two_rdm_l2;
+      restart->rdm_pair_of = rerdmft::buildPnofPairOf(geminals, n_total);
+      restart->rdm_valid = true;
     } catch (const std::exception& e) {
       out << "\n  RESTART data (gamma angles) FAILED: " << e.what() << "\n";
     }
@@ -2658,7 +2670,7 @@ std::string scfAccelerationLabel(const rerdmft::Input& input) {
   return label.str();
 }
 
-// AIMPAC WFN of the CC density (defined after writeC4Aimpac): cc_<input>_<level>.wfn.
+// AIMPAC WFN of the CC density (defined after writeC4Aimpac): uccsd_<input>_<level>.wfn.
 void writeCcAimpac(const rerdmft::Input& input, const std::string& input_path, const std::string& level,
                    const rerdmft::CartesianSpinors& cs, const rerdmft::Matrix<std::complex<double>>& gamma1,
                    double total_energy, std::ostream& log);
@@ -2711,6 +2723,320 @@ void runUccsdStage(const std::string& label, const rerdmft::Input& input, const 
     rdm.gauss_settings.unnormalized_primitives = input.cc_rdm_cnorm1();
   }
   rerdmft::runUccsdRdmReport(label, h_mo, eri, eri_shift, spaces, settings, rdm, scf_total_energy, log);
+}
+
+// CASSCF_RDM / FUNCTIONAL_RDM: where and how the density matrix files of a correlated state are written. `glob` maps the output spinor order
+// of the files to the global MO index of the state; `spinors(U)` expands the output spinors over the Cartesian AOs for the Gaussian-basis
+// files, given the total orbital rotation U of the run (C_final = C_start U; empty = identity), or returns nothing to skip them.
+struct RdmRequest {
+  std::string base;  // "<prefix>_<input>_<level>": files base_MO.dm1/.dm2 and base_GAU.basis/.dm1/.dm2
+  std::vector<std::size_t> glob;
+  std::function<std::optional<rerdmft::CartesianSpinors>(const rerdmft::Matrix<std::complex<double>>&)> spinors;
+  double threshold = 1e-10, max_memory_gb = 4.0;
+  bool unnormalized_primitives = false;
+};
+
+// Writes the molecular-basis files, and the Gaussian-basis files when the request can build the spinors, for a prepared RdmSource.
+void writeRdmOutputs(const RdmRequest& req, const rerdmft::RdmSource& src, const rerdmft::Matrix<std::complex<double>>& total_rotation,
+                     std::ostream& log) {
+  log << "\n  Density matrices (" << req.base << "_MO.dm1/.dm2 : " << src.n << " spinors, record format of CC_RDM):\n";
+  const auto mo = rerdmft::writeMoRdmFiles(src, req.base + "_MO.dm1", req.base + "_MO.dm2", req.threshold, log);
+  log << "  h-onebody from the 1-RDM file: " << std::fixed << std::setprecision(10) << mo.e_onebody << " Hartree\n"
+      << std::defaultfloat << std::setprecision(6);
+  if (!req.spinors) return;
+  try {
+    const auto cs = req.spinors(total_rotation);
+    if (!cs) return;
+    rerdmft::GaussRdmSettings gs;
+    gs.basis_path = req.base + "_GAU.basis";
+    gs.dm1_path = req.base + "_GAU.dm1";
+    gs.dm2_path = req.base + "_GAU.dm2";
+    gs.threshold = req.threshold;
+    gs.max_memory_gb = req.max_memory_gb;
+    gs.unnormalized_primitives = req.unnormalized_primitives;
+    const auto gr = rerdmft::writeGaussRdm(*cs, src.gamma1, src.n, src.slab, gs, log);
+    log << "  Gaussian-basis files written: " << gs.basis_path << ", " << gs.dm1_path << ", " << gs.dm2_path << " (" << gr.n_primitives
+        << " primitives; trace gamma = " << std::fixed << std::setprecision(8) << gr.trace_dm1 << ", trace Gamma = " << gr.trace_dm2
+        << ")\n" << std::defaultfloat << std::setprecision(6);
+  } catch (const std::exception& e) {
+    log << "  Gaussian-basis density matrix files FAILED: " << e.what() << "\n";
+  }
+}
+
+RdmRequest makeRdmRequest(const rerdmft::Input& input, const std::string& base, std::vector<std::size_t> glob,
+                          std::function<std::optional<rerdmft::CartesianSpinors>(const rerdmft::Matrix<std::complex<double>>&)> spinors) {
+  RdmRequest req;
+  req.base = base;
+  req.glob = std::move(glob);
+  req.threshold = input.functional_rdm_threshold();
+  req.max_memory_gb = input.functional_rdm_maxmem();
+  req.unnormalized_primitives = input.functional_rdm_cnorm1();
+  if (input.functional_rdm_gaussian()) req.spinors = std::move(spinors);
+  return req;
+}
+
+// FUNCTIONAL_RDM: the RDMFT functional's 1-/2-RDM in its natural orbitals from the stored ansatz (RestartCapture::rdm_*): gamma = diag(n),
+//   Gamma_pqrs = <a+_p a+_q a_s a_r> = h(p,q) d_pr d_qs - x(p,q) d_ps d_qr, plus the pair terms Gamma(p, pbar, q, qbar) = 2 l1(p,q) and
+//   Gamma(p, pbar, qbar, q) = 2 l2(p,q)
+// (twice the ansatz of the energy E = sum h n + sum <pq|rs> Gamma/2), which is NOT antisymmetric for most functionals, so every nonzero
+// element is written. `h_mo` is the one-electron matrix of the starting orbitals; the rotation of the capture takes it to the final ones.
+void writeFunctionalRdm(const RdmRequest& req, const rerdmft::RestartCapture& cap, const rerdmft::Matrix<std::complex<double>>& h_mo,
+                        std::ostream& log) {
+  if (!cap.valid || !cap.rdm_valid) {
+    log << "\n  FUNCTIONAL_RDM: not written -- no functional result with a 2-RDM ansatz was produced.\n";
+    return;
+  }
+  const std::size_t no = req.glob.size(), nt = cap.occupations.size();
+  std::vector<long> out_of(nt, -1);
+  for (std::size_t i = 0; i < no; ++i) out_of[req.glob[i]] = static_cast<long>(i);
+  rerdmft::RdmSource src;
+  src.n = no;
+  src.antisymmetric = false;
+  src.gamma1 = rerdmft::Matrix<std::complex<double>>(no, no, std::complex<double>(0.0, 0.0));
+  for (std::size_t i = 0; i < no; ++i) src.gamma1(i, i) = cap.occupations[req.glob[i]];
+  const bool has_l = cap.rdm_l1.rows() > 0 && !cap.rdm_pair_of.empty();
+  src.slab = [&, no](std::size_t p, std::complex<double>* out) {
+    std::fill(out, out + no * no * no, std::complex<double>(0.0, 0.0));
+    const std::size_t gp = req.glob[p];
+    for (std::size_t q = 0; q < no; ++q) {
+      const std::size_t gq = req.glob[q];
+      out[(q * no + p) * no + q] += cap.rdm_h(gp, gq);
+      out[(q * no + q) * no + p] -= cap.rdm_x(gp, gq);
+    }
+    if (has_l) {
+      // pair terms: Gamma(p, pbar, q, qbar) = 2 l1(p,q), Gamma(p, pbar, qbar, q) = 2 l2(p,q) (first index p, second its partner)
+      const long pb = out_of[cap.rdm_pair_of[gp]];
+      if (pb >= 0)
+        for (std::size_t q = 0; q < no; ++q) {
+          const std::size_t gq = req.glob[q];
+          const long qb = out_of[cap.rdm_pair_of[gq]];
+          if (qb < 0) continue;
+          out[(static_cast<std::size_t>(pb) * no + q) * no + static_cast<std::size_t>(qb)] += 2.0 * cap.rdm_l1(gp, gq);
+          out[(static_cast<std::size_t>(pb) * no + static_cast<std::size_t>(qb)) * no + q] += 2.0 * cap.rdm_l2(gp, gq);
+        }
+    }
+  };
+  rerdmft::Matrix<std::complex<double>> u = cap.total_rotation;
+  if (u.rows() == 0) {
+    u = rerdmft::Matrix<std::complex<double>>(nt, nt, std::complex<double>(0.0, 0.0));
+    for (std::size_t i = 0; i < nt; ++i) u(i, i) = 1.0;
+  }
+  const auto h_final = rerdmft::dagger(u) * (h_mo * u);
+  src.h = rerdmft::Matrix<std::complex<double>>(no, no);
+  for (std::size_t i = 0; i < no; ++i)
+    for (std::size_t j = 0; j < no; ++j) src.h(i, j) = h_final(req.glob[i], req.glob[j]);
+  writeRdmOutputs(req, src, cap.total_rotation, log);
+}
+
+// CASSCF keyword: complete-active-space SCF (src/MCSCF) on the converged SCF orbitals. The core are the lowest NELEC - CASSCF_ELECTRONS
+// spinors, the active space the next CASSCF_SPINORS (energy order; for NON_REL the spin-orbitals [alpha | beta] of the lowest spatial
+// orbitals, so the lists are not contiguous), everything above is virtual. `first_spinor` = size of the negative-energy branch (C4_SPINOR:
+// no-pair, the correlated space is the positive-energy block). `eri` is whichever MO-basis representation the run holds.
+template <typename T, typename Eri>
+void runCasscfStage(const std::string& label, const rerdmft::Input& input, const rerdmft::Matrix<T>& h_mo, const Eri& eri,
+                    std::size_t first_spinor, double nuclear_repulsion_energy, double scf_total_energy, std::ostringstream& log,
+                    rerdmft::RestartCapture* capture = nullptr, const rerdmft::RestartData* restart = nullptr,
+                    const RdmRequest* rdm = nullptr) {
+  const std::size_t n = h_mo.rows();
+  const std::size_t n_core_spinors = static_cast<std::size_t>(input.n_electrons() - input.casscf_electrons());
+  const std::size_t n_active = static_cast<std::size_t>(input.casscf_spinors());
+  const bool nonrel = (label == "NON_REL");
+  std::vector<std::size_t> core, active;
+  std::vector<int> active_spin;
+  if (nonrel) {
+    const std::size_t ns = n / 2, c = n_core_spinors / 2, m = n_active / 2;
+    if (c + m > ns) {
+      log << "\n  CASSCF (" << label << ") skipped: " << c << " core + " << m << " active spatial orbitals exceed the " << ns << " available.\n";
+      return;
+    }
+    for (std::size_t k = 0; k < c; ++k) { core.push_back(k); core.push_back(ns + k); }
+    for (std::size_t k = c; k < c + m; ++k) { active.push_back(k); active_spin.push_back(0); }
+    for (std::size_t k = c; k < c + m; ++k) { active.push_back(ns + k); active_spin.push_back(1); }
+  } else {
+    if (first_spinor + n_core_spinors + n_active > n) {
+      log << "\n  CASSCF (" << label << ") skipped: " << n_core_spinors << " core + " << n_active << " active spinors exceed the "
+          << n - first_spinor << " available.\n";
+      return;
+    }
+    for (std::size_t k = 0; k < n_core_spinors; ++k) core.push_back(first_spinor + k);
+    for (std::size_t k = 0; k < n_active; ++k) active.push_back(first_spinor + n_core_spinors + k);
+  }
+  log << "\n  CASSCF (" << label << "): " << input.casscf_electrons() << " electrons in " << n_active << " active "
+      << (nonrel ? "spin-orbitals" : "spinors") << ", " << n_core_spinors << " core " << (nonrel ? "spin-orbitals" : "spinors")
+      << ", starting from the " << (restart != nullptr ? "RESTART file" : input.core_start() ? "core-Hamiltonian" : "SCF")
+      << " orbitals (" << (restart != nullptr ? "total energy of the restart file" : "SCF total energy") << " " << std::fixed
+      << std::setprecision(10) << scf_total_energy << " Hartree).\n" << std::defaultfloat << std::setprecision(6);
+  try {
+    rerdmft::FullOptSettings settings = fullOptSettings(input);
+    settings.checkpoint = nullptr;
+    rerdmft::CasciOptions ci_options;
+    ci_options.symmetric_start = input.casscf_ci_start() == "SYMMETRIC";
+    ci_options.time_reversal_projection = !nonrel && (input.casscf_ci_time_reversal_set() ? input.casscf_ci_time_reversal() : true);
+    ci_options.stagnation_window = input.casscf_ci_stagnation() ? 20 : 0;
+    ci_options.n_keep = input.casscf_ci_keep();
+    // CI start from a CASSCF restart file with the same active space (the vector is in the stored orbitals' basis)
+    std::vector<double> initial_state;
+    const bool is_complex = !std::is_same_v<T, double>;
+    if (restart != nullptr && restart->kind == "CASSCF") {
+      if (restart->cas_electrons == input.casscf_electrons() && restart->cas_spinors == input.casscf_spinors() &&
+          restart->cas_state.size() == (is_complex ? 2u : 1u) * [&] {  // C(M, N) determinants
+            long double c = 1.0L;
+            const std::size_t k = std::min<std::size_t>(input.casscf_electrons(), n_active - input.casscf_electrons());
+            for (std::size_t i = 1; i <= k; ++i) c = c * static_cast<long double>(n_active - k + i) / static_cast<long double>(i);
+            return static_cast<std::size_t>(std::llround(c));
+          }()) {
+        initial_state = restart->cas_state;
+        log << "  CI vector of the restart file used as the starting CI state.\n";
+      } else {
+        log << "  Note: the restart file's active space (" << restart->cas_electrons << " electrons in " << restart->cas_spinors
+            << " spinors) differs from this run's; its CI vector is not used.\n";
+      }
+    }
+    const rerdmft::FullOptResult result = rerdmft::runFullOptimizationCas<T, Eri>(
+        h_mo, eri, core, active, static_cast<std::size_t>(input.casscf_electrons()), active_spin, n, settings,
+        /*kramers_restricted=*/!nonrel, nuclear_repulsion_energy, log,
+        nonrel ? blockSpinPartner(n) : std::vector<std::size_t>{}, first_spinor, ci_options, initial_state.empty() ? nullptr : &initial_state, input.casci());
+    if (!result.checks_passed) {
+      log << "\n  CASSCF: a validation check failed -- the orbital optimization did not run; see above.\n";
+      return;
+    }
+    const double total = result.electronic_energy + nuclear_repulsion_energy;
+    if (input.casci()) {
+      log << "\n  CASCI " << (result.converged ? "converged" : "did NOT converge") << " (orbitals fixed): total energy ";
+    } else {
+      log << "\n  CASSCF " << (result.converged ? "converged" : "did NOT converge") << " after " << result.iterations
+          << " macro-iteration(s): total energy ";
+    }
+    log << std::fixed << std::setprecision(10) << total << " Hartree ("
+        << total - scf_total_energy << (restart != nullptr ? " relative to the restart file energy)\n" : " relative to the SCF energy)\n") << std::defaultfloat << std::setprecision(6);
+    if (capture != nullptr) {
+      capture->valid = true;
+      capture->kind = "CASSCF";
+      capture->occupations = result.occupations;
+      capture->electronic_energy = result.electronic_energy;
+      capture->orbitals_optimized = !input.casci();
+      capture->converged = result.converged;
+      capture->total_rotation = result.total_rotation;
+      capture->cas_electrons = input.casscf_electrons();
+      capture->cas_spinors = input.casscf_spinors();
+      capture->cas_state = result.occupation_state;
+      if (input.aimpac()) {
+        // Natural orbitals of the active space for the WFN export: diagonalize the active 1-RDM (NON_REL: the spin-summed spatial
+        // block, applied to alpha and beta alike), rotate the active orbitals with its eigenvectors, occupation = eigenvalues.
+        const std::size_t dim_ci = result.occupation_state.size() / (is_complex ? 2 : 1);
+        std::vector<T> ci(dim_ci);
+        for (std::size_t i = 0; i < dim_ci; ++i) {
+          if constexpr (std::is_same_v<T, double>) ci[i] = result.occupation_state[i];
+          else ci[i] = std::complex<double>(result.occupation_state[i], result.occupation_state[dim_ci + i]);
+        }
+        const rerdmft::Casci<T> casci_engine(n_active, static_cast<std::size_t>(input.casscf_electrons()));
+        const rerdmft::Matrix<T> g = casci_engine.oneRdm(ci);
+        const std::size_t u_dim = n;
+        rerdmft::Matrix<std::complex<double>> u_nat = capture->total_rotation.rows() == 0
+                                                          ? rerdmft::Matrix<std::complex<double>>(u_dim, u_dim, std::complex<double>(0.0, 0.0))
+                                                          : capture->total_rotation;
+        if (capture->total_rotation.rows() == 0)
+          for (std::size_t i = 0; i < u_dim; ++i) u_nat(i, i) = 1.0;
+        std::vector<double> occ_nat = capture->occupations;
+        if (nonrel) {
+          const std::size_t m = n_active / 2;  // active layout [alpha m | beta m]; spatial block = alpha + beta
+          rerdmft::Matrix<double> d(m, m, 0.0);
+          for (std::size_t i = 0; i < m; ++i)
+            for (std::size_t j = 0; j < m; ++j) d(i, j) = std::real(g(i, j)) + std::real(g(m + i, m + j));
+          const auto eig = rerdmft::diagonalizeSymmetric(d);
+          rerdmft::Matrix<std::complex<double>> w(u_dim, u_dim, std::complex<double>(0.0, 0.0));
+          for (std::size_t i = 0; i < u_dim; ++i) w(i, i) = 1.0;
+          for (std::size_t half = 0; half < 2; ++half)
+            for (std::size_t i = 0; i < m; ++i)
+              for (std::size_t j = 0; j < m; ++j) w(active[half * m + i], active[half * m + j]) = eig.eigenvectors(i, j);
+          u_nat = u_nat * w;
+          for (std::size_t half = 0; half < 2; ++half)
+            for (std::size_t i = 0; i < m; ++i) occ_nat[active[half * m + i]] = 0.5 * eig.eigenvalues[i];
+        } else {
+          rerdmft::Matrix<std::complex<double>> gc(n_active, n_active);
+          for (std::size_t i = 0; i < n_active; ++i)
+            for (std::size_t j = 0; j < n_active; ++j) gc(i, j) = g(i, j);
+          const auto eig = rerdmft::diagonalizeHermitian(gc);
+          rerdmft::Matrix<std::complex<double>> w(u_dim, u_dim, std::complex<double>(0.0, 0.0));
+          for (std::size_t i = 0; i < u_dim; ++i) w(i, i) = 1.0;
+          for (std::size_t i = 0; i < n_active; ++i)
+            for (std::size_t j = 0; j < n_active; ++j) w(active[i], active[j]) = eig.eigenvectors(i, j);
+          u_nat = u_nat * w;
+          for (std::size_t i = 0; i < n_active; ++i) occ_nat[active[i]] = eig.eigenvalues[i];
+        }
+        capture->natural_rotation = u_nat;
+        capture->natural_occupations = occ_nat;
+      }
+    }
+    if (rdm != nullptr) {
+      // Full 1-/2-RDM of the CASSCF state in the final orbitals: Gamma_pqrs = <a+_p a+_q a_s a_r> = D_pr D_qs - D_ps D_qr + cumulant,
+      // D = core (1) + active 1-RDM; the cumulant (rdm2 - D D + D D) is nonzero only when all four indices are active.
+      const std::size_t dim_ci = result.occupation_state.size() / (is_complex ? 2 : 1);
+      std::vector<T> ci(dim_ci);
+      for (std::size_t i = 0; i < dim_ci; ++i) {
+        if constexpr (std::is_same_v<T, double>) ci[i] = result.occupation_state[i];
+        else ci[i] = std::complex<double>(result.occupation_state[i], result.occupation_state[dim_ci + i]);
+      }
+      const rerdmft::Casci<T> engine(n_active, static_cast<std::size_t>(input.casscf_electrons()));
+      rerdmft::Matrix<T> g1;
+      std::vector<T> g2;
+      engine.densities(ci, g1, g2);
+      const std::size_t a = n_active, no = rdm->glob.size();
+      std::vector<long> slot(n, -1);
+      for (std::size_t t = 0; t < a; ++t) slot[active[t]] = static_cast<long>(t);
+      rerdmft::Matrix<std::complex<double>> d_out(no, no, std::complex<double>(0.0, 0.0));
+      std::vector<long> slot_out(no);
+      for (std::size_t i = 0; i < no; ++i) slot_out[i] = slot[rdm->glob[i]];
+      std::vector<char> is_core(n, 0);
+      for (std::size_t i : core) is_core[i] = 1;
+      for (std::size_t i = 0; i < no; ++i) {
+        if (is_core[rdm->glob[i]]) d_out(i, i) = 1.0;
+        for (std::size_t j = 0; j < no; ++j)
+          if (slot_out[i] >= 0 && slot_out[j] >= 0) d_out(i, j) = g1(static_cast<std::size_t>(slot_out[i]), static_cast<std::size_t>(slot_out[j]));
+      }
+      std::vector<T> lambda(a * a * a * a);
+      for (std::size_t t = 0; t < a; ++t)
+        for (std::size_t u = 0; u < a; ++u)
+          for (std::size_t v = 0; v < a; ++v)
+            for (std::size_t w = 0; w < a; ++w)
+              lambda[((t * a + u) * a + v) * a + w] =
+                  g2[((t * a + u) * a + v) * a + w] - g1(t, u) * g1(v, w) + g1(t, w) * g1(v, u);
+      rerdmft::RdmSource src;
+      src.n = no;
+      src.gamma1 = d_out;
+      src.antisymmetric = true;
+      src.slab = [&, no](std::size_t p, std::complex<double>* out) {
+        for (std::size_t q = 0; q < no; ++q)
+          for (std::size_t r = 0; r < no; ++r)
+            for (std::size_t s2 = 0; s2 < no; ++s2) {
+              std::complex<double> v = d_out(p, r) * d_out(q, s2) - d_out(p, s2) * d_out(q, r);
+              if (slot_out[p] >= 0 && slot_out[q] >= 0 && slot_out[r] >= 0 && slot_out[s2] >= 0)
+                v += std::complex<double>(lambda[((static_cast<std::size_t>(slot_out[p]) * a + static_cast<std::size_t>(slot_out[r])) * a +
+                                                  static_cast<std::size_t>(slot_out[q])) * a + static_cast<std::size_t>(slot_out[s2])]);
+              out[(q * no + r) * no + s2] = v;
+            }
+      };
+      // one-electron matrix in the final orbitals, over the output spinors
+      rerdmft::Matrix<std::complex<double>> u = result.total_rotation;
+      if (u.rows() == 0) {
+        u = rerdmft::Matrix<std::complex<double>>(n, n, std::complex<double>(0.0, 0.0));
+        for (std::size_t i = 0; i < n; ++i) u(i, i) = 1.0;
+      }
+      rerdmft::Matrix<std::complex<double>> h_c(n, n);
+      for (std::size_t i = 0; i < n; ++i)
+        for (std::size_t j = 0; j < n; ++j) h_c(i, j) = std::complex<double>(h_mo(i, j));
+      const auto h_final = rerdmft::dagger(u) * (h_c * u);
+      src.h = rerdmft::Matrix<std::complex<double>>(no, no);
+      for (std::size_t i = 0; i < no; ++i)
+        for (std::size_t j = 0; j < no; ++j) src.h(i, j) = h_final(rdm->glob[i], rdm->glob[j]);
+      writeRdmOutputs(*rdm, src, result.total_rotation, log);
+    }
+    log << "  Final CASSCF energy decomposition (components and active-space natural occupation numbers listed above):\n"
+        << "    N-N:                " << std::setprecision(10) << nuclear_repulsion_energy << std::setprecision(6) << " Hartree\n"
+        << "    Total energy:       " << std::setprecision(10) << total << std::setprecision(6) << " Hartree\n";
+  } catch (const std::exception& e) {
+    log << "\n  CASSCF FAILED: " << e.what() << "\n";
+  }
 }
 
 // CC_RDM in the Gaussian primitive basis: the spinors in the output order of the density matrix files, expanded over the
@@ -3228,6 +3554,18 @@ std::string buildPccdFunctionalReport(const std::string& label, const rerdmft::M
       restart->orbitals_optimized = true;
       restart->total_rotation = full_result.total_rotation;
     }
+    try {
+      const auto rdm_full = rerdmft::buildPccdFullTwoRdm(reps, bar, n_core, n_occ, n_vir,
+                                                         pccdRdmFromState(restart->amplitudes, n_occ, n_vir), restart->occupations, n_total);
+      restart->rdm_h = rdm_full.two_rdm_h;
+      restart->rdm_x = rdm_full.two_rdm_x;
+      restart->rdm_l1 = rdm_full.two_rdm_l1;
+      restart->rdm_l2 = rdm_full.two_rdm_l2;
+      restart->rdm_pair_of = rerdmft::buildPccdPairOf(reps, bar, n_total);
+      restart->rdm_valid = true;
+    } catch (const std::exception& e) {
+      out << "\n  FUNCTIONAL_RDM data FAILED: " << e.what() << "\n";
+    }
   }
   logTiming(label + " pCCD functional report complete", t_start, t_checkpoint, timing_records);
   return out.str();
@@ -3294,14 +3632,53 @@ std::string wfnOutputPath(const std::string& input_path, bool is_neg, const std:
   return dir + name + (is_neg ? "_neg.wfn" : ".wfn");
 }
 
-// "foo.inp" -> "cc_foo_<level>.wfn" (level: nonrel / x2c / 4c), the AIMPAC file of the UCCSD density.
+// "foo.inp" with FUNCTIONAL PNOF7 -> "pnof7_foo_<level>.wfn" (functional name in lower case; "pnof7_foo_4c_neg.wfn" for the 4C min-max stage);
+// always followed by the method level: "pnof7_foo_<level>.wfn" (level: nonrel / x2c / 4c).
+std::string functionalWfnOutputPath(const rerdmft::Input& input, const std::string& input_path, const std::string& level, bool is_neg) {
+  const auto slash = input_path.find_last_of("/\\");
+  const std::string dir = (slash == std::string::npos) ? std::string() : input_path.substr(0, slash + 1);
+  std::string name = (slash == std::string::npos) ? input_path : input_path.substr(slash + 1);
+  const auto dot = name.find_last_of('.');
+  if (dot != std::string::npos && dot != 0) name = name.substr(0, dot);
+  std::string functional = input.functional();
+  for (char& ch : functional) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+  return dir + functional + "_" + name + "_" + level + (is_neg ? "_neg" : "") + ".wfn";
+}
+
+// "foo.inp" -> "cas_foo_<level>.wfn" (level: nonrel / x2c / 4c), the AIMPAC file of the CASSCF natural orbitals.
+std::string casWfnOutputPath(const rerdmft::Input& input, const std::string& input_path, const std::string& level) {
+  const auto slash = input_path.find_last_of("/\\");
+  const std::string dir = (slash == std::string::npos) ? std::string() : input_path.substr(0, slash + 1);
+  std::string name = (slash == std::string::npos) ? input_path : input_path.substr(slash + 1);
+  const auto dot = name.find_last_of('.');
+  if (dot != std::string::npos && dot != 0) name = name.substr(0, dot);
+  return dir + "cas_" + name + "_" + level + ".wfn";
+}
+
+// Path prefix of the density matrix files of CASSCF_RDM / FUNCTIONAL_RDM: "<prefix>_<input>_<level>" ("cas_foo_x2c" -> cas_foo_x2c_MO.dm1, ...);
+// the prefix is "cas" or the lower-case functional name.
+std::string lowerCase(std::string s) {
+  for (char& ch : s) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+  return s;
+}
+
+std::string rdmBasePath(const std::string& prefix, const std::string& input_path, const std::string& level) {
+  const auto slash = input_path.find_last_of("/\\");
+  const std::string dir = (slash == std::string::npos) ? std::string() : input_path.substr(0, slash + 1);
+  std::string name = (slash == std::string::npos) ? input_path : input_path.substr(slash + 1);
+  const auto dot = name.find_last_of('.');
+  if (dot != std::string::npos && dot != 0) name = name.substr(0, dot);
+  return dir + prefix + "_" + name + "_" + level;
+}
+
+// "foo.inp" -> "uccsd_foo_<level>.wfn" (level: nonrel / x2c / 4c), the AIMPAC file of the UCCSD density.
 std::string ccWfnOutputPath(const std::string& input_path, const std::string& level) {
   const auto slash = input_path.find_last_of("/\\");
   const std::string dir = (slash == std::string::npos) ? std::string() : input_path.substr(0, slash + 1);
   std::string name = (slash == std::string::npos) ? input_path : input_path.substr(slash + 1);
   const auto dot = name.find_last_of('.');
   if (dot != std::string::npos && dot != 0) name = name.substr(0, dot);
-  return dir + "cc_" + name + "_" + level + ".wfn";
+  return dir + "uccsd_" + name + "_" + level + ".wfn";
 }
 
 // A RestartCapture standing for the converged HF/DHF 1-RDM itself (AIMPAC's HF/DHF files): identity rotation,
@@ -3314,6 +3691,16 @@ rerdmft::RestartCapture hartreeFockAimpacCapture(std::size_t n_columns, std::siz
   for (std::size_t k = 0; k < n_occupied; ++k) cap.occupations[first_occupied + k] = 1.0;
   cap.electronic_energy = electronic_energy;
   return cap;
+}
+
+// The capture the AIMPAC writers should see: for a CASSCF state the NATURAL-orbital view (the active 1-RDM is not diagonal in the
+// optimized orbitals), the capture itself otherwise.
+rerdmft::RestartCapture aimpacView(const rerdmft::RestartCapture& capture) {
+  if (capture.natural_rotation.rows() == 0) return capture;
+  rerdmft::RestartCapture view = capture;
+  view.occupations = capture.natural_occupations;
+  view.total_rotation = capture.natural_rotation;
+  return view;
 }
 
 // Writes the AIMPAC/AIMAll WFN file (Utils/AIMPAC.h) of the converged NON_REL 1-RDM's natural
@@ -3347,7 +3734,9 @@ void writeNonRelAimpac(const rerdmft::Input& input, const std::string& input_pat
     for (std::size_t j = 0; j < d_real.cols(); ++j) d_ao(i, j) = d_real(i, j);
   const rerdmft::Matrix<double> s_cart = rerdmft::overlapMatrix(large_basis_fns);
   const auto orbitals = rerdmft::naturalOrbitalsFromDensity(s_cart, d_ao, input.x_lin_dep_thrs_l());
-  const std::string path = wfnOutputPath(input_path, /*is_neg=*/false, (hf || core) ? "nonrel" : "", core ? "core" : "hf");
+  const std::string path = capture.kind == "CASSCF" ? casWfnOutputPath(input, input_path, "nonrel")
+                                                       : (hf || core) ? wfnOutputPath(input_path, /*is_neg=*/false, "nonrel", core ? "core" : "hf")
+                                                                      : functionalWfnOutputPath(input, input_path, "nonrel", false);
   const char* tag = core ? "NON_REL CORE" : hf ? "NON_REL HF" : "NON_REL";
   rerdmft::writeAimpacWfn(path, std::string("RERDMFT ") + tag + " WFN FILE", input.geometry(), large_basis_fns, orbitals,
                            capture.electronic_energy + nuclear_repulsion_energy, 0.0);
@@ -3461,7 +3850,9 @@ void writeX2CAimpac(const rerdmft::Input& input, const std::string& input_path,
   const auto d_ao = largeComponentAimpacDensity(c_final, capture.occupations, /*occ_start=*/0, large_transform_final);
   const rerdmft::Matrix<double> s_cart = rerdmft::overlapMatrix(large_basis_fns);
   const auto orbitals = rerdmft::naturalOrbitalsFromDensity(s_cart, d_ao, input.x_lin_dep_thrs_l());
-  const std::string path = wfnOutputPath(input_path, /*is_neg=*/false, (hf || core) ? "x2c" : "", core ? "core" : "hf");
+  const std::string path = capture.kind == "CASSCF" ? casWfnOutputPath(input, input_path, "x2c")
+                                                       : (hf || core) ? wfnOutputPath(input_path, /*is_neg=*/false, "x2c", core ? "core" : "hf")
+                                                                      : functionalWfnOutputPath(input, input_path, "x2c", false);
   const char* tag = core ? "X2C CORE" : hf ? "X2C HF" : "X2C";
   rerdmft::writeAimpacWfn(path, std::string("RERDMFT ") + tag + " WFN FILE", input.geometry(), large_basis_fns, orbitals,
                            capture.electronic_energy + nuclear_repulsion_energy, 0.0);
@@ -3540,13 +3931,13 @@ void writeC4Aimpac(const rerdmft::Input& input, const std::string& input_path,
     writeOne(capture, wfnOutputPath(input_path, /*is_neg=*/false, "4c", core ? "core" : "hf"), core ? "4C CORE" : "4C DHF");
     return;
   }
-  writeOne(capture, wfnOutputPath(input_path, /*is_neg=*/false), "4C");
+  writeOne(capture, capture.kind == "CASSCF" ? casWfnOutputPath(input, input_path, "4c") : functionalWfnOutputPath(input, input_path, "4c", false), "4C");
   if (capture_neg.valid) {
-    writeOne(capture_neg, wfnOutputPath(input_path, /*is_neg=*/true), "4C_NEG");
+    writeOne(capture_neg, functionalWfnOutputPath(input, input_path, "4c", true), "4C_NEG");
   }
 }
 
-// AIMPAC WFN of the CC density (UCCSD + CC_RDM + AIMPAC): "foo.inp" -> "cc_foo_<level>.wfn". gamma1 = <a_p^+ a_q> over the
+// AIMPAC WFN of the CC density (UCCSD + CC_RDM + AIMPAC): "foo.inp" -> "uccsd_foo_<level>.wfn". gamma1 = <a_p^+ a_q> over the
 // columns of `cs` (all spinors, frozen core included). The density over the Gaussians is rho_c = sum_s conj(C_s) gamma C_s^T per
 // component c (Large / Small, s = alpha, beta); as for the HF files the components are diagonalized independently (no Large-Small
 // cross term in rho(r)) and merged, Large first. Occupations are written as they come, negative ones included.
@@ -3643,8 +4034,11 @@ void writeRestartFile(std::ostream& out, const rerdmft::Input& input, const std:
     const auto c_final = rerdmft::restartCoefficients(c_scf, capture.total_rotation);
     rerdmft::RestartData data;
     data.method = method;
-    data.functional = input.functional();
+    data.functional = capture.kind == "CASSCF" ? std::string("CASSCF") : input.functional();
     data.kind = capture.kind;
+    data.cas_electrons = capture.cas_electrons;
+    data.cas_spinors = capture.cas_spinors;
+    data.cas_state = capture.cas_state;
     data.basis_fingerprint = basis_fingerprint;
     data.n_electrons = input.n_electrons();
     if (capture.kind == "GAMMAS") {
@@ -3676,7 +4070,8 @@ void writeRestartFile(std::ostream& out, const rerdmft::Input& input, const std:
                       back.jk_frozen_pairs == data.jk_frozen_pairs && back.jk_active_pairs == data.jk_active_pairs &&
                       back.total_energy == data.total_energy &&
                       back.occupations == data.occupations && back.gammas == data.gammas &&
-                      back.amplitudes == data.amplitudes &&
+                      back.amplitudes == data.amplitudes && back.cas_state == data.cas_state &&
+                      back.cas_electrons == data.cas_electrons && back.cas_spinors == data.cas_spinors &&
                       back.rows == data.rows && back.cols == data.cols &&
                       back.coefficients == data.coefficients;
 
@@ -3713,6 +4108,10 @@ void writeRestartFile(std::ostream& out, const rerdmft::Input& input, const std:
                                                              : std::string("")) +
                      (capture.kind == "OCCUPATIONS" ? "JK_only window: " + std::to_string(data.jk_frozen_pairs) + " frozen pair(s), " +
                                           std::to_string(data.jk_active_pairs) + " active pair(s); "
+                                                                       : std::string("")) +
+                     (capture.kind == "CASSCF" ? "CASSCF " + std::to_string(data.cas_electrons) + " electrons in " +
+                                          std::to_string(data.cas_spinors) + " active spinors, CI vector of " +
+                                          std::to_string(data.cas_state.size()) + " numbers; "
                                                                        : std::string("")) +
                      std::to_string(data.occupations.size()) + " occupation numbers, MO coefficients " +
                      std::to_string(data.rows) + " x " + std::to_string(data.cols) +
@@ -4001,6 +4400,7 @@ int main(int argc, char** argv) {
   std::ostringstream nonrel_structure_log, nonrel_restart_log, x2c_structure_log, x2c_restart_log, c4_pre_log,
       c4_structure_log, c4_restart_log;
   std::ostringstream uccsd_nonrel_log, uccsd_x2c_log, uccsd_c4_log;  // UCCSD keyword: one report per method
+  std::ostringstream casscf_nonrel_log, casscf_x2c_log, casscf_c4_log;  // CASSCF keyword: one report per method
   double dhf_gradient_efficient_norm = 0.0;
   double dhf_gradient_efficient_max_abs = 0.0;
   double dhf_gradient_rdmft_norm = 0.0;
@@ -4044,7 +4444,7 @@ int main(int argc, char** argv) {
   const std::string input_path = argv[1];  // AIMPAC's own output naming (wfnOutputPath): "<input>.wfn"
   try {
     input.read(argv[1]);
-    x2c_core_start = c4_core_start = input.functional_init() == "CORE" && input.has_functional();
+    x2c_core_start = c4_core_start = input.core_start();
     basis_set.read(input.basis_file());
     if (std::getenv("SWITCH_SIGN_ERI") != nullptr) {
       if (input.use_ri() || input.cholesky() || input.scf_direct_4c() || input.functional_direct_4c()) {
@@ -4332,8 +4732,8 @@ int main(int argc, char** argv) {
     // numbers, from which the FUNCTIONAL calculation (FULL_OPTIMIZATION, ...) starts. Written for potential-energy
     // scans: run one geometry, keep RESTART.*, change the geometry, set READ_RESTART TRUE.
     if (input.read_restart()) {
-      if (!input.has_functional()) {
-        throw std::runtime_error("READ_RESTART TRUE requires a FUNCTIONAL (the restart files hold an RDMFT state)");
+      if (!input.has_functional() && !input.casscf()) {
+        throw std::runtime_error("READ_RESTART TRUE requires a FUNCTIONAL or CASSCF (the restart files hold an RDMFT or CASSCF state)");
       }
       std::cout << "READ_RESTART TRUE: the HF/DHF SCF is skipped; orbitals and occupation numbers come from RESTART.<method>.\n";
       const double restart_nuclear_repulsion = rerdmft::nuclearRepulsionEnergy(input.geometry());
@@ -4347,7 +4747,10 @@ int main(int argc, char** argv) {
       // still checked against the window of this run when the functional stage starts, and refused if a
       // frozen/deep-virtual position is not exactly 1/0, or the amplitude vector's size does not fit).
       const auto noteWindow = [&](std::ostream& out, const rerdmft::RestartOrbitals& ro) {
-        if (ro.data.kind == "GAMMAS" || isPnofFunctionalName(input.functional())) return;
+        if (input.has_functional() && ro.data.kind == "CASSCF") {
+          throw std::runtime_error("READ_RESTART: a CASSCF restart file (active-space CI state, non-natural orbitals) cannot start a FUNCTIONAL calculation");
+        }
+        if (input.casscf() || ro.data.kind == "GAMMAS" || isPnofFunctionalName(input.functional())) return;
         const bool pccd = ro.data.kind == "PCCD";
         if (ro.data.jk_frozen_pairs != (pccd ? input.pccd_frozen_pairs() : input.jk_frozen_pairs()) ||
             ((pccd ? input.pccd_active_pairs() : input.jk_active_pairs()) >= 0 &&
@@ -4473,15 +4876,21 @@ int main(int argc, char** argv) {
           writeRestartFile<double>(sink, input, "NON_REL", c, blockDiagTwice(c_spatial), blockDiagTwice(h_core_nonrel),
                                  blockDiagTwice(s_large_cart), h_spin, restartFingerprint, restart_nuclear_repulsion);
         };
+        if (input.casscf()) {  // CASSCF from the restart orbitals (and CI vector); the capture is written below like a functional's
+          if (input.use_ri()) runCasscfStage("NON_REL", input, h_spin, ri_nonrel_mo_eri, 0, restart_nuclear_repulsion, ro.data.total_energy, casscf_nonrel_log, &nonrel_restart, &ro.data);
+          else if (input.cholesky()) runCasscfStage("NON_REL", input, h_spin, eri_spin_chol, 0, restart_nuclear_repulsion, ro.data.total_energy, casscf_nonrel_log, &nonrel_restart, &ro.data);
+          else runCasscfStage("NON_REL", input, h_spin, eri_spin_sym, 0, restart_nuclear_repulsion, ro.data.total_energy, casscf_nonrel_log, &nonrel_restart, &ro.data);
+        } else {
         nonrel_functional_report = input.use_ri()     ? nonrel_functional(ri_nonrel_mo_eri)
                                     : input.cholesky() ? nonrel_functional(eri_spin_chol)
                                                         : nonrel_functional(eri_spin_sym);
+        }
         writeRestartFile<double>(nonrel_restart_log, input, "NON_REL", nonrel_restart, blockDiagTwice(c_spatial), blockDiagTwice(h_core_nonrel),
                                  blockDiagTwice(s_large_cart), h_spin, restartFingerprint, restart_nuclear_repulsion);
         writeNonRelFcidump(input, c_spatial, h_core_nonrel, nonrel_eri, ao_cholesky, nonrel_restart,
                            restart_nuclear_repulsion, nonrel_restart_log);
-        writeNonRelAimpac(input, input_path, c_spatial, nonrel_restart, large_basis.functions(), nonrel_transform,
-                           restart_nuclear_repulsion, nonrel_restart_log);
+        writeNonRelAimpac(input, input_path, c_spatial, aimpacView(nonrel_restart), large_basis.functions(), nonrel_transform,
+                          restart_nuclear_repulsion, nonrel_restart_log);
       }
 
       if (input.x2c()) {
@@ -4568,12 +4977,18 @@ int main(int argc, char** argv) {
           writeRestartFile<std::complex<double>>(sink, input, "X2C", c, c_x2c, x2c_hamiltonian.h_x2c, s_x2c, h_x2c_mo,
                                                restartFingerprint, restart_nuclear_repulsion);
         };
+        if (input.casscf()) {
+          if (input.use_ri()) runCasscfStage("X2C", input, h_x2c_mo, ri_x2c_mo_eri, 0, restart_nuclear_repulsion, ro.data.total_energy, casscf_x2c_log, &x2c_restart, &ro.data);
+          else if (input.cholesky()) runCasscfStage("X2C", input, h_x2c_mo, x2c_mo_chol, 0, restart_nuclear_repulsion, ro.data.total_energy, casscf_x2c_log, &x2c_restart, &ro.data);
+          else runCasscfStage("X2C", input, h_x2c_mo, x2c_mo_sym, 0, restart_nuclear_repulsion, ro.data.total_energy, casscf_x2c_log, &x2c_restart, &ro.data);
+        } else {
         x2c_functional_report = input.use_ri()     ? x2c_functional(ri_x2c_mo_eri)
                                  : input.cholesky() ? x2c_functional(x2c_mo_chol)
                                                      : x2c_functional(x2c_mo_sym);
+        }
         writeRestartFile<std::complex<double>>(x2c_restart_log, input, "X2C", x2c_restart, c_x2c, x2c_hamiltonian.h_x2c, s_x2c, h_x2c_mo,
                                                restartFingerprint, restart_nuclear_repulsion);
-        writeX2CAimpac(input, input_path, c_x2c, x2c_restart, large_basis.functions(), large_transform_final,
+        writeX2CAimpac(input, input_path, c_x2c, aimpacView(x2c_restart), large_basis.functions(), large_transform_final,
                        restart_nuclear_repulsion, x2c_restart_log);
       }
 
@@ -4779,7 +5194,12 @@ int main(int argc, char** argv) {
               timing_records, &c4_restart, eri_full_factory, &ro.data.occupations, occ_in, ukb_direct_ptr_r, nullptr,
               &c4_restart_neg);
         };
-        if (input.use_ri()) {
+        if (input.casscf()) {
+          // No-pair CASSCF on the positive-energy spinors of the restart file
+          if (input.use_ri()) runCasscfStage("C4_SPINOR", input, h_mo_restart, ri_c4_mo_eri_r, n_negative_r, restart_nuclear_repulsion, ro.data.total_energy, casscf_c4_log, &c4_restart, &ro.data);
+          else if (input.cholesky()) runCasscfStage("C4_SPINOR", input, h_mo_restart, c4_mo_chol_r, n_negative_r, restart_nuclear_repulsion, ro.data.total_energy, casscf_c4_log, &c4_restart, &ro.data);
+          else runCasscfStage("C4_SPINOR", input, h_mo_restart, c4_mo_sym_r, n_negative_r, restart_nuclear_repulsion, ro.data.total_energy, casscf_c4_log, &c4_restart, &ro.data);
+        } else if (input.use_ri()) {
           // FULL_OPTIMIZATION_4C_NEG + USE_RI: unlike CHOLESKY's own full_chol_factory, no
           // SEPARATE rebuild is needed -- `ri_c4_mo_eri_r` is ALREADY built over the full,
           // untrimmed RKB space (see its own construction comment above), so the min-max stage
@@ -4813,7 +5233,7 @@ int main(int argc, char** argv) {
         if (c4_restart_neg.valid)
           writeRestartFile<std::complex<double>>(c4_restart_log, input, "4C_NEG", c4_restart_neg, c_dhf_restart, h_rkb, s_full, h_mo_restart,
                                                restartFingerprint, restart_nuclear_repulsion);
-        writeC4Aimpac(input, input_path, c_dhf_restart, c4_restart, c4_restart_neg, large_basis.functions(),
+        writeC4Aimpac(input, input_path, c_dhf_restart, aimpacView(c4_restart), c4_restart_neg, large_basis.functions(),
                       small_basis.functions(), large_transform_final, rkb_coefficients, restart_nuclear_repulsion,
                       c4_restart_log);
       }
@@ -4867,7 +5287,7 @@ int main(int argc, char** argv) {
       // converged HF orbitals. CORE: the eigenvectors of the core Hamiltonian diagonalized above. The SCF itself
       // has run either way (its energy and HF density are still reported); UCCSD/DEBUG/HESSIAN_MEAN_FIELD, which
       // validate or build on the HF orbitals, are rejected together with CORE in Input.cpp.
-      const bool nonrel_core_start = input.functional_init() == "CORE" && input.has_functional();
+      const bool nonrel_core_start = input.core_start();
       const rerdmft::Matrix<double> nonrel_c_start = nonrel_core_start ? nonrel_c_initial : nonrel_hf_result.c_matrix;
       const std::vector<double>& nonrel_start_energies =
           nonrel_core_start ? h_core_nonrel_eig.eigenvalues : nonrel_hf_result.orbital_energies;
@@ -4905,7 +5325,7 @@ int main(int argc, char** argv) {
       // built straight from the already-RI-transformed AO tensor instead) -- DEBUG/HESSIAN_MEAN_FIELD
       // are mutually exclusive with USE_RI (Input.cpp's own check), so `nonrel_dense` is always
       // false here whenever USE_RI is active.
-      if (!input.use_ri() && input.cholesky() && (nonrel_dense || input.has_functional() || input.uccsd())) {
+      if (!input.use_ri() && input.cholesky() && (nonrel_dense || input.has_functional() || input.uccsd() || input.casscf())) {
         eri_spin_chol = rerdmft::aoCholeskyToMoSpinOrbital(ao_cholesky, nonrel_c_start);
       }
       logTiming("NON_REL MO integral transform complete", t_start, t_checkpoint, timing_records);
@@ -4961,6 +5381,37 @@ int main(int argc, char** argv) {
           runUccsdStage("NON_REL", input, input_path, "nonrel", h_spin_cc, nonrel_core_start ? sym_hf : eri_spin_sym, 0, cc_spaces, e_scf, uccsd_nonrel_log, cs_ptr);
         }
         logTiming("NON_REL UCCSD complete", t_start, t_checkpoint, timing_records);
+      }
+      if (input.casscf()) {
+        const double e_scf = nonrel_hf_result.total_energy;
+        const double e_nuc = nonrel_hf_result.nuclear_repulsion_energy;
+        rerdmft::RestartCapture casscf_restart;
+        RdmRequest rdm_req;
+        if (input.casscf_rdm()) {
+          rdm_req.base = rdmBasePath("cas", input_path, "nonrel");
+          for (std::size_t k = 0; k < n_spatial; ++k) { rdm_req.glob.push_back(k); rdm_req.glob.push_back(n_spatial + k); }
+          rdm_req.threshold = input.casscf_rdm_threshold();
+          rdm_req.max_memory_gb = input.casscf_rdm_maxmem();
+          rdm_req.unnormalized_primitives = input.casscf_rdm_cnorm1();
+          if (input.casscf_rdm_gaussian())
+            rdm_req.spinors = [&](const rerdmft::Matrix<std::complex<double>>& u) -> std::optional<rerdmft::CartesianSpinors> {
+              rerdmft::Matrix<double> ur(n_spatial, n_spatial, 0.0);
+              for (std::size_t i = 0; i < n_spatial; ++i)
+                for (std::size_t j = 0; j < n_spatial; ++j) ur(i, j) = u.rows() == 0 ? (i == j ? 1.0 : 0.0) : u(i, j).real();
+              return buildNonRelCartesianSpinors(large_basis.functions(), nonrel_c_start * ur, input.cartesian(), nonrel_transform, rdm_req.glob);
+            };
+        }
+        const RdmRequest* rdm_ptr = input.casscf_rdm() ? &rdm_req : nullptr;
+        if (input.use_ri()) runCasscfStage("NON_REL", input, h_spin, ri_nonrel_mo_eri, 0, e_nuc, e_scf, casscf_nonrel_log, &casscf_restart, nullptr, rdm_ptr);
+        else if (input.cholesky()) runCasscfStage("NON_REL", input, h_spin, eri_spin_chol, 0, e_nuc, e_scf, casscf_nonrel_log, &casscf_restart, nullptr, rdm_ptr);
+        else runCasscfStage("NON_REL", input, h_spin, eri_spin_sym, 0, e_nuc, e_scf, casscf_nonrel_log, &casscf_restart, nullptr, rdm_ptr);
+        writeRestartFile<double>(casscf_nonrel_log, input, "NON_REL", casscf_restart, blockDiagTwice(nonrel_c_start),
+                                 blockDiagTwice(h_core_nonrel), blockDiagTwice(s_large_cart), h_spin,
+                                 rerdmft::basisFingerprint(large_basis.functions()), e_nuc);
+        writeNonRelFcidump(input, nonrel_c_start, h_core_nonrel, nonrel_eri, ao_cholesky, casscf_restart, e_nuc, casscf_nonrel_log);
+        writeNonRelAimpac(input, input_path, nonrel_c_start, aimpacView(casscf_restart), large_basis.functions(),
+                          nonrel_transform, e_nuc, casscf_nonrel_log);
+        logTiming("NON_REL CASSCF complete", t_start, t_checkpoint, timing_records);
       }
       if (input.cholesky() && input.debug()) {
         // DEBUG: dense (exact) vs Cholesky, for the Fock matrix at the converged density and for the MO integrals.
@@ -5193,6 +5644,21 @@ int main(int argc, char** argv) {
                                  nonrel_hf_result.nuclear_repulsion_energy);
         writeNonRelFcidump(input, nonrel_c_start, h_core_nonrel, nonrel_eri, ao_cholesky, nonrel_restart,
                            nonrel_hf_result.nuclear_repulsion_energy, nonrel_restart_log);
+        if (input.functional_rdm()) {
+          std::vector<std::size_t> glob;
+          for (std::size_t k = 0; k < n_spatial; ++k) { glob.push_back(k); glob.push_back(n_spatial + k); }
+          const RdmRequest req = makeRdmRequest(
+              input, rdmBasePath(lowerCase(input.functional()), input_path, "nonrel"), glob,
+              [&](const rerdmft::Matrix<std::complex<double>>& u) -> std::optional<rerdmft::CartesianSpinors> {
+                rerdmft::Matrix<double> ur(n_spatial, n_spatial, 0.0);
+                for (std::size_t i = 0; i < n_spatial; ++i)
+                  for (std::size_t j = 0; j < n_spatial; ++j) ur(i, j) = u.rows() == 0 ? (i == j ? 1.0 : 0.0) : u(i, j).real();
+                std::vector<std::size_t> g2;
+                for (std::size_t k = 0; k < n_spatial; ++k) { g2.push_back(k); g2.push_back(n_spatial + k); }
+                return buildNonRelCartesianSpinors(large_basis.functions(), nonrel_c_start * ur, input.cartesian(), nonrel_transform, g2);
+              });
+          writeFunctionalRdm(req, nonrel_restart, toComplexMatrix(h_spin), nonrel_restart_log);
+        }
         writeNonRelAimpac(input, input_path, nonrel_c_start, nonrel_restart, large_basis.functions(),
                            nonrel_transform, nonrel_hf_result.nuclear_repulsion_energy, nonrel_restart_log);
       }
@@ -5340,7 +5806,7 @@ int main(int argc, char** argv) {
           for (std::size_t i = 0; i < n_ukb; ++i) v_identity(i, i) = 1.0;
           shim.v_total = v_identity;
           ri_out = rerdmft::buildRiMoEri(shim, c_mo);
-        } else if (input.cholesky() && (x2c_dense || input.has_functional() || input.uccsd())) {
+        } else if (input.cholesky() && (x2c_dense || input.has_functional() || input.uccsd() || input.casscf())) {
           chol_out = rerdmft::aoCholeskyToMoSpinor(ao_cholesky_sph, c_mo);
         }
         if (!input.use_ri() && (!input.cholesky() || input.debug())) {
@@ -5409,6 +5875,35 @@ int main(int argc, char** argv) {
         else if (input.cholesky()) runUccsdStage("X2C", input, input_path, "x2c", h_cc, x2c_core_start ? chol_cc : x2c_mo_chol, 0, cc_spaces, e_scf, uccsd_x2c_log, cs_ptr);
         else runUccsdStage("X2C", input, input_path, "x2c", h_cc, x2c_core_start ? sym_cc : x2c_mo_sym, 0, cc_spaces, e_scf, uccsd_x2c_log, cs_ptr);
         logTiming("X2C UCCSD complete", t_start, t_checkpoint, timing_records);
+      }
+      if (input.casscf()) {
+        const double e_scf = x2c_hf_result.total_energy;
+        const double e_nuc = x2c_hf_result.nuclear_repulsion_energy;
+        rerdmft::RestartCapture casscf_restart;
+        RdmRequest rdm_req;
+        if (input.casscf_rdm()) {
+          rdm_req.base = rdmBasePath("cas", input_path, "x2c");
+          for (std::size_t k = 0; k < h_x2c_mo.rows(); ++k) rdm_req.glob.push_back(k);
+          rdm_req.threshold = input.casscf_rdm_threshold();
+          rdm_req.max_memory_gb = input.casscf_rdm_maxmem();
+          rdm_req.unnormalized_primitives = input.casscf_rdm_cnorm1();
+          if (input.casscf_rdm_gaussian())
+            rdm_req.spinors = [&](const rerdmft::Matrix<std::complex<double>>& u) -> std::optional<rerdmft::CartesianSpinors> {
+              return buildX2cCartesianSpinors(large_basis.functions(), large_transform_final,
+                                              rerdmft::restartCoefficients(x2c_hf_result.c_matrix, u), rdm_req.glob);
+            };
+        }
+        const RdmRequest* rdm_ptr = input.casscf_rdm() ? &rdm_req : nullptr;
+        if (input.use_ri()) runCasscfStage("X2C", input, h_x2c_mo, ri_x2c_mo_eri, 0, e_nuc, e_scf, casscf_x2c_log, &casscf_restart, nullptr, rdm_ptr);
+        else if (input.cholesky()) runCasscfStage("X2C", input, h_x2c_mo, x2c_mo_chol, 0, e_nuc, e_scf, casscf_x2c_log, &casscf_restart, nullptr, rdm_ptr);
+        else runCasscfStage("X2C", input, h_x2c_mo, x2c_mo_sym, 0, e_nuc, e_scf, casscf_x2c_log, &casscf_restart, nullptr, rdm_ptr);
+        writeRestartFile<std::complex<double>>(
+            casscf_x2c_log, input, "X2C", casscf_restart, x2c_hf_result.c_matrix, x2c_hamiltonian.h_x2c,
+            rerdmft::extractLargeComponentBlock(s_full, x2c_hf_result.c_matrix.rows()), h_x2c_mo,
+            rerdmft::basisFingerprint(large_basis.functions()), e_nuc);
+        writeX2CAimpac(input, input_path, x2c_hf_result.c_matrix, aimpacView(casscf_restart), large_basis.functions(),
+                       large_transform_final, e_nuc, casscf_x2c_log);
+        logTiming("X2C CASSCF complete", t_start, t_checkpoint, timing_records);
       }
 
       // Default, always-on check: the RDMFT-ansatz gradient, TESTED
@@ -5605,6 +6100,19 @@ int main(int argc, char** argv) {
             rerdmft::basisFingerprint(large_basis.functions()), x2c_hf_result.nuclear_repulsion_energy);
         writeX2CAimpac(input, input_path, x2c_hf_result.c_matrix, x2c_restart, large_basis.functions(),
                        large_transform_final, x2c_hf_result.nuclear_repulsion_energy, x2c_restart_log);
+        if (input.functional_rdm()) {
+          std::vector<std::size_t> glob;
+          for (std::size_t k = 0; k < h_x2c_mo.rows(); ++k) glob.push_back(k);
+          const RdmRequest req = makeRdmRequest(
+              input, rdmBasePath(lowerCase(input.functional()), input_path, "x2c"), glob,
+              [&](const rerdmft::Matrix<std::complex<double>>& u) -> std::optional<rerdmft::CartesianSpinors> {
+                std::vector<std::size_t> g2;
+                for (std::size_t k = 0; k < h_x2c_mo.rows(); ++k) g2.push_back(k);
+                return buildX2cCartesianSpinors(large_basis.functions(), large_transform_final,
+                                                rerdmft::restartCoefficients(x2c_hf_result.c_matrix, u), g2);
+              });
+          writeFunctionalRdm(req, x2c_restart, toComplexMatrix(h_x2c_mo), x2c_restart_log);
+        }
       }
     }
 
@@ -5685,7 +6193,7 @@ int main(int argc, char** argv) {
           (input.cholesky() && !input.scf_direct_4c() && !input.use_ri()) || (input.cholesky() && input.debug()) ||
           (use_cholesky_integrals && c4_dense) ||
           (use_cholesky_integrals && input.has_functional() && !input.functional_pos_cho_4c() && !input.use_ri()) ||
-          (use_cholesky_integrals && input.uccsd() && !input.use_ri()) ||
+          (use_cholesky_integrals && (input.uccsd() || input.casscf()) && !input.use_ri()) ||
           c4_minmax_may_run;
       if (use_cholesky_integrals) {
         // ONE decomposition of the real AO Coulomb matrix over {LL} u {SS} pairs; everything else (SCF Fock
@@ -5833,7 +6341,7 @@ int main(int argc, char** argv) {
                                                       rkb_coefficients, large_transform_final, dhf_result.c_dhf,
                                                       h_mo.rows() / 2, input.cholesky_threshold(),
                                                       input.on_demand_eri());
-        } else if (use_cholesky_integrals && (c4_dense || input.has_functional() || input.uccsd())) {
+        } else if (use_cholesky_integrals && (c4_dense || input.has_functional() || input.uccsd() || input.casscf())) {
           c4_mo_chol = rerdmft::rkbCholeskyToMo(rkb_cholesky, dhf_result.c_dhf, h_mo.rows() / 2, input.cholesky_threshold());
         }
         if (!input.use_ri() && (!use_cholesky_integrals || input.debug())) {
@@ -5935,6 +6443,36 @@ int main(int argc, char** argv) {
         else if (use_cholesky_integrals) runUccsdStage("C4_SPINOR", input, input_path, "4c", h_cc, c4_core_start ? chol_cc : c4_mo_chol, 0, cc_spaces, e_scf, uccsd_c4_log, cs_ptr);
         else runUccsdStage("C4_SPINOR", input, input_path, "4c", h_cc, c4_core_start ? sym_cc : c4_mo_sym, 0, cc_spaces, e_scf, uccsd_c4_log, cs_ptr);
         logTiming("C4_SPINOR UCCSD complete", t_start, t_checkpoint, timing_records);
+      }
+      if (input.casscf()) {
+        // No-pair: the negative-energy branch (indices [0, h_mo.rows()/2)) takes no part.
+        const std::size_t n_neg = h_mo.rows() / 2;
+        const double e_scf = dhf_result.total_energy;
+        const double e_nuc = dhf_result.nuclear_repulsion_energy;
+        rerdmft::RestartCapture casscf_restart;
+        RdmRequest rdm_req;
+        if (input.casscf_rdm()) {
+          rdm_req.base = rdmBasePath("cas", input_path, "4c");
+          for (std::size_t k = n_neg; k < h_mo.rows(); ++k) rdm_req.glob.push_back(k);
+          rdm_req.threshold = input.casscf_rdm_threshold();
+          rdm_req.max_memory_gb = input.casscf_rdm_maxmem();
+          rdm_req.unnormalized_primitives = input.casscf_rdm_cnorm1();
+          if (input.casscf_rdm_gaussian())
+            rdm_req.spinors = [&](const rerdmft::Matrix<std::complex<double>>& u) -> std::optional<rerdmft::CartesianSpinors> {
+              return buildC4CartesianSpinors(large_basis.functions(), small_basis.functions(), large_transform_final, rkb_coefficients,
+                                             rerdmft::restartCoefficients(dhf_result.c_dhf, u), rdm_req.glob);
+            };
+        }
+        const RdmRequest* rdm_ptr = input.casscf_rdm() ? &rdm_req : nullptr;
+        if (input.use_ri()) runCasscfStage("C4_SPINOR", input, h_mo, ri_dhf_mo_eri, n_neg, e_nuc, e_scf, casscf_c4_log, &casscf_restart, nullptr, rdm_ptr);
+        else if (use_cholesky_integrals) runCasscfStage("C4_SPINOR", input, h_mo, c4_mo_chol, n_neg, e_nuc, e_scf, casscf_c4_log, &casscf_restart, nullptr, rdm_ptr);
+        else runCasscfStage("C4_SPINOR", input, h_mo, c4_mo_sym, n_neg, e_nuc, e_scf, casscf_c4_log, &casscf_restart, nullptr, rdm_ptr);
+        writeRestartFile<std::complex<double>>(casscf_c4_log, input, "4C", casscf_restart, dhf_result.c_dhf, h_rkb, s_full, h_mo,
+                                               rerdmft::basisFingerprint(large_basis.functions()), e_nuc);
+        writeC4Aimpac(input, input_path, dhf_result.c_dhf, aimpacView(casscf_restart), rerdmft::RestartCapture(),
+                      large_basis.functions(), small_basis.functions(), large_transform_final, rkb_coefficients, e_nuc,
+                      casscf_c4_log);
+        logTiming("C4_SPINOR CASSCF complete", t_start, t_checkpoint, timing_records);
       }
 
       // Release the big AO-basis RKB vectors as soon as the MO-basis ones (c4_mo_chol, trimmed to
@@ -6190,6 +6728,18 @@ int main(int argc, char** argv) {
         writeC4Aimpac(input, input_path, dhf_result.c_dhf, c4_restart, c4_restart_neg, large_basis.functions(),
                       small_basis.functions(), large_transform_final, rkb_coefficients,
                       dhf_result.nuclear_repulsion_energy, c4_restart_log);
+        if (input.functional_rdm()) {
+          const std::size_t n_neg_rdm = h_mo.rows() / 2;
+          std::vector<std::size_t> glob;
+          for (std::size_t k = n_neg_rdm; k < h_mo.rows(); ++k) glob.push_back(k);
+          const RdmRequest req = makeRdmRequest(
+              input, rdmBasePath(lowerCase(input.functional()), input_path, "4c"), glob,
+              [&, glob](const rerdmft::Matrix<std::complex<double>>& u) -> std::optional<rerdmft::CartesianSpinors> {
+                return buildC4CartesianSpinors(large_basis.functions(), small_basis.functions(), large_transform_final, rkb_coefficients,
+                                               rerdmft::restartCoefficients(dhf_result.c_dhf, u), glob);
+              });
+          writeFunctionalRdm(req, c4_restart, toComplexMatrix(h_mo), c4_restart_log);
+        }
       }
     }
   } catch (const std::exception& e) {
@@ -6218,9 +6768,9 @@ int main(int argc, char** argv) {
     }
     input.print(std::cout);
     std::cout << std::fixed << std::setprecision(6);
-    std::cout << nonrel_structure_log.str() << nonrel_functional_report << nonrel_restart_log.str();
-    std::cout << x2c_structure_log.str() << x2c_functional_report << x2c_restart_log.str();
-    std::cout << c4_structure_log.str() << dhf_functional_report << c4_restart_log.str();
+    std::cout << nonrel_structure_log.str() << nonrel_functional_report << casscf_nonrel_log.str() << nonrel_restart_log.str();
+    std::cout << x2c_structure_log.str() << x2c_functional_report << casscf_x2c_log.str() << x2c_restart_log.str();
+    std::cout << c4_structure_log.str() << dhf_functional_report << casscf_c4_log.str() << c4_restart_log.str();
     printTimings(timing_records);
     printFarewell();
     return 0;
@@ -6558,6 +7108,7 @@ int main(int argc, char** argv) {
     // this section accordingly (moved here from right after "Total
     // ... energy" per explicit user feedback).
     std::cout << uccsd_nonrel_log.str();
+    std::cout << casscf_nonrel_log.str();
     std::cout << nonrel_functional_report;
     std::cout << nonrel_restart_log.str();
   }
@@ -6807,6 +7358,7 @@ int main(int argc, char** argv) {
     // and its own gradient/Hessian diagnostics -- printed last within
     // this section accordingly, matching NON_REL/C4_DHF's own placement.
     std::cout << uccsd_x2c_log.str();
+    std::cout << casscf_x2c_log.str();
     std::cout << x2c_functional_report;
     std::cout << x2c_restart_log.str();
   }
@@ -6947,6 +7499,7 @@ int main(int argc, char** argv) {
     // this section accordingly (moved here from right after "Total
     // ... energy" per explicit user feedback).
     std::cout << uccsd_c4_log.str();
+    std::cout << casscf_c4_log.str();
     std::cout << dhf_functional_report;
     std::cout << c4_restart_log.str();
   }

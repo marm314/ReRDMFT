@@ -95,8 +95,11 @@ Matrix<std::complex<double>> RestartData::coefficientsComplex() const {
 
 void writeRestart(const std::string& path, const RestartData& data) {
   if (!hostIsLittleEndian()) throw std::runtime_error("writeRestart: big-endian hosts are not supported");
-  if (data.kind != "OCCUPATIONS" && data.kind != "GAMMAS" && data.kind != "PCCD") {
-    throw std::runtime_error("writeRestart: kind must be OCCUPATIONS, GAMMAS or PCCD");
+  if (data.kind != "OCCUPATIONS" && data.kind != "GAMMAS" && data.kind != "PCCD" && data.kind != "CASSCF") {
+    throw std::runtime_error("writeRestart: kind must be OCCUPATIONS, GAMMAS, PCCD or CASSCF");
+  }
+  if (data.kind == "CASSCF" && (data.cas_electrons <= 0 || data.cas_spinors <= 0 || data.cas_state.empty())) {
+    throw std::runtime_error("writeRestart: kind CASSCF without the active space or the CI vector");
   }
   if (data.occupations.empty()) throw std::runtime_error("writeRestart: no occupation numbers");
   if (data.kind == "GAMMAS" && data.gammas.empty()) {
@@ -135,6 +138,9 @@ void writeRestart(const std::string& path, const RestartData& data) {
   put<std::uint64_t>(out, data.cols);
   out.write(reinterpret_cast<const char*>(data.coefficients.data()),
             static_cast<std::streamsize>(data.coefficients.size() * sizeof(double)));
+  put<std::int64_t>(out, data.cas_electrons);
+  put<std::int64_t>(out, data.cas_spinors);
+  putVector(out, data.cas_state);
   out.flush();
   if (!out) throw std::runtime_error("writeRestart: error while writing " + path);
 }
@@ -148,7 +154,8 @@ RestartData readRestart(const std::string& path) {
   if (!in || std::memcmp(magic, kMagic, sizeof(kMagic)) != 0) {
     throw std::runtime_error("readRestart: " + path + " is not a RERDMFT restart file");
   }
-  if (get<std::uint32_t>(in) != kRestartVersion) {
+  const std::uint32_t version = get<std::uint32_t>(in);
+  if (version != kRestartVersion && version != 2) {
     throw std::runtime_error("readRestart: unsupported restart-file version");
   }
   if (get<std::uint32_t>(in) != kByteOrderMarker) {
@@ -181,6 +188,11 @@ RestartData readRestart(const std::string& path) {
   in.read(reinterpret_cast<char*>(d.coefficients.data()),
           static_cast<std::streamsize>(d.coefficients.size() * sizeof(double)));
   if (!in) throw std::runtime_error("readRestart: the file is truncated");
+  if (version >= 3) {
+    d.cas_electrons = get<std::int64_t>(in);
+    d.cas_spinors = get<std::int64_t>(in);
+    d.cas_state = getVector(in);
+  }
   return d;
 }
 

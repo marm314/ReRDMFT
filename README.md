@@ -70,6 +70,22 @@ Case-insensitive, one per line, optional `=` (`DEBUG TRUE` = `DEBUG=TRUE`);
 | `FUNCTIONAL_POS_CHO_4C` | bool | `TRUE` for `C4_SPINOR` + `FUNCTIONAL` | With `CHOLESKY`: build the positive-energy MO Cholesky vectors in one fused pass (only acts when the full AO vector set is not otherwise built). |
 | `FUNCTIONAL_DIRECT_4C` | bool | `FALSE` | `C4_SPINOR` + `FULL_OPTIMIZATION`: ADAM builds its Fock matrix directly from UKB AO integrals (see below). |
 
+### CASSCF
+
+| Keyword | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `CASSCF` | bool | `FALSE` | CAS-SCF (`src/MCSCF`) after `NON_REL`/`X2C`/`C4_SPINOR`: determinant CI, ADAM orbital rotations; 4C uses positive-energy spinors only. |
+| `CASCI` | bool | `FALSE` | With `CASSCF`: only the first CI solve, orbitals fixed. |
+| `CASSCF_RDM` | bool | `FALSE` | Write the CASSCF 1-/2-RDM: `cas_<input>_<level>_MO.*` and `_GAU.*` (formats of `CC_RDM`). |
+| `CASSCF_RDM_THRESHOLD`, `_GAUSSIAN`, `_MAXMEM`, `_CNORM1` | mixed | `1e-10`, `TRUE`, `4`, `FALSE` | As the `CC_RDM_*` settings. |
+| `CASSCF_ELECTRONS` | int | required | Active electrons (even); the core is the lowest `NELEC - CASSCF_ELECTRONS` spinors. |
+| `CASSCF_SPINORS` | int | required | Active spinors (even, at most 64), the next in energy order. |
+| `CASSCF_INIT` | string | `SCF` | Starting orbitals: `SCF` or `CORE` (one-electron Hamiltonian eigenvectors). |
+| `CASSCF_CI_START` | string | `SYMMETRIC` | CI start: closed-shell determinant (even S only) or `LOWEST` diagonal. |
+| `CASSCF_CI_TIME_REVERSAL` | bool | `TRUE` (`X2C`/`C4_SPINOR`) | Keep the CI time-reversal even (equal Kramers-pair occupations). |
+| `CASSCF_CI_STAGNATION` | bool | `FALSE` | Accept a CI that stagnates in a near-degenerate cluster. |
+| `CASSCF_CI_KEEP` | int | `4` | Ritz vectors kept at a Davidson restart. |
+
 ### UCCSD
 
 | Keyword | Type | Default | Meaning |
@@ -105,9 +121,11 @@ Case-insensitive, one per line, optional `=` (`DEBUG TRUE` = `DEBUG=TRUE`);
 | `PCCD_AMPLITUDE_GUESS` | string | `ZERO` | pCCD starting t without restart amplitudes: `ZERO`, `MP2` (uncoupled first-order) or `PNOF` (from the occupations of a PNOF `READ_RESTART`). |
 | `PCCD_DEBUG` | bool | `FALSE` | Print per-macro-iteration amplitude-solve diagnostics to the live file. |
 | `READ_OCCUPANCIES` | bool | `FALSE` | Read starting occupations from `OCC.in`; for pCCD they set the starting t, z (see *pCCD functional*). |
-| `READ_RESTART` | bool | `FALSE` | Skip the SCF and start from `RESTART.*` (see *Restart*). |
-| `FCIDUMP` | bool | `FALSE` | `NON_RELATIVISTIC` + `FUNCTIONAL`: write an `FCIDUMP` of the MO integrals. |
-| `AIMPAC` | bool | `FALSE` | Write AIMPAC `.wfn` files: `hf_<input>_<level>.wfn` (always the SCF density), `<input>.wfn` (functional natural orbitals), `cc_<input>_<level>.wfn` (UCCSD, with `CC_RDM`), and `core_<input>_<level>.wfn` (core-Hamiltonian state, with `FUNCTIONAL_INIT CORE`). |
+| `READ_RESTART` | bool | `FALSE` | Skip the SCF and start from `RESTART.*` (see *Restart*); with `FUNCTIONAL` or `CASSCF`. |
+| `FCIDUMP` | bool | `FALSE` | `NON_RELATIVISTIC` + `FUNCTIONAL` or `CASSCF`: write an `FCIDUMP` of the MO integrals in the final orbitals. |
+| `FUNCTIONAL_RDM` | bool | `FALSE` | Write the functional's 1-/2-RDM: `<functional>_<input>_<level>_MO.*` and `_GAU.*`; the 2-RDM is not antisymmetric, all nonzero elements are stored. |
+| `FUNCTIONAL_RDM_THRESHOLD`, `_GAUSSIAN`, `_MAXMEM`, `_CNORM1` | mixed | `1e-10`, `TRUE`, `4`, `FALSE` | As the `CC_RDM_*` settings. |
+| `AIMPAC` | bool | `FALSE` | Write `.wfn` files named `<kind>_<input>_<level>.wfn`, kind = `hf`, `core`, `cas`, `uccsd` or the functional (lower case); `_neg` for the 4C min-max stage. |
 
 ### Orbital optimization
 
@@ -141,8 +159,15 @@ Case-insensitive, one per line, optional `=` (`DEBUG TRUE` = `DEBUG=TRUE`);
 | `USE_RI` + explicit `SCF_DIRECT_4C` or `FUNCTIONAL_DIRECT_4C` | Mutually exclusive kernels. |
 | `CC_RDM` without `UCCSD` | Built from the UCCSD amplitudes. |
 | `UCCSD` without an SCF method, or + `READ_RESTART` | Needs a fresh SCF reference. |
+| `CASSCF` without an SCF method, or + `FUNCTIONAL`/`UCCSD`/`FULL_OPTIMIZATION*` | Exclusive with the other post-SCF stages. |
+| `CASCI` / `CASSCF_*` / `*_RDM_*` settings without their switch | They modify `CASSCF`, `CASSCF_RDM` or `FUNCTIONAL_RDM`. |
+| `CASSCF_RDM`/`FUNCTIONAL_RDM` + `READ_RESTART` | RDM files come from the SCF-start runs only. |
+| `FUNCTIONAL_RDM` + `FULL_OPTIMIZATION_4C_NEG` | Not implemented for the min-max stage (only the minimum). |
+| `CASSCF_INIT CORE` + `READ_RESTART`/`DEBUG`/`HESSIAN_MEAN_FIELD` | The restart supplies the orbitals; the diagnostics validate HF orbitals. |
+| `CASSCF` without `CASSCF_ELECTRONS`/`CASSCF_SPINORS`, or an odd core | The active space must be defined; core electrons even. |
+| `CASSCF_CI_TIME_REVERSAL TRUE` with `NON_REL` only | Needs complex spinors. |
 | `FUNCTIONAL_INIT CORE` without `FUNCTIONAL`, or + `READ_RESTART`/`DEBUG`/`HESSIAN_MEAN_FIELD` | Needs a functional stage; the restart supplies the orbitals; the diagnostics validate HF orbitals. |
-| `FCIDUMP` without `NON_RELATIVISTIC` + `FUNCTIONAL` | NON_REL only. |
+| `FCIDUMP` without `NON_RELATIVISTIC` + (`FUNCTIONAL` or `CASSCF`) | NON_REL only; needs an optimized orbital order to write. |
 | `READ_OCCUPANCIES` without `FUNCTIONAL` | Nothing to read into. |
 | `FUNCTIONAL_DIRECT_4C` without `C4_SPINOR` + `FUNCTIONAL` + `FULL_OPTIMIZATION` | Replaces only that ADAM sub-loop. |
 | `FUNCTIONAL_DIRECT_4C` + `FULL_OPTIMIZATION_4C_NEG` or `NEO`/`ADAM_NEO` | No UKB-direct Hessian exists. |
@@ -293,7 +318,8 @@ A run with a `FUNCTIONAL` writes the final state to `RESTART.NON_REL`,
 check; `FULL_OPTIMIZATION` rewrites it every 10 macro-iterations, and the min-max
 result goes to `RESTART.4C_NEG` (write-only). It holds occupations, the frozen/
 active window, gamma angles (PNOF), t-/z-amplitudes (pCCD), the MO coefficients
-and metadata.
+and metadata. A `CASSCF` run writes the same files with the orbitals, the
+active space and the CI vector.
 
 `READ_RESTART TRUE` skips the SCF and starts from that file:
 
@@ -303,6 +329,8 @@ and metadata.
 4. `C4_SPINOR`: re-establish the positive-energy space with one Fock build.
 5. Occupations/amplitudes seed the occupation optimization; a file that does not
    fit the current `JK_*`/`PCCD_*` window is refused.
+6. `CASSCF`: the orbitals and, if the active space matches, the CI vector start
+   it. A CASSCF file cannot start a `FUNCTIONAL`.
 
 A geometry scan is a chain: run the first point, then change the geometry, add
 `READ_RESTART TRUE`, repeat (the new results overwrite `RESTART.*`; copy it per

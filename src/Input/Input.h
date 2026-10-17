@@ -153,6 +153,41 @@ class Input {
   // integral representation as the rest of the run (USE_RI by default, CHOLESKY, or dense unique elements).
   // For C4_SPINOR only the positive-energy spinors enter (no-pair).
   bool uccsd() const { return uccsd_; }
+  // Optional; defaults to false. CASSCF TRUE runs a complete-active-space SCF (src/MCSCF) right after the NON_REL / X2C /
+  // C4_SPINOR SCF, starting from its orbitals: a determinant CI over CASSCF_ELECTRONS electrons in the CASSCF_SPINORS spinors just
+  // above the (NELEC - CASSCF_ELECTRONS) lowest ones (energy order; 4C: positive-energy spinors only), with ADAM orbital rotations
+  // between the core, active and virtual classes and a CI re-solve each macro-iteration. Mutually exclusive with FUNCTIONAL and UCCSD.
+  bool casscf() const { return casscf_; }
+  // CASCI TRUE (with CASSCF TRUE): only the first CI solve, on the fixed SCF (or CASSCF_INIT CORE / restart) orbitals; no orbital optimization.
+  bool casci() const { return casci_; }
+  // CASSCF_RDM TRUE: write the CASSCF 1-/2-RDM files (molecular and Gaussian basis, same formats as CC_RDM).
+  // FUNCTIONAL_RDM TRUE: the same for a FUNCTIONAL's RDMFT 1-/2-RDM.
+  bool casscf_rdm() const { return casscf_rdm_; }
+  bool functional_rdm() const { return functional_rdm_; }
+  // Output settings of the two RDM writers (same meaning and defaults as CC_RDM_THRESHOLD/_GAUSSIAN/_MAXMEM/_CNORM1, which are UCCSD's).
+  double casscf_rdm_threshold() const { return casscf_rdm_threshold_; }
+  bool casscf_rdm_gaussian() const { return casscf_rdm_gaussian_; }
+  double casscf_rdm_maxmem() const { return casscf_rdm_maxmem_; }
+  bool casscf_rdm_cnorm1() const { return casscf_rdm_cnorm1_; }
+  double functional_rdm_threshold() const { return functional_rdm_threshold_; }
+  bool functional_rdm_gaussian() const { return functional_rdm_gaussian_; }
+  double functional_rdm_maxmem() const { return functional_rdm_maxmem_; }
+  bool functional_rdm_cnorm1() const { return functional_rdm_cnorm1_; }
+  int casscf_electrons() const { return casscf_electrons_; }  // active electrons (even)
+  // CI start vector: SYMMETRIC (closed-shell determinant, alpha/beta- or Kramers-pair-symmetric: even S only) or LOWEST (lowest
+  // diagonal determinant, Ms = 0 for NON_REL; reaches triplets but can break the spin/Kramers symmetry the rotations assume)
+  const std::string& casscf_ci_start() const { return casscf_ci_start_; }
+  // Time-reversal-even CI projection (X2C/C4_SPINOR). Unset: on for the spinor stages (the CI alone does not keep the Kramers pairs
+  // equal), off for NON_REL; an explicit value applies to the spinor stages (TRUE is an error with NON_REL alone).
+  bool casscf_ci_time_reversal_set() const { return casscf_ci_time_reversal_set_; }
+  bool casscf_ci_time_reversal() const { return casscf_ci_time_reversal_; }
+  bool casscf_ci_stagnation() const { return casscf_ci_stagnation_; }        // accept a CI that stagnates in a near-degenerate cluster
+  int casscf_ci_keep() const { return casscf_ci_keep_; }                      // Ritz vectors kept at a Davidson restart (1 = collapse)
+  const std::string& casscf_init() const { return casscf_init_; }  // SCF (default) or CORE: starting orbitals of the CASSCF
+  // True when the post-SCF stage (FUNCTIONAL via FUNCTIONAL_INIT, or CASSCF via CASSCF_INIT) starts from the core-Hamiltonian
+  // eigenvectors instead of the SCF orbitals.
+  bool core_start() const { return (functional_init_ == "CORE" && has_functional_) || (casscf_ && casscf_init_ == "CORE"); }
+  int casscf_spinors() const { return casscf_spinors_; }      // active spinors / spin-orbitals (even)
   // Optional; defaults to 0. Number of lowest occupied spinors (spin-orbitals) kept frozen in the UCCSD
   // (even; each Kramers/spin pair counts as two). Only meaningful with UCCSD TRUE.
   int cc_frozen_core() const { return cc_frozen_core_; }
@@ -652,6 +687,23 @@ class Input {
   bool aimpac_ = false;
   bool pccd_debug_ = false;
   bool uccsd_ = false;
+  bool casscf_ = false;
+  bool casci_ = false;
+  bool casscf_rdm_ = false;
+  bool functional_rdm_ = false;
+  double casscf_rdm_threshold_ = 1e-10, functional_rdm_threshold_ = 1e-10;
+  bool casscf_rdm_gaussian_ = true, functional_rdm_gaussian_ = true;
+  double casscf_rdm_maxmem_ = 4.0, functional_rdm_maxmem_ = 4.0;
+  bool casscf_rdm_cnorm1_ = false, functional_rdm_cnorm1_ = false;
+  bool casscf_rdm_options_set_ = false, functional_rdm_options_set_ = false;
+  int casscf_electrons_ = 0;
+  int casscf_spinors_ = 0;
+  std::string casscf_init_ = "SCF";
+  std::string casscf_ci_start_ = "SYMMETRIC";
+  bool casscf_ci_time_reversal_ = false;
+  bool casscf_ci_time_reversal_set_ = false;
+  bool casscf_ci_stagnation_ = false;
+  int casscf_ci_keep_ = 4;
   bool cc_rdm_ = false;
   double cc_rdm_threshold_ = 1e-10;
   bool cc_rdm_gaussian_ = true;

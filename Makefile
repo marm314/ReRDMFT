@@ -370,3 +370,20 @@ clean:
 	rm -rf $(BUILD_DIR) $(BIN) check_wfn $(GIT_VERSION_HEADER)
 # ($(BUILD_DIR) already holds the .d files alongside their .o's, so the
 # rm -rf above removes them too -- nothing extra needed here.)
+
+# Unit test of MCSCF/Casci.h: general spinor CASCI (real + complex) vs brute force, exact diagonalization, sum rules and PySCF.
+# Run from the repository root (reads tests/data/n2_cas66_1p1.txt). Run: make test_casci LIBCINT=...
+.PHONY: test_casci
+test_casci: $(BUILD_DIR)/test_casci
+	./$(BUILD_DIR)/test_casci
+
+$(BUILD_DIR)/test_casci: tests/test_casci.cpp $(BUILD_DIR)/Casci.o $(BUILD_DIR)/LinearAlgebra.o | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
+# Unit test of MCSCF/CasFock.h: CASSCF generalized Fock matrix + energy vs the dense GeneralizedFock oracle, all integral backends.
+.PHONY: test_casfock
+test_casfock: $(BUILD_DIR)/test_casfock
+	./$(BUILD_DIR)/test_casfock
+
+$(BUILD_DIR)/test_casfock: tests/test_casfock.cpp $(BUILD_DIR)/CasFock.o $(BUILD_DIR)/Casci.o $(BUILD_DIR)/GeneralizedFock.o $(BUILD_DIR)/OrbitalGradient.o $(BUILD_DIR)/IntegralRotation.o $(BUILD_DIR)/SpinorRotation.o $(BUILD_DIR)/ADAM.o $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o $(BUILD_DIR)/LinearAlgebra.o | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
