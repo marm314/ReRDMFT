@@ -91,7 +91,7 @@ Case-insensitive, one per line, optional `=` (`DEBUG TRUE` = `DEBUG=TRUE`);
 > (spin-orbitals): `CASSCF_SPINORS` is twice the usual m. `CASSCF_ELECTRONS 6` / `CASSCF_SPINORS 12` is the usual CAS(6,6);
 > `CASSCF_ELECTRONS 4` / `CASSCF_SPINORS 4` is a single determinant (Hartree-Fock), not CAS(4,4).
 
-Examples: `examples/casscf_lih.inp`, `casscf_lih_dissociated_core.inp`, `casscf_lih_casci.inp`, `casscf_lih_outputs.inp`, `casscf_lih_read_restart.inp`, `casscf_lih_c4_minmax.inp` (`CASSCF_4C_NEG`).
+Examples: `examples/casscf_lih.inp`, `casscf_lih_dissociated_core.inp`, `casscf_lih_casci.inp`, `casscf_lih_outputs.inp`, `casscf_lih_read_restart.inp`, `casscf_lih_c4_minmax.inp` (`CASSCF_4C_NEG`), `casscf_he_c4_minmax.inp` (same stage for He, checked against the exact two-electron pCCD of `he_pccd_c4_neg.inp`).
 
 ### UCCSD
 

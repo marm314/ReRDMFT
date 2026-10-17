@@ -1,0 +1,22 @@
+# Example ReRDMFT input file: He, cc-pVDZ, CASSCF over the full orbital space (2 electrons in 10 spinors) with the 4-component
+# min-max stage (CASSCF_4C_NEG), SPEED_OF_LIGHT 20.
+#
+# Validation: for two electrons pCCD is exact with optimized orbitals, so he_pccd_c4_neg.inp (a different implementation) gives
+# the same energies to 2e-10 Hartree. At SPEED_OF_LIGHT 20 the electron-positron relaxation is 8.6e-7 Hartree.
+#
+# Converged total energies:
+#   no-pair (positive-energy-only) CASSCF: -2.8933945888 Hartree
+#   min-max (including the negative-energy spinors): -2.8933937309 Hartree
+NELEC 2
+BASIS he-cc-pvdz.gbs
+C4_SPINOR TRUE
+CASSCF TRUE
+CASSCF_ELECTRONS 2
+CASSCF_SPINORS 10
+CASSCF_4C_NEG TRUE
+SPEED_OF_LIGHT 20
+USE_RI FALSE
+
+GEOMETRY
+He  0.000000   0.000000   0.000000
+END

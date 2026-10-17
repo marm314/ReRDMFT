@@ -1,0 +1,21 @@
+# Example ReRDMFT input file: He, cc-pVDZ, FUNCTIONAL PCCD, 4-component with the min-max stage, SPEED_OF_LIGHT 20.
+#
+# For two electrons pCCD (one electron pair) is exact once the orbitals are optimized, so this is the reference for
+# casscf_he_c4_minmax.inp (CASSCF over the full orbital space, an independent implementation): the two agree to 2e-10 Hartree.
+# SPEED_OF_LIGHT 20 makes the electron-positron relaxation visible (8.6e-7 Hartree; at the real c it is ~1e-10).
+#
+# Converged total energies:
+#   no-pair (positive-energy-only) minimum: -2.8933945876 Hartree
+#   min-max (including the negative-energy spinors): -2.8933937307 Hartree
+NELEC 2
+BASIS he-cc-pvdz.gbs
+C4_SPINOR TRUE
+FUNCTIONAL PCCD
+FULL_OPTIMIZATION TRUE
+FULL_OPTIMIZATION_4C_NEG TRUE
+SPEED_OF_LIGHT 20
+USE_RI FALSE
+
+GEOMETRY
+He  0.000000   0.000000   0.000000
+END
