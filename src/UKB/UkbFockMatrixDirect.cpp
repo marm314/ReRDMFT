@@ -217,7 +217,8 @@ Matrix<C> ukbFockTwoElectronDirect(const std::vector<BasisFunction>& large_basis
           km_part[static_cast<std::size_t>(t)][static_cast<std::size_t>(f)][static_cast<std::size_t>(u)] =
               Matrix<C>(fsize[static_cast<std::size_t>(f)], fsize[static_cast<std::size_t>(u)], C{});
 
-#pragma omp parallel for schedule(dynamic)
+// Per-thread buffers: schedule(static, 1) fixes which thread gets which iteration, so the per-thread sums (merged in thread order) are bit-identical from run to run.
+#pragma omp parallel for schedule(static, 1)
     for (std::size_t a = 0; a < nl; ++a) {
       const int tid = omp_get_thread_num();
       Matrix<C>& jm_large_t = jm_large_part[static_cast<std::size_t>(tid)];
@@ -288,7 +289,8 @@ Matrix<C> ukbFockTwoElectronDirect(const std::vector<BasisFunction>& large_basis
       for (int f = 0; f < 2; ++f)
         for (int u = 0; u < 2; ++u) km_part[static_cast<std::size_t>(t)][static_cast<std::size_t>(f)][static_cast<std::size_t>(u)] = Matrix<C>(ns, ns, C{});
 
-#pragma omp parallel for schedule(dynamic)
+// Per-thread buffers: schedule(static, 1) fixes which thread gets which iteration, so the per-thread sums (merged in thread order) are bit-identical from run to run.
+#pragma omp parallel for schedule(static, 1)
     for (std::size_t a = 0; a < ns; ++a) {
       const int tid = omp_get_thread_num();
       Matrix<C>& jm_small_t = jm_small_part[static_cast<std::size_t>(tid)];

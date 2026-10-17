@@ -3,6 +3,7 @@
 #include <cblas.h>
 #include <omp.h>
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <vector>
@@ -67,14 +68,17 @@ Matrix<double> nonRelFockMatrix(const Matrix<double>& h_core, const RiNonRelEriS
   for (std::size_t i = 0; i < n_occ; ++i)
     for (std::size_t q = 0; q < nl; ++q) c_t(i, q) = std::sqrt(2.0) * c_occ(q, i);
 
-  const int n_threads = omp_get_max_threads();
-  std::vector<Matrix<double>> k_part(static_cast<std::size_t>(n_threads));
-  for (int t = 0; t < n_threads; ++t) k_part[static_cast<std::size_t>(t)] = Matrix<double>(nl, nl, 0.0);
+  // Deterministic reduction: a STATIC schedule hands every thread the same fixed block of auxiliary functions in every run, and the per-thread
+  // buffers are summed in thread order -- the Fock matrix is bit-identical from run to run for a given thread count (a dynamic schedule is not:
+  // which auxiliary functions a thread gets, and so the summation order, changes with the timing). Memory: one buffer per thread.
+  const int n_parts = omp_get_max_threads();
+  std::vector<Matrix<double>> k_part(static_cast<std::size_t>(n_parts));
+  for (int t = 0; t < n_parts; ++t) k_part[static_cast<std::size_t>(t)] = Matrix<double>(nl, nl, 0.0);
 
-#pragma omp parallel for schedule(dynamic)
+#pragma omp parallel for schedule(static)
   for (std::size_t p = 0; p < n_aux; ++p) {
     if (n_occ == 0) continue;
-    const int tid = omp_get_thread_num();
+    const std::size_t tid = static_cast<std::size_t>(omp_get_thread_num());
     const double* slice = eri.eri3_L.data() + p * nl * nl;
     Matrix<double> tmp(n_occ, nl, 0.0);
     cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, static_cast<int>(n_occ), static_cast<int>(nl),
@@ -86,7 +90,7 @@ Matrix<double> nonRelFockMatrix(const Matrix<double>& h_core, const RiNonRelEriS
                 k_part[static_cast<std::size_t>(tid)].data(), static_cast<int>(nl));
   }
   Matrix<double> k(nl, nl, 0.0);
-  for (int t = 0; t < n_threads; ++t)
+  for (int t = 0; t < n_parts; ++t)
     for (std::size_t i = 0; i < nl * nl; ++i) k.data()[i] += k_part[static_cast<std::size_t>(t)].data()[i];
 
   Matrix<double> fock(nl, nl);

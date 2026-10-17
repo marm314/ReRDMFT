@@ -1,10 +1,12 @@
 #include "NonRelHartreeFock.h"
+#include "DetHash.h"
 #include "Progress.h"
 
 #include <iomanip>
 #include <cmath>
 #include <cstddef>
 #include <stdexcept>
+#include <string>
 
 #include "DIIS.h"
 #include "ElectronRepulsion.h"
@@ -128,6 +130,7 @@ NonRelHartreeFockResult nonRelScfImpl(
 
   for (int iteration = 1; iteration <= max_iterations; ++iteration) {
     const Matrix<double> fock = nonRelFockMatrix(h_core, eri, p_current);
+    detHashMatrix(("SCF iter " + std::to_string(iteration) + " fock").c_str(), fock);
     // DIIS: extrapolate F (the first iteration has a single pair and returns F unchanged).
     const Matrix<double> fock_scf =
         use_diis ? diis.extrapolate(scfCommutatorError(fock, p_current, overlap), fock) : fock;
@@ -139,6 +142,7 @@ NonRelHartreeFockResult nonRelScfImpl(
     const SymmetricEigenResult eig = diagonalizeSymmetric(fock_ortho);
     const Matrix<double> c_matrix = x_large * eig.eigenvectors;
     const Matrix<double> p_new = nonRelDensityMatrix(c_matrix, n_electrons);
+    detHashMatrix(("SCF iter " + std::to_string(iteration) + " c_matrix").c_str(), c_matrix);
 
     // Self-consistent-pair energy: evaluated with the SAME density that
     // built this Fock matrix, not the (not yet computed) mixed one.

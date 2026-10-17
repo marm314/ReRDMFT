@@ -63,6 +63,7 @@
 #include "OrbitalGradient.h"
 #include "OrbitalRotationFiniteDifference.h"
 #include "PNOFs.h"
+#include "DetHash.h"
 #include "OutputFormat.h"
 #include "Progress.h"
 #include "PnofFock.h"
@@ -4450,6 +4451,8 @@ int main(int argc, char** argv) {
     // X2C/C4_SPINOR's own small-component LOWGEN already uses.
     rerdmft::RankReductionReport nonrel_lowdin_report;
     x_large_cart = rerdmft::canonicalOrthogonalize(s_large_cart, input.x_lin_dep_thrs_l(), &nonrel_lowdin_report);
+    rerdmft::detHashMatrix("S_large", s_large_cart);
+    rerdmft::detHashMatrix("X_large", x_large_cart);
     if (nonrel_lowdin_report.n_dropped > 0) {
       std::cout << "  Note: NON_REL large-component LOWGEN safety net (X_LIN_DEP_THRS_L = "
                 << input.x_lin_dep_thrs_l() << ") dropped " << nonrel_lowdin_report.n_dropped
@@ -5214,6 +5217,10 @@ int main(int argc, char** argv) {
       // works if x_large_cart comes back rectangular from the LOWGEN safety net below.
       h_core_nonrel_ortho = rerdmft::transpose(x_large_cart) * (h_core_nonrel * x_large_cart);
       h_core_nonrel_eig = rerdmft::diagonalizeSymmetric(h_core_nonrel_ortho);
+      rerdmft::detHashMatrix("kinetic", schrodinger_kinetic);
+      rerdmft::detHashMatrix("vext", vext_large);
+      rerdmft::detHashMatrix("h_core_ortho", h_core_nonrel_ortho);
+      rerdmft::detHashMatrix("h_core_eigvec", h_core_nonrel_eig.eigenvectors);
 
       const auto nonrel_c_initial = x_large_cart * h_core_nonrel_eig.eigenvectors;
       const auto nonrel_density_initial =
@@ -5229,6 +5236,8 @@ int main(int argc, char** argv) {
                                              cache.eri3_cart, large_basis.functions().size(), nonrel_transform);
         ri_nonrel_source.x_large = x_large_cart;
         ri_nonrel_source.overlap = s_large_cart;
+        rerdmft::detHashMatrix("eri3_cart (LL|Q) raw", cache.eri3_cart);
+        rerdmft::detHashMatrix("eri3_L (LL|Q) metric-contracted", ri_nonrel_source.eri3_L);
       }
       const auto run_nonrel_scf = [&](const auto& eri_source) {
         return rerdmft::runNonRelativisticHartreeFock(
@@ -5313,6 +5322,8 @@ int main(int argc, char** argv) {
       rerdmft::RiNonRelSpinMoEri ri_nonrel_mo_eri;
       if (input.use_ri()) {
         ri_nonrel_mo_eri = rerdmft::buildRiNonRelSpinMoEri(ri_nonrel_source.eri3_L, n_spatial, nonrel_c_start);
+        rerdmft::detHashMatrix("nonrel_c_start (SCF orbitals)", nonrel_c_start);
+        rerdmft::detHashMatrix("MO RI tensor B", ri_nonrel_mo_eri.b());
       }
       rerdmft::Tensor4<double> eri_spin;
       if (nonrel_dense) eri_spin = rerdmft::denseOf(eri_spin_sym);

@@ -104,17 +104,20 @@ Matrix<C> riFockTwoElectronDirect(std::size_t nl, std::size_t ns, const Matrix<d
   const std::vector<std::pair<int, int>> unique_pairs = {{0, 0}, {1, 1}, {2, 2}, {3, 3}, {0, 1},
                                                            {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}};
 
-  const int n_threads = omp_get_max_threads();
-  std::vector<std::array<std::array<Matrix<C>, 4>, 4>> km_part(static_cast<std::size_t>(n_threads));
-  for (int t = 0; t < n_threads; ++t)
+  // Deterministic reduction: a STATIC schedule hands every thread the same fixed block of auxiliary functions in every run, and the per-thread
+  // buffers are summed in thread order -- the Fock matrix is bit-identical from run to run for a given thread count (a dynamic schedule is not:
+  // which auxiliary functions a thread gets, and so the summation order, changes with the timing). Memory: one buffer per thread.
+  const int n_parts = omp_get_max_threads();
+  std::vector<std::array<std::array<Matrix<C>, 4>, 4>> km_part(static_cast<std::size_t>(n_parts));
+  for (int t = 0; t < n_parts; ++t)
     for (const auto& fu : unique_pairs) {
       km_part[static_cast<std::size_t>(t)][static_cast<std::size_t>(fu.first)][static_cast<std::size_t>(fu.second)] =
           Matrix<C>(fsize[static_cast<std::size_t>(fu.first)], fsize[static_cast<std::size_t>(fu.second)], C{});
     }
 
-#pragma omp parallel for schedule(dynamic)
+#pragma omp parallel for schedule(static)
   for (std::size_t p = 0; p < n_aux; ++p) {
-    const int tid = omp_get_thread_num();
+    const std::size_t tid = static_cast<std::size_t>(omp_get_thread_num());
     auto& km_t = km_part[static_cast<std::size_t>(tid)];
 
     const double* slice[4] = {eri3_LL.data() + p * nl * nl, eri3_LL.data() + p * nl * nl,
@@ -152,7 +155,7 @@ Matrix<C> riFockTwoElectronDirect(std::size_t nl, std::size_t ns, const Matrix<d
   for (const auto& fu : unique_pairs) {
     const std::size_t f = static_cast<std::size_t>(fu.first), u = static_cast<std::size_t>(fu.second);
     km[f][u] = Matrix<C>(fsize[f], fsize[u], C{});
-    for (int t = 0; t < n_threads; ++t) addInto(km[f][u], km_part[static_cast<std::size_t>(t)][f][u]);
+    for (int t = 0; t < n_parts; ++t) addInto(km[f][u], km_part[static_cast<std::size_t>(t)][f][u]);
     if (f != u) km[u][f] = dagger(km[f][u]);
   }
 

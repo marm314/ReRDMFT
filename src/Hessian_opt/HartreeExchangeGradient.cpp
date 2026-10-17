@@ -160,20 +160,26 @@ double hartreeExchangeEnergy(const Matrix<T>& h, const Eri& eri,
     energy += occupations[p] * std::real(h(p, p));
   }
 
-  double two_electron = 0.0;
-  double pair_energy = 0.0;
-#pragma omp parallel for collapse(2) reduction(+ : two_electron, pair_energy)
+  // Terms are stored per (p,q) and added serially in index order: an OpenMP reduction(+) combines the per-thread partial sums in an
+  // unspecified, run-dependent order, so the last bits of the energy would change from run to run.
+  std::vector<double> terms_h(n * n), terms_l(n * n, 0.0);
+#pragma omp parallel for collapse(2)
   for (std::size_t p = 0; p < n; ++p) {
     for (std::size_t q = 0; q < n; ++q) {
-      two_electron +=
+      terms_h[p * n + q] =
           std::real(eri(p, q, p, q)) * two_rdm_h(p, q) - std::real(eri(p, q, q, p)) * two_rdm_x(p, q);
       if (have_l) {
         const std::size_t pbar = pair_of[p];
         const std::size_t qbar = pair_of[q];
-        pair_energy += std::real(eri(p, pbar, q, qbar)) * two_rdm_l1(p, q) +
-                       std::real(eri(p, pbar, qbar, q)) * two_rdm_l2(p, q);
+        terms_l[p * n + q] = std::real(eri(p, pbar, q, qbar)) * two_rdm_l1(p, q) +
+                             std::real(eri(p, pbar, qbar, q)) * two_rdm_l2(p, q);
       }
     }
+  }
+  double two_electron = 0.0, pair_energy = 0.0;
+  for (std::size_t i = 0; i < n * n; ++i) {
+    two_electron += terms_h[i];
+    pair_energy += terms_l[i];
   }
   energy += 0.5 * two_electron + pair_energy;
   return energy;

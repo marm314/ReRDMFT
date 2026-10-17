@@ -5,6 +5,8 @@
 #include "RiMoEri.h"
 #include "SymmetricEri.h"
 
+#include <omp.h>
+
 #include <complex>
 #include <cstddef>
 #include <stdexcept>
@@ -576,10 +578,13 @@ std::vector<double> hartreeExchangeJointHessianVector(
   const C im(0.0, 1.0);
   // Same (I,J), I<=J block values as hartreeExchangeSymmetricJointHessianMatrix, but contracted
   // with v and accumulated into w on the spot instead of stored -- see the header comment.
+  // Each thread fills its own w_local (static, round-robin schedule: the iterations of a thread are the same in every run); the per-thread
+  // vectors are summed in thread order after the region -- no `omp critical` merge in arrival order, so w is bit-identical from run to run.
+  std::vector<std::vector<double>> w_parts(static_cast<std::size_t>(omp_get_max_threads()));
 #pragma omp parallel
   {
     std::vector<double> w_local(2 * n_pairs, 0.0);
-#pragma omp for schedule(dynamic)
+#pragma omp for schedule(static, 1)
     for (std::size_t big_i = 0; big_i < n_pairs; ++big_i) {
       for (std::size_t big_j = big_i; big_j < n_pairs; ++big_j) {
         const auto& [p, q] = pair_indices[big_i];
@@ -615,9 +620,10 @@ std::vector<double> hartreeExchangeJointHessianVector(
         }
       }
     }
-#pragma omp critical
-    for (std::size_t k = 0; k < w.size(); ++k) w[k] += w_local[k];
+    w_parts[static_cast<std::size_t>(omp_get_thread_num())] = std::move(w_local);
   }
+  for (const auto& part : w_parts)
+    for (std::size_t k = 0; k < part.size(); ++k) w[k] += part[k];
   return w;
 }
 

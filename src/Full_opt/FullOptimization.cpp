@@ -15,6 +15,7 @@
 #include <type_traits>
 
 #include "ADAM.h"
+#include "DetHash.h"
 #include "OutputFormat.h"
 #include "CholeskyEri.h"
 #include "HartreeExchangeGradient.h"
@@ -1405,6 +1406,14 @@ class RotationProblem : public AdamProblem<T> {
     return rawGradient();
   }
   std::vector<T> rawGradient() {
+    std::vector<T> g = rawGradientImpl();
+    if (detProbeEnabled()) {
+      static int calls = 0;
+      detHash(("ADAM gradient " + std::to_string(calls++)).c_str(), g.data(), g.size() * sizeof(T));
+    }
+    return g;
+  }
+  std::vector<T> rawGradientImpl() {
     std::vector<T> g;
     if (ukbDirect()) {
       ukbEnsureBuilt();
@@ -1421,6 +1430,10 @@ class RotationProblem : public AdamProblem<T> {
     return g;
   }
   void rotate(const std::vector<T>& step) override {
+    if (detProbeEnabled()) {
+      static int calls = 0;
+      detHash(("ADAM step " + std::to_string(calls++)).c_str(), step.data(), step.size() * sizeof(T));
+    }
     if (saddle_active_) {
       std::vector<T> kappa = step;
       for (std::size_t i = 0; i < kappa.size(); ++i)
@@ -1439,6 +1452,11 @@ class RotationProblem : public AdamProblem<T> {
     h_t_ = oneElectronRotated(h_t_, u);
     u_t_ = u_t_ * u;
     saddle_g_.reset();
+    if (detProbeEnabled()) {
+      static int calls = 0;
+      detHashMatrix(("ADAM rotation u " + std::to_string(calls) + " / h after " + std::to_string(calls)).c_str(), h_t_);
+      ++calls;
+    }
     if (ukbDirect()) {
       // eri_t_ is NOT rotated here -- nothing reads it until syncIntegrals() is called (right
       // after this ADAM run finishes, by runFullOptimization), which is the entire point: the

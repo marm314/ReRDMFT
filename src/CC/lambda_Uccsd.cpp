@@ -1,5 +1,7 @@
 #include "lambda_Uccsd.h"
 
+#include <omp.h>
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -653,13 +655,22 @@ CcRdmResult runUccsdRdm(const Matrix<CcScalar>& h_mo, const CcIntegrals& ints, c
     if (cls[p] == 0) buildDvvvvSlab(loc[p]);
     std::vector<Rec> recs;
     cplx e2_local{};
-#pragma omp parallel
-    {
+    // Per-thread results with a STATIC schedule, merged in thread order after the region (an `omp critical` merge in arrival order would
+    // change the record order of the density-matrix file and the last bits of the energy sums from run to run).
+    struct Part {
       std::vector<Rec> mine;
       cplx e2_mine{};
       cplx cat_mine[3][3] = {};
       double tr2_mine = 0.0;
-#pragma omp for schedule(dynamic, 4) nowait
+    };
+    std::vector<Part> parts(static_cast<std::size_t>(omp_get_max_threads()));
+#pragma omp parallel
+    {
+      std::vector<Rec>& mine = parts[static_cast<std::size_t>(omp_get_thread_num())].mine;
+      cplx& e2_mine = parts[static_cast<std::size_t>(omp_get_thread_num())].e2_mine;
+      auto& cat_mine = parts[static_cast<std::size_t>(omp_get_thread_num())].cat_mine;
+      double& tr2_mine = parts[static_cast<std::size_t>(omp_get_thread_num())].tr2_mine;
+#pragma omp for schedule(static, 4) nowait
       for (std::ptrdiff_t qq = static_cast<std::ptrdiff_t>(p) + 1; qq < static_cast<std::ptrdiff_t>(n_out); ++qq) {
         const std::size_t q = static_cast<std::size_t>(qq);
         for (std::size_t r = 0; r < n_out; ++r)
@@ -677,14 +688,13 @@ CcRdmResult runUccsdRdm(const Matrix<CcScalar>& h_mo, const CcIntegrals& ints, c
             cat_mine[(cls[p] != 0) + (cls[q] != 0)][(cls[r] != 0) + (cls[s] != 0)] += anti * val;
           }
       }
-#pragma omp critical
-      {
-        recs.insert(recs.end(), mine.begin(), mine.end());
-        e2_local += e2_mine;
-        tr2 += tr2_mine;
-        for (int a = 0; a < 3; ++a)
-          for (int b = 0; b < 3; ++b) e2cat[a][b] += cat_mine[a][b];
-      }
+    }
+    for (const Part& pt : parts) {
+      recs.insert(recs.end(), pt.mine.begin(), pt.mine.end());
+      e2_local += pt.e2_mine;
+      tr2 += pt.tr2_mine;
+      for (int a = 0; a < 3; ++a)
+        for (int b = 0; b < 3; ++b) e2cat[a][b] += pt.cat_mine[a][b];
     }
     for (const Rec& rc : recs) w2.put(rc.idx, 4, rc.re, rc.im);
     result.n_dm2 += recs.size();

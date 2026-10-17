@@ -141,14 +141,18 @@ double jkOnlyEnergy(const Matrix<T>& h, const Eri& eri,
     energy += occupations[p] * std::real(h(p, p));
   }
 
-  double two_electron = 0.0;
-#pragma omp parallel for collapse(2) reduction(+ : two_electron)
+  // Terms are stored per (p,q) and added serially in index order: an OpenMP reduction(+) combines the per-thread partial sums in an
+  // unspecified, run-dependent order, so the last bits of the energy would change from run to run.
+  std::vector<double> terms(n * n);
+#pragma omp parallel for collapse(2)
   for (std::size_t p = 0; p < n; ++p) {
     for (std::size_t q = 0; q < n; ++q) {
-      two_electron += std::real(eri(p, q, p, q)) * two_rdm_h(p, q) -
-                      std::real(eri(p, q, q, p)) * two_rdm_x(p, q);
+      terms[p * n + q] = std::real(eri(p, q, p, q)) * two_rdm_h(p, q) -
+                         std::real(eri(p, q, q, p)) * two_rdm_x(p, q);
     }
   }
+  double two_electron = 0.0;
+  for (const double t : terms) two_electron += t;
   energy += 0.5 * two_electron;
   return energy;
 }
