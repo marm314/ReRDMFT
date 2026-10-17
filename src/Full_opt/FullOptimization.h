@@ -67,6 +67,9 @@ struct FullOptSettings {
   // current state (occupations, occupation state, accumulated rotation, energy) to `checkpoint`, if set; the caller writes the RESTART file.
   int checkpoint_interval = 10;
   std::function<void(const FullOptResult&)> checkpoint;
+  // Functionals: printed right after the h-onebody / Vee / N-N block of the final energy (the trace of the 2-RDM against N(N-1)/2).
+  // It receives the occupations of the FULL orbital space (the no-pair trimming is undone before the call) and the occupation state (pCCD t, z).
+  std::function<void(const std::vector<double>&, const std::vector<double>&, std::ostream&)> print_two_rdm_trace;  // (occupations, occupation state, log)
   int max_macro_iterations = 1000;
   double energy_tolerance = 1e-9;     // tolE of the Fortran
   double gradient_tolerance = 1e-5;   // 10**-itolLambda of the Fortran
@@ -218,6 +221,8 @@ struct RdmftModel {
   // Prints a full occupation vector in the SAME format main.cpp uses right after the
   // first occupation optimization (JK_only: index/occupation table, two Kramers columns
   // for X2C; PNOF: one line per geminal, core frozen at 1). Called after the macro loop.
+  // One-electron energy of the final state when it is not sum_p n_p h_pp (CASSCF: the active 1-RDM is not diagonal); returns false if unavailable.
+  std::function<bool(double&)> one_body_energy;
   std::function<void(const std::vector<double>&, std::ostream&)> print_occupations;
   // Orbital-rotation Hessian-VECTOR product w = H v at fixed occupations, over the SAME pair list
   // `hessianPairIndices(h.rows())` jointOrbitalGradient/the joint Hessian builders use --

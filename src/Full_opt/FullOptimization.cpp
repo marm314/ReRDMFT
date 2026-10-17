@@ -12,6 +12,7 @@
 #include <type_traits>
 
 #include "ADAM.h"
+#include "OutputFormat.h"
 #include "CholeskyEri.h"
 #include "HartreeExchangeGradient.h"
 #include "HartreeExchangeHessian.h"
@@ -2899,12 +2900,22 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
 
   log << "  " << (result.converged ? "CONVERGED" : "NOT converged") << " after " << result.iterations
       << " macro-iteration(s).\n";
-  log << "    Final total energy: " << std::setprecision(10) << e_elec + nuclear_repulsion_energy << std::setprecision(6)
-      << " Hartree (" << std::scientific << std::setprecision(3) << e_elec - e_start << std::defaultfloat
-      << std::setprecision(6) << " Hartree relative to the occupation-only optimum)\n";
+  printEnergyLine(log, 4, "Final total energy", e_elec + nuclear_repulsion_energy);
+  printScientificLine(log, 4, "Change from occupation-only opt.", e_elec - e_start, " Hartree");
   if (model.print_occupations) {
     log << "  Occupation numbers after the macro-iteration loop:\n";
     model.print_occupations(occ, log);
+  }
+  {
+    // h-onebody = sum_p n_p h_pp in the final (rotated) orbitals unless the model has its own, Vee = E - h-onebody, then the 2-RDM trace check
+    double h_onebody = 0.0;
+    if (!(model.one_body_energy && model.one_body_energy(h_onebody))) {
+      h_onebody = 0.0;
+      for (std::size_t p = 0; p < occ.size() && p < problem.h().rows(); ++p) h_onebody += occ[p] * std::real(std::complex<double>(problem.h()(p, p)));
+    }
+    log << "  Energy components of the final energy:\n";
+    printEnergyComponents(log, 4, h_onebody, e_elec - h_onebody, nuclear_repulsion_energy);
+    if (settings.print_two_rdm_trace) settings.print_two_rdm_trace(occ, occ_state, log);
   }
   if (n_occ_unconverged > 0) {
     log << "    Note: the occupation optimizer reported no convergence in " << n_occ_unconverged
@@ -3169,6 +3180,14 @@ FullOptSettings withRoundoffScale(FullOptSettings s, const Matrix<T>& h, std::si
   if (s.checkpoint) {
     s.checkpoint = [inner = s.checkpoint, n_negative, n_full = h.rows()](const FullOptResult& r) {
       inner(embedTrimmedResult(r, n_negative, n_full));
+    };
+  }
+  if (s.print_two_rdm_trace) {  // the trimmed loop's occupations lack the negative-energy block: pad them
+    s.print_two_rdm_trace = [inner = s.print_two_rdm_trace, n_negative](const std::vector<double>& occ, const std::vector<double>& state,
+                                                                        std::ostream& out) {
+      std::vector<double> full(n_negative, 0.0);
+      full.insert(full.end(), occ.begin(), occ.end());
+      inner(full, state, out);
     };
   }
   for (std::size_t p = 0; p < h.rows(); ++p)
@@ -3842,17 +3861,17 @@ FullOptResult runFullOptimizationCas(const Matrix<T>& h, const Eri& eri, const s
     r.occupation_state = state;
     r.electronic_energy = model.energy(h, eri, warm_up.occupations);
     log << "\n  CASCI: single CI solve on the fixed starting orbitals (no orbital optimization).\n"
-        << "\n  Final CASSCF energy components and active-space natural occupation numbers:\n";
+        << "\n  Active-space natural occupation numbers:\n";
     model.print_occupations(r.occupations, log);
+    double h_onebody = 0.0;
+    if (model.one_body_energy && model.one_body_energy(h_onebody)) {
+      log << "  Energy components of the final energy:\n";
+      printEnergyComponents(log, 4, h_onebody, r.electronic_energy - h_onebody, nuclear_repulsion_energy);
+    }
     return r;
   }
   FullOptResult result = runFullOptimization<T, Eri>(h, eri, warm_up.occupations, state, model, settings, kramers_restricted,
                                                      nuclear_repulsion_energy, log, spin_partner, /*n_negative=*/0);
-  if (result.checks_passed && model.print_occupations) {
-    // the final CASSCF state: electronic energy, h-onebody, Vee and the active-space natural occupations, right before the summary
-    log << "\n  Final CASSCF energy components and active-space natural occupation numbers:\n";
-    model.print_occupations(result.occupations, log);
-  }
   return result;
 }
 

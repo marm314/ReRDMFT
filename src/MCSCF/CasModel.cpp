@@ -9,6 +9,7 @@
 #include <stdexcept>
 
 #include "CasFock.h"
+#include "OutputFormat.h"
 #include "LinearAlgebra.h"
 #include "OrbitalGradient.h"
 #include "SymmetricEri.h"
@@ -170,26 +171,24 @@ RdmftModel<T, Eri> makeCasModel(std::vector<std::size_t> core, std::vector<std::
     return RdmftOccupationResult{occ, res.energy, res.converged, res.iterations, warning};
   };
 
+  model.one_body_energy = [=](double& h_onebody) {
+    if (!cache->valid || cache->h_key.rows() != n_total || cache->fock_version != cache->version) return false;
+    T h1{};
+    for (std::size_t i : core) h1 += cache->h_key(i, i);
+    for (std::size_t t = 0; t < a; ++t)
+      for (std::size_t u = 0; u < a; ++u) h1 += cache->h_key(active[t], active[u]) * cache->rdm1(t, u);
+    h_onebody = std::real(Cx(h1));
+    return true;
+  };
   model.print_occupations = [=](const std::vector<double>&, std::ostream& out) {
     if (!cache->valid) return;
     const Casci<T>& ci = *cache->ci;
     out << "    CASSCF (" << n_active_electrons << " electrons in " << a << " active spinors, " << core.size() << " core spinors): CI dimension "
-        << ci.dimension() << ", CI energy " << std::fixed << std::setprecision(10) << cache->ci_energy << " (electronic)\n";
-    if (cache->h_key.rows() == n_total && cache->fock_version == cache->version) {
-      // energy components at the last evaluated point: h-onebody = sum_core h_ii + sum_tu h(a_t,a_u) D_tu, Vee = E - h-onebody
-      T h1{};
-      for (std::size_t i : core) h1 += cache->h_key(i, i);
-      for (std::size_t t = 0; t < a; ++t)
-        for (std::size_t u = 0; u < a; ++u) h1 += cache->h_key(active[t], active[u]) * cache->rdm1(t, u);
-      const double h_onebody = std::real(Cx(h1));
-      out << "    Electronic energy:  " << std::setprecision(10) << cache->fock.energy << " Hartree\n";
-      out << "    h-onebody:          " << h_onebody << " Hartree\n";
-      out << "    Vee:                " << cache->fock.energy - h_onebody << " Hartree\n";
-    }
+        << ci.dimension() << "\n";
     out << "    Natural occupation numbers of the active space:\n";
-    out << std::setprecision(6);
+    out << std::fixed << std::setprecision(6);
     for (std::size_t k = 0; k < cache->natural.size(); ++k) {
-      out << "      " << std::setw(4) << k + 1 << "  " << cache->natural[k] << "\n";
+      out << "      " << std::setw(4) << k + 1 << "  " << std::setw(10) << cache->natural[k] << "\n";
     }
     // dominant determinants: bit t of the mask = occupation of active index active[t]
     std::vector<std::size_t> order(ci.dimension());
@@ -201,7 +200,7 @@ RdmftModel<T, Eri> makeCasModel(std::vector<std::size_t> core, std::vector<std::
     out << "    Leading determinants (weight, occupied active spinors by MO index):\n";
     for (std::size_t k = 0; k < top; ++k) {
       const std::size_t i = order[k];
-      out << "      " << std::setprecision(5) << std::norm(Cx(cache->ci_vector[i])) << "  [";
+      out << "      " << std::setprecision(5) << std::setw(9) << std::norm(Cx(cache->ci_vector[i])) << "  [";
       bool first = true;
       for (std::size_t t = 0; t < a; ++t)
         if ((ci.determinants()[i] >> t) & 1u) { out << (first ? "" : " ") << active[t]; first = false; }
