@@ -2724,15 +2724,23 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
       // (ADAM_NEO_MIN_ADAM_ITERATIONS) that finds nothing better reports dE ~ 0, which would end the run before NEO has
       // polished the point. The |dE| selector then hands the next macro-iteration to NEO, and only NEO can converge.
       const bool adam_defers_to_neo = neo_available && !saddle && !run_neo && settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo;
-      // ADAM min-max: the restart flag (merit did not improve) can alternate with gradient-converged runs forever while the energy no longer moves
-      // (the CI re-solve between runs keeps nudging the gradient above the tolerance). Three consecutive |dE| < tolerance iterations count as converged.
+      // A restart request (ADAM found nothing better than its starting point although the energy still moved inside the run) must not
+      // block convergence when the orbital gradient is already below its tolerance: the point is stationary and the energy unchanged.
+      // Without this, a run that ends 'restart gradient-converged' returns to the same point every macro-iteration and never stops
+      // (seen on casscf_lih: 1000 identical iterations, converged energy). A long run of unchanged energies also ends the loop
+      // (3 macro-iterations for the ADAM min-max, whose run merit alternates; 10 otherwise: the learning rate has shrunk by
+      // 0.2^10 by then, so no further progress is possible).
+      const bool orbital_restart = !run_neo && adam.restartRequested();
+      const bool restart_blocks = orbital_restart && !gradient_converged;
       small_dE_streak = std::abs(d_e) < settings.energy_tolerance ? small_dE_streak + 1 : 0;
-      const bool stalled_converged = saddle_adam && small_dE_streak >= 3;
-      if (stalled_converged && adam.restartRequested()) {
-        log << "    Energy unchanged (|dE| < " << settings.energy_tolerance << ") for 3 consecutive macro-iterations although ADAM keeps requesting restarts: converged on the energy (max|g| = "
+      const int stall_limit = saddle_adam ? 3 : 10;
+      const bool stalled_converged = !run_neo && !adam_defers_to_neo && small_dE_streak >= stall_limit;
+      if (stalled_converged && restart_blocks) {
+        log << "    Energy unchanged (|dE| < " << settings.energy_tolerance << ") for " << stall_limit
+            << " consecutive macro-iterations although ADAM keeps requesting restarts: converged on the energy (max|g| = "
             << std::scientific << std::setprecision(2) << max_gradient << std::defaultfloat << std::setprecision(6) << ").\n";
       }
-      if ((std::abs(d_e) < settings.energy_tolerance && !adam_defers_to_neo && !(run_neo ? false : adam.restartRequested())) || stalled_converged) {
+      if ((std::abs(d_e) < settings.energy_tolerance && !adam_defers_to_neo && !restart_blocks) || stalled_converged) {
         result.converged = true;
         break;
       }
