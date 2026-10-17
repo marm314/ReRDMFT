@@ -1395,7 +1395,7 @@ class RotationProblem : public AdamProblem<T> {
       std::vector<T> g = *saddle_g_;
       for (std::size_t i = 0; i < g.size(); ++i) {
         const double s = saddle_scale_[i];
-        g[i] = s > 0.0 ? -g[i] / std::sqrt(s) : g[i];
+        g[i] = s > 0.0 ? -g[i] / std::sqrt(s) : (s < 0.0 ? T(0.0) : g[i]);  // s < 0: frozen direction
       }
       return g;
     }
@@ -1422,6 +1422,7 @@ class RotationProblem : public AdamProblem<T> {
       std::vector<T> kappa = step;
       for (std::size_t i = 0; i < kappa.size(); ++i)
         if (saddle_scale_[i] > 0.0) kappa[i] = kappa[i] / std::sqrt(saddle_scale_[i]);
+        else if (saddle_scale_[i] < 0.0) kappa[i] = T(0.0);
       applyOrthogonal(spinorRotationMatrix(adamKappaMatrix(n_, pairs_, kappa)));
       return;
     }
@@ -1538,23 +1539,40 @@ class NeoOrbitalProblem : public NeoProblem<double> {
   std::size_t dimension() const override {
     return std::is_same_v<Scalar, double> ? problem_.pairs().size() : 2 * problem_.pairs().size();
   }
+  // Min-max stage guard (setEnergyFloor): the min-max energy lies slightly ABOVE the no-pair minimum, so a TRIAL point far below it is a
+  // variational collapse into the negative-energy sea (seen from a not fully converged no-pair start: a Newton step along a flat direction
+  // rotates occupied spinors into the negative-energy ones and the energy runs away to -1e4 Ha). trialEnergy() reports such a point as a very
+  // high energy, so the trust region rejects the step and shrinks (guarding energy() instead is wrong: by then the step has been accepted).
+  void setEnergyFloor(double floor) { energy_floor_ = floor; }
   double energy() override { return model_.energy(problem_.h(), problem_.eri(), occ_); }
+  int floorRejections() const { return floor_rejections_; }
+  // Frozen parameters (size = dimension(), nonzero = frozen; empty = none): the min-max stage freezes the rotations between UNOCCUPIED
+  // positive-energy spinors and negative-energy ones. At fixed occupations they cost no energy (gradient and curvature ~ 0, flat), so the Newton
+  // step g/lambda along them is huge; it mixes negative-energy character into the virtual orbitals, and the next occupation re-optimization fills
+  // them and the energy collapses. Frozen entries get zero gradient, zero Hessian action and zero step.
+  void setFrozen(std::vector<char> frozen) { frozen_ = std::move(frozen); }
   std::vector<double> gradient() override {
     g0_ = jointOrbitalGradient(model_.gradient(problem_.h(), problem_.eri(), occ_), problem_.pairs());
+    zeroFrozen(g0_);
     g0_valid_ = true;
     return g0_;
   }
-  std::vector<double> hessianVector(const std::vector<double>& v) override {
+  std::vector<double> hessianVector(const std::vector<double>& v_in) override {
+    std::vector<double> v = v_in;
+    zeroFrozen(v);
+    std::vector<double> w;
     if constexpr (!kIsCholesky<Eri>) {
       if (!model_.hessian_vector) {
         throw std::runtime_error("NeoOrbitalProblem: the model has no hessian_vector");
       }
-      return model_.hessian_vector(problem_.h(), problem_.eri(), occ_, v);
+      w = model_.hessian_vector(problem_.h(), problem_.eri(), occ_, v);
     } else {
       // Cholesky vectors: NO dense tensor. H*v is obtained matrix-free from the gradient (see
       // finiteDifferenceHessianVector), O(N_chol n^3) per product.
-      return finiteDifferenceHessianVector(v);
+      w = finiteDifferenceHessianVector(v);
     }
+    zeroFrozen(w);
+    return w;
   }
 
   // Matrix-free Hessian-vector product for integrals held ONLY as Cholesky vectors: a central
@@ -1623,21 +1641,30 @@ class NeoOrbitalProblem : public NeoProblem<double> {
   std::vector<double> hessianDiagonal() override {
     if constexpr (!kIsCholesky<Eri>) {
       if (!model_.hessian_diagonal) return {};
-      return model_.hessian_diagonal(problem_.h(), problem_.eri(), occ_);
+      return frozenDiagonal(model_.hessian_diagonal(problem_.h(), problem_.eri(), occ_));
     } else {
       // Cholesky vectors: O(n_pairs) elements, each O(N_chol) per integral access -- cheap next to one
       // Hessian-vector product, and no dense tensor.
       if (!model_.hessian_diagonal) return {};
-      return model_.hessian_diagonal(problem_.h(), problem_.eri(), occ_);
+      return frozenDiagonal(model_.hessian_diagonal(problem_.h(), problem_.eri(), occ_));
     }
   }
-  double trialEnergy(const std::vector<double>& d) override {
+  double trialEnergy(const std::vector<double>& d_in) override {
+    std::vector<double> d = d_in;
+    zeroFrozen(d);
     const auto u = spinorRotationMatrix(buildKappa(d));
     const auto h_trial = oneElectronRotated(problem_.h(), u);
     const auto eri_trial = rotateEri(problem_.eri(), u);
-    return model_.energy(h_trial, eri_trial, occ_);
+    const double e = model_.energy(h_trial, eri_trial, occ_);
+    if (e < energy_floor_) {
+      ++floor_rejections_;
+      return 1.0e6;
+    }
+    return e;
   }
-  void accept(const std::vector<double>& d) override {
+  void accept(const std::vector<double>& d_in) override {
+    std::vector<double> d = d_in;
+    zeroFrozen(d);
     problem_.rotate(toStep(d));
     // RI-direct Hessian wiring (ukbDirect()&&ukb_direct_ri, see
     // [[project-ri-hessian-neo-design]] Stage 5): `rotate()` DEFERS eri_t_'s own rotation while
@@ -1686,6 +1713,18 @@ class NeoOrbitalProblem : public NeoProblem<double> {
     return step;
   }
 
+  void zeroFrozen(std::vector<double>& x) const {
+    for (std::size_t i = 0; i < frozen_.size() && i < x.size(); ++i)
+      if (frozen_[i]) x[i] = 0.0;
+  }
+  std::vector<double> frozenDiagonal(std::vector<double> diag) const {
+    for (std::size_t i = 0; i < frozen_.size() && i < diag.size(); ++i)
+      if (frozen_[i]) diag[i] = 1.0;  // keeps the Davidson preconditioner finite; the entry never carries weight
+    return diag;
+  }
+  std::vector<char> frozen_;
+  double energy_floor_ = -std::numeric_limits<double>::infinity();
+  int floor_rejections_ = 0;
   const RdmftModel<Scalar, Eri>& model_;
   RotationProblem<Scalar, Eri>& problem_;
   std::vector<double> occ_;
@@ -2279,6 +2318,9 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
   if (want_neo && model.hessian_vector) {
     neo_problem = std::make_unique<NeoOrbitalProblem<T, Eri>>(model, problem);
     neo_available = true;
+    if (saddle && !std::isnan(settings.saddle.start_energy)) {
+      neo_problem->setEnergyFloor(settings.saddle.start_energy - settings.saddle.collapse_guard);
+    }
     if constexpr (kIsCholesky<Eri>) {
       if (settings.debug) {
         // DEBUG: the matrix-free (finite-difference) Hessian-vector product used with Cholesky vectors
@@ -2373,13 +2415,29 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
       return mask;
     };
     neo_options.step.sector = buildMask(electronPositron);
+    // Rotations between an UNOCCUPIED positive-energy spinor and a negative-energy one are flat at fixed occupations: freeze them (see
+    // NeoOrbitalProblem::setFrozen). Parameter layout of the full (unreduced) NEO vector: [t; (y)] blocks of prs.size() entries.
+    std::vector<char> frozen_pairs(prs.size(), 0);
+    for (std::size_t i = 0; i < prs.size(); ++i) {
+      const std::size_t lo = std::min(prs[i].first, prs[i].second), hi = std::max(prs[i].first, prs[i].second);
+      frozen_pairs[i] = lo < nn && hi >= nn && occ_now[hi] <= settings.saddle.occupied_threshold;
+    }
+    if (neo_problem) {
+      const std::size_t reps_full = std::is_same_v<T, double> ? 1 : 2;
+      std::vector<char> frozen_full(reps_full * prs.size(), 0);
+      for (std::size_t r = 0; r < reps_full; ++r)
+        for (std::size_t i = 0; i < prs.size(); ++i) frozen_full[r * prs.size() + i] = frozen_pairs[i];
+      neo_problem->setFrozen(std::move(frozen_full));
+    }
     if (saddle_adam) {
-      // ADAM descent-ascent: the same (occupied positive x negative) pairs, with their curvature ~ 4 c^2 n_i (Kramers/spin twins share it).
+      // ADAM descent-ascent: the same (occupied positive x negative) pairs, with their curvature ~ 4 c^2 n_i (Kramers/spin twins share it);
+      // the flat (unoccupied positive x negative) pairs get scale -1 = frozen.
       std::vector<double> scale(prs.size(), 0.0);
       for (std::size_t i = 0; i < prs.size(); ++i) {
         const std::size_t lo = std::min(prs[i].first, prs[i].second), hi = std::max(prs[i].first, prs[i].second);
         if (lo < nn && hi >= nn && occ_now[hi] > settings.saddle.occupied_threshold)
           scale[i] = 4.0 * settings.saddle.speed_of_light * settings.saddle.speed_of_light * occ_now[hi];
+        else if (frozen_pairs[i]) scale[i] = -1.0;
       }
       problem.setSaddleScales(std::move(scale));
     }
@@ -2522,6 +2580,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
   constexpr int kMaxSaddleEscapeAttempts = 3;
 
   int iter = 0;
+  bool minmax_collapsed = false;  // the min-max stage left the physical basin (see the collapse check in the macro loop)
   int n_occ_unconverged = 0;
   int total_macro_iterations = 0;
   Matrix<T> g_final(h.rows(), h.rows(), T{});
@@ -2682,6 +2741,16 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
       // optimizer's own value can differ for a non-symmetric eri).
       e_elec = model.energy(problem.h(), problem.eri(), occ);
       const double d_e = e_elec - e_old;
+      // Min-max stage: its energy lies slightly ABOVE the no-pair minimum. Far below it, the orbitals have been rotated into the negative-energy
+      // sea (variational collapse): stop, do not report it as a converged result.
+      if (saddle && !std::isnan(settings.saddle.start_energy) && e_elec < settings.saddle.start_energy - settings.saddle.collapse_guard) {
+        log << "    VARIATIONAL COLLAPSE: after macro-iteration " << iter << " the energy " << std::fixed << std::setprecision(10)
+            << e_elec + nuclear_repulsion_energy << " Hartree is " << settings.saddle.start_energy - e_elec
+            << " Hartree below the no-pair minimum (the min-max energy lies above it). The min-max stage is abandoned and its orbitals must not be used.\n"
+            << std::defaultfloat << std::setprecision(6);
+        minmax_collapsed = true;
+        break;
+      }
       log << "    " << kTableRow << std::setw(4) << iter << "  " << std::fixed << std::setprecision(10) << std::setw(20)
           << e_elec + nuclear_repulsion_energy << "  " << std::scientific << std::setprecision(2) << std::setw(10)
           << d_e << "  " << std::setw(10) << max_gradient << "  ";
@@ -2915,6 +2984,10 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
       << " macro-iteration(s).\n";
   printEnergyLine(log, 4, "Final total energy", e_elec + nuclear_repulsion_energy);
   printEnergyLine(log, 4, "Change from occupation-only opt.", e_elec - e_start);
+  if (neo_problem && neo_problem->floorRejections() > 0) {
+    log << "    Note: " << neo_problem->floorRejections() << " trial step(s) were rejected because the energy fell more than "
+        << settings.saddle.collapse_guard << " Hartree below the no-pair minimum (variational collapse guard).\n";
+  }
   if (!std::isnan(settings.reference_total_energy)) {
     printEnergyLine(log, 4, settings.reference_label, e_elec + nuclear_repulsion_energy - settings.reference_total_energy);
   }
@@ -3029,6 +3102,10 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
   }
   log << "  Final test: " << (final_ok ? "all checks PASSED" : "a check FAILED -- inspect the values above") << "\n";
   log << std::defaultfloat << std::setprecision(6);
+  if (minmax_collapsed) {
+    result.checks_passed = false;
+    result.converged = false;
+  }
   return result;
 }
 

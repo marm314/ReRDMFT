@@ -153,6 +153,9 @@ struct FullOptSettings {
     // negative-energy) rotation is sign-flipped and both it and the step are divided by sqrt(4 c^2 occupation), i.e. ADAM runs
     // in variables scaled by the square root of the electron-positron curvature; the run merit is 0.5 |scaled gradient|^2.
     bool use_adam = false;
+    // NEO min-max: a trial point more than this (Hartree) below the no-pair minimum's energy is rejected (variational collapse guard, see
+    // NeoOrbitalProblem::setEnergyFloor); the min-max energy lies above the no-pair minimum, so a legitimate step never goes this low.
+    double collapse_guard = 1.0e-2;
     double speed_of_light = 137.036;  // the run's c (SPEED_OF_LIGHT): the electron-positron curvature is ~ -4 c^2 n
     std::size_t n_negative = 0;  // size of the negative-energy branch (indices [0, n_negative)); 0 = off
     Matrix<std::complex<double>> start_rotation;
