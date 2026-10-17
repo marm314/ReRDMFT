@@ -143,6 +143,7 @@ void testStep(const std::string& label) {
     opt.target_order = m;
     opt.residual_tolerance = 1e-11;
     opt.residual_relative = 1.0;
+    opt.stagnation_window = 0;  // this test checks the exact solve; the stagnation stop would end it at the noise floor
     NeoStepSolver<T> solver(g, hv, diag, opt);
     const NeoStep<T> st = solver.solve(0.0);
     const std::string tag = label + " m=" + std::to_string(m) + ": ";

@@ -164,7 +164,7 @@ $(BUILD_DIR)/test_pnof_gradient: tests/test_pnof_occupation_gradient.cpp $(BUILD
 test_pccd: $(BUILD_DIR)/test_pccd
 	./$(BUILD_DIR)/test_pccd
 
-$(BUILD_DIR)/test_pccd: tests/test_pccd_amplitudes.cpp $(BUILD_DIR)/pCCD.o $(BUILD_DIR)/LinearAlgebra.o $(BUILD_DIR)/LBFGS.o $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o | $(BUILD_DIR)
+$(BUILD_DIR)/test_pccd: tests/test_pccd_amplitudes.cpp $(filter-out $(BUILD_DIR)/main.o,$(OBJS)) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
 # Unit test of Hessian_opt/PccdFock.h's buildPccdFullTwoRdm: energy from the unfolded
@@ -174,7 +174,7 @@ $(BUILD_DIR)/test_pccd: tests/test_pccd_amplitudes.cpp $(BUILD_DIR)/pCCD.o $(BUI
 test_pccd_fock: $(BUILD_DIR)/test_pccd_fock
 	./$(BUILD_DIR)/test_pccd_fock
 
-$(BUILD_DIR)/test_pccd_fock: tests/test_pccd_fock.cpp $(BUILD_DIR)/pCCD.o $(BUILD_DIR)/PccdFock.o $(BUILD_DIR)/HartreeExchangeGradient.o $(BUILD_DIR)/LinearAlgebra.o $(BUILD_DIR)/LBFGS.o $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o | $(BUILD_DIR)
+$(BUILD_DIR)/test_pccd_fock: tests/test_pccd_fock.cpp $(filter-out $(BUILD_DIR)/main.o,$(OBJS)) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
 # Unit test of Hessian_opt/PccdHessian.h's pccdHessianElement vs a finite difference of the
@@ -219,7 +219,7 @@ $(BUILD_DIR)/test_hartreeexchange_sigma_hessian: tests/test_hartreeexchange_sigm
 test_jkonly_sigma_hessian_ri: $(BUILD_DIR)/test_jkonly_sigma_hessian_ri
 	./$(BUILD_DIR)/test_jkonly_sigma_hessian_ri
 
-$(BUILD_DIR)/test_jkonly_sigma_hessian_ri: tests/test_jkonly_sigma_hessian_ri.cpp $(BUILD_DIR)/JkOnlyHessian.o $(BUILD_DIR)/JkOnlySigmaHessianVector.o $(BUILD_DIR)/JkOnlySigmaHessianVectorRi.o $(BUILD_DIR)/RiSigmaHessianToolkit.o $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o | $(BUILD_DIR)
+$(BUILD_DIR)/test_jkonly_sigma_hessian_ri: tests/test_jkonly_sigma_hessian_ri.cpp $(filter-out $(BUILD_DIR)/main.o,$(OBJS)) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
 # Unit test of Hessian_opt/JkOnlySigmaHessianVector.h's jkOnlySigmaJointHessianVector (complex/
@@ -247,7 +247,7 @@ $(BUILD_DIR)/test_hartreeexchange_sigma_hessian_joint: tests/test_hartreeexchang
 test_jkonly_sigma_hessian_ri_joint: $(BUILD_DIR)/test_jkonly_sigma_hessian_ri_joint
 	./$(BUILD_DIR)/test_jkonly_sigma_hessian_ri_joint
 
-$(BUILD_DIR)/test_jkonly_sigma_hessian_ri_joint: tests/test_jkonly_sigma_hessian_ri_joint.cpp $(BUILD_DIR)/JkOnlyHessian.o $(BUILD_DIR)/JkOnlySigmaHessianVector.o $(BUILD_DIR)/JkOnlySigmaHessianVectorRi.o $(BUILD_DIR)/RiSigmaHessianToolkit.o $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o | $(BUILD_DIR)
+$(BUILD_DIR)/test_jkonly_sigma_hessian_ri_joint: tests/test_jkonly_sigma_hessian_ri_joint.cpp $(filter-out $(BUILD_DIR)/main.o,$(OBJS)) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
 # Unit test of Hessian_opt/HartreeExchangeSigmaHessianVectorRi.h's
@@ -257,7 +257,7 @@ $(BUILD_DIR)/test_jkonly_sigma_hessian_ri_joint: tests/test_jkonly_sigma_hessian
 test_hartreeexchange_sigma_hessian_ri_joint: $(BUILD_DIR)/test_hartreeexchange_sigma_hessian_ri_joint
 	./$(BUILD_DIR)/test_hartreeexchange_sigma_hessian_ri_joint
 
-$(BUILD_DIR)/test_hartreeexchange_sigma_hessian_ri_joint: tests/test_hartreeexchange_sigma_hessian_ri_joint.cpp $(BUILD_DIR)/HartreeExchangeHessian.o $(BUILD_DIR)/HartreeExchangeSigmaHessianVector.o $(BUILD_DIR)/HartreeExchangeSigmaHessianVectorRi.o $(BUILD_DIR)/RiSigmaHessianToolkit.o $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o | $(BUILD_DIR)
+$(BUILD_DIR)/test_hartreeexchange_sigma_hessian_ri_joint: tests/test_hartreeexchange_sigma_hessian_ri_joint.cpp $(filter-out $(BUILD_DIR)/main.o,$(OBJS)) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
 # Unit test of Hessian_opt/HartreeExchangeSigmaHessianVectorRi.h (RI-native, covers PNOF+pCCD)
@@ -266,7 +266,7 @@ $(BUILD_DIR)/test_hartreeexchange_sigma_hessian_ri_joint: tests/test_hartreeexch
 test_hartreeexchange_sigma_hessian_ri: $(BUILD_DIR)/test_hartreeexchange_sigma_hessian_ri
 	./$(BUILD_DIR)/test_hartreeexchange_sigma_hessian_ri
 
-$(BUILD_DIR)/test_hartreeexchange_sigma_hessian_ri: tests/test_hartreeexchange_sigma_hessian_ri.cpp $(BUILD_DIR)/HartreeExchangeHessian.o $(BUILD_DIR)/HartreeExchangeSigmaHessianVector.o $(BUILD_DIR)/HartreeExchangeSigmaHessianVectorRi.o $(BUILD_DIR)/RiSigmaHessianToolkit.o $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o | $(BUILD_DIR)
+$(BUILD_DIR)/test_hartreeexchange_sigma_hessian_ri: tests/test_hartreeexchange_sigma_hessian_ri.cpp $(filter-out $(BUILD_DIR)/main.o,$(OBJS)) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
 # Unit test of Utils/KramersPairing (exact Kramers re-pairing of degenerate clusters).
@@ -283,7 +283,7 @@ $(BUILD_DIR)/test_kramers_pairing: tests/test_kramers_pairing.cpp $(BUILD_DIR)/K
 test_cholesky_eri: $(BUILD_DIR)/test_cholesky_eri
 	./$(BUILD_DIR)/test_cholesky_eri
 
-$(BUILD_DIR)/test_cholesky_eri: tests/test_cholesky_eri.cpp $(BUILD_DIR)/CholeskyEri.o $(BUILD_DIR)/Cholesky_Decomposition.o $(BUILD_DIR)/SpinorRotation.o $(BUILD_DIR)/LinearAlgebra.o $(BUILD_DIR)/OccupationEnergy.o $(BUILD_DIR)/JK_only.o $(BUILD_DIR)/JkOnlyFock.o $(BUILD_DIR)/HartreeExchangeGradient.o $(BUILD_DIR)/PnofFock.o $(BUILD_DIR)/PNOFs.o $(BUILD_DIR)/Orb_subspaces.o $(BUILD_DIR)/StringUtils.o | $(BUILD_DIR)
+$(BUILD_DIR)/test_cholesky_eri: tests/test_cholesky_eri.cpp $(filter-out $(BUILD_DIR)/main.o,$(OBJS)) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
 # Unit test of Utils/Restart (binary RESTART file) and of the PNOF gamma <-> occupation maps.
