@@ -355,6 +355,7 @@ point to keep a backup). Example: `examples/lih_gnof_read_restart.inp`.
 | `OMP_NUM_THREADS` | OpenMP threads (also the threaded BLAS). |
 | `RERDMFT_PCCD_FIX_AMPLITUDES` | Any value, with `READ_OCCUPANCIES` + `FUNCTIONAL PCCD`: t, z built from `OCC.in` are never solved. |
 | `RERDMFT_MINMAX_CURVATURE_PROBE` | Any value, with the ADAM min-max (`CASSCF_4C_NEG`, `MINMAX_ORBITAL_OPTIMIZER ADAM`): prints finite-difference curvatures of a few electron-positron and ordinary rotations at the end (expect ~ -4c^2 n and > 0). |
+| `RERDMFT_DET_PROBE` | Any value, with `FULL_OPTIMIZATION`/`CASSCF`: before the loop, repeats each building block of an orbital step and compares the results bit for bit, and prints hashes of the starting state (equal hashes in two runs = identical start). Runs with several OpenMP threads are not bit-reproducible (summation order); `OMP_NUM_THREADS=1` is. |
 | `RERDMFT_RI_HV_REFERENCE` | Any value: `USE_RI` products use the element-by-element reference code (same results, much slower). |
 | `SWITCH_SIGN_ERI` | Any value: flips the sign of every electron-repulsion integral (diagnostic; dense integrals only). |
 

@@ -2,6 +2,9 @@
 #include "CasModel.h"
 
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <cstdlib>
 #include <cmath>
 #include <iomanip>
 #include <limits>
@@ -2284,6 +2287,76 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
     return result;
   }
   log << "  All validation checks passed.\n";
+  if (std::getenv("RERDMFT_DET_PROBE") != nullptr) {
+    // Run-to-run reproducibility probe: each building block of an orbital step, repeated on identical input and compared BIT FOR BIT.
+    const auto same = [](const Matrix<T>& a, const Matrix<T>& b) {
+      return a.rows() == b.rows() && a.cols() == b.cols() && std::memcmp(a.data(), b.data(), a.rows() * a.cols() * sizeof(T)) == 0;
+    };
+    constexpr int kRepeats = 6;
+    bool e_same = true, g_same = true, h_same = true, eri_same = true, ge_same = true;
+    const double e_ref = model.energy(h, eri, occupations);
+    const Matrix<T> g_ref = model.gradient(h, eri, occupations);
+    const std::size_t nn_ = h.rows();
+    Matrix<T> kappa(nn_, nn_, T{});  // a fixed, dense, small anti-Hermitian generator
+    // NON_REL spin-orbitals ([alpha | beta] blocks): the generator must be spin-restricted (same-spin pairs only, alpha = beta)
+    const std::size_t span = spin_partner.empty() ? nn_ : nn_ / 2;
+    for (std::size_t p = 0; p < span; ++p)
+      for (std::size_t q = 0; q < p; ++q) {
+        const double x = 1e-2 * std::sin(1.0 + 0.37 * static_cast<double>(p) + 0.91 * static_cast<double>(q));
+        kappa(p, q) = T(x);
+        kappa(q, p) = -T(x);
+        if (!spin_partner.empty()) {
+          kappa(spin_partner[p], spin_partner[q]) = T(x);
+          kappa(spin_partner[q], spin_partner[p]) = -T(x);
+        }
+      }
+    const Matrix<T> u = spinorRotationMatrix(kappa);
+    const Matrix<T> h_rot_ref = oneElectronRotated(h, u);
+    const auto eri_rot_ref = rotateEri(eri, u);
+    const double e_rot_ref = model.energy(h_rot_ref, eri_rot_ref, occupations);
+    const Matrix<T> g_rot_ref = model.gradient(h_rot_ref, eri_rot_ref, occupations);
+    for (int rep = 0; rep < kRepeats; ++rep) {
+      e_same = e_same && model.energy(h, eri, occupations) == e_ref;
+      g_same = g_same && same(model.gradient(h, eri, occupations), g_ref);
+      h_same = h_same && same(oneElectronRotated(h, u), h_rot_ref);
+      const auto eri_rot = rotateEri(eri, u);
+      eri_same = eri_same && model.energy(h_rot_ref, eri_rot, occupations) == e_rot_ref;
+      ge_same = ge_same && same(model.gradient(h_rot_ref, eri_rot, occupations), g_rot_ref);
+    }
+    // matrix exponential of the generator, and the occupation / CI re-solve from an identical start (rotated integrals, same state)
+    bool u_same = true, occ_same = true, state_same = true;
+    {
+      const std::vector<double> state0 = state;
+      std::vector<double> st_ref = state0;
+      const auto occ_ref = model.optimize_occupations(h_rot_ref, eri_rot_ref, st_ref);
+      for (int rep = 0; rep < kRepeats; ++rep) {
+        u_same = u_same && same(spinorRotationMatrix(kappa), u);
+        std::vector<double> st = state0;
+        const auto o = model.optimize_occupations(h_rot_ref, eri_rot_ref, st);
+        occ_same = occ_same && o.occupations.size() == occ_ref.occupations.size() &&
+                   std::memcmp(o.occupations.data(), occ_ref.occupations.data(), o.occupations.size() * sizeof(double)) == 0 &&
+                   o.electronic_energy == occ_ref.electronic_energy;
+        state_same = state_same && st.size() == st_ref.size() && std::memcmp(st.data(), st_ref.data(), st.size() * sizeof(double)) == 0;
+      }
+    }
+    {
+      const auto fnv = [](const void* data, std::size_t bytes) {
+        std::uint64_t hsh = 1469598103934665603ULL;
+        const unsigned char* b = static_cast<const unsigned char*>(data);
+        for (std::size_t i = 0; i < bytes; ++i) hsh = (hsh ^ b[i]) * 1099511628211ULL;
+        return hsh;
+      };
+      log << "  [DET PROBE] start-state hashes: h " << std::hex << fnv(h.data(), h.rows() * h.cols() * sizeof(T) ) % 0xffffff << ", gradient "
+          << fnv(g_ref.data(), g_ref.rows() * g_ref.cols() * sizeof(T)) % 0xffffff << ", occupations "
+          << fnv(occupations.data(), occupations.size() * sizeof(double)) % 0xffffff << ", state " << fnv(state.data(), state.size() * sizeof(double)) % 0xffffff
+          << std::dec << "\n";
+    }
+    log << "  [DET PROBE] rotation exponential " << (u_same ? "yes" : "NO") << ", occupation/CI re-solve: occupations+energy "
+        << (occ_same ? "yes" : "NO") << ", state vector " << (state_same ? "yes" : "NO") << "\n";
+    log << "  [DET PROBE] bitwise reproducible over " << kRepeats << " repeats: energy " << (e_same ? "yes" : "NO") << ", gradient "
+        << (g_same ? "yes" : "NO") << ", one-electron rotation " << (h_same ? "yes" : "NO") << ", two-electron rotation (via energy) "
+        << (eri_same ? "yes" : "NO") << ", gradient on rotated integrals " << (ge_same ? "yes" : "NO") << "\n";
+  }
 
   log << "  b) Macro-iteration loop:\n";
   ProgressLine() << "FULL_OPTIMIZATION (" << (want_neo ? "NEO" : "ADAM")
