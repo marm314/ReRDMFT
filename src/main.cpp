@@ -1047,6 +1047,8 @@ inline rerdmft::FullOptSettings fullOptSettings(const rerdmft::Input& input) {
   settings.orbital_optimizer = input.orbital_optimizer() == "NEO"      ? rerdmft::OrbitalOptimizer::kNeo
                               : input.orbital_optimizer() == "ADAM_NEO" ? rerdmft::OrbitalOptimizer::kAdamNeo
                                                                        : rerdmft::OrbitalOptimizer::kAdam;
+  settings.saddle.use_adam = input.minmax_orbital_optimizer() == "ADAM";
+  settings.saddle.speed_of_light = input.speed_of_light();
   settings.neo_max_iterations = input.neo_max_iterations();
   settings.adam_neo_switch_tolerance = input.adam_neo_switch_tolerance();
   settings.adam_neo_initial_adam_iterations = input.adam_neo_initial_adam_iterations();
@@ -1762,7 +1764,7 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
         } else {
           try {
             out << "\n  FULL_OPTIMIZATION_4C_NEG: min-max stage. Starting from the positive-energy-only minimum above, orbital rotations now\n"
-                   "  include the positive <-> negative-energy pairs: NEO (whatever ORBITAL_OPTIMIZER says) converges the orbitals to the saddle\n"
+                   "  include the positive <-> negative-energy pairs: NEO (or ADAM descent-ascent with MINMAX_ORBITAL_OPTIMIZER ADAM; ORBITAL_OPTIMIZER does not matter here) converges the orbitals to the saddle\n"
                    "  point of the order set by the occupied positive-energy spinors, then the occupations are fully re-minimized, macro-iterated.\n";
             rerdmft::FullOptSettings saddle_settings = full_opt;
             if (restart_neg != nullptr && restart != nullptr) {  // min-max stage checkpoints go to RESTART.4C_NEG
@@ -2547,7 +2549,7 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
         } else {
           try {
             out << "\n  FULL_OPTIMIZATION_4C_NEG: min-max stage. Starting from the positive-energy-only minimum above, orbital rotations now\n"
-                   "  include the positive <-> negative-energy pairs: NEO (whatever ORBITAL_OPTIMIZER says) converges the orbitals to the saddle\n"
+                   "  include the positive <-> negative-energy pairs: NEO (or ADAM descent-ascent with MINMAX_ORBITAL_OPTIMIZER ADAM; ORBITAL_OPTIMIZER does not matter here) converges the orbitals to the saddle\n"
                    "  point of the order set by the occupied positive-energy spinors, then the occupations are fully re-minimized, macro-iterated.\n";
             rerdmft::FullOptSettings saddle_settings = full_opt;
             if (restart_neg != nullptr && restart != nullptr) {  // min-max stage checkpoints go to RESTART.4C_NEG
@@ -2909,6 +2911,35 @@ void runCasscfStage(const std::string& label, const rerdmft::Input& input, const
     }
     log << std::fixed << std::setprecision(10) << total << " Hartree ("
         << total - scf_total_energy << (restart != nullptr ? " relative to the restart file energy)\n" : " relative to the SCF energy)\n") << std::defaultfloat << std::setprecision(6);
+    // CASSCF_4C_NEG: the min-max stage (ADAM descent-ascent; the CAS model has no Hessian-vector for NEO) from the no-pair
+    // CASSCF above, on the full (negative-energy block included) integrals. Report only: the restart/RDM/WFN outputs stay the no-pair ones.
+    if (!nonrel && first_spinor > 0 && input.casscf_4c_neg() && !input.casci()) {
+      if (!result.converged) {
+        log << "\n  CASSCF_4C_NEG skipped: the positive-energy-only CASSCF did not converge.\n";
+      } else {
+        try {
+          log << "\n  CASSCF_4C_NEG: min-max stage. Starting from the positive-energy-only CASSCF above, orbital rotations now include the\n"
+                 "  positive <-> negative-energy pairs: ADAM descent-ascent (the gradient of every occupied-positive x negative-energy rotation is\n"
+                 "  sign-flipped) converges the orbitals to the saddle point, and the CI is re-solved, macro-iterated.\n";
+          rerdmft::FullOptSettings saddle_settings = settings;
+          saddle_settings.orbital_optimizer = rerdmft::OrbitalOptimizer::kAdam;
+          saddle_settings.saddle.use_adam = true;
+          saddle_settings.saddle.n_negative = first_spinor;
+          saddle_settings.saddle.start_rotation = result.total_rotation;
+          saddle_settings.saddle.start_energy = result.electronic_energy;
+          const std::vector<double> ci_start = result.occupation_state;
+          const rerdmft::FullOptResult saddle_result = rerdmft::runFullOptimizationCas<T, Eri>(
+              h_mo, eri, core, active, static_cast<std::size_t>(input.casscf_electrons()), active_spin, n, saddle_settings,
+              /*kramers_restricted=*/true, nuclear_repulsion_energy, log, std::vector<std::size_t>{}, /*n_negative=*/0, ci_options, &ci_start, false);
+          log << "  CASSCF_4C_NEG " << (saddle_result.checks_passed && saddle_result.converged ? "converged" : "did NOT converge")
+              << ": total energy " << std::fixed << std::setprecision(10) << saddle_result.electronic_energy + nuclear_repulsion_energy
+              << " Hartree (" << saddle_result.electronic_energy - result.electronic_energy << " relative to the positive-energy-only CASSCF)\n"
+              << std::defaultfloat << std::setprecision(6);
+        } catch (const std::exception& e) {
+          log << "\n  CASSCF_4C_NEG FAILED: " << e.what() << "\n";
+        }
+      }
+    }
     if (capture != nullptr) {
       capture->valid = true;
       capture->kind = "CASSCF";

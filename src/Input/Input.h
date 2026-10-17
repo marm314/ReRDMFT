@@ -160,6 +160,8 @@ class Input {
   bool casscf() const { return casscf_; }
   // CASCI TRUE (with CASSCF TRUE): only the first CI solve, on the fixed SCF (or CASSCF_INIT CORE / restart) orbitals; no orbital optimization.
   bool casci() const { return casci_; }
+  // CASSCF_4C_NEG (CASSCF + C4_SPINOR): min-max stage after the no-pair CASSCF, always ADAM descent-ascent (the CAS model has no Hessian-vector for NEO).
+  bool casscf_4c_neg() const { return casscf_4c_neg_; }
   // CASSCF_RDM TRUE: write the CASSCF 1-/2-RDM files (molecular and Gaussian basis, same formats as CC_RDM).
   // FUNCTIONAL_RDM TRUE: the same for a FUNCTIONAL's RDMFT 1-/2-RDM.
   bool casscf_rdm() const { return casscf_rdm_; }
@@ -591,6 +593,10 @@ class Input {
   // re-decided every macro-iteration, works with CHOLESKY TRUE or FALSE (same NEO machinery
   // either way, including the CHOLESKY TRUE dense-tensor-per-Newton-step cache).
   const std::string& orbital_optimizer() const { return orbital_optimizer_; }
+  // Optional; defaults to "NEO". Which method drives the FULL_OPTIMIZATION_4C_NEG min-max stage: "NEO" (saddle-order
+  // Newton) or "ADAM" (gradient descent-ascent: the gradient of every occupied-positive x negative-energy rotation
+  // enters with flipped sign and is scaled by the electron-positron curvature, see FullOptSettings::SaddleStage).
+  const std::string& minmax_orbital_optimizer() const { return minmax_orbital_optimizer_; }
   // Optional; defaults to 20 when NEO_MAX_ITERATIONS is absent. Only meaningful with
   // ORBITAL_OPTIMIZER NEO: the hard cap on Newton steps ONE macro-iteration's orbital-rotation
   // descent may take (Full_opt/FullOptimization.h's own FullOptSettings::neo_max_iterations --
@@ -689,6 +695,7 @@ class Input {
   bool uccsd_ = false;
   bool casscf_ = false;
   bool casci_ = false;
+  bool casscf_4c_neg_ = false;
   bool casscf_rdm_ = false;
   bool functional_rdm_ = false;
   double casscf_rdm_threshold_ = 1e-10, functional_rdm_threshold_ = 1e-10;
@@ -750,6 +757,7 @@ class Input {
   double macro_energy_tolerance_ = 1e-9;
   double orbital_gradient_tolerance_ = 1e-5;
   std::string orbital_optimizer_ = "ADAM";
+  std::string minmax_orbital_optimizer_ = "NEO";
   int neo_max_iterations_ = 20;
   double adam_neo_switch_tolerance_ = 2e-3;
   int adam_neo_initial_adam_iterations_ = 3;

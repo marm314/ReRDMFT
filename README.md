@@ -76,17 +76,22 @@ Case-insensitive, one per line, optional `=` (`DEBUG TRUE` = `DEBUG=TRUE`);
 | --- | --- | --- | --- |
 | `CASSCF` | bool | `FALSE` | CAS-SCF (`src/MCSCF`) after `NON_REL`/`X2C`/`C4_SPINOR`: determinant CI, ADAM orbital rotations; 4C uses positive-energy spinors only. |
 | `CASCI` | bool | `FALSE` | With `CASSCF`: only the first CI solve, orbitals fixed. |
+| `CASSCF_4C_NEG` | bool | `FALSE` | With `CASSCF` + `C4_SPINOR`: min-max stage after the no-pair CASSCF (ADAM descent-ascent; report only). |
 | `CASSCF_RDM` | bool | `FALSE` | Write the CASSCF 1-/2-RDM: `cas_<input>_<level>_MO.*` and `_GAU.*` (formats of `CC_RDM`). |
 | `CASSCF_RDM_THRESHOLD`, `_GAUSSIAN`, `_MAXMEM`, `_CNORM1` | mixed | `1e-10`, `TRUE`, `4`, `FALSE` | As the `CC_RDM_*` settings. |
 | `CASSCF_ELECTRONS` | int | required | Active electrons (even); the core is the lowest `NELEC - CASSCF_ELECTRONS` spinors. |
-| `CASSCF_SPINORS` | int | required | Active spinors (even, at most 64), the next in energy order. |
+| `CASSCF_SPINORS` | int | required | Active spinors = spin-orbitals (even, at most 64), the next in energy order; twice the spatial orbitals of the usual CAS(n,m) notation. |
 | `CASSCF_INIT` | string | `SCF` | Starting orbitals: `SCF` or `CORE` (one-electron Hamiltonian eigenvectors). |
 | `CASSCF_CI_START` | string | `SYMMETRIC` | CI start: closed-shell determinant (even S only) or `LOWEST` diagonal. |
 | `CASSCF_CI_TIME_REVERSAL` | bool | `TRUE` (`X2C`/`C4_SPINOR`) | Keep the CI time-reversal even (equal Kramers-pair occupations). |
 | `CASSCF_CI_STAGNATION` | bool | `FALSE` | Accept a CI that stagnates in a near-degenerate cluster. |
 | `CASSCF_CI_KEEP` | int | `4` | Ritz vectors kept at a Davidson restart. |
 
-Examples: `examples/casscf_lih.inp`, `casscf_lih_dissociated_core.inp`, `casscf_lih_casci.inp`, `casscf_lih_outputs.inp`, `casscf_lih_read_restart.inp`.
+> **Note:** unlike the usual CAS(n,m) notation, which counts spatial orbitals, the active space here is counted in spinors
+> (spin-orbitals): `CASSCF_SPINORS` is twice the usual m. `CASSCF_ELECTRONS 6` / `CASSCF_SPINORS 12` is the usual CAS(6,6);
+> `CASSCF_ELECTRONS 4` / `CASSCF_SPINORS 4` is a single determinant (Hartree-Fock), not CAS(4,4).
+
+Examples: `examples/casscf_lih.inp`, `casscf_lih_dissociated_core.inp`, `casscf_lih_casci.inp`, `casscf_lih_outputs.inp`, `casscf_lih_read_restart.inp`, `casscf_lih_c4_minmax.inp` (`CASSCF_4C_NEG`).
 
 ### UCCSD
 
@@ -138,6 +143,7 @@ Examples: `examples/casscf_lih.inp`, `casscf_lih_dissociated_core.inp`, `casscf_
 | `MAX_MACRO_ITERATIONS` | int | `1000` | Macro-iteration cap. |
 | `MACRO_ENERGY_TOLERANCE` | float | `1e-9` | Macro-loop energy convergence. |
 | `ORBITAL_GRADIENT_TOLERANCE` | float | `1e-5` | Orbital-gradient convergence. |
+| `MINMAX_ORBITAL_OPTIMIZER` | string | `NEO` | `NEO` or `ADAM` (sign-flipped electron-positron gradient) for the functionals' `FULL_OPTIMIZATION_4C_NEG`. |
 | `NEO_MAX_ITERATIONS` | int | `20` | Newton steps per macro-iteration. |
 | `ADAM_NEO_SWITCH_TOLERANCE` | double | `2e-3` | `|dE|` threshold for switching drivers. |
 | `ADAM_NEO_INITIAL_ADAM_ITERATIONS` | int | `3` | Initial macro-iterations always run with ADAM. |
@@ -161,7 +167,9 @@ Examples: `examples/casscf_lih.inp`, `casscf_lih_dissociated_core.inp`, `casscf_
 | `USE_RI` + explicit `SCF_DIRECT_4C` or `FUNCTIONAL_DIRECT_4C` | Mutually exclusive kernels. |
 | `CC_RDM` without `UCCSD` | Built from the UCCSD amplitudes. |
 | `UCCSD` without an SCF method, or + `READ_RESTART` | Needs a fresh SCF reference. |
-| `CASSCF` without an SCF method, or + `FUNCTIONAL`/`UCCSD`/`FULL_OPTIMIZATION*` | Exclusive with the other post-SCF stages. |
+| `CASSCF` without an SCF method, or + `FUNCTIONAL`/`UCCSD`/`FULL_OPTIMIZATION` | Exclusive with the other post-SCF stages. |
+| `CASSCF_4C_NEG` without `CASSCF` + `C4_SPINOR`, or + `CASCI` | The min-max stage follows an orbital-optimized no-pair CASSCF. |
+| `CASSCF` + `FULL_OPTIMIZATION_4C_NEG` | Use `CASSCF_4C_NEG`; `MINMAX_ORBITAL_OPTIMIZER` does not apply (always ADAM). |
 | `CASCI` / `CASSCF_*` / `*_RDM_*` settings without their switch | They modify `CASSCF`, `CASSCF_RDM` or `FUNCTIONAL_RDM`. |
 | `CASSCF_RDM`/`FUNCTIONAL_RDM` + `READ_RESTART` | RDM files come from the SCF-start runs only. |
 | `FUNCTIONAL_RDM` + `FULL_OPTIMIZATION_4C_NEG` | Not implemented for the min-max stage (only the minimum). |
@@ -292,7 +300,9 @@ Examples: `examples/lih_gnof_c4_full_optimization.inp` (dense),
 After the positive-energy minimum converges, a second stage finds the true
 min-max point: minimize over positive-energy rotations, maximize over
 electron-positron rotations, with NEO using a dynamic saddle order and a sector
-partition; occupations are fully re-minimized each step. `DEBUG` adds an exact
+partition (or, with `MINMAX_ORBITAL_OPTIMIZER ADAM`, ADAM with the gradient of the
+electron-positron rotations sign-flipped and scaled by their curvature ~ 4c^2 n:
+same energies, about 1.1-1.8x the NEO run time); occupations are fully re-minimized each step. `DEBUG` adds an exact
 dense-Hessian check. For light systems it moves the energy by ~1e-10 Ha, so it
 mostly confirms the no-pair minimum. Examples:
 `examples/lih_gnof_c4_neg_full_optimization.inp`,
@@ -344,6 +354,7 @@ point to keep a backup). Example: `examples/lih_gnof_read_restart.inp`.
 |---|---|
 | `OMP_NUM_THREADS` | OpenMP threads (also the threaded BLAS). |
 | `RERDMFT_PCCD_FIX_AMPLITUDES` | Any value, with `READ_OCCUPANCIES` + `FUNCTIONAL PCCD`: t, z built from `OCC.in` are never solved. |
+| `RERDMFT_MINMAX_CURVATURE_PROBE` | Any value, with the ADAM min-max (`CASSCF_4C_NEG`, `MINMAX_ORBITAL_OPTIMIZER ADAM`): prints finite-difference curvatures of a few electron-positron and ordinary rotations at the end (expect ~ -4c^2 n and > 0). |
 | `RERDMFT_RI_HV_REFERENCE` | Any value: `USE_RI` products use the element-by-element reference code (same results, much slower). |
 | `SWITCH_SIGN_ERI` | Any value: flips the sign of every electron-repulsion integral (diagnostic; dense integrals only). |
 

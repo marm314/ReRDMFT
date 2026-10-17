@@ -1346,7 +1346,17 @@ class RotationProblem : public AdamProblem<T> {
       }
     }
   }
-  void setOccupations(const std::vector<double>& occ) { occ_ = occ; }
+  void setOccupations(const std::vector<double>& occ) { occ_ = occ; saddle_g_.reset(); }
+  // Min-max stage driven by ADAM (SaddleStage::use_adam): `scale[I]` > 0 marks pair I as a maximization direction (an occupied
+  // positive x negative-energy rotation) with electron-positron curvature ~ `scale[I]`; its gradient enters ADAM sign-flipped and
+  // divided by sqrt(scale), and its step is divided by sqrt(scale) again (ADAM runs in the variables sqrt(scale) kappa, where all
+  // curvatures are O(1) and a fixed-size ADAM step no longer overshoots the stiff direction). While active energy() returns the
+  // merit 0.5 |scaled gradient|^2 -- the energy is not monotone along a descent-ascent path, so "best so far" needs another measure.
+  void setSaddleScales(std::vector<double> scale) {
+    saddle_scale_ = std::move(scale);
+    saddle_active_ = true;
+    saddle_g_.reset();
+  }
   std::size_t dimension() const override { return pairs_.size(); }
   // FUNCTIONAL_DIRECT_4C (model_.ukb_direct_fock set, C4_SPINOR only): energy()/gradient() build
   // the generalized Fock DIRECTLY from UKB AO integrals at the CURRENT trial orbitals
@@ -1357,6 +1367,11 @@ class RotationProblem : public AdamProblem<T> {
   // class) pays for it only once.
   bool ukbDirect() const { return static_cast<bool>(model_.ukb_direct_fock); }
   double energy() override {
+    if (saddle_active_) {
+      double merit = 0.0;
+      for (const T& x : gradient()) merit += 0.5 * std::norm(std::complex<double>(x));
+      return merit;
+    }
     if (ukbDirect()) {
       ukbEnsureBuilt();
       // Classic double-counting trace identity E = 0.5 * sum_q [occ[q]*Re(h(q,q)) + Re(F(q,q))] --
@@ -1374,6 +1389,18 @@ class RotationProblem : public AdamProblem<T> {
     return model_.energy(h_t_, eri_t_, occ_);
   }
   std::vector<T> gradient() override {
+    if (saddle_active_) {
+      if (!saddle_g_) saddle_g_ = rawGradient();
+      std::vector<T> g = *saddle_g_;
+      for (std::size_t i = 0; i < g.size(); ++i) {
+        const double s = saddle_scale_[i];
+        g[i] = s > 0.0 ? -g[i] / std::sqrt(s) : g[i];
+      }
+      return g;
+    }
+    return rawGradient();
+  }
+  std::vector<T> rawGradient() {
     std::vector<T> g;
     if (ukbDirect()) {
       ukbEnsureBuilt();
@@ -1390,6 +1417,13 @@ class RotationProblem : public AdamProblem<T> {
     return g;
   }
   void rotate(const std::vector<T>& step) override {
+    if (saddle_active_) {
+      std::vector<T> kappa = step;
+      for (std::size_t i = 0; i < kappa.size(); ++i)
+        if (saddle_scale_[i] > 0.0) kappa[i] = kappa[i] / std::sqrt(saddle_scale_[i]);
+      applyOrthogonal(spinorRotationMatrix(adamKappaMatrix(n_, pairs_, kappa)));
+      return;
+    }
     applyOrthogonal(spinorRotationMatrix(adamKappaMatrix(n_, pairs_, step)));
   }
   void applyOrthogonal(const Matrix<T>& u) {
@@ -1399,6 +1433,7 @@ class RotationProblem : public AdamProblem<T> {
     // energy()'s own double-counting trace identity above.
     h_t_ = oneElectronRotated(h_t_, u);
     u_t_ = u_t_ * u;
+    saddle_g_.reset();
     if (ukbDirect()) {
       // eri_t_ is NOT rotated here -- nothing reads it until syncIntegrals() is called (right
       // after this ADAM run finishes, by runFullOptimization), which is the entire point: the
@@ -1417,6 +1452,7 @@ class RotationProblem : public AdamProblem<T> {
   }
   void restoreBest() override {
     h_t_ = h_b_; eri_t_ = eri_b_; u_t_ = u_b_;
+    saddle_g_.reset();
     if (ukbDirect()) { ukb_pending_ = ukb_pending_b_; ukb_cached_f_.reset(); }
   }
   // FUNCTIONAL_DIRECT_4C only: brings eri_t_ up to date with every rotate() call since the last
@@ -1453,6 +1489,9 @@ class RotationProblem : public AdamProblem<T> {
   Matrix<T> ukb_pending_, ukb_pending_b_;
   std::optional<Matrix<T>> ukb_cached_f_;
   std::vector<long> twin_;
+  bool saddle_active_ = false;
+  std::vector<double> saddle_scale_;
+  std::optional<std::vector<T>> saddle_g_;  // raw gradient at the current trial point (energy() and gradient() share it)
 };
 
 // =====================================================================
@@ -2125,9 +2164,11 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
   result.occupations = occupations;
   // Min-max stage (FullOptSettings::saddle): NEO with a saddle target, integrals rotated to the no-pair minimum first.
   const bool saddle = settings.saddle.n_negative > 0;
-  const bool want_neo = saddle || settings.orbital_optimizer == OrbitalOptimizer::kNeo ||
-                        settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo;
-  if (saddle && !model.hessian_vector) {
+  const bool saddle_adam = saddle && settings.saddle.use_adam;
+  // ADAM min-max: never NEO, whatever orbital_optimizer says (the functional min-max call sites set kNeo).
+  const bool want_neo = !saddle_adam && ((saddle && !saddle_adam) || settings.orbital_optimizer == OrbitalOptimizer::kNeo ||
+                                         settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo);
+  if (saddle && !saddle_adam && !model.hessian_vector) {
     throw std::runtime_error("FULL_OPTIMIZATION_4C_NEG: the model has no Hessian-vector callback (NEO is required)");
   }
   // FUNCTIONAL_DIRECT_4C: Input.cpp already rejects ORBITAL_OPTIMIZER NEO/ADAM_NEO and
@@ -2160,7 +2201,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
   }
   const Matrix<T>& h = h_start ? *h_start : h_in;
   const Eri& eri = eri_start ? *eri_start : eri_in;
-  std::string driver_phrase = want_neo ? "NEO" : "ADAM";
+  std::string driver_phrase = want_neo ? "NEO" : (saddle_adam ? "ADAM descent-ascent (electron-positron gradient sign-flipped)" : "ADAM");
   if (settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo && !saddle) {
     std::ostringstream tol_str;
     tol_str << std::scientific << std::setprecision(1) << settings.adam_neo_switch_tolerance;
@@ -2209,7 +2250,9 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
   RotationProblem<T, Eri> problem(model, h, eri, spin_partner, n_negative);
   AdamOptions adam_options;
   adam_options.gradient_tolerance = settings.gradient_tolerance;
-  adam_options.energy_tolerance = settings.energy_tolerance;
+  // ADAM min-max: the run "energy" is the gradient merit (RotationProblem::energy), which is ~1e-7 or smaller near the saddle -- a 1e-9
+  // change threshold would stop every run after two steps. Disabled: runs end on the gradient tolerance or the step budget.
+  adam_options.energy_tolerance = saddle_adam ? 0.0 : settings.energy_tolerance;
   AdamOptimizer<T> adam(adam_options);
   std::unique_ptr<KramersRestriction> kr;
   if constexpr (!std::is_same_v<T, double>) {
@@ -2328,6 +2371,16 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
       return mask;
     };
     neo_options.step.sector = buildMask(electronPositron);
+    if (saddle_adam) {
+      // ADAM descent-ascent: the same (occupied positive x negative) pairs, with their curvature ~ 4 c^2 n_i (Kramers/spin twins share it).
+      std::vector<double> scale(prs.size(), 0.0);
+      for (std::size_t i = 0; i < prs.size(); ++i) {
+        const std::size_t lo = std::min(prs[i].first, prs[i].second), hi = std::max(prs[i].first, prs[i].second);
+        if (lo < nn && hi >= nn && occ_now[hi] > settings.saddle.occupied_threshold)
+          scale[i] = 4.0 * settings.saddle.speed_of_light * settings.saddle.speed_of_light * occ_now[hi];
+      }
+      problem.setSaddleScales(std::move(scale));
+    }
   };
   if (saddle) {
     refreshSaddleTargeting(occupations);
@@ -2360,13 +2413,13 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
           static_cast<std::size_t>(std::count_if(w0.begin(), w0.end(), [](double e) { return e < -1e-6; }));
       ProgressLine() << "FULL_OPTIMIZATION_4C_NEG starting-point Hessian: " << n_neg0 << " negative eigenvalue(s), lowest "
                      << std::scientific << std::setprecision(3) << w0.front() << " (expected -4c^2 = "
-                     << (-4.0 * kSpeedOfLight * kSpeedOfLight) << ")" << std::defaultfloat << std::setprecision(6);
+                     << (-4.0 * settings.saddle.speed_of_light * settings.saddle.speed_of_light) << ")" << std::defaultfloat << std::setprecision(6);
       log << "    Hessian check (dense diagonalization of the " << space0 << " " << hessian0.rows() << " x " << hessian0.rows()
           << " orbital-rotation Hessian, AT THE STARTING POINT before any NEO step): " << n_neg0
           << " negative eigenvalue(s) (< -1e-6); lowest " << std::scientific << std::setprecision(3) << w0.front()
           << std::defaultfloat << std::setprecision(6) << " (expected scale: -4c^2 = "
-          << std::scientific << std::setprecision(3) << (-4.0 * kSpeedOfLight * kSpeedOfLight)
-          << std::defaultfloat << std::setprecision(6) << ", default c; SPEED_OF_LIGHT TRUE changes this).\n";
+          << std::scientific << std::setprecision(3) << (-4.0 * settings.saddle.speed_of_light * settings.saddle.speed_of_light)
+          << std::defaultfloat << std::setprecision(6) << ", for this run's SPEED_OF_LIGHT).\n";
     }
     // DEBUG TRUE: the electron-positron GRADIENT at the same starting point. Unlike the Hessian
     // diagonal above, h_pq is EXACTLY zero between an occupied positive-energy spinor and any
@@ -2473,6 +2526,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
     std::optional<bool> prev_run_neo;
     int adam_streak = 0;  // consecutive ADAM macro-iterations just run (ADAM_NEO_MIN_ADAM_ITERATIONS)
     double last_dE = 0.0;
+    int small_dE_streak = 0;  // consecutive macro-iterations with |dE| < tolerance (ADAM min-max stall-convergence below)
     for (iter = 1; iter <= settings.max_macro_iterations; ++iter) {
       problem.setOccupations(occ);
       // The actual driver for THIS macro-iteration: NEO always for the min-max stage and plain ORBITAL_OPTIMIZER
@@ -2664,7 +2718,15 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
       // (ADAM_NEO_MIN_ADAM_ITERATIONS) that finds nothing better reports dE ~ 0, which would end the run before NEO has
       // polished the point. The |dE| selector then hands the next macro-iteration to NEO, and only NEO can converge.
       const bool adam_defers_to_neo = neo_available && !saddle && !run_neo && settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo;
-      if (std::abs(d_e) < settings.energy_tolerance && !adam_defers_to_neo && !(run_neo ? false : adam.restartRequested())) {
+      // ADAM min-max: the restart flag (merit did not improve) can alternate with gradient-converged runs forever while the energy no longer moves
+      // (the CI re-solve between runs keeps nudging the gradient above the tolerance). Three consecutive |dE| < tolerance iterations count as converged.
+      small_dE_streak = std::abs(d_e) < settings.energy_tolerance ? small_dE_streak + 1 : 0;
+      const bool stalled_converged = saddle_adam && small_dE_streak >= 3;
+      if (stalled_converged && adam.restartRequested()) {
+        log << "    Energy unchanged (|dE| < " << settings.energy_tolerance << ") for 3 consecutive macro-iterations although ADAM keeps requesting restarts: converged on the energy (max|g| = "
+            << std::scientific << std::setprecision(2) << max_gradient << std::defaultfloat << std::setprecision(6) << ").\n";
+      }
+      if ((std::abs(d_e) < settings.energy_tolerance && !adam_defers_to_neo && !(run_neo ? false : adam.restartRequested())) || stalled_converged) {
         result.converged = true;
         break;
       }
@@ -2687,6 +2749,49 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
     g_max = 0.0;
     for (const auto& [p, q] : problem.pairs()) g_max = std::max(g_max, std::abs(std::complex<double>(g_final(p, q))));
     result.gradient_max = g_max;
+
+    // ADAM min-max, env RERDMFT_MINMAX_CURVATURE_PROBE=1: second derivative of the energy (fixed occupations/CI) along single rotation
+    // parameters at the converged point, by central differences -- electron-positron pairs should be ~ -4 c^2 n_i, the others >= 0.
+    if (saddle_adam && std::getenv("RERDMFT_MINMAX_CURVATURE_PROBE") != nullptr) {
+      const std::size_t nn = settings.saddle.n_negative;
+      const auto& prs = problem.pairs();
+      const Matrix<T> g_raw = model.gradient(problem.h(), problem.eri(), occ);
+      std::vector<std::size_t> ep, other;
+      for (std::size_t i = 0; i < prs.size(); ++i) {
+        const std::size_t lo = std::min(prs[i].first, prs[i].second), hi = std::max(prs[i].first, prs[i].second);
+        (lo < nn && hi >= nn && occ[hi] > settings.saddle.occupied_threshold ? ep : other).push_back(i);
+      }
+      const auto occOf = [&](std::size_t i) { return occ[std::max(prs[i].first, prs[i].second)]; };
+      std::sort(ep.begin(), ep.end(), [&](std::size_t a, std::size_t b) { return occOf(a) > occOf(b); });
+      const auto absG = [&](std::size_t i) { return std::abs(std::complex<double>(g_raw(prs[i].first, prs[i].second))); };
+      std::sort(other.begin(), other.end(), [&](std::size_t a, std::size_t b) { return absG(a) > absG(b); });
+      const double e0 = model.energy(problem.h(), problem.eri(), occ);
+      const auto curvature = [&](std::size_t i, double delta) {
+        std::vector<T> step(prs.size(), T{});
+        problem.saveBest();
+        double e_pm[2];
+        for (int sgn = 0; sgn < 2; ++sgn) {
+          step[i] = T(sgn == 0 ? delta : -delta);
+          problem.applyOrthogonal(spinorRotationMatrix(adamKappaMatrix(h.rows(), prs, step)));
+          e_pm[sgn] = model.energy(problem.h(), problem.eri(), occ);
+          problem.restoreBest();
+        }
+        return (e_pm[0] + e_pm[1] - 2.0 * e0) / (delta * delta);
+      };
+      log << "    Curvature probe (central differences of the energy at fixed occupations/CI along one real rotation parameter; expected for"
+             " electron-positron pairs: -4 c^2 n = -4 c^2 x occupation):\n";
+      for (std::size_t k = 0; k < std::min<std::size_t>(ep.size(), 4); ++k) {
+        const std::size_t i = ep[k];
+        log << "      electron-positron pair (" << prs[i].first << "," << prs[i].second << ") n = " << std::setprecision(4) << occOf(i)
+            << ": d2E/dt2 = " << std::scientific << std::setprecision(4) << curvature(i, 1e-4) << "  (-4c^2 n = "
+            << -4.0 * settings.saddle.speed_of_light * settings.saddle.speed_of_light * occOf(i) << ")" << std::defaultfloat << std::setprecision(6) << "\n";
+      }
+      for (std::size_t k = 0; k < std::min<std::size_t>(other.size(), 4); ++k) {
+        const std::size_t i = other[k];
+        log << "      ordinary pair (" << prs[i].first << "," << prs[i].second << ") |g| = " << std::scientific << std::setprecision(2) << absG(i)
+            << ": d2E/dt2 = " << std::setprecision(4) << curvature(i, 1e-3) << std::defaultfloat << std::setprecision(6) << "\n";
+      }
+    }
 
     // Is the point really a minimum? If the lowest Hessian eigenvalues show a saddle, escape along the
     // negative-curvature eigenvector and re-optimize (see the comment before `withReduced`). Gated on NEO
@@ -3708,7 +3813,24 @@ FullOptResult runFullOptimizationCas(const Matrix<T>& h, const Eri& eri, const s
   const auto model = makeCasModel<T, Eri>(core, active, n_active_electrons, active_spin, n_total, ci_options);
   std::vector<double> state;
   if (initial_state != nullptr) state = *initial_state;  // CASSCF restart: the CI start vector (model state convention)
-  const auto warm_up = model.optimize_occupations(h, eri, state);
+  // Min-max (FULL_OPTIMIZATION_4C_NEG) call: runFullOptimization rotates h/eri by the no-pair minimum's rotation before the loop,
+  // so the starting CI is solved in that rotated basis (see the pCCD twin of this block).
+  std::optional<Matrix<T>> h_warm;
+  std::optional<Eri> eri_warm;
+  if (settings.saddle.n_negative > 0) {
+    const std::size_t n = h.rows();
+    if (settings.saddle.start_rotation.rows() != n || settings.saddle.start_rotation.cols() != n) {
+      throw std::runtime_error("FULL_OPTIMIZATION_4C_NEG: the starting rotation has the wrong dimension");
+    }
+    Matrix<T> u0(n, n);
+    for (std::size_t i = 0; i < n * n; ++i) {
+      if constexpr (std::is_same_v<T, double>) u0.data()[i] = settings.saddle.start_rotation.data()[i].real();
+      else u0.data()[i] = settings.saddle.start_rotation.data()[i];
+    }
+    h_warm = oneElectronRotated(h, u0);
+    eri_warm = rotateEri(eri, u0);
+  }
+  const auto warm_up = model.optimize_occupations(h_warm ? *h_warm : h, eri_warm ? *eri_warm : eri, state);
   if (!warm_up.warning.empty()) log << "  " << warm_up.warning << "\n";
   if (ci_only) {
     // CASCI: the first CI solve on the fixed starting orbitals, no orbital optimization

@@ -159,6 +159,8 @@ void Input::read(const std::string& filename) {
       uccsd_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "CASSCF") {
       casscf_ = parseBool(iss, line_number, keyword);
+    } else if (keyword == "CASSCF_4C_NEG") {
+      casscf_4c_neg_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "CASCI") {
       casci_ = parseBool(iss, line_number, keyword);
     } else if (keyword == "CASSCF_RDM") {
@@ -455,6 +457,15 @@ void Input::read(const std::string& filename) {
         throw std::runtime_error("line " + std::to_string(line_number) +
                                   ": ORBITAL_OPTIMIZER must be ADAM, NEO or ADAM_NEO");
       }
+    } else if (keyword == "MINMAX_ORBITAL_OPTIMIZER") {
+      std::string token;
+      if (!(iss >> token)) {
+        throw std::runtime_error("line " + std::to_string(line_number) + ": expected ADAM or NEO after MINMAX_ORBITAL_OPTIMIZER");
+      }
+      minmax_orbital_optimizer_ = toUpper(token);
+      if (minmax_orbital_optimizer_ != "ADAM" && minmax_orbital_optimizer_ != "NEO") {
+        throw std::runtime_error("line " + std::to_string(line_number) + ": MINMAX_ORBITAL_OPTIMIZER must be ADAM or NEO");
+      }
     } else if (keyword == "NEO_MAX_ITERATIONS") {
       neo_max_iterations_ = parseInt(iss, line_number, keyword);
       if (!(neo_max_iterations_ > 0)) {
@@ -659,6 +670,7 @@ void Input::read(const std::string& filename) {
   if ((casscf_rdm_ || functional_rdm_) && read_restart_) {
     throw std::runtime_error("CASSCF_RDM/FUNCTIONAL_RDM with READ_RESTART TRUE is not supported yet (the RDM files are written by the SCF-start runs)");
   }
+  if (casscf_4c_neg_ && !casscf_) throw std::runtime_error("CASSCF_4C_NEG TRUE requires CASSCF TRUE");
   if (casci_ && !casscf_) {
     throw std::runtime_error("CASCI TRUE requires CASSCF TRUE (it defines the active space and the starting orbitals; CASCI then stops after the first CI solve)");
   }
@@ -680,8 +692,10 @@ void Input::read(const std::string& filename) {
       throw std::runtime_error("CASSCF TRUE is mutually exclusive with FUNCTIONAL and UCCSD (run them as separate calculations)");
     }
     if (full_optimization_ || full_optimization_4c_neg_) {
-      throw std::runtime_error("CASSCF TRUE does not combine with FULL_OPTIMIZATION/FULL_OPTIMIZATION_4C_NEG (it has its own orbital optimization)");
+      throw std::runtime_error("CASSCF TRUE does not combine with FULL_OPTIMIZATION/FULL_OPTIMIZATION_4C_NEG (it has its own orbital optimization; use CASSCF_4C_NEG for its min-max stage)");
     }
+    if (casscf_4c_neg_ && !c4_spinor_) throw std::runtime_error("CASSCF_4C_NEG TRUE requires C4_SPINOR TRUE");
+    if (casscf_4c_neg_ && casci_) throw std::runtime_error("CASCI TRUE has no orbital optimization, so CASSCF_4C_NEG TRUE does not apply");
     if (read_restart_ && casscf_init_ == "CORE") {
       throw std::runtime_error("CASSCF_INIT CORE with READ_RESTART TRUE is not supported (the restart file supplies the orbitals)");
     }
@@ -843,6 +857,7 @@ void Input::print(std::ostream& out) const {
   line("AIMPAC") << flag(aimpac_) << "\n";
   line("UCCSD") << flag(uccsd_) << "\n";
   line("CASSCF") << flag(casscf_) << "\n";
+  line("CASSCF_4C_NEG") << flag(casscf_4c_neg_) << "\n";
   line("CASCI") << flag(casci_) << "\n";
   line("CASSCF_RDM") << flag(casscf_rdm_) << "\n";
   line("CASSCF_RDM_THRESHOLD") << casscf_rdm_threshold_ << "\n";
@@ -907,6 +922,7 @@ void Input::print(std::ostream& out) const {
   line("MACRO_ENERGY_TOLERANCE") << macro_energy_tolerance_ << "\n";
   line("ORBITAL_GRADIENT_TOLERANCE") << orbital_gradient_tolerance_ << "\n";
   line("ORBITAL_OPTIMIZER") << orbital_optimizer_ << "\n";
+  line("MINMAX_ORBITAL_OPTIMIZER") << minmax_orbital_optimizer_ << "\n";
   line("NEO_MAX_ITERATIONS") << neo_max_iterations_ << "\n";
   line("ADAM_NEO_SWITCH_TOLERANCE") << adam_neo_switch_tolerance_ << "\n";
   line("ADAM_NEO_INITIAL_ADAM_ITERATIONS") << adam_neo_initial_adam_iterations_ << "\n";

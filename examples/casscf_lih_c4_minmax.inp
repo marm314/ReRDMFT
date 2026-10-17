@@ -1,0 +1,23 @@
+# Example ReRDMFT input file: LiH, 6-31G, CASSCF with the 4-component min-max stage.
+#
+# CASSCF first optimizes the orbitals over the positive-energy spinors only (no-pair); CASSCF_4C_NEG TRUE then
+# continues with rotations that also mix the occupied positive-energy spinors with the negative-energy ones, driven by ADAM
+# (always: the CAS model has no Hessian-vector product for NEO), and the CI is re-solved.
+# Validation: 4 electrons in 4 spinors (CASSCF_ELECTRONS 4, CASSCF_SPINORS 4) is a single determinant, so the min-max energy must equal the Dirac-Hartree-Fock one
+# (checked at SPEED_OF_LIGHT 20 -- where the electron-positron relaxation is 1.5e-6 Ha -- to 1e-10 Ha). The core-Hamiltonian start
+# makes the no-pair stage differ from the DHF orbitals.
+NELEC 4
+BASIS lih-6-31g.gbs
+C4_SPINOR TRUE
+CASSCF TRUE
+CASSCF_INIT CORE
+CASSCF_ELECTRONS 4
+CASSCF_SPINORS 4
+CASSCF_4C_NEG TRUE
+SPEED_OF_LIGHT 20
+USE_RI FALSE
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.594900
+END
