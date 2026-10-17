@@ -86,6 +86,8 @@ Case-insensitive, one per line, optional `=` (`DEBUG TRUE` = `DEBUG=TRUE`);
 | `CASSCF_CI_STAGNATION` | bool | `FALSE` | Accept a CI that stagnates in a near-degenerate cluster. |
 | `CASSCF_CI_KEEP` | int | `4` | Ritz vectors kept at a Davidson restart. |
 
+Examples: `examples/casscf_lih.inp`, `casscf_lih_dissociated_core.inp`, `casscf_lih_casci.inp`, `casscf_lih_outputs.inp`, `casscf_lih_read_restart.inp`.
+
 ### UCCSD
 
 | Keyword | Type | Default | Meaning |

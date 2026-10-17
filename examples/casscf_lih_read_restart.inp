@@ -1,0 +1,18 @@
+# Example ReRDMFT input file: continuing a CASSCF from RESTART files at another geometry (READ_RESTART), as in lih_gnof_read_restart.inp.
+# 1) Run examples/casscf_lih.inp: it writes RESTART.NON_REL, RESTART.X2C and RESTART.4C (orbitals and CI vector).
+# 2) Run this file from the same directory: the geometry is stretched to 1.70; the SCF is skipped, the orbitals are
+#    Loewdin-orthonormalized at the new geometry, and the CI vector of the file starts the CI. The files are overwritten.
+NELEC 4
+BASIS lih-6-31g.gbs
+NON_RELATIVISTIC TRUE
+X2C TRUE
+C4_SPINOR TRUE
+CASSCF TRUE
+CASSCF_ELECTRONS 2
+CASSCF_SPINORS 4
+READ_RESTART TRUE
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.700000
+END

@@ -1,0 +1,18 @@
+# Example ReRDMFT input file: CASSCF on stretched LiH (5 A) starting from the core-Hamiltonian orbitals (CASSCF_INIT CORE).
+# The RHF of a stretched molecule is a poor (or non-converging) starting point; the one-electron-Hamiltonian eigenvectors are
+# a clean alternative (the SCF still runs and reports its energy). CASSCF_INIT CORE needs the closed-shell CI start
+# (CASSCF_CI_START SYMMETRIC, the default).
+NELEC 4
+BASIS lih-6-31g.gbs
+NON_RELATIVISTIC TRUE
+X2C TRUE
+DIIS FALSE
+CASSCF TRUE
+CASSCF_ELECTRONS 2
+CASSCF_SPINORS 4
+CASSCF_INIT CORE
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   5.000000
+END

@@ -1,0 +1,19 @@
+# Example ReRDMFT input file: CASSCF on LiH (6-31G) with NON_REL, X2C and C4_SPINOR in one run.
+# CASSCF follows the SCF/DHF: the core is the lowest NELEC - CASSCF_ELECTRONS spinors (here 2 electrons), the active space the
+# next CASSCF_SPINORS spinors (4 spinors, 2 electrons); the CI uses all determinants of the active space (real for NON_REL,
+# complex spinors for X2C/4C) and the orbitals are optimized with ADAM. USE_RI defaults to TRUE (RI integrals).
+# The report ends with the total energy, h-onebody / Vee / N-N and the natural occupation numbers of the active space.
+# It also writes RESTART.NON_REL / RESTART.X2C / RESTART.4C (orbitals + CI vector), see casscf_lih_read_restart.inp.
+NELEC 4
+BASIS lih-6-31g.gbs
+NON_RELATIVISTIC TRUE
+X2C TRUE
+C4_SPINOR TRUE
+CASSCF TRUE
+CASSCF_ELECTRONS 2
+CASSCF_SPINORS 4
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.594900
+END

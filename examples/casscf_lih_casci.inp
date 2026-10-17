@@ -1,0 +1,14 @@
+# Example ReRDMFT input file: CASCI on LiH (NON_REL): CASCI TRUE does only the first CI solve on the fixed SCF orbitals
+# (CASSCF_INIT CORE would use the core-Hamiltonian orbitals instead), with no orbital optimization.
+NELEC 4
+BASIS lih-6-31g.gbs
+NON_RELATIVISTIC TRUE
+CASSCF TRUE
+CASCI TRUE
+CASSCF_ELECTRONS 2
+CASSCF_SPINORS 4
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.594900
+END

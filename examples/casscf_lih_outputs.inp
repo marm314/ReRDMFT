@@ -1,0 +1,20 @@
+# Example ReRDMFT input file: CASSCF on LiH (NON_REL, exact integrals) with all the output files:
+#   AIMPAC TRUE         -> cas_casscf_lih_outputs_nonrel.wfn, hf_..._nonrel.wfn (natural orbitals of the CASSCF 1-RDM)
+#   FCIDUMP TRUE        -> FCIDUMP of the MO integrals in the final CASSCF orbitals (NON_REL only)
+#   CASSCF_RDM TRUE     -> cas_casscf_lih_outputs_nonrel_MO.dm1/.dm2 and _GAU.basis/.dm1/.dm2 (1-/2-RDM over all spinors; formats of CC_RDM)
+# FCIDUMP and the RDM files hold exact integrals, so USE_RI FALSE keeps the CASSCF energy consistent with them.
+NELEC 4
+BASIS lih-6-31g.gbs
+NON_RELATIVISTIC TRUE
+USE_RI FALSE
+CASSCF TRUE
+CASSCF_ELECTRONS 2
+CASSCF_SPINORS 4
+AIMPAC TRUE
+FCIDUMP TRUE
+CASSCF_RDM TRUE
+
+GEOMETRY
+Li  0.000000   0.000000   0.000000
+H   0.000000   0.000000   1.594900
+END
