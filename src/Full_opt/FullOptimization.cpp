@@ -1352,6 +1352,8 @@ class RotationProblem : public AdamProblem<T> {
     }
   }
   void setOccupations(const std::vector<double>& occ) { occ_ = occ; saddle_g_.reset(); }
+  // ADAM_NEO min-max: the descent-ascent view (merit, flipped/scaled gradient) is on only while ADAM drives; NEO needs the true energy.
+  void setSaddleActive(bool active) { saddle_active_ = active; saddle_g_.reset(); }
   // Min-max stage driven by ADAM (SaddleStage::use_adam): `scale[I]` > 0 marks pair I as a maximization direction (an occupied
   // positive x negative-energy rotation) with electron-positron curvature ~ `scale[I]`; its gradient enters ADAM sign-flipped and
   // divided by sqrt(scale), and its step is divided by sqrt(scale) again (ADAM runs in the variables sqrt(scale) kappa, where all
@@ -2228,9 +2230,10 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
   const bool saddle = settings.saddle.n_negative > 0;
   const bool saddle_adam = saddle && settings.saddle.use_adam;
   // ADAM min-max: never NEO, whatever orbital_optimizer says (the functional min-max call sites set kNeo).
-  const bool want_neo = !saddle_adam && ((saddle && !saddle_adam) || settings.orbital_optimizer == OrbitalOptimizer::kNeo ||
+  const bool saddle_hybrid = saddle_adam && settings.saddle.adam_neo;
+  const bool want_neo = (!saddle_adam || saddle_hybrid) && ((saddle && !saddle_adam) || settings.orbital_optimizer == OrbitalOptimizer::kNeo ||
                                          settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo);
-  if (saddle && !saddle_adam && !model.hessian_vector) {
+  if (saddle && (!saddle_adam || saddle_hybrid) && !model.hessian_vector) {
     throw std::runtime_error("FULL_OPTIMIZATION_4C_NEG: the model has no Hessian-vector callback (NEO is required)");
   }
   // FUNCTIONAL_DIRECT_4C: Input.cpp already rejects ORBITAL_OPTIMIZER NEO/ADAM_NEO and
@@ -2263,7 +2266,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
   }
   const Matrix<T>& h = h_start ? *h_start : h_in;
   const Eri& eri = eri_start ? *eri_start : eri_in;
-  std::string driver_phrase = want_neo ? "NEO" : (saddle_adam ? "ADAM descent-ascent (electron-positron gradient sign-flipped)" : "ADAM");
+  std::string driver_phrase = saddle_hybrid ? "ADAM descent-ascent / NEO (switching by |dE|)" : want_neo ? "NEO" : (saddle_adam ? "ADAM descent-ascent (electron-positron gradient sign-flipped)" : "ADAM");
   if (settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo && !saddle) {
     std::ostringstream tol_str;
     tol_str << std::scientific << std::setprecision(1) << settings.adam_neo_switch_tolerance;
@@ -2632,7 +2635,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
   }
   // Iteration table: the header is built with the same column widths as the rows printed below (the last two columns are the
   // number of orbital steps and the learning rate / trust radius).
-  const bool table_driver = settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo && !saddle;
+  const bool table_driver = saddle_hybrid || (settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo && !saddle);
   const int steps_width = table_driver ? 5 : 10, radius_width = table_driver ? 9 : 13;
   {
     const std::string steps_title = table_driver ? "steps" : (neo_available ? "NEO steps" : "ADAM steps");
@@ -2690,9 +2693,11 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
       // The actual driver for THIS macro-iteration: NEO always for the min-max stage and plain ORBITAL_OPTIMIZER
       // NEO; for ADAM_NEO, re-decided every iteration from the PREVIOUS iteration's |dE| (iter == 1 has none yet,
       // so the first adam_neo_initial_adam_iterations macro-iterations are always ADAM, regardless of |dE|).
+      // MINMAX_ORBITAL_OPTIMIZER ADAM_NEO applies the same rule to the min-max stage (settings.orbital_optimizer is not consulted there).
+      const bool adam_neo_rule = saddle_hybrid || (!saddle && settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo);
       const bool run_neo = neo_available &&
-          (saddle || settings.orbital_optimizer == OrbitalOptimizer::kNeo ||
-           (settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo && iter > settings.adam_neo_initial_adam_iterations &&
+          ((saddle && !saddle_adam) || (!saddle && settings.orbital_optimizer == OrbitalOptimizer::kNeo) ||
+           (adam_neo_rule && iter > settings.adam_neo_initial_adam_iterations &&
             std::abs(last_dE) <= settings.adam_neo_switch_tolerance &&
             // Having just left NEO, ADAM must get its minimum number of macro-iterations before NEO may take over again.
             (!prev_run_neo || *prev_run_neo || adam_streak >= settings.adam_neo_min_adam_iterations)));
@@ -2754,6 +2759,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
         }
       }
       prev_run_neo = run_neo;
+      if (saddle_adam) problem.setSaddleActive(!run_neo);
       adam_streak = run_neo ? 0 : adam_streak + 1;
       double max_gradient = 0.0;
       int orbital_iterations = 0;
@@ -2883,7 +2889,7 @@ FullOptResult runFullOptimization(const Matrix<T>& h_in, const Eri& eri_in,
       // ORBITAL_OPTIMIZER ADAM_NEO: never declare convergence on an ADAM macro-iteration -- a forced ADAM stretch
       // (ADAM_NEO_MIN_ADAM_ITERATIONS) that finds nothing better reports dE ~ 0, which would end the run before NEO has
       // polished the point. The |dE| selector then hands the next macro-iteration to NEO, and only NEO can converge.
-      const bool adam_defers_to_neo = neo_available && !saddle && !run_neo && settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo;
+      const bool adam_defers_to_neo = neo_available && !run_neo && (saddle_hybrid || (!saddle && settings.orbital_optimizer == OrbitalOptimizer::kAdamNeo));
       // A restart request (ADAM found nothing better than its starting point although the energy still moved inside the run) must not
       // block convergence when the orbital gradient is already below its tolerance: the point is stationary and the energy unchanged.
       // Without this, a run that ends 'restart gradient-converged' returns to the same point every macro-iteration and never stops

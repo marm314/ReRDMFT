@@ -460,11 +460,12 @@ void Input::read(const std::string& filename) {
     } else if (keyword == "MINMAX_ORBITAL_OPTIMIZER") {
       std::string token;
       if (!(iss >> token)) {
-        throw std::runtime_error("line " + std::to_string(line_number) + ": expected ADAM or NEO after MINMAX_ORBITAL_OPTIMIZER");
+        throw std::runtime_error("line " + std::to_string(line_number) + ": expected ADAM, NEO or ADAM_NEO after MINMAX_ORBITAL_OPTIMIZER");
       }
       minmax_orbital_optimizer_ = toUpper(token);
-      if (minmax_orbital_optimizer_ != "ADAM" && minmax_orbital_optimizer_ != "NEO") {
-        throw std::runtime_error("line " + std::to_string(line_number) + ": MINMAX_ORBITAL_OPTIMIZER must be ADAM or NEO");
+      if (minmax_orbital_optimizer_ != "ADAM" && minmax_orbital_optimizer_ != "NEO" &&
+          minmax_orbital_optimizer_ != "ADAM_NEO") {
+        throw std::runtime_error("line " + std::to_string(line_number) + ": MINMAX_ORBITAL_OPTIMIZER must be ADAM, NEO or ADAM_NEO");
       }
     } else if (keyword == "NEO_MAX_ITERATIONS") {
       neo_max_iterations_ = parseInt(iss, line_number, keyword);

@@ -593,9 +593,10 @@ class Input {
   // re-decided every macro-iteration, works with CHOLESKY TRUE or FALSE (same NEO machinery
   // either way, including the CHOLESKY TRUE dense-tensor-per-Newton-step cache).
   const std::string& orbital_optimizer() const { return orbital_optimizer_; }
-  // Optional; defaults to "NEO". Which method drives the FULL_OPTIMIZATION_4C_NEG min-max stage: "NEO" (saddle-order
-  // Newton) or "ADAM" (gradient descent-ascent: the gradient of every occupied-positive x negative-energy rotation
-  // enters with flipped sign and is scaled by the electron-positron curvature, see FullOptSettings::SaddleStage).
+  // Optional; defaults to "ADAM" (as CASSCF_4C_NEG). Which method drives the FULL_OPTIMIZATION_4C_NEG min-max stage: "NEO" (saddle-order
+  // Newton) "ADAM" (gradient descent-ascent: the gradient of every occupied-positive x negative-energy rotation
+  // enters with flipped sign and is scaled by the electron-positron curvature, see FullOptSettings::SaddleStage) or "ADAM_NEO"
+  // (ADAM descent-ascent, switching to NEO by |dE| exactly like ORBITAL_OPTIMIZER ADAM_NEO and its ADAM_NEO_* keywords).
   const std::string& minmax_orbital_optimizer() const { return minmax_orbital_optimizer_; }
   // Optional; defaults to 20 when NEO_MAX_ITERATIONS is absent. Only meaningful with
   // ORBITAL_OPTIMIZER NEO: the hard cap on Newton steps ONE macro-iteration's orbital-rotation
@@ -757,7 +758,7 @@ class Input {
   double macro_energy_tolerance_ = 1e-9;
   double orbital_gradient_tolerance_ = 1e-5;
   std::string orbital_optimizer_ = "ADAM";
-  std::string minmax_orbital_optimizer_ = "NEO";
+  std::string minmax_orbital_optimizer_ = "ADAM";
   int neo_max_iterations_ = 20;
   double adam_neo_switch_tolerance_ = 2e-3;
   int adam_neo_initial_adam_iterations_ = 3;

@@ -1046,7 +1046,8 @@ inline rerdmft::FullOptSettings fullOptSettings(const rerdmft::Input& input) {
   settings.orbital_optimizer = input.orbital_optimizer() == "NEO"      ? rerdmft::OrbitalOptimizer::kNeo
                               : input.orbital_optimizer() == "ADAM_NEO" ? rerdmft::OrbitalOptimizer::kAdamNeo
                                                                        : rerdmft::OrbitalOptimizer::kAdam;
-  settings.saddle.use_adam = input.minmax_orbital_optimizer() == "ADAM";
+  settings.saddle.use_adam = input.minmax_orbital_optimizer() != "NEO";
+  settings.saddle.adam_neo = input.minmax_orbital_optimizer() == "ADAM_NEO";
   settings.saddle.speed_of_light = input.speed_of_light();
   settings.neo_max_iterations = input.neo_max_iterations();
   settings.adam_neo_switch_tolerance = input.adam_neo_switch_tolerance();
@@ -1754,7 +1755,7 @@ std::string buildFunctionalReport(const std::string& label, const rerdmft::Matri
         } else {
           try {
             out << "\n  FULL_OPTIMIZATION_4C_NEG: min-max stage. Starting from the positive-energy-only minimum above, orbital rotations now\n"
-                   "  include the positive <-> negative-energy pairs: NEO (or ADAM descent-ascent with MINMAX_ORBITAL_OPTIMIZER ADAM; ORBITAL_OPTIMIZER does not matter here) converges the orbitals to the saddle\n"
+                   "  include the positive <-> negative-energy pairs: the MINMAX_ORBITAL_OPTIMIZER driver (ADAM descent-ascent by default, or NEO / ADAM_NEO; ORBITAL_OPTIMIZER does not matter here) converges the orbitals to the saddle\n"
                    "  point of the order set by the occupied positive-energy spinors, then the occupations are fully re-minimized, macro-iterated.\n";
             rerdmft::FullOptSettings saddle_settings = full_opt;
             if (restart_neg != nullptr && restart != nullptr) {  // min-max stage checkpoints go to RESTART.4C_NEG
@@ -2519,7 +2520,7 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
         } else {
           try {
             out << "\n  FULL_OPTIMIZATION_4C_NEG: min-max stage. Starting from the positive-energy-only minimum above, orbital rotations now\n"
-                   "  include the positive <-> negative-energy pairs: NEO (or ADAM descent-ascent with MINMAX_ORBITAL_OPTIMIZER ADAM; ORBITAL_OPTIMIZER does not matter here) converges the orbitals to the saddle\n"
+                   "  include the positive <-> negative-energy pairs: the MINMAX_ORBITAL_OPTIMIZER driver (ADAM descent-ascent by default, or NEO / ADAM_NEO; ORBITAL_OPTIMIZER does not matter here) converges the orbitals to the saddle\n"
                    "  point of the order set by the occupied positive-energy spinors, then the occupations are fully re-minimized, macro-iterated.\n";
             rerdmft::FullOptSettings saddle_settings = full_opt;
             if (restart_neg != nullptr && restart != nullptr) {  // min-max stage checkpoints go to RESTART.4C_NEG

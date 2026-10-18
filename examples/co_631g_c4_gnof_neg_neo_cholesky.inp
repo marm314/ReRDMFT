@@ -18,6 +18,7 @@ PNOF_SUBSPACES 3
 PNOF_COUPLING 2
 FULL_OPTIMIZATION TRUE
 FULL_OPTIMIZATION_4C_NEG TRUE
+MINMAX_ORBITAL_OPTIMIZER NEO
 ORBITAL_OPTIMIZER NEO
 CHOLESKY TRUE
 ON_DEMAND_ERI FALSE  # off here to keep this example's historical fast runtime (the whole packed AO tensor already fits in memory); default is TRUE, see lih_gnof_c4_full_optimization_cholesky.inp for the on-demand path demonstrated explicitly.

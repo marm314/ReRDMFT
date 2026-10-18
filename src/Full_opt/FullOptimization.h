@@ -153,6 +153,9 @@ struct FullOptSettings {
     // negative-energy) rotation is sign-flipped and both it and the step are divided by sqrt(4 c^2 occupation), i.e. ADAM runs
     // in variables scaled by the square root of the electron-positron curvature; the run merit is 0.5 |scaled gradient|^2.
     bool use_adam = false;
+    // MINMAX_ORBITAL_OPTIMIZER ADAM_NEO (use_adam is also set): the ADAM descent-ascent hands over to NEO per macro-iteration by |dE|,
+    // with the ORBITAL_OPTIMIZER ADAM_NEO rule and its ADAM_NEO_* settings.
+    bool adam_neo = false;
     // NEO min-max: a trial point more than this (Hartree) below the no-pair minimum's energy is rejected (variational collapse guard, see
     // NeoOrbitalProblem::setEnergyFloor); the min-max energy lies above the no-pair minimum, so a legitimate step never goes this low.
     double collapse_guard = 1.0e-2;

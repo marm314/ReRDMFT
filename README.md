@@ -143,7 +143,7 @@ Examples: `examples/casscf_lih.inp`, `casscf_lih_dissociated_core.inp`, `casscf_
 | `MAX_MACRO_ITERATIONS` | int | `1000` | Macro-iteration cap. |
 | `MACRO_ENERGY_TOLERANCE` | float | `1e-9` | Macro-loop energy convergence. |
 | `ORBITAL_GRADIENT_TOLERANCE` | float | `1e-5` | Orbital-gradient convergence. |
-| `MINMAX_ORBITAL_OPTIMIZER` | string | `NEO` | `NEO` or `ADAM` (sign-flipped electron-positron gradient) for the functionals' `FULL_OPTIMIZATION_4C_NEG`. |
+| `MINMAX_ORBITAL_OPTIMIZER` | string | `ADAM` | `NEO`, `ADAM` (sign-flipped electron-positron gradient) or `ADAM_NEO` (switches by `|dE|`, as `ORBITAL_OPTIMIZER`) for the functionals' `FULL_OPTIMIZATION_4C_NEG`. |
 | `NEO_MAX_ITERATIONS` | int | `20` | Newton steps per macro-iteration. |
 | `ADAM_NEO_SWITCH_TOLERANCE` | double | `2e-3` | `|dE|` threshold for switching drivers. |
 | `ADAM_NEO_INITIAL_ADAM_ITERATIONS` | int | `3` | Initial macro-iterations always run with ADAM. |
@@ -300,13 +300,11 @@ Examples: `examples/lih_gnof_c4_full_optimization.inp` (dense),
 After the positive-energy minimum converges, a second stage finds the true
 min-max point: minimize over positive-energy rotations, maximize over
 electron-positron rotations, with NEO using a dynamic saddle order and a sector
-partition (or, with `MINMAX_ORBITAL_OPTIMIZER ADAM`, ADAM with the gradient of the
-electron-positron rotations sign-flipped and scaled by their curvature ~ 4c^2 n:
-same energies, about 1.1-1.8x the NEO run time); occupations are fully re-minimized each step. `DEBUG` adds an exact
+partition, or (default) ADAM with the electron-positron gradient sign-flipped and scaled by ~4c^2 n; `ADAM_NEO` hands
+over to NEO by `|dE|`. Occupations are fully re-minimized each step. `DEBUG` adds an exact
 dense-Hessian check. For light systems it moves the energy by ~1e-10 Ha, so it
-mostly confirms the no-pair minimum. Examples:
-`examples/lih_gnof_c4_neg_full_optimization.inp`,
-`examples/lih_muller_c4_neg_full_optimization_cholesky.inp`.
+mostly confirms the no-pair minimum. Examples: `examples/lih_gnof_c4_neg_full_optimization.inp` (NEO),
+`examples/lih_gnof_c4_neg_adam.inp`, `examples/lih_gnof_c4_neg_adam_neo.inp`.
 
 ### FUNCTIONAL_DIRECT_4C
 
