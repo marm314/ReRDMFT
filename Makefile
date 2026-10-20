@@ -121,7 +121,9 @@ $(BUILD_DIR):
 
 # Standalone WFN checker (Utils/check_wfn.cpp): S_mo = C^T S_prim C of an AIMPAC WFN file.
 # Links every object except main.o, like the tests below.
-check_wfn: $(BUILD_DIR)/check_wfn.o $(filter-out $(BUILD_DIR)/main.o,$(OBJS))
+check_wfn: $(SRC_DIR)/Utils/check_wfn
+
+$(SRC_DIR)/Utils/check_wfn: $(BUILD_DIR)/check_wfn.o $(filter-out $(BUILD_DIR)/main.o,$(OBJS))
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDLIBS)
 
 # Standalone unit test of Utils/NEO (tests/test_neo.cpp): needs only NEO and
@@ -367,7 +369,7 @@ $(BUILD_DIR)/test_rkb_coefficients_cross_check: tests/test_rkb_coefficients_cros
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
 clean:
-	rm -rf $(BUILD_DIR) $(BIN) check_wfn $(GIT_VERSION_HEADER)
+	rm -rf $(BUILD_DIR) $(BIN) $(SRC_DIR)/Utils/check_wfn $(GIT_VERSION_HEADER)
 # ($(BUILD_DIR) already holds the .d files alongside their .o's, so the
 # rm -rf above removes them too -- nothing extra needed here.)
 

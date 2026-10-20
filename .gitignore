@@ -6,7 +6,7 @@ RESTART.*
 FCIDUMP
 *.live
 tests_mau/
-check_wfn
+src/Utils/check_wfn
 *.dm1
 *.dm2
 *_GAU.basis
