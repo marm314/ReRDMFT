@@ -3609,7 +3609,7 @@ std::string functionalWfnOutputPath(const rerdmft::Input& input, const std::stri
 }
 
 // "foo.inp" -> "cas_foo_<level>.wfn" (level: nonrel / x2c / 4c), the AIMPAC file of the CASSCF natural orbitals.
-std::string casWfnOutputPath(const rerdmft::Input& input, const std::string& input_path, const std::string& level) {
+std::string casWfnOutputPath(const std::string& input_path, const std::string& level) {
   const auto slash = input_path.find_last_of("/\\");
   const std::string dir = (slash == std::string::npos) ? std::string() : input_path.substr(0, slash + 1);
   std::string name = (slash == std::string::npos) ? input_path : input_path.substr(slash + 1);
@@ -3697,7 +3697,7 @@ void writeNonRelAimpac(const rerdmft::Input& input, const std::string& input_pat
     for (std::size_t j = 0; j < d_real.cols(); ++j) d_ao(i, j) = d_real(i, j);
   const rerdmft::Matrix<double> s_cart = rerdmft::overlapMatrix(large_basis_fns);
   const auto orbitals = rerdmft::naturalOrbitalsFromDensity(s_cart, d_ao, input.x_lin_dep_thrs_l());
-  const std::string path = capture.kind == "CASSCF" ? casWfnOutputPath(input, input_path, "nonrel")
+  const std::string path = capture.kind == "CASSCF" ? casWfnOutputPath(input_path, "nonrel")
                                                        : (hf || core) ? wfnOutputPath(input_path, /*is_neg=*/false, "nonrel", core ? "core" : "hf")
                                                                       : functionalWfnOutputPath(input, input_path, "nonrel", false);
   const char* tag = core ? "NON_REL CORE" : hf ? "NON_REL HF" : "NON_REL";
@@ -3813,7 +3813,7 @@ void writeX2CAimpac(const rerdmft::Input& input, const std::string& input_path,
   const auto d_ao = largeComponentAimpacDensity(c_final, capture.occupations, /*occ_start=*/0, large_transform_final);
   const rerdmft::Matrix<double> s_cart = rerdmft::overlapMatrix(large_basis_fns);
   const auto orbitals = rerdmft::naturalOrbitalsFromDensity(s_cart, d_ao, input.x_lin_dep_thrs_l());
-  const std::string path = capture.kind == "CASSCF" ? casWfnOutputPath(input, input_path, "x2c")
+  const std::string path = capture.kind == "CASSCF" ? casWfnOutputPath(input_path, "x2c")
                                                        : (hf || core) ? wfnOutputPath(input_path, /*is_neg=*/false, "x2c", core ? "core" : "hf")
                                                                       : functionalWfnOutputPath(input, input_path, "x2c", false);
   const char* tag = core ? "X2C CORE" : hf ? "X2C HF" : "X2C";
@@ -3894,7 +3894,7 @@ void writeC4Aimpac(const rerdmft::Input& input, const std::string& input_path,
     writeOne(capture, wfnOutputPath(input_path, /*is_neg=*/false, "4c", core ? "core" : "hf"), core ? "4C CORE" : "4C DHF");
     return;
   }
-  writeOne(capture, capture.kind == "CASSCF" ? casWfnOutputPath(input, input_path, "4c") : functionalWfnOutputPath(input, input_path, "4c", false), "4C");
+  writeOne(capture, capture.kind == "CASSCF" ? casWfnOutputPath(input_path, "4c") : functionalWfnOutputPath(input, input_path, "4c", false), "4C");
   if (capture_neg.valid) {
     writeOne(capture_neg, functionalWfnOutputPath(input, input_path, "4c", true), "4C_NEG");
   }

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -122,7 +123,19 @@ int main(int argc, char** argv) {
       f.x = w.centre_xyz[3 * c];
       f.y = w.centre_xyz[3 * c + 1];
       f.z = w.centre_xyz[3 * c + 2];
-      f.cartesian = aimpacTypeExponents(w.type[p]);
+      int code = w.type[p];
+      if (const char* remap = std::getenv("CHECK_WFN_TYPEMAP")) {  // debug: "from:to,from:to" reinterpretation of TYPE codes
+        std::istringstream in(remap);
+        std::string tok;
+        while (std::getline(in, tok, ',')) {
+          const auto colon = tok.find(':');
+          if (std::stoi(tok.substr(0, colon)) == code) {
+            code = std::stoi(tok.substr(colon + 1));
+            break;
+          }
+        }
+      }
+      f.cartesian = aimpacTypeExponents(code);
       f.l = f.cartesian.lx + f.cartesian.ly + f.cartesian.lz;
       const double fac = f.l == 0 ? 0.282094791773878143 : f.l == 1 ? 0.488602511902919921 : 1.0;
       f.exponents = {w.exponent[p]};
@@ -150,7 +163,21 @@ int main(int argc, char** argv) {
       n_sum += w.occupation[i];
       n_dens += s_mo(i, i) * w.occupation[i];  // Tr(S_mo diag(n)) = integral of the density
     }
-    std::printf("WFN: %zu MOs, %zu primitives, %zu nuclei\n", n_mo, n_prim, w.centre_xyz.size() / 3);
+    if (const char* dump = std::getenv("CHECK_WFN_DUMP")) {
+      std::ofstream o(dump);
+      o.precision(17);
+      for (std::size_t p = 0; p < n_prim; ++p) {
+        for (std::size_t q = 0; q < n_prim; ++q) o << prim_overlap(p, q) << " ";
+        o << "\n";
+      }
+    }
+    if (std::getenv("CHECK_WFN_VERBOSE")) {
+      for (std::size_t i = 0; i < n_mo; ++i) {
+        std::printf("MO %3zu  occ = %.8f  S_ii = %.8f  n*(S_ii-1) = %+.3e\n", i + 1, w.occupation[i], s_mo(i, i),
+                    w.occupation[i] * (s_mo(i, i) - 1.0));
+      }
+    }
+    std::printf("WFN: %zu MOs,%zu primitives, %zu nuclei\n", n_mo, n_prim, w.centre_xyz.size() / 3);
     std::printf("S_mo - I:  max|diag| = %.3e   max|offdiag| = %.3e   max = %.3e   Frobenius = %.3e\n", max_diag,
                 max_off, max_err, std::sqrt(frob));
     std::printf("Sum of occupancies               = %.10f\n", n_sum);

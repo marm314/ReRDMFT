@@ -16,20 +16,23 @@ namespace rerdmft {
 
 namespace {
 
-// AIMPAC's fixed "TYPE ASSIGNMENTS" code for a Cartesian primitive (lx, ly, lz), S..G
-// (codes 1..35) -- this table is the WFN FORMAT ITSELF (fixed by the AIMPAC/AIMAll readers,
+// AIMPAC's fixed "TYPE ASSIGNMENTS" code for a Cartesian primitive (lx, ly, lz), S..H
+// (codes 1..56) -- this table is the WFN FORMAT ITSELF (fixed by the AIMPAC/AIMAll readers,
 // completely independent of any internal basis-function ordering this project happens to use;
 // matches the table used by, e.g., PySCF's tools/wfn_format.py).
-const std::array<std::array<int, 3>, 35>& aimpacTypeTable() {
-  static const std::array<std::array<int, 3>, 35> table = {{
+const std::array<std::array<int, 3>, 56>& aimpacTypeTable() {
+  static const std::array<std::array<int, 3>, 56> table = {{
       {{0, 0, 0}},                                                    // 1: S
       {{1, 0, 0}}, {{0, 1, 0}}, {{0, 0, 1}},                          // 2-4: P
       {{2, 0, 0}}, {{0, 2, 0}}, {{0, 0, 2}}, {{1, 1, 0}}, {{1, 0, 1}}, {{0, 1, 1}},  // 5-10: D
-      {{3, 0, 0}}, {{0, 3, 0}}, {{0, 0, 3}}, {{1, 2, 0}}, {{2, 1, 0}}, {{2, 0, 1}},
-      {{1, 0, 2}}, {{0, 1, 2}}, {{0, 2, 1}}, {{1, 1, 1}},              // 11-20: F
+      {{3, 0, 0}}, {{0, 3, 0}}, {{0, 0, 3}}, {{2, 1, 0}}, {{2, 0, 1}}, {{0, 2, 1}},
+      {{1, 2, 0}}, {{1, 0, 2}}, {{0, 1, 2}}, {{1, 1, 1}},              // 11-20: F
       {{4, 0, 0}}, {{0, 4, 0}}, {{0, 0, 4}}, {{3, 1, 0}}, {{3, 0, 1}}, {{1, 3, 0}},
       {{0, 3, 1}}, {{1, 0, 3}}, {{0, 1, 3}}, {{2, 2, 0}}, {{2, 0, 2}}, {{0, 2, 2}},
       {{2, 1, 1}}, {{1, 2, 1}}, {{1, 1, 2}},                          // 21-35: G
+      {{0, 0, 5}}, {{0, 1, 4}}, {{0, 2, 3}}, {{0, 3, 2}}, {{0, 4, 1}}, {{0, 5, 0}}, {{1, 0, 4}},
+      {{1, 1, 3}}, {{1, 2, 2}}, {{1, 3, 1}}, {{1, 4, 0}}, {{2, 0, 3}}, {{2, 1, 2}}, {{2, 2, 1}},
+      {{2, 3, 0}}, {{3, 0, 2}}, {{3, 1, 1}}, {{3, 2, 0}}, {{4, 0, 1}}, {{4, 1, 0}}, {{5, 0, 0}},  // 36-56: H
   }};
   return table;
 }
@@ -41,7 +44,7 @@ int aimpacTypeCode(int lx, int ly, int lz) {
   }
   throw std::runtime_error(
       "writeAimpacWfn: angular momentum (lx=" + std::to_string(lx) + ", ly=" + std::to_string(ly) +
-      ", lz=" + std::to_string(lz) + ") has no AIMPAC WFN TYPE code -- only S..G (l<=4) are defined");
+      ", lz=" + std::to_string(lz) + ") has no AIMPAC WFN TYPE code -- only S..H (l<=5) are defined");
 }
 
 // Formats `value` the way AIMPAC WFN files do: a mantissa normalized to [0.1, 1.0) (or exactly 0)
@@ -118,7 +121,7 @@ int centreIndexOf(const BasisFunction& fn, const std::vector<Atom>& geometry) {
 CartesianExponents aimpacTypeExponents(int code) {
   const auto& table = aimpacTypeTable();
   if (code < 1 || code > static_cast<int>(table.size())) {
-    throw std::runtime_error("aimpacTypeExponents: WFN TYPE code " + std::to_string(code) + " outside 1..35");
+    throw std::runtime_error("aimpacTypeExponents: WFN TYPE code " + std::to_string(code) + " outside 1..56");
   }
   const auto& t = table[static_cast<std::size_t>(code) - 1];
   return {t[0], t[1], t[2]};

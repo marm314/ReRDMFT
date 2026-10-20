@@ -19,7 +19,7 @@ struct NaturalOrbital {
   std::vector<double> coefficients;
 };
 
-// Inverse of the WFN format's fixed TYPE ASSIGNMENTS table: code (1..35) -> Cartesian exponents.
+// Inverse of the WFN format's fixed TYPE ASSIGNMENTS table: code (1..56) -> Cartesian exponents.
 CartesianExponents aimpacTypeExponents(int code);
 
 // Diagonalizes a 1-RDM `d_ao` given in a non-orthogonal Cartesian AO basis (overlap `s`, real,
