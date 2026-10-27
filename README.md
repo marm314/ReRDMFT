@@ -1,3 +1,5 @@
+<p align="center"><img src="doc/logo.png" alt="ReRDMFT logo" width="360"></p>
+
 # ReRDMFT
 
 Relativistic Reduced Density Matrix Functional Theory in C++17. Includes a
