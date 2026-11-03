@@ -10,3 +10,5 @@ src/Utils/check_wfn
 *.dm1
 *.dm2
 *_GAU.basis
+*.wfn
+__pycache__/
