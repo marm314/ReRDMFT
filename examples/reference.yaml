@@ -1,0 +1,2459 @@
+casscf_he_c4_minmax:
+  energies:
+    Final total energy#1: -2.8933945888
+    Final total energy#2: -2.8933937309
+    Total DHF (4C) energy#1: -2.860998556
+    Vee#1: 1.0302812484
+    Vee#2: 0.9645266537
+    Vee#3: 0.9645281272
+    h-onebody#1: -3.8912798044
+    h-onebody#2: -3.8579212425
+    h-onebody#3: -3.8579218581
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+casscf_lih:
+  energies:
+    Final total energy#1: -7.9958789416
+    Final total energy#2: -7.9966927832
+    Final total energy#3: -7.9966419048
+    Total DHF (4C) energy#1: -7.9800761582
+    Total approximate X2C-HF energy#1: -7.9801139998
+    Total nonrelativistic HF energy#1: -7.9793032232
+    Vee#1: 3.4667569222
+    Vee#2: 3.424614531
+    Vee#3: 3.4667642967
+    Vee#4: 3.424627633
+    Vee#5: 3.4666430014
+    Vee#6: 3.4245109375
+    h-onebody#1: -12.4414401893
+    h-onebody#2: -12.4158735165
+    h-onebody#3: -12.4422583404
+    h-onebody#4: -12.4167004601
+    h-onebody#5: -12.4420992035
+    h-onebody#6: -12.4165328862
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+casscf_lih_c4_minmax:
+  energies:
+    Final total energy#1: -8.0168264726
+    Final total energy#2: -8.0168250075
+    Total DHF (4C) energy#1: -8.0168250075
+    Vee#1: 3.467276544
+    Vee#2: 3.4672783668
+    Vee#3: 3.4672747736
+    h-onebody#1: -12.4794815953
+    h-onebody#2: -12.4794848832
+    h-onebody#3: -12.479479825
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+casscf_lih_casci:
+  energies:
+    Final total energy#1: -7.9794455043
+    Total nonrelativistic HF energy#1: -7.9793032232
+    Vee#1: 3.4667569222
+    Vee#2: 3.4657576342
+    h-onebody#1: -12.4414401893
+    h-onebody#2: -12.4405831824
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+casscf_lih_dissociated_core:
+  energies:
+    Final total energy#1: -7.9299469817
+    Final total energy#2: -7.930762352
+    Total approximate X2C-HF energy#1: -7.8233022042
+    Total nonrelativistic HF energy#1: -7.8225039742
+    Vee#1: 2.6185643135
+    Vee#2: 2.613711912
+    Vee#3: 2.6185984481
+    Vee#4: 2.6137295932
+    h-onebody#1: -10.7585746141
+    h-onebody#2: -10.8611652201
+    h-onebody#3: -10.7594069788
+    h-onebody#4: -10.8619982716
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+casscf_lih_outputs:
+  energies:
+    Final total energy#1: -7.9958315936
+    Total nonrelativistic HF energy#1: -7.9792678287
+    Vee#1: 3.4666281576
+    Vee#2: 3.4244934853
+    h-onebody#1: -12.4412760302
+    h-onebody#2: -12.4157051228
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+casscf_lih_read_restart:
+  energies:
+    Final total energy#1: -7.9964857303
+    Final total energy#2: -7.9972966741
+    Final total energy#3: -7.9972262027
+    Vee#1: 3.3598151491
+    Vee#2: 3.3597848307
+    Vee#3: 3.3596246064
+    h-onebody#1: -12.2901430158
+    h-onebody#2: -12.2909236413
+    h-onebody#3: -12.2906929455
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+co-cc-pvdz:
+  energies:
+    Total DHF (4C) energy#1: -112.8205105605
+    Total nonrelativistic HF energy#1: -112.7497064007
+    Vee#1: 62.9030163543
+    Vee#2: 62.9220525121
+    h-onebody#1: -198.1709019324
+    h-onebody#2: -198.2607422501
+  occupations: {}
+  slow: true
+  tolerance: 1.0e-06
+co-cc-pvtz:
+  energies:
+    Total nonrelativistic HF energy#1: -112.7809028524
+    Vee#1: 62.9322792427
+    h-onebody#1: -198.2313612726
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+co-sto-3g:
+  energies:
+    Total DHF (4C) energy#1: -111.2793019678
+    Total nonrelativistic HF energy#1: -111.2245586982
+    Vee#1: 63.2901000762
+    Vee#2: 63.2934249034
+    h-onebody#1: -197.0328379519
+    h-onebody#2: -197.0909060487
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+co-sto-3g_gnof:
+  energies:
+    Optimized total energy#1: -111.2867994509
+    Optimized total energy#2: -111.3419864844
+    Total DHF (4C) energy#1: -111.2793019678
+    Total nonrelativistic HF energy#1: -111.2245586982
+    Vee#1: 63.2901000762
+    Vee#2: 63.2460574529
+    Vee#3: 63.2934249034
+    Vee#4: 63.2489753637
+    h-onebody#1: -197.0328379519
+    h-onebody#2: -197.0510360813
+    h-onebody#3: -197.0909060487
+    h-onebody#4: -197.1091410256
+  occupations:
+    occupations#1/count: 8.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.01797
+    occupations#1/sum: 7.0
+    occupations#2/count: 8.0
+    occupations#2/max: 1.0
+    occupations#2/min: 0.01813
+    occupations#2/sum: 7.0
+  slow: false
+  tolerance: 1.0e-06
+co-sto-3g_muller:
+  energies:
+    Optimized total energy#1: -111.5830404136
+    Optimized total energy#2: -111.6377681894
+    Total DHF (4C) energy#1: -111.2793019678
+    Total nonrelativistic HF energy#1: -111.2245586982
+    Vee#1: 63.2901000762
+    Vee#2: 63.0467274157
+    Vee#3: 63.2934249034
+    Vee#4: 63.0486428862
+    h-onebody#1: -197.0328379519
+    h-onebody#2: -197.1479470068
+    h-onebody#3: -197.0909060487
+    h-onebody#4: -197.204590253
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+co-sto-3g_rel:
+  energies:
+    Total DHF (4C) energy#1: -111.2793019678
+    Vee#1: 63.2934249034
+    h-onebody#1: -197.0909060487
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+co_631g_c4_gnof_neg_adam_cholesky:
+  energies:
+    Final total energy#1: -112.9253453828
+    Final total energy#2: -112.9253453815
+    Optimized total energy#1: -112.8353620057
+    Total DHF (4C) energy#1: -112.7381124455
+    Vee#1: 62.6437774774
+    Vee#2: 62.4373725117
+    Vee#3: 62.5151196471
+    Vee#4: 62.5151167415
+    h-onebody#1: -197.9000691004
+    h-onebody#2: -197.7909136949
+    h-onebody#3: -197.9586442073
+    h-onebody#4: -197.9586413005
+  occupations:
+    occupations#1/count: 10.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0039
+    occupations#1/sum: 7.0
+    occupations#2/count: 10.0
+    occupations#2/max: 1.0
+    occupations#2/min: 0.0118
+    occupations#2/sum: 7.0
+    occupations#3/count: 10.0
+    occupations#3/max: 1.0
+    occupations#3/min: 0.0118
+    occupations#3/sum: 7.0
+  slow: true
+  tolerance: 1.0e-06
+co_631g_c4_gnof_neg_adam_neo_cholesky:
+  energies:
+    Final total energy#1: -112.9253453828
+    Final total energy#2: -112.9253453815
+    Optimized total energy#1: -112.8353620057
+    Total DHF (4C) energy#1: -112.7381124455
+    Vee#1: 62.6437774774
+    Vee#2: 62.4373725117
+    Vee#3: 62.5151196471
+    Vee#4: 62.5151167675
+    h-onebody#1: -197.9000691004
+    h-onebody#2: -197.7909136949
+    h-onebody#3: -197.9586442073
+    h-onebody#4: -197.9586413264
+  occupations:
+    occupations#1/count: 10.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0039
+    occupations#1/sum: 7.0
+    occupations#2/count: 10.0
+    occupations#2/max: 1.0
+    occupations#2/min: 0.0118
+    occupations#2/sum: 7.0
+    occupations#3/count: 10.0
+    occupations#3/max: 1.0
+    occupations#3/min: 0.0118
+    occupations#3/sum: 7.0
+  slow: true
+  tolerance: 1.0e-06
+co_631g_c4_gnof_neg_neo_cholesky:
+  energies:
+    Final total energy#1: -112.9253453828
+    Final total energy#2: -112.9253453811
+    Optimized total energy#1: -112.8353620057
+    Total DHF (4C) energy#1: -112.7381124455
+    Vee#1: 62.6437774774
+    Vee#2: 62.4373725117
+    Vee#3: 62.5151196471
+    Vee#4: 62.5151223341
+    h-onebody#1: -197.9000691004
+    h-onebody#2: -197.7909136949
+    h-onebody#3: -197.9586442073
+    h-onebody#4: -197.9586468926
+  occupations:
+    occupations#1/count: 10.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0039
+    occupations#1/sum: 7.0
+    occupations#2/count: 10.0
+    occupations#2/max: 1.0
+    occupations#2/min: 0.0118
+    occupations#2/sum: 7.0
+    occupations#3/count: 10.0
+    occupations#3/max: 1.0
+    occupations#3/min: 0.0118
+    occupations#3/sum: 7.0
+  slow: false
+  tolerance: 1.0e-06
+co_ccpvdz_c4_gnof_neg_neo_cholesky:
+  energies:
+    Final total energy#1: -113.0029197596
+    Final total energy#2: -113.0029197584
+    Optimized total energy#1: -112.9063149256
+    Total DHF (4C) energy#1: -112.8205106987
+    Vee#1: 62.9220525275
+    Vee#2: 62.7200326714
+    Vee#3: 62.7799864412
+    Vee#4: 62.7799830721
+    h-onebody#1: -198.2607424037
+    h-onebody#2: -198.1445267745
+    h-onebody#3: -198.3010853782
+    h-onebody#4: -198.3010820079
+  occupations:
+    occupations#1/count: 10.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.00337
+    occupations#1/sum: 7.0
+    occupations#2/count: 10.0
+    occupations#2/max: 1.0
+    occupations#2/min: 0.01144
+    occupations#2/sum: 7.0
+    occupations#3/count: 10.0
+    occupations#3/max: 1.0
+    occupations#3/min: 0.01144
+    occupations#3/sum: 7.0
+  slow: true
+  tolerance: 1.0e-06
+co_ccpvdz_c4_gnof_neo_cholesky:
+  energies:
+    Final total energy#1: -113.0029197596
+    Optimized total energy#1: -112.9063149256
+    Total DHF (4C) energy#1: -112.8205106987
+    Vee#1: 62.9220525275
+    Vee#2: 62.7200326714
+    Vee#3: 62.7799864412
+    h-onebody#1: -198.2607424037
+    h-onebody#2: -198.1445267745
+    h-onebody#3: -198.3010853782
+  occupations:
+    occupations#1/count: 10.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.00337
+    occupations#1/sum: 7.0
+    occupations#2/count: 10.0
+    occupations#2/max: 1.0
+    occupations#2/min: 0.01144
+    occupations#2/sum: 7.0
+  slow: true
+  tolerance: 1.0e-06
+co_ccpvdz_nonrel_gnof_neo_cholesky:
+  energies:
+    Final total energy#1: -112.9287487264
+    Optimized total energy#1: -112.8354416578
+    Total nonrelativistic HF energy#1: -112.7497064004
+    Vee#1: 62.9030163533
+    Vee#2: 62.699354642
+    Vee#3: 62.791012248
+    h-onebody#1: -198.1709019311
+    h-onebody#2: -198.0529754773
+    h-onebody#3: -198.2379401518
+  occupations:
+    occupations#1/count: 10.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.00334
+    occupations#1/sum: 7.0
+    occupations#2/count: 10.0
+    occupations#2/max: 1.0
+    occupations#2/min: 0.00984
+    occupations#2/sum: 7.0
+  slow: false
+  tolerance: 1.0e-06
+co_ccpvdz_x2c_gnof_neo_cholesky:
+  energies:
+    Final total energy#1: -113.00327162
+    Optimized total energy#1: -112.9066383953
+    Total approximate X2C-HF energy#1: -112.8208059114
+    Vee#1: 62.9234071026
+    Vee#2: 62.7213790378
+    Vee#3: 62.7812502553
+    h-onebody#1: -198.2623921914
+    h-onebody#2: -198.1461966106
+    h-onebody#3: -198.3027010528
+  occupations:
+    occupations#1/count: 10.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.00337
+    occupations#1/sum: 7.0
+    occupations#2/count: 10.0
+    occupations#2/max: 1.0
+    occupations#2/min: 0.01144
+    occupations#2/sum: 7.0
+  slow: true
+  tolerance: 1.0e-06
+co_sto3g_gnof_full_optimization:
+  energies:
+    Final total energy#1: -111.2912013297
+    Final total energy#2: -111.3471776599
+    Optimized total energy#1: -111.2867994509
+    Optimized total energy#2: -111.3428270662
+    Total approximate X2C-HF energy#1: -111.2801403995
+    Total nonrelativistic HF energy#1: -111.2245586982
+    Vee#1: 63.2901000762
+    Vee#2: 63.2460574529
+    Vee#3: 63.1490140832
+    Vee#4: 63.2929682566
+    Vee#5: 63.2485143358
+    Vee#6: 63.1579167124
+    h-onebody#1: -197.0328379519
+    h-onebody#2: -197.0510360813
+    h-onebody#3: -196.9583945904
+    h-onebody#4: -197.0912878336
+    h-onebody#5: -197.1095205794
+    h-onebody#6: -197.0232735497
+  occupations:
+    occupations#1/count: 8.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.01797
+    occupations#1/sum: 7.0
+    occupations#2/count: 8.0
+    occupations#2/max: 1.0
+    occupations#2/min: 0.0212
+    occupations#2/sum: 7.0
+    occupations#3/count: 8.0
+    occupations#3/max: 1.0
+    occupations#3/min: 0.01814
+    occupations#3/sum: 7.0
+    occupations#4/count: 8.0
+    occupations#4/max: 1.0
+    occupations#4/min: 0.02114
+    occupations#4/sum: 7.0
+  slow: false
+  tolerance: 1.0e-06
+co_sto3g_muller_full_optimization:
+  energies:
+    Final total energy#1: -111.6031348721
+    Final total energy#2: -111.6586599239
+    Optimized total energy#1: -111.5830404136
+    Optimized total energy#2: -111.6386555058
+    Total approximate X2C-HF energy#1: -111.2801403995
+    Total nonrelativistic HF energy#1: -111.2245586982
+    Vee#1: 63.2901000762
+    Vee#2: 63.0467274157
+    Vee#3: 62.7605775562
+    Vee#4: 63.2929682566
+    Vee#5: 63.0479023486
+    Vee#6: 62.7626236665
+    h-onebody#1: -197.0328379519
+    h-onebody#2: -197.1479470068
+    h-onebody#3: -196.8818916057
+    h-onebody#4: -197.0912878336
+    h-onebody#5: -197.2047370318
+    h-onebody#6: -196.9394627678
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+h2:
+  energies:
+    Total DHF (4C) energy#1: -1.1329689668
+    Total nonrelativistic HF energy#1: -1.1329762445
+    Vee#1: 0.6581847067
+    Vee#2: 0.658200018
+    h-onebody#1: -2.5049149445
+    h-onebody#2: -2.5049229781
+  occupations: {}
+  slow: true
+  tolerance: 1.0e-06
+h2_X2C:
+  energies:
+    Total approximate X2C-HF energy#1: -1.1329616422
+    Total nonrelativistic HF energy#1: -1.1329762445
+    Vee#1: 0.6581847067
+    Vee#2: 0.6582037257
+    h-onebody#1: -2.5049149445
+    h-onebody#2: -2.5049193613
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+h2_X2C_gnof:
+  energies:
+    Optimized total energy#1: -0.9749292703
+    Optimized total energy#2: -0.9753850638
+    Total approximate X2C-HF energy#1: -0.8059994809
+    Total nonrelativistic HF energy#1: -0.8062138433
+    Vee#1: 0.3344577426
+    Vee#2: 0.1524867478
+    Vee#3: 0.3350178522
+    Vee#4: 0.1524970173
+    h-onebody#1: -1.2918650746
+    h-onebody#2: -1.2786095069
+    h-onebody#3: -1.2922108219
+    h-onebody#4: -1.2790755699
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 0.55212
+    occupations#1/min: 0.0
+    occupations#1/sum: 1.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.55171
+    occupations#2/min: 0.0
+    occupations#2/sum: 1.0
+  slow: false
+  tolerance: 1.0e-06
+h2_sto3g_c4_dense_reference:
+  energies:
+    Total DHF (4C) energy#1: -1.1166976925
+    Vee#1: 0.6744875315
+    h-onebody#1: -2.5049392173
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+h2_sto3g_c4_dense_reference_muller:
+  energies:
+    Optimized total energy#1: -1.1384767519
+    Total DHF (4C) energy#1: -1.1166976925
+    Vee#1: 0.6744875315
+    Vee#2: 0.6306506683
+    h-onebody#1: -2.5049392173
+    h-onebody#2: -2.4828814135
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+h2_sto3g_c4_read_restart_muller:
+  energies:
+    Optimized total energy#1: -1.1384767671
+    Vee#1: 0.6306507062
+    h-onebody#1: -2.4828814667
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+h2_sto3g_c4_scf_direct:
+  energies:
+    Total DHF (4C) energy#1: -1.1166976925
+    Vee#1: 0.6744875315
+    h-onebody#1: -2.5049392173
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+h2_sto3g_c4_scf_direct_muller:
+  energies:
+    Optimized total energy#1: -1.1384767519
+    Total DHF (4C) energy#1: -1.1166976925
+    Vee#1: 0.6744875315
+    Vee#2: 0.6306506683
+    h-onebody#1: -2.5049392173
+    h-onebody#2: -2.4828814135
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+he_pccd_c4_neg:
+  energies:
+    Final total energy#1: -2.8933945876
+    Final total energy#2: -2.8933937307
+    Total DHF (4C) energy#1: -2.860998556
+    Vee#1: 1.0302812484
+    Vee#2: 0.9656171751
+    Vee#3: 0.9645294174
+    Vee#4: 0.964528075
+    h-onebody#1: -3.8912798044
+    h-onebody#2: -3.8590085639
+    h-onebody#3: -3.857924005
+    h-onebody#4: -3.8579218056
+  occupations:
+    occupations#1/count: 5.0
+    occupations#1/max: 0.99271
+    occupations#1/min: 0.00103
+    occupations#1/sum: 1.00001
+    occupations#2/count: 5.0
+    occupations#2/max: 0.99271
+    occupations#2/min: 0.00103
+    occupations#2/sum: 1.00002
+    occupations#3/count: 5.0
+    occupations#3/max: 0.99271
+    occupations#3/min: 0.00103
+    occupations#3/sum: 1.00002
+  slow: false
+  tolerance: 1.0e-06
+lih_4C_gnof_debug:
+  energies:
+    Optimized total energy#1: -7.979636578
+    Optimized total energy#2: -7.9804451559
+    Total DHF (4C) energy#1: -7.980076239
+    Total nonrelativistic HF energy#1: -7.9792678287
+    Vee#1: 3.4666281576
+    Vee#2: 3.4655826932
+    Vee#3: 3.466642629
+    Vee#4: 3.4655966744
+    h-onebody#1: -12.4412760302
+    h-onebody#2: -12.4405993151
+    h-onebody#3: -12.4420989119
+    h-onebody#4: -12.4414218742
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 1.0
+    occupations#2/min: 0.0
+    occupations#2/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_X2C_gnof_debug:
+  energies:
+    Optimized total energy#1: -7.979636578
+    Optimized total energy#2: -7.9804475508
+    Total approximate X2C-HF energy#1: -7.9800786075
+    Total nonrelativistic HF energy#1: -7.9792678287
+    Vee#1: 3.4666281576
+    Vee#2: 3.4655826932
+    Vee#3: 3.4666355323
+    Vee#4: 3.4655894854
+    h-onebody#1: -12.4412760302
+    h-onebody#2: -12.4405993151
+    h-onebody#3: -12.4420941837
+    h-onebody#4: -12.4414170801
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 1.0
+    occupations#2/min: 0.0
+    occupations#2/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_X2C_gnof_full_optimization:
+  energies:
+    Final total energy#1: -7.9984220086
+    Optimized total energy#1: -7.9804475508
+    Total approximate X2C-HF energy#1: -7.9800786075
+    Vee#1: 3.4666355323
+    Vee#2: 3.4655894854
+    Vee#3: 3.4246083045
+    h-onebody#1: -12.4420941837
+    h-onebody#2: -12.4414170801
+    h-onebody#3: -12.418410357
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99994
+    occupations#2/min: 6.0e-05
+    occupations#2/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_X2C_gnof_full_optimization_dissociated:
+  energies:
+    Final total energy#1: -7.9315109182
+    Optimized total energy#1: -7.8478202313
+    Total approximate X2C-HF energy#1: -7.8231745325
+    Vee#1: 2.6191465275
+    Vee#2: 2.6004429277
+    Vee#3: 2.612273645
+    h-onebody#1: -10.7598273864
+    h-onebody#2: -10.7657694854
+    h-onebody#3: -10.8612908896
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 0.99999
+    occupations#1/min: 1.0e-05
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99991
+    occupations#2/min: 9.0e-05
+    occupations#2/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_c4_gnof_full_optimization_dissociated:
+  energies:
+    Final total energy#1: -7.9315109182
+    Final total energy#2: -7.9315050407
+    Optimized total energy#1: -7.8478202313
+    Optimized total energy#2: -7.8478137304
+    Total DHF (4C) energy#1: -7.8231724971
+    Total approximate X2C-HF energy#1: -7.8231745325
+    Vee#1: 2.6191465275
+    Vee#2: 2.6004429277
+    Vee#3: 2.612273645
+    Vee#4: 2.6191464941
+    Vee#5: 2.6004459025
+    Vee#6: 2.6122826919
+    h-onebody#1: -10.7598273864
+    h-onebody#2: -10.7657694854
+    h-onebody#3: -10.8612908896
+    h-onebody#4: -10.7598253176
+    h-onebody#5: -10.7657659593
+    h-onebody#6: -10.861294059
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 0.99999
+    occupations#1/min: 1.0e-05
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99991
+    occupations#2/min: 9.0e-05
+    occupations#2/sum: 2.0
+    occupations#3/count: 4.0
+    occupations#3/max: 0.99999
+    occupations#3/min: 1.0e-05
+    occupations#3/sum: 2.0
+    occupations#4/count: 4.0
+    occupations#4/max: 0.99991
+    occupations#4/min: 9.0e-05
+    occupations#4/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_c4_gnof_full_optimization_dissociated_cholesky:
+  energies:
+    Final total energy#1: -7.9315109188
+    Final total energy#2: -7.9315050392
+    Optimized total energy#1: -7.8478202313
+    Optimized total energy#2: -7.8478137305
+    Total DHF (4C) energy#1: -7.8231724971
+    Total approximate X2C-HF energy#1: -7.8231745325
+    Vee#1: 2.6191465275
+    Vee#2: 2.6004429277
+    Vee#3: 2.6122747164
+    Vee#4: 2.6191464941
+    Vee#5: 2.6004459025
+    Vee#6: 2.6122821542
+    h-onebody#1: -10.7598273864
+    h-onebody#2: -10.7657694854
+    h-onebody#3: -10.8612919617
+    h-onebody#4: -10.7598253176
+    h-onebody#5: -10.7657659593
+    h-onebody#6: -10.8612935199
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 0.99999
+    occupations#1/min: 1.0e-05
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99991
+    occupations#2/min: 9.0e-05
+    occupations#2/sum: 2.0
+    occupations#3/count: 4.0
+    occupations#3/max: 0.99999
+    occupations#3/min: 1.0e-05
+    occupations#3/sum: 2.0
+    occupations#4/count: 4.0
+    occupations#4/max: 0.99991
+    occupations#4/min: 9.0e-05
+    occupations#4/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_c4_gnof_neo_full_optimization_dissociated:
+  energies:
+    Final total energy#1: -7.9315109189
+    Final total energy#2: -7.9315050407
+    Optimized total energy#1: -7.8478202313
+    Optimized total energy#2: -7.8478137304
+    Total DHF (4C) energy#1: -7.8231724971
+    Total approximate X2C-HF energy#1: -7.8231745325
+    Vee#1: 2.6191465275
+    Vee#2: 2.6004429277
+    Vee#3: 2.6122735701
+    Vee#4: 2.6191464941
+    Vee#5: 2.6004459025
+    Vee#6: 2.6122813125
+    h-onebody#1: -10.7598273864
+    h-onebody#2: -10.7657694854
+    h-onebody#3: -10.8612908154
+    h-onebody#4: -10.7598253176
+    h-onebody#5: -10.7657659593
+    h-onebody#6: -10.8612926797
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 0.99999
+    occupations#1/min: 1.0e-05
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99991
+    occupations#2/min: 9.0e-05
+    occupations#2/sum: 2.0
+    occupations#3/count: 4.0
+    occupations#3/max: 0.99999
+    occupations#3/min: 1.0e-05
+    occupations#3/sum: 2.0
+    occupations#4/count: 4.0
+    occupations#4/max: 0.99991
+    occupations#4/min: 9.0e-05
+    occupations#4/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_gnof_adam_neo_full_optimization:
+  energies:
+    Final total energy#1: -7.9976089471
+    Final total energy#2: -7.9984220094
+    Final total energy#3: -7.998418662
+    Optimized total energy#1: -7.979636578
+    Optimized total energy#2: -7.9804475508
+    Optimized total energy#3: -7.9804451559
+    Total DHF (4C) energy#1: -7.980076239
+    Total approximate X2C-HF energy#1: -7.9800786075
+    Total nonrelativistic HF energy#1: -7.9792678287
+    Vee#1: 3.4666281576
+    Vee#2: 3.4655826932
+    Vee#3: 3.4246022184
+    Vee#4: 3.4666355323
+    Vee#5: 3.4655894854
+    Vee#6: 3.4246081137
+    Vee#7: 3.466642629
+    Vee#8: 3.4655966744
+    Vee#9: 3.4246164611
+    h-onebody#1: -12.4412760302
+    h-onebody#2: -12.4405993151
+    h-onebody#3: -12.4175912094
+    h-onebody#4: -12.4420941837
+    h-onebody#5: -12.4414170801
+    h-onebody#6: -12.418410167
+    h-onebody#7: -12.4420989119
+    h-onebody#8: -12.4414218742
+    h-onebody#9: -12.4184151669
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99994
+    occupations#2/min: 6.0e-05
+    occupations#2/sum: 2.0
+    occupations#3/count: 4.0
+    occupations#3/max: 1.0
+    occupations#3/min: 0.0
+    occupations#3/sum: 2.0
+    occupations#4/count: 4.0
+    occupations#4/max: 0.99994
+    occupations#4/min: 6.0e-05
+    occupations#4/sum: 2.0
+    occupations#5/count: 4.0
+    occupations#5/max: 1.0
+    occupations#5/min: 0.0
+    occupations#5/sum: 2.0
+    occupations#6/count: 4.0
+    occupations#6/max: 0.99994
+    occupations#6/min: 6.0e-05
+    occupations#6/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_gnof_c4_dense_direct:
+  energies:
+    Final total energy#1: -7.998418659
+    Optimized total energy#1: -7.9804451559
+    Total DHF (4C) energy#1: -7.980076239
+    Vee#1: 3.466642629
+    Vee#2: 3.4655966744
+    Vee#3: 3.4246104979
+    h-onebody#1: -12.4420989119
+    h-onebody#2: -12.4414218742
+    h-onebody#3: -12.4184092008
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99994
+    occupations#2/min: 6.0e-05
+    occupations#2/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_gnof_c4_dense_direct_neg:
+  energies:
+    Final total energy#1: -7.998418659
+    Final total energy#2: -7.9984186619
+    Optimized total energy#1: -7.9804451559
+    Total DHF (4C) energy#1: -7.980076239
+    Vee#1: 3.466642629
+    Vee#2: 3.4655966744
+    Vee#3: 3.4246104979
+    Vee#4: 3.4246141718
+    h-onebody#1: -12.4420989119
+    h-onebody#2: -12.4414218742
+    h-onebody#3: -12.4184092008
+    h-onebody#4: -12.4184128776
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99994
+    occupations#2/min: 6.0e-05
+    occupations#2/sum: 2.0
+    occupations#3/count: 4.0
+    occupations#3/max: 0.99994
+    occupations#3/min: 6.0e-05
+    occupations#3/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_gnof_c4_full_optimization:
+  energies:
+    Final total energy#1: -7.997608947
+    Final total energy#2: -7.9984220074
+    Final total energy#3: -7.9984186573
+    Optimized total energy#1: -7.979636578
+    Optimized total energy#2: -7.9804475508
+    Optimized total energy#3: -7.9804451559
+    Total DHF (4C) energy#1: -7.980076239
+    Total approximate X2C-HF energy#1: -7.9800786075
+    Total nonrelativistic HF energy#1: -7.9792678287
+    Vee#1: 3.4666281576
+    Vee#2: 3.4655826932
+    Vee#3: 3.4246023181
+    Vee#4: 3.4666355323
+    Vee#5: 3.4655894854
+    Vee#6: 3.4246125067
+    Vee#7: 3.466642629
+    Vee#8: 3.4655966744
+    Vee#9: 3.4246161371
+    h-onebody#1: -12.4412760302
+    h-onebody#2: -12.4405993151
+    h-onebody#3: -12.4175913089
+    h-onebody#4: -12.4420941837
+    h-onebody#5: -12.4414170801
+    h-onebody#6: -12.418414558
+    h-onebody#7: -12.4420989119
+    h-onebody#8: -12.4414218742
+    h-onebody#9: -12.4184148383
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99994
+    occupations#2/min: 6.0e-05
+    occupations#2/sum: 2.0
+    occupations#3/count: 4.0
+    occupations#3/max: 1.0
+    occupations#3/min: 0.0
+    occupations#3/sum: 2.0
+    occupations#4/count: 4.0
+    occupations#4/max: 0.99994
+    occupations#4/min: 6.0e-05
+    occupations#4/sum: 2.0
+    occupations#5/count: 4.0
+    occupations#5/max: 1.0
+    occupations#5/min: 0.0
+    occupations#5/sum: 2.0
+    occupations#6/count: 4.0
+    occupations#6/max: 0.99994
+    occupations#6/min: 6.0e-05
+    occupations#6/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_gnof_c4_full_optimization_cholesky:
+  energies:
+    Final total energy#1: -7.9976089469
+    Final total energy#2: -7.9984220071
+    Final total energy#3: -7.998418659
+    Optimized total energy#1: -7.979636578
+    Optimized total energy#2: -7.9804475508
+    Optimized total energy#3: -7.9804451559
+    Total DHF (4C) energy#1: -7.980076239
+    Total approximate X2C-HF energy#1: -7.9800786075
+    Total nonrelativistic HF energy#1: -7.9792678287
+    Vee#1: 3.4666281576
+    Vee#2: 3.4655826932
+    Vee#3: 3.4246036661
+    Vee#4: 3.4666355323
+    Vee#5: 3.4655894854
+    Vee#6: 3.4246066163
+    Vee#7: 3.4666426292
+    Vee#8: 3.4655966744
+    Vee#9: 3.4246082989
+    h-onebody#1: -12.4412760302
+    h-onebody#2: -12.4405993151
+    h-onebody#3: -12.417592657
+    h-onebody#4: -12.4420941837
+    h-onebody#5: -12.4414170801
+    h-onebody#6: -12.4184086673
+    h-onebody#7: -12.4420989121
+    h-onebody#8: -12.4414218742
+    h-onebody#9: -12.4184070018
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99994
+    occupations#2/min: 6.0e-05
+    occupations#2/sum: 2.0
+    occupations#3/count: 4.0
+    occupations#3/max: 1.0
+    occupations#3/min: 0.0
+    occupations#3/sum: 2.0
+    occupations#4/count: 4.0
+    occupations#4/max: 0.99994
+    occupations#4/min: 6.0e-05
+    occupations#4/sum: 2.0
+    occupations#5/count: 4.0
+    occupations#5/max: 1.0
+    occupations#5/min: 0.0
+    occupations#5/sum: 2.0
+    occupations#6/count: 4.0
+    occupations#6/max: 0.99994
+    occupations#6/min: 6.0e-05
+    occupations#6/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_gnof_c4_full_optimization_use_ri:
+  energies:
+    Final total energy#1: -7.9976533572
+    Final total energy#2: -7.9984664158
+    Final total energy#3: -7.9984184633
+    Optimized total energy#1: -7.9796705841
+    Optimized total energy#2: -7.9804815526
+    Optimized total energy#3: -7.9804450725
+    Total DHF (4C) energy#1: -7.9800761582
+    Total approximate X2C-HF energy#1: -7.9801139998
+    Total nonrelativistic HF energy#1: -7.9793032232
+    Vee#1: 3.4667569222
+    Vee#2: 3.4657149622
+    Vee#3: 3.4247190161
+    Vee#4: 3.4667642967
+    Vee#5: 3.4657217618
+    Vee#6: 3.424722281
+    Vee#7: 3.4666430014
+    Vee#8: 3.4655970522
+    Vee#9: 3.4246184795
+    h-onebody#1: -12.4414401893
+    h-onebody#2: -12.4407655902
+    h-onebody#3: -12.4177524172
+    h-onebody#4: -12.4422583404
+    h-onebody#5: -12.4415833583
+    h-onebody#6: -12.4185687407
+    h-onebody#7: -12.4420992035
+    h-onebody#8: -12.4414221686
+    h-onebody#9: -12.4184169868
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99994
+    occupations#2/min: 6.0e-05
+    occupations#2/sum: 2.0
+    occupations#3/count: 4.0
+    occupations#3/max: 1.0
+    occupations#3/min: 0.0
+    occupations#3/sum: 2.0
+    occupations#4/count: 4.0
+    occupations#4/max: 0.99994
+    occupations#4/min: 6.0e-05
+    occupations#4/sum: 2.0
+    occupations#5/count: 4.0
+    occupations#5/max: 1.0
+    occupations#5/min: 0.0
+    occupations#5/sum: 2.0
+    occupations#6/count: 4.0
+    occupations#6/max: 0.99994
+    occupations#6/min: 6.0e-05
+    occupations#6/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_gnof_c4_functional_direct:
+  energies:
+    Final total energy#1: -7.9984186349
+    Optimized total energy#1: -7.9804451559
+    Total DHF (4C) energy#1: -7.980076239
+    Vee#1: 3.466642629
+    Vee#2: 3.4655966744
+    Vee#3: 3.4246166808
+    h-onebody#1: -12.4420989119
+    h-onebody#2: -12.4414218742
+    h-onebody#3: -12.4184153596
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99994
+    occupations#2/min: 6.0e-05
+    occupations#2/sum: 2.0
+  slow: true
+  tolerance: 1.0e-06
+lih_gnof_c4_functional_pos_cho:
+  energies:
+    Final total energy#1: -7.998418659
+    Optimized total energy#1: -7.9804451559
+    Total DHF (4C) energy#1: -7.980076239
+    Vee#1: 3.4666426292
+    Vee#2: 3.4655966744
+    Vee#3: 3.4246082989
+    h-onebody#1: -12.4420989121
+    h-onebody#2: -12.4414218742
+    h-onebody#3: -12.4184070018
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99994
+    occupations#2/min: 6.0e-05
+    occupations#2/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_gnof_c4_neg_adam:
+  energies:
+    Final total energy#1: -7.9984186573
+    Final total energy#2: -7.998418662
+    Optimized total energy#1: -7.9804451559
+    Total DHF (4C) energy#1: -7.980076239
+    Vee#1: 3.466642629
+    Vee#2: 3.4655966744
+    Vee#3: 3.4246161371
+    Vee#4: 3.4246130641
+    h-onebody#1: -12.4420989119
+    h-onebody#2: -12.4414218742
+    h-onebody#3: -12.4184148383
+    h-onebody#4: -12.41841177
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99994
+    occupations#2/min: 6.0e-05
+    occupations#2/sum: 2.0
+    occupations#3/count: 4.0
+    occupations#3/max: 0.99994
+    occupations#3/min: 6.0e-05
+    occupations#3/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_gnof_c4_neg_adam_neo:
+  energies:
+    Final total energy#1: -7.9984186573
+    Final total energy#2: -7.998418662
+    Optimized total energy#1: -7.9804451559
+    Total DHF (4C) energy#1: -7.980076239
+    Vee#1: 3.466642629
+    Vee#2: 3.4655966744
+    Vee#3: 3.4246161371
+    Vee#4: 3.4246145697
+    h-onebody#1: -12.4420989119
+    h-onebody#2: -12.4414218742
+    h-onebody#3: -12.4184148383
+    h-onebody#4: -12.4184132756
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99994
+    occupations#2/min: 6.0e-05
+    occupations#2/sum: 2.0
+    occupations#3/count: 4.0
+    occupations#3/max: 0.99994
+    occupations#3/min: 6.0e-05
+    occupations#3/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_gnof_c4_neg_full_optimization:
+  energies:
+    Final total energy#1: -7.9984186573
+    Final total energy#2: -7.9984186616
+    Optimized total energy#1: -7.9804451559
+    Total DHF (4C) energy#1: -7.980076239
+    Vee#1: 3.466642629
+    Vee#2: 3.4655966744
+    Vee#3: 3.4246161371
+    Vee#4: 3.4246193558
+    h-onebody#1: -12.4420989119
+    h-onebody#2: -12.4414218742
+    h-onebody#3: -12.4184148383
+    h-onebody#4: -12.4184180613
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99994
+    occupations#2/min: 6.0e-05
+    occupations#2/sum: 2.0
+    occupations#3/count: 4.0
+    occupations#3/max: 0.99994
+    occupations#3/min: 6.0e-05
+    occupations#3/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_gnof_c4_neo_full_optimization:
+  energies:
+    Final total energy#1: -7.9973645391
+    Final total energy#2: -7.9984220095
+    Final total energy#3: -7.998418662
+    Optimized total energy#1: -7.979636578
+    Optimized total energy#2: -7.9804475508
+    Optimized total energy#3: -7.9804451559
+    Total DHF (4C) energy#1: -7.980076239
+    Total approximate X2C-HF energy#1: -7.9800786075
+    Total nonrelativistic HF energy#1: -7.9792678287
+    Vee#1: 3.4666281576
+    Vee#2: 3.4655826932
+    Vee#3: 3.4247638691
+    Vee#4: 3.4666355323
+    Vee#5: 3.4655894854
+    Vee#6: 3.4246066996
+    Vee#7: 3.466642629
+    Vee#8: 3.4655966744
+    Vee#9: 3.4246160147
+    h-onebody#1: -12.4412760302
+    h-onebody#2: -12.4405993151
+    h-onebody#3: -12.417508452
+    h-onebody#4: -12.4420941837
+    h-onebody#5: -12.4414170801
+    h-onebody#6: -12.418408753
+    h-onebody#7: -12.4420989119
+    h-onebody#8: -12.4414218742
+    h-onebody#9: -12.4184147205
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99997
+    occupations#2/min: 3.0e-05
+    occupations#2/sum: 2.0
+    occupations#3/count: 4.0
+    occupations#3/max: 1.0
+    occupations#3/min: 0.0
+    occupations#3/sum: 2.0
+    occupations#4/count: 4.0
+    occupations#4/max: 0.99994
+    occupations#4/min: 6.0e-05
+    occupations#4/sum: 2.0
+    occupations#5/count: 4.0
+    occupations#5/max: 1.0
+    occupations#5/min: 0.0
+    occupations#5/sum: 2.0
+    occupations#6/count: 4.0
+    occupations#6/max: 0.99994
+    occupations#6/min: 6.0e-05
+    occupations#6/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_gnof_c4_restart_functional_pos_cho:
+  energies:
+    Optimized total energy#1: -7.998418662
+    Vee#1: 3.4246160147
+    h-onebody#1: -12.4184147205
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 0.99994
+    occupations#1/min: 6.0e-05
+    occupations#1/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_gnof_c4_ri_4c:
+  energies:
+    Final total energy#1: -7.9984184633
+    Optimized total energy#1: -7.9804450725
+    Total DHF (4C) energy#1: -7.9800761582
+    Vee#1: 3.4666430014
+    Vee#2: 3.4655970522
+    Vee#3: 3.4246184795
+    h-onebody#1: -12.4420992035
+    h-onebody#2: -12.4414221686
+    h-onebody#3: -12.4184169868
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99994
+    occupations#2/min: 6.0e-05
+    occupations#2/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_gnof_c4_scf_and_functional_pos_cho:
+  energies:
+    Final total energy#1: -7.998418659
+    Optimized total energy#1: -7.9804451559
+    Total DHF (4C) energy#1: -7.980076239
+    Vee#1: 3.466642629
+    Vee#2: 3.4655966744
+    Vee#3: 3.424613153
+    h-onebody#1: -12.4420989119
+    h-onebody#2: -12.4414218742
+    h-onebody#3: -12.4184118559
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99994
+    occupations#2/min: 6.0e-05
+    occupations#2/sum: 2.0
+  slow: true
+  tolerance: 1.0e-06
+lih_gnof_fcidump:
+  energies:
+    Final total energy#1: -7.997608947
+    Optimized total energy#1: -7.979636578
+    Total nonrelativistic HF energy#1: -7.9792678287
+    Vee#1: 3.4666281576
+    Vee#2: 3.4655826932
+    Vee#3: 3.4246023181
+    h-onebody#1: -12.4412760302
+    h-onebody#2: -12.4405993151
+    h-onebody#3: -12.4175913089
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99994
+    occupations#2/min: 6.0e-05
+    occupations#2/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_gnof_fcidump_cholesky:
+  energies:
+    Final total energy#1: -7.9976089468
+    Optimized total energy#1: -7.979636578
+    Total nonrelativistic HF energy#1: -7.9792678287
+    Vee#1: 3.4666281576
+    Vee#2: 3.4655826932
+    Vee#3: 3.424604711
+    h-onebody#1: -12.4412760302
+    h-onebody#2: -12.4405993151
+    h-onebody#3: -12.4175937017
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99994
+    occupations#2/min: 6.0e-05
+    occupations#2/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_gnof_fixed_occupancies:
+  energies:
+    Final total energy#1: -7.9854183433
+    Optimized total energy#1: -7.979636578
+    Total nonrelativistic HF energy#1: -7.9792678287
+    Vee#1: 3.4666281576
+    Vee#2: 3.4655826932
+    Vee#3: 3.4608022569
+    h-onebody#1: -12.4412760302
+    h-onebody#2: -12.4405993151
+    h-onebody#3: -12.4416006441
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 1.0
+    occupations#2/min: 0.0
+    occupations#2/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_gnof_full_optimization:
+  energies:
+    Final total energy#1: -7.997608947
+    Final total energy#2: -7.9984220074
+    Optimized total energy#1: -7.979636578
+    Optimized total energy#2: -7.9804475508
+    Total approximate X2C-HF energy#1: -7.9800786075
+    Total nonrelativistic HF energy#1: -7.9792678287
+    Vee#1: 3.4666281576
+    Vee#2: 3.4655826932
+    Vee#3: 3.4246023181
+    Vee#4: 3.4666355323
+    Vee#5: 3.4655894854
+    Vee#6: 3.4246125067
+    h-onebody#1: -12.4412760302
+    h-onebody#2: -12.4405993151
+    h-onebody#3: -12.4175913089
+    h-onebody#4: -12.4420941837
+    h-onebody#5: -12.4414170801
+    h-onebody#6: -12.418414558
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99994
+    occupations#2/min: 6.0e-05
+    occupations#2/sum: 2.0
+    occupations#3/count: 4.0
+    occupations#3/max: 1.0
+    occupations#3/min: 0.0
+    occupations#3/sum: 2.0
+    occupations#4/count: 4.0
+    occupations#4/max: 0.99994
+    occupations#4/min: 6.0e-05
+    occupations#4/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_gnof_full_optimization_cholesky:
+  energies:
+    Final total energy#1: -7.9976089468
+    Final total energy#2: -7.9984220053
+    Optimized total energy#1: -7.979636578
+    Optimized total energy#2: -7.9804475508
+    Total approximate X2C-HF energy#1: -7.9800786075
+    Total nonrelativistic HF energy#1: -7.9792678287
+    Vee#1: 3.4666281576
+    Vee#2: 3.4655826932
+    Vee#3: 3.424604711
+    Vee#4: 3.4666355323
+    Vee#5: 3.4655894854
+    Vee#6: 3.4246034041
+    h-onebody#1: -12.4412760302
+    h-onebody#2: -12.4405993151
+    h-onebody#3: -12.4175937017
+    h-onebody#4: -12.4420941837
+    h-onebody#5: -12.4414170801
+    h-onebody#6: -12.4184054533
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99994
+    occupations#2/min: 6.0e-05
+    occupations#2/sum: 2.0
+    occupations#3/count: 4.0
+    occupations#3/max: 1.0
+    occupations#3/min: 0.0
+    occupations#3/sum: 2.0
+    occupations#4/count: 4.0
+    occupations#4/max: 0.99994
+    occupations#4/min: 6.0e-05
+    occupations#4/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_gnof_full_optimization_use_ri_nonrel_x2c:
+  energies:
+    Final total energy#1: -7.9976533572
+    Final total energy#2: -7.9984664158
+    Optimized total energy#1: -7.9796705841
+    Optimized total energy#2: -7.9804815526
+    Total approximate X2C-HF energy#1: -7.9801139998
+    Total nonrelativistic HF energy#1: -7.9793032232
+    Vee#1: 3.4667569222
+    Vee#2: 3.4657149622
+    Vee#3: 3.4247190161
+    Vee#4: 3.4667642967
+    Vee#5: 3.4657217618
+    Vee#6: 3.424722281
+    h-onebody#1: -12.4414401893
+    h-onebody#2: -12.4407655902
+    h-onebody#3: -12.4177524172
+    h-onebody#4: -12.4422583404
+    h-onebody#5: -12.4415833583
+    h-onebody#6: -12.4185687407
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99994
+    occupations#2/min: 6.0e-05
+    occupations#2/sum: 2.0
+    occupations#3/count: 4.0
+    occupations#3/max: 1.0
+    occupations#3/min: 0.0
+    occupations#3/sum: 2.0
+    occupations#4/count: 4.0
+    occupations#4/max: 0.99994
+    occupations#4/min: 6.0e-05
+    occupations#4/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_gnof_neo_full_optimization:
+  energies:
+    Final total energy#1: -7.9973645391
+    Final total energy#2: -7.9984220095
+    Optimized total energy#1: -7.979636578
+    Optimized total energy#2: -7.9804475508
+    Total approximate X2C-HF energy#1: -7.9800786075
+    Total nonrelativistic HF energy#1: -7.9792678287
+    Vee#1: 3.4666281576
+    Vee#2: 3.4655826932
+    Vee#3: 3.4247638691
+    Vee#4: 3.4666355323
+    Vee#5: 3.4655894854
+    Vee#6: 3.4246066996
+    h-onebody#1: -12.4412760302
+    h-onebody#2: -12.4405993151
+    h-onebody#3: -12.417508452
+    h-onebody#4: -12.4420941837
+    h-onebody#5: -12.4414170801
+    h-onebody#6: -12.418408753
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99997
+    occupations#2/min: 3.0e-05
+    occupations#2/sum: 2.0
+    occupations#3/count: 4.0
+    occupations#3/max: 1.0
+    occupations#3/min: 0.0
+    occupations#3/sum: 2.0
+    occupations#4/count: 4.0
+    occupations#4/max: 0.99994
+    occupations#4/min: 6.0e-05
+    occupations#4/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_gnof_read_occupancies:
+  energies:
+    Optimized total energy#1: -7.9112918875
+    Total nonrelativistic HF energy#1: -7.9792678287
+    Vee#1: 3.4666281576
+    Vee#2: 3.4281109332
+    h-onebody#1: -12.4412760302
+    h-onebody#2: -12.3347828646
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 0.99
+    occupations#1/min: 0.01
+    occupations#1/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_gnof_read_restart:
+  energies:
+    Final total energy#1: -7.9985090882
+    Final total energy#2: -7.9993189536
+    Final total energy#3: -7.9992504858
+    Optimized total energy#1: -7.9760635193
+    Optimized total energy#2: -7.995787688
+    Optimized total energy#3: -7.9957092231
+    Vee#1: 3.4214157207
+    Vee#2: 3.3601761786
+    Vee#3: 3.3795773078
+    Vee#4: 3.3601757431
+    Vee#5: 3.3796798763
+    Vee#6: 3.360005014
+    h-onebody#1: -12.3313213765
+    h-onebody#2: -12.2925274033
+    h-onebody#3: -12.3092071323
+    h-onebody#4: -12.2933368332
+    h-onebody#5: -12.3092312359
+    h-onebody#6: -12.2930976362
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99994
+    occupations#2/min: 6.0e-05
+    occupations#2/sum: 2.0
+    occupations#3/count: 4.0
+    occupations#3/max: 0.99995
+    occupations#3/min: 5.0e-05
+    occupations#3/sum: 2.0
+    occupations#4/count: 4.0
+    occupations#4/max: 0.99994
+    occupations#4/min: 6.0e-05
+    occupations#4/sum: 2.0
+    occupations#5/count: 4.0
+    occupations#5/max: 0.99995
+    occupations#5/min: 5.0e-05
+    occupations#5/sum: 2.0
+    occupations#6/count: 4.0
+    occupations#6/max: 0.99994
+    occupations#6/min: 6.0e-05
+    occupations#6/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_gnof_read_restart_use_ri:
+  energies:
+    Final total energy#1: -7.9985090882
+    Final total energy#2: -7.9993189536
+    Final total energy#3: -7.9992504858
+    Optimized total energy#1: -7.9985090882
+    Optimized total energy#2: -7.9993189536
+    Optimized total energy#3: -7.9992504858
+    Vee#1: 3.3601761786
+    Vee#2: 3.3601761786
+    Vee#3: 3.3601757431
+    Vee#4: 3.3601757431
+    Vee#5: 3.360005014
+    Vee#6: 3.360005014
+    h-onebody#1: -12.2925274033
+    h-onebody#2: -12.2925274033
+    h-onebody#3: -12.2933368332
+    h-onebody#4: -12.2933368332
+    h-onebody#5: -12.2930976362
+    h-onebody#6: -12.2930976362
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 0.99994
+    occupations#1/min: 6.0e-05
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99994
+    occupations#2/min: 6.0e-05
+    occupations#2/sum: 2.0
+    occupations#3/count: 4.0
+    occupations#3/max: 0.99994
+    occupations#3/min: 6.0e-05
+    occupations#3/sum: 2.0
+    occupations#4/count: 4.0
+    occupations#4/max: 0.99994
+    occupations#4/min: 6.0e-05
+    occupations#4/sum: 2.0
+    occupations#5/count: 4.0
+    occupations#5/max: 0.99994
+    occupations#5/min: 6.0e-05
+    occupations#5/sum: 2.0
+    occupations#6/count: 4.0
+    occupations#6/max: 0.99994
+    occupations#6/min: 6.0e-05
+    occupations#6/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_gnof_unit_length_bohr:
+  energies:
+    Final total energy#1: -7.997608947
+    Final total energy#2: -7.9984220074
+    Optimized total energy#1: -7.979636578
+    Optimized total energy#2: -7.9804475508
+    Total approximate X2C-HF energy#1: -7.9800786075
+    Total nonrelativistic HF energy#1: -7.9792678287
+    Vee#1: 3.4666281576
+    Vee#2: 3.4655826932
+    Vee#3: 3.4246023181
+    Vee#4: 3.4666355323
+    Vee#5: 3.4655894854
+    Vee#6: 3.4246125067
+    h-onebody#1: -12.4412760302
+    h-onebody#2: -12.4405993151
+    h-onebody#3: -12.4175913089
+    h-onebody#4: -12.4420941837
+    h-onebody#5: -12.4414170801
+    h-onebody#6: -12.418414558
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99994
+    occupations#2/min: 6.0e-05
+    occupations#2/sum: 2.0
+    occupations#3/count: 4.0
+    occupations#3/max: 1.0
+    occupations#3/min: 0.0
+    occupations#3/sum: 2.0
+    occupations#4/count: 4.0
+    occupations#4/max: 0.99994
+    occupations#4/min: 6.0e-05
+    occupations#4/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_muller_c4_neg_full_optimization_cholesky:
+  energies:
+    Final total energy#1: -8.0327795288
+    Final total energy#2: -8.032779534
+    Optimized total energy#1: -8.0126255324
+    Total DHF (4C) energy#1: -7.980076239
+    Vee#1: 3.4666426292
+    Vee#2: 3.282387475
+    Vee#3: 3.2804298385
+    Vee#4: 3.2804261298
+    h-onebody#1: -12.4420989122
+    h-onebody#2: -12.2903930513
+    h-onebody#3: -12.3085894112
+    h-onebody#4: -12.3085857077
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+lih_pnof5_full_optimization:
+  energies:
+    Final total energy#1: -7.9958854669
+    Final total energy#2: -7.9966992744
+    Optimized total energy#1: -7.9794034405
+    Optimized total energy#2: -7.9802144642
+    Total approximate X2C-HF energy#1: -7.9800786075
+    Total nonrelativistic HF energy#1: -7.9792678287
+    Vee#1: 3.4666281576
+    Vee#2: 3.4662351106
+    Vee#3: 3.4243598202
+    Vee#4: 3.4666355323
+    Vee#5: 3.4662417824
+    Vee#6: 3.4243606022
+    h-onebody#1: -12.4412760302
+    h-onebody#2: -12.441018595
+    h-onebody#3: -12.415625331
+    h-onebody#4: -12.4420941837
+    h-onebody#5: -12.4418362905
+    h-onebody#6: -12.4164399205
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99999
+    occupations#2/min: 1.0e-05
+    occupations#2/sum: 2.0
+    occupations#3/count: 4.0
+    occupations#3/max: 1.0
+    occupations#3/min: 0.0
+    occupations#3/sum: 2.0
+    occupations#4/count: 4.0
+    occupations#4/max: 0.99999
+    occupations#4/min: 1.0e-05
+    occupations#4/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_pnof5_neo_saddle_escape:
+  energies:
+    Final total energy#1: -7.9958612671
+    Final total energy#2: -7.9966992779
+    Optimized total energy#1: -7.9794034405
+    Optimized total energy#2: -7.9802144642
+    Total approximate X2C-HF energy#1: -7.9800786075
+    Total nonrelativistic HF energy#1: -7.9792678287
+    Vee#1: 3.4666281576
+    Vee#2: 3.4662351106
+    Vee#3: 3.4244315923
+    Vee#4: 3.4666355323
+    Vee#5: 3.4662417824
+    Vee#6: 3.4243617066
+    h-onebody#1: -12.4412760302
+    h-onebody#2: -12.441018595
+    h-onebody#3: -12.4156729033
+    h-onebody#4: -12.4420941837
+    h-onebody#5: -12.4418362905
+    h-onebody#6: -12.4164410284
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99999
+    occupations#2/min: 1.0e-05
+    occupations#2/sum: 2.0
+    occupations#3/count: 4.0
+    occupations#3/max: 1.0
+    occupations#3/min: 0.0
+    occupations#3/sum: 2.0
+    occupations#4/count: 4.0
+    occupations#4/max: 0.99999
+    occupations#4/min: 1.0e-05
+    occupations#4/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_pnof7_full_optimization:
+  energies:
+    Final total energy#1: -7.9959327962
+    Final total energy#2: -7.9967466503
+    Optimized total energy#1: -7.9794036026
+    Optimized total energy#2: -7.9802146267
+    Total approximate X2C-HF energy#1: -7.9800786075
+    Total nonrelativistic HF energy#1: -7.9792678287
+    Vee#1: 3.4666281576
+    Vee#2: 3.4662342653
+    Vee#3: 3.4238548155
+    Vee#4: 3.4666355323
+    Vee#5: 3.4662409342
+    Vee#6: 3.4238489156
+    h-onebody#1: -12.4412760302
+    h-onebody#2: -12.4410179118
+    h-onebody#3: -12.4151676556
+    h-onebody#4: -12.4420941837
+    h-onebody#5: -12.4418356048
+    h-onebody#6: -12.4159756099
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99999
+    occupations#2/min: 1.0e-05
+    occupations#2/sum: 2.0
+    occupations#3/count: 4.0
+    occupations#3/max: 1.0
+    occupations#3/min: 0.0
+    occupations#3/sum: 2.0
+    occupations#4/count: 4.0
+    occupations#4/max: 0.99999
+    occupations#4/min: 1.0e-05
+    occupations#4/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_pnof7s_full_optimization:
+  energies:
+    Final total energy#1: -7.9958855116
+    Final total energy#2: -7.9966993202
+    Optimized total energy#1: -7.9794034405
+    Optimized total energy#2: -7.9802144642
+    Total approximate X2C-HF energy#1: -7.9800786075
+    Total nonrelativistic HF energy#1: -7.9792678287
+    Vee#1: 3.4666281576
+    Vee#2: 3.4662351106
+    Vee#3: 3.4243594233
+    Vee#4: 3.4666355323
+    Vee#5: 3.4662417824
+    Vee#6: 3.4243508856
+    h-onebody#1: -12.4412760302
+    h-onebody#2: -12.441018595
+    h-onebody#3: -12.4156249788
+    h-onebody#4: -12.4420941837
+    h-onebody#5: -12.4418362905
+    h-onebody#6: -12.4164302497
+  occupations:
+    occupations#1/count: 4.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.0
+    occupations#1/sum: 2.0
+    occupations#2/count: 4.0
+    occupations#2/max: 0.99999
+    occupations#2/min: 1.0e-05
+    occupations#2/sum: 2.0
+    occupations#3/count: 4.0
+    occupations#3/max: 1.0
+    occupations#3/min: 0.0
+    occupations#3/sum: 2.0
+    occupations#4/count: 4.0
+    occupations#4/max: 0.99999
+    occupations#4/min: 1.0e-05
+    occupations#4/sum: 2.0
+  slow: false
+  tolerance: 1.0e-06
+lih_uccsd:
+  energies:
+    Total DHF (4C) energy#1: -7.9800761582
+    Total approximate X2C-HF energy#1: -7.9801139998
+    Total nonrelativistic HF energy#1: -7.9793032232
+    UCCSD correlation energy#1: -0.0189847241
+    UCCSD correlation energy#2: -0.0189878081
+    UCCSD correlation energy#3: -0.0189970822
+    UCCSD total energy#1: -7.9982879473
+    UCCSD total energy#2: -7.9991018079
+    UCCSD total energy#3: -7.9990732404
+    UMP2 correlation energy#1: -0.0125298486
+    UMP2 correlation energy#2: -0.012531419
+    UMP2 correlation energy#3: -0.0126023358
+    UMP2 total energy#1: -7.9918330718
+    UMP2 total energy#2: -7.9926454188
+    UMP2 total energy#3: -7.992678494
+    Vee#1: 3.4667569222
+    Vee#2: 3.4667642967
+    Vee#3: 3.4666430014
+    h-onebody#1: -12.4414401893
+    h-onebody#2: -12.4422583404
+    h-onebody#3: -12.4420992035
+  external:
+    UCCSD correlation energy#1:
+      source: input comment (default USE_RI)
+      tolerance: 1.0e-08
+      value: -0.0189847241
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+lih_uccsd_rdm:
+  energies:
+    Total DHF (4C) energy#1: -7.9800761582
+    Total approximate X2C-HF energy#1: -7.9801139998
+    Total nonrelativistic HF energy#1: -7.9793032232
+    UCCSD correlation energy#1: -0.0189847241
+    UCCSD correlation energy#2: -0.0189878081
+    UCCSD correlation energy#3: -0.0189970822
+    UCCSD total energy#1: -7.9982879473
+    UCCSD total energy#2: -7.9991018079
+    UCCSD total energy#3: -7.9990732404
+    UMP2 correlation energy#1: -0.0125298486
+    UMP2 correlation energy#2: -0.012531419
+    UMP2 correlation energy#3: -0.0126023358
+    UMP2 total energy#1: -7.9918330718
+    UMP2 total energy#2: -7.9926454188
+    UMP2 total energy#3: -7.992678494
+    Vee#1: 3.4667569222
+    Vee#2: 3.4181312352
+    Vee#3: 3.4667642967
+    Vee#4: 3.4181276364
+    Vee#5: 3.4666430014
+    Vee#6: 3.4180839633
+    h-onebody#1: -12.4414401893
+    h-onebody#2: -12.4117992264
+    h-onebody#3: -12.4422583404
+    h-onebody#4: -12.4126094882
+    h-onebody#5: -12.4420992035
+    h-onebody#6: -12.4125372476
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+ne_pccd_c4:
+  energies:
+    Final total energy#1: -128.559673858
+    Final total energy#2: -128.7019321426
+    Final total energy#3: -128.7008621744
+    Total DHF (4C) energy#1: -128.6318160911
+    Total approximate X2C-HF energy#1: -128.6328724852
+    Total nonrelativistic HF energy#1: -128.488866172
+    Vee#1: 54.1263463763
+    Vee#2: 54.0191599504
+    Vee#3: 53.9324778273
+    Vee#4: 54.1608836976
+    Vee#5: 54.0391917385
+    Vee#6: 53.9647937911
+    Vee#7: 54.1578180545
+    Vee#8: 54.027056272
+    Vee#9: 53.9618992703
+    h-onebody#1: -182.6152125483
+    h-onebody#2: -182.5552741032
+    h-onebody#3: -182.4921516853
+    h-onebody#4: -182.7937561828
+    h-onebody#5: -182.724810256
+    h-onebody#6: -182.6667259338
+    h-onebody#7: -182.7896341456
+    h-onebody#8: -182.7158755976
+    h-onebody#9: -182.6627614446
+  occupations:
+    occupations#1/count: 15.0
+    occupations#1/max: 0.99999
+    occupations#1/min: 5.0e-05
+    occupations#1/sum: 5.0
+    occupations#2/count: 15.0
+    occupations#2/max: 0.99999
+    occupations#2/min: 3.0e-05
+    occupations#2/sum: 5.00001
+    occupations#3/count: 14.0
+    occupations#3/max: 1.0
+    occupations#3/min: 0.0004
+    occupations#3/sum: 5.0
+    occupations#4/count: 14.0
+    occupations#4/max: 1.0
+    occupations#4/min: 0.00041
+    occupations#4/sum: 5.00001
+    occupations#5/count: 14.0
+    occupations#5/max: 1.0
+    occupations#5/min: 0.00041
+    occupations#5/sum: 5.00002
+    occupations#6/count: 14.0
+    occupations#6/max: 1.0
+    occupations#6/min: 0.00041
+    occupations#6/sum: 5.0
+  slow: false
+  tolerance: 1.0e-06
+ne_pccd_c4_neg:
+  energies:
+    Final total energy#1: -128.559673858
+    Final total energy#2: -128.7019321426
+    Final total energy#3: -128.7008621744
+    Final total energy#4: -128.7008621789
+    Total DHF (4C) energy#1: -128.6318160911
+    Total approximate X2C-HF energy#1: -128.6328724852
+    Total nonrelativistic HF energy#1: -128.488866172
+    Vee#1: 54.1263463763
+    Vee#10: 53.96184515
+    Vee#2: 54.0191599504
+    Vee#3: 53.9324778273
+    Vee#4: 54.1608836976
+    Vee#5: 54.0391917385
+    Vee#6: 53.9647937911
+    Vee#7: 54.1578180545
+    Vee#8: 54.027056272
+    Vee#9: 53.9618992703
+    h-onebody#1: -182.6152125483
+    h-onebody#10: -182.6627073288
+    h-onebody#2: -182.5552741032
+    h-onebody#3: -182.4921516853
+    h-onebody#4: -182.7937561828
+    h-onebody#5: -182.724810256
+    h-onebody#6: -182.6667259338
+    h-onebody#7: -182.7896341456
+    h-onebody#8: -182.7158755976
+    h-onebody#9: -182.6627614446
+  occupations:
+    occupations#1/count: 15.0
+    occupations#1/max: 0.99999
+    occupations#1/min: 5.0e-05
+    occupations#1/sum: 5.0
+    occupations#2/count: 15.0
+    occupations#2/max: 0.99999
+    occupations#2/min: 3.0e-05
+    occupations#2/sum: 5.00001
+    occupations#3/count: 14.0
+    occupations#3/max: 1.0
+    occupations#3/min: 0.0004
+    occupations#3/sum: 5.0
+    occupations#4/count: 14.0
+    occupations#4/max: 1.0
+    occupations#4/min: 0.00041
+    occupations#4/sum: 5.00001
+    occupations#5/count: 14.0
+    occupations#5/max: 1.0
+    occupations#5/min: 0.00041
+    occupations#5/sum: 5.00002
+    occupations#6/count: 14.0
+    occupations#6/max: 1.0
+    occupations#6/min: 0.00041
+    occupations#6/sum: 5.0
+    occupations#7/count: 14.0
+    occupations#7/max: 1.0
+    occupations#7/min: 0.00041
+    occupations#7/sum: 4.99999
+  slow: false
+  tolerance: 1.0e-06
+ne_pccd_full_optimization:
+  energies:
+    Final total energy#1: -128.5596738591
+    Total nonrelativistic HF energy#1: -128.488866172
+    Vee#1: 54.1263463763
+    Vee#2: 54.0001144328
+    Vee#3: 53.9323326257
+    h-onebody#1: -182.6152125483
+    h-onebody#2: -182.5433843698
+    h-onebody#3: -182.4920064848
+  external:
+    Final total energy#1:
+      source: literature oo-pCCD/cc-pVDZ (input comment)
+      tolerance: 5.0e-07
+      value: -128.559674
+  occupations:
+    occupations#1/count: 15.0
+    occupations#1/max: 0.99999
+    occupations#1/min: 5.0e-05
+    occupations#1/sum: 5.0
+    occupations#2/count: 15.0
+    occupations#2/max: 0.99999
+    occupations#2/min: 3.0e-05
+    occupations#2/sum: 5.00001
+  slow: false
+  tolerance: 1.0e-06
+ne_pccd_nonrel_cartesian_false:
+  energies:
+    Final total energy#1: -128.5578703096
+    Total nonrelativistic HF energy#1: -128.4887755517
+    Vee#1: 54.1273188411
+    Vee#2: 53.9867586453
+    Vee#3: 53.9315618367
+    h-onebody#1: -182.6160943928
+    h-onebody#2: -182.5348609579
+    h-onebody#3: -182.4894321464
+  external:
+    Final total energy#1:
+      source: input comment
+      tolerance: 1.0e-06
+      value: -128.5578703
+    Total nonrelativistic HF energy#1:
+      source: input comment
+      tolerance: 1.0e-06
+      value: -128.4887756
+  occupations:
+    occupations#1/count: 14.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.00037
+    occupations#1/sum: 5.0
+    occupations#2/count: 14.0
+    occupations#2/max: 1.0
+    occupations#2/min: 0.00041
+    occupations#2/sum: 5.0
+  slow: false
+  tolerance: 1.0e-06
+ne_pccd_x2c:
+  energies:
+    Final total energy#1: -128.559673858
+    Final total energy#2: -128.7019321426
+    Total approximate X2C-HF energy#1: -128.6328724852
+    Total nonrelativistic HF energy#1: -128.488866172
+    Vee#1: 54.1263463763
+    Vee#2: 54.0191599504
+    Vee#3: 53.9324778273
+    Vee#4: 54.1608836976
+    Vee#5: 54.0391917385
+    Vee#6: 53.9647937911
+    h-onebody#1: -182.6152125483
+    h-onebody#2: -182.5552741032
+    h-onebody#3: -182.4921516853
+    h-onebody#4: -182.7937561828
+    h-onebody#5: -182.724810256
+    h-onebody#6: -182.6667259338
+  occupations:
+    occupations#1/count: 15.0
+    occupations#1/max: 0.99999
+    occupations#1/min: 5.0e-05
+    occupations#1/sum: 5.0
+    occupations#2/count: 15.0
+    occupations#2/max: 0.99999
+    occupations#2/min: 3.0e-05
+    occupations#2/sum: 5.00001
+    occupations#3/count: 14.0
+    occupations#3/max: 1.0
+    occupations#3/min: 0.0004
+    occupations#3/sum: 5.0
+    occupations#4/count: 14.0
+    occupations#4/max: 1.0
+    occupations#4/min: 0.00041
+    occupations#4/sum: 5.00001
+  slow: false
+  tolerance: 1.0e-06
+water:
+  energies:
+    Total DHF (4C) energy#1: -75.0051578439
+    Total nonrelativistic HF energy#1: -74.962946681
+    Vee#1: 38.2124056333
+    Vee#2: 38.2158795404
+    h-onebody#1: -122.3692654706
+    h-onebody#2: -122.4149505406
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+water-c1000:
+  energies:
+    Total DHF (4C) energy#1: -74.9637404315
+    Total nonrelativistic HF energy#1: -74.962946681
+    Vee#1: 38.2124056333
+    Vee#2: 38.2124710467
+    h-onebody#1: -122.3692654706
+    h-onebody#2: -122.3701246345
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+water-c100000:
+  energies:
+    Total DHF (4C) energy#1: -74.9629467603
+    Total nonrelativistic HF energy#1: -74.962946681
+    Vee#1: 38.2124056333
+    Vee#2: 38.21240554
+    h-onebody#1: -122.3692654706
+    h-onebody#2: -122.3692654567
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+water_NON_REL_full_optimization:
+  energies:
+    Final total energy#1: -75.1632640747
+    Optimized total energy#1: -75.1628333688
+    Total nonrelativistic HF energy#1: -74.962946681
+    Vee#1: 38.2124056333
+    Vee#2: 37.355219126
+    Vee#3: 37.3741241861
+    h-onebody#1: -122.3692654706
+    h-onebody#2: -121.7119656511
+    h-onebody#3: -121.7313014171
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+water_X2C:
+  energies:
+    Total approximate X2C-HF energy#1: -75.0057780751
+    Total nonrelativistic HF energy#1: -74.962946681
+    Vee#1: 38.2124056333
+    Vee#2: 38.2160744838
+    h-onebody#1: -122.3692654706
+    h-onebody#2: -122.4157657152
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+water_X2C_debug:
+  energies:
+    Total approximate X2C-HF energy#1: -75.0057780751
+    Total nonrelativistic HF energy#1: -74.962946681
+    Vee#1: 38.2124056333
+    Vee#2: 38.2160744838
+    h-onebody#1: -122.3692654706
+    h-onebody#2: -122.4157657152
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+water_X2C_full_optimization:
+  energies:
+    Final total energy#1: -75.2061692168
+    Optimized total energy#1: -75.205739191
+    Total approximate X2C-HF energy#1: -75.0057780751
+    Vee#1: 38.2160744838
+    Vee#2: 37.3579661548
+    Vee#3: 37.3768141639
+    h-onebody#1: -122.4157657152
+    h-onebody#2: -121.7576185021
+    h-onebody#3: -121.776896537
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+water_X2C_full_optimization_cholesky:
+  energies:
+    Final total energy#1: -75.2061692175
+    Optimized total energy#1: -75.205739191
+    Total approximate X2C-HF energy#1: -75.0057780751
+    Vee#1: 38.2160744838
+    Vee#2: 37.3579661548
+    Vee#3: 37.3768690862
+    h-onebody#1: -122.4157657152
+    h-onebody#2: -121.7576185021
+    h-onebody#3: -121.7769514599
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+water_X2C_gnof:
+  energies:
+    Optimized total energy#1: -75.0492821193
+    Total approximate X2C-HF energy#1: -75.0057780751
+    Vee#1: 38.2160744838
+    Vee#2: 38.1143667229
+    h-onebody#1: -122.4157657152
+    h-onebody#2: -122.3575619985
+  occupations:
+    occupations#1/count: 6.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.01371
+    occupations#1/sum: 5.0
+  slow: false
+  tolerance: 1.0e-06
+water_X2C_muller:
+  energies:
+    Optimized total energy#1: -75.205739191
+    Total approximate X2C-HF energy#1: -75.0057780751
+    Vee#1: 38.2160744838
+    Vee#2: 37.3579661548
+    h-onebody#1: -122.4157657152
+    h-onebody#2: -121.7576185021
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+water_X2C_neo_full_optimization:
+  energies:
+    Final total energy#1: -75.2061692187
+    Optimized total energy#1: -75.205739191
+    Total approximate X2C-HF energy#1: -75.0057780751
+    Vee#1: 38.2160744838
+    Vee#2: 37.3579661548
+    Vee#3: 37.3768555576
+    h-onebody#1: -122.4157657152
+    h-onebody#2: -121.7576185021
+    h-onebody#3: -121.7769379326
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+water_cga_full_optimization:
+  energies:
+    Final total energy#1: -75.1040791378
+    Final total energy#2: -75.1469859732
+    Optimized total energy#1: -75.1036832282
+    Optimized total energy#2: -75.1465902345
+    Total approximate X2C-HF energy#1: -75.0057780751
+    Total nonrelativistic HF energy#1: -74.962946681
+    Vee#1: 38.2124056333
+    Vee#2: 37.4716577922
+    Vee#3: 37.531147484
+    Vee#4: 38.2160744838
+    Vee#5: 37.474380648
+    Vee#6: 37.5340820892
+    h-onebody#1: -122.3692654706
+    h-onebody#2: -121.7692541767
+    h-onebody#3: -121.829139778
+    h-onebody#4: -122.4157657152
+    h-onebody#5: -121.8148840388
+    h-onebody#6: -121.8749812187
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+water_debug:
+  energies:
+    Total DHF (4C) energy#1: -75.0051578439
+    Total nonrelativistic HF energy#1: -74.962946681
+    Vee#1: 38.2124056333
+    Vee#2: 38.2158795404
+    h-onebody#1: -122.3692654706
+    h-onebody#2: -122.4149505406
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+water_debug_1iter:
+  energies:
+    Total DHF (4C) energy#1: -73.2761424796
+    Total nonrelativistic HF energy#1: -73.2325267844
+    Vee#1: 44.9390809365
+    Vee#2: 44.9406799104
+    h-onebody#1: -127.3655208772
+    h-onebody#2: -127.4107355464
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+water_debug_2iter:
+  energies:
+    Total DHF (4C) energy#1: -74.9880404146
+    Total nonrelativistic HF energy#1: -74.9458769918
+    Vee#1: 37.6257022701
+    Vee#2: 37.6284603745
+    h-onebody#1: -121.7654924181
+    h-onebody#2: -121.8104139454
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+water_gnof:
+  energies:
+    Optimized total energy#1: -75.0064664286
+    Optimized total energy#2: -75.048663393
+    Total DHF (4C) energy#1: -75.0051578439
+    Total nonrelativistic HF energy#1: -74.962946681
+    Vee#1: 38.2124056333
+    Vee#2: 38.1107046088
+    Vee#3: 38.2158795404
+    Vee#4: 38.1141777522
+    h-onebody#1: -122.3692654706
+    h-onebody#2: -122.3110841937
+    h-onebody#3: -122.4149505406
+    h-onebody#4: -122.3567543015
+  occupations:
+    occupations#1/count: 6.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.01371
+    occupations#1/sum: 5.0
+    occupations#2/count: 6.0
+    occupations#2/max: 1.0
+    occupations#2/min: 0.01371
+    occupations#2/sum: 5.0
+  slow: false
+  tolerance: 1.0e-06
+water_gnof_full_optimization:
+  energies:
+    Final total energy#1: -75.0103005077
+    Final total energy#2: -75.05314479
+    Optimized total energy#1: -75.0064664286
+    Optimized total energy#2: -75.0492821193
+    Total approximate X2C-HF energy#1: -75.0057780751
+    Total nonrelativistic HF energy#1: -74.962946681
+    Vee#1: 38.2124056333
+    Vee#2: 38.1107046088
+    Vee#3: 38.0561025175
+    Vee#4: 38.2160744838
+    Vee#5: 38.1143667229
+    Vee#6: 38.0595810896
+    h-onebody#1: -122.3692654706
+    h-onebody#2: -122.3110841937
+    h-onebody#3: -122.2603161815
+    h-onebody#4: -122.4157657152
+    h-onebody#5: -122.3575619985
+    h-onebody#6: -122.3066390358
+  occupations:
+    occupations#1/count: 6.0
+    occupations#1/max: 1.0
+    occupations#1/min: 0.01371
+    occupations#1/sum: 5.0
+    occupations#2/count: 6.0
+    occupations#2/max: 1.0
+    occupations#2/min: 0.01651
+    occupations#2/sum: 5.0
+    occupations#3/count: 6.0
+    occupations#3/max: 1.0
+    occupations#3/min: 0.01371
+    occupations#3/sum: 5.0
+    occupations#4/count: 6.0
+    occupations#4/max: 1.0
+    occupations#4/min: 0.01653
+    occupations#4/sum: 5.0
+  slow: false
+  tolerance: 1.0e-06
+water_muller:
+  energies:
+    Optimized total energy#1: -75.1628333688
+    Optimized total energy#2: -75.2050934277
+    Total DHF (4C) energy#1: -75.0051578439
+    Total nonrelativistic HF energy#1: -74.962946681
+    Vee#1: 38.2124056333
+    Vee#2: 37.355219126
+    Vee#3: 38.2158795404
+    Vee#4: 37.3579655022
+    h-onebody#1: -122.3692654706
+    h-onebody#2: -121.7119656511
+    h-onebody#3: -122.4149505406
+    h-onebody#4: -121.7569720862
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+water_muller_as:
+  energies:
+    Optimized total energy#1: -116.7739899179
+    Optimized total energy#2: -116.8191321144
+    Total DHF (4C) energy#1: -75.0051578439
+    Total nonrelativistic HF energy#1: -74.962946681
+    Vee#1: 38.2124056333
+    Vee#2: -4.691964266
+    Vee#3: 38.2158795404
+    Vee#4: -4.6929467391
+    h-onebody#1: -122.3692654706
+    h-onebody#2: -121.2759388081
+    h-onebody#3: -122.4149505406
+    h-onebody#4: -121.3200985316
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+water_muller_as_full_optimization:
+  energies:
+    Final total energy#1: -119.6895910186
+    Final total energy#2: -119.7345609366
+    Optimized total energy#1: -116.7739899179
+    Optimized total energy#2: -116.8193810432
+    Total approximate X2C-HF energy#1: -75.0057780751
+    Total nonrelativistic HF energy#1: -74.962946681
+    Vee#1: 38.2124056333
+    Vee#2: -4.691964266
+    Vee#3: -2.8576853977
+    Vee#4: 38.2160744838
+    Vee#5: -4.6926623278
+    Vee#6: -2.8572943993
+    h-onebody#1: -122.3692654706
+    h-onebody#2: -121.2759388081
+    h-onebody#3: -126.0258187771
+    h-onebody#4: -122.4157657152
+    h-onebody#5: -121.3206318717
+    h-onebody#6: -126.0711796935
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+water_muller_as_neo_full_optimization:
+  energies:
+    Final total energy#1: -119.6895910193
+    Final total energy#2: -119.7345609383
+    Optimized total energy#1: -116.7739899179
+    Optimized total energy#2: -116.8193810432
+    Total approximate X2C-HF energy#1: -75.0057780751
+    Total nonrelativistic HF energy#1: -74.962946681
+    Vee#1: 38.2124056333
+    Vee#2: -4.691964266
+    Vee#3: -2.857685899
+    Vee#4: 38.2160744838
+    Vee#5: -4.6926623278
+    Vee#6: -2.8572947358
+    h-onebody#1: -122.3692654706
+    h-onebody#2: -121.2759388081
+    h-onebody#3: -126.0258182767
+    h-onebody#4: -122.4157657152
+    h-onebody#5: -121.3206318717
+    h-onebody#6: -126.0711793588
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+water_muller_frozen:
+  energies:
+    Optimized total energy#1: -75.063791311
+    Total nonrelativistic HF energy#1: -74.962946681
+    Vee#1: 38.2124056333
+    Vee#2: 37.7201515362
+    h-onebody#1: -122.3692654706
+    h-onebody#2: -121.9778560035
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
+water_uccsd_frozen_core:
+  energies:
+    Total nonrelativistic HF energy#1: -76.0267936449
+    UCCSD correlation energy#1: -0.211196537
+    UCCSD total energy#1: -76.237990182
+    UMP2 correlation energy#1: -0.2016297937
+    UMP2 total energy#1: -76.2284234386
+    Vee#1: 37.928579431
+    h-onebody#1: -123.1492862322
+  external:
+    Total nonrelativistic HF energy#1:
+      source: PySCF 2.14 RHF (input comment)
+      tolerance: 1.0e-08
+      value: -76.026793645
+    UCCSD correlation energy#1:
+      source: PySCF 2.14 CCSD frozen=1 (input comment)
+      tolerance: 1.0e-08
+      value: -0.2111965374
+  occupations: {}
+  slow: false
+  tolerance: 1.0e-06
