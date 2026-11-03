@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Run the ReRDMFT examples (strictly one at a time) and print [ OK ] / [FAIL] per check.
 
-    examples/run_examples.py                      run every examples/*.inp
+    examples/run_examples.py                      run the fast examples (slow ones are skipped by default)
     examples/run_examples.py -i lih_gnof_c4_full_optimization co-sto-3g
     examples/run_examples.py -e co-cc-pvdz h2     run everything except these
-    examples/run_examples.py --fast               skip the examples recorded as slow (> 60 s)
+    examples/run_examples.py --all                also run the slow examples (> 60 s, flagged in reference.yaml)
     examples/run_examples.py --update [-i ...]    (re)write the reference values from the current run
     examples/run_examples.py -l                   list the examples and exit
 
@@ -142,7 +142,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("-i", "--input", nargs="+", default=[], help="only these examples (name or name.inp)")
     ap.add_argument("-e", "--exclude", nargs="+", default=[], help="all examples but these")
-    ap.add_argument("--fast", action="store_true", help="skip examples recorded as slow (> 60 s)")
+    ap.add_argument("-a", "--all", action="store_true", help="also run the examples recorded as slow (> 60 s)")
     ap.add_argument("--update", action="store_true", help="write reference values from this run")
     ap.add_argument("-t", "--timeout", type=float, default=DEFAULT_TIMEOUT, help="seconds per example")
     ap.add_argument("-l", "--list", action="store_true", help="list examples and exit")
@@ -162,8 +162,11 @@ def main():
 
     ref = yaml.safe_load(REFERENCE.read_text()) if REFERENCE.exists() else {}
     ref = ref or {}
-    if args.fast:
-        names = [n for n in names if not ref.get(n, {}).get("slow", False)]
+    if not args.all and not args.input:  # slow examples only on request (--all, or named with -i)
+        skipped = [n for n in names if ref.get(n, {}).get("slow", False)]
+        names = [n for n in names if n not in skipped]
+        if skipped and not args.list:
+            print(f"skipping {len(skipped)} slow example(s) (> {SLOW_SECONDS:.0f} s); use --all to include them")
     if args.list:
         print("\n".join(names))
         return 0
