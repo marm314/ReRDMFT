@@ -28,6 +28,9 @@ Set `LIBCINT_INC` if the headers are elsewhere, or put
 tail -f examples/water.live      # live progress: phases, SCF and macro-iterations
 ```
 
+Regression check of the examples: `examples/run_examples.py` runs them one at a time and prints `[ OK ]`/`[FAIL]`
+against `examples/reference.yaml` (slow ones only with `--all`; `--update` re-records the references).
+
 ## Input keywords
 
 Case-insensitive, one per line, optional `=` (`DEBUG TRUE` = `DEBUG=TRUE`);
