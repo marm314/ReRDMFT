@@ -2218,8 +2218,22 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
       const auto default_gammas = rerdmft::pnofDefaultGuessGammas(pnof_coupling);
       for (int s = 0; s < pnof_subspaces; ++s) {
         const std::size_t base = static_cast<std::size_t>(s) * n_gammas_per_subspace;
-        for (std::size_t k = 0; k < n_gammas_per_subspace; ++k) {
-          gammas0[base + k] = default_gammas[k];
+        if (occupations_from_restart) {
+          // READ_RESTART: x0 already holds the restart file's occupations (the "Initial energy" printed above
+          // is evaluated on them), so L-BFGS must START from them. Starting from the default guess instead
+          // ignored the restart: the optimizer could end in a different, higher minimum (seen for water
+          // GNOF, R = 1.84 A restarted from R = 1.85 A: initial -75.9332 Ha, "optimized" -75.9038 Ha), and the
+          // orbital optimization that follows then stayed on the wrong solution.
+          const std::size_t x_base = static_cast<std::size_t>(s) * static_cast<std::size_t>(pnof_coupling);
+          const std::vector<double> occ_subspace(
+              x0.begin() + static_cast<std::ptrdiff_t>(x_base),
+              x0.begin() + static_cast<std::ptrdiff_t>(x_base) + pnof_coupling);
+          const auto restart_gammas = rerdmft::pnofSubspaceGammasFromOccupations(pnof_coupling, occ_subspace);
+          for (std::size_t k = 0; k < n_gammas_per_subspace; ++k) gammas0[base + k] = restart_gammas[k];
+        } else {
+          for (std::size_t k = 0; k < n_gammas_per_subspace; ++k) {
+            gammas0[base + k] = default_gammas[k];
+          }
         }
       }
     }
@@ -2296,7 +2310,15 @@ std::string buildPnofFunctionalReport(const std::string& label, const rerdmft::M
       rerdmft::printEnergyLine(out, 4, "Optimized electronic energy", lbfgs_result.objective_value);
       rerdmft::printEnergyLine(out, 4, "Optimized total energy", optimized_total_energy,
                                std::string(" Hartree (") + (optimized_total_energy <= initial_total_energy ? "<=" : ">") +
-                                   " the initial-occupations value above, as expected for a minimization)");
+                                   " the initial-occupations value above" +
+                                   (occupations_from_restart ? ", started from the restart occupations)"
+                                                             : ", started from the default guess)"));
+      if (optimized_total_energy > initial_total_energy + 1e-10) {
+        out << "    WARNING: the optimized occupations are HIGHER than the initial ones (" << std::scientific
+            << std::setprecision(3) << optimized_total_energy - initial_total_energy << std::defaultfloat
+            << std::setprecision(6) << " Hartree): the optimizer started from a different point than the initial energy\n"
+            << "      above (default guess, not READ_RESTART) or failed; this occupation state may be a worse minimum.\n";
+      }
       const auto final_occ = embedGammas(lbfgs_result.x);
       printEnergyDecompositionMo(out, h, final_occ, rerdmft::Matrix<std::complex<double>>(),
                                   lbfgs_result.objective_value, nuclear_repulsion_energy);
