@@ -12,3 +12,6 @@ src/Utils/check_wfn
 *_GAU.basis
 *.wfn
 __pycache__/
+*.json
+*.json.sig
+graphify-out/20*/
