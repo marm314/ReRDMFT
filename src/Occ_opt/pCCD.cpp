@@ -63,6 +63,7 @@ PccdCoefficients buildPccdCoefficients(const Matrix<T>& h, const Eri& eri,
   // eps_p = 2 h_pp + J_pp (Eq. (coulomb), boxed): the opposite-Kramers piece V_p reduces
   // to the plain self-Coulomb J_pp = (pp|pp) because K_{p\bar p} = 0 identically (tex
   // doc, Eq. (coulrel)) -- no `bar[p]` needed here at all.
+#pragma omp parallel for schedule(static)
   for (std::size_t p = 0; p < n; ++p) {
     const std::size_t rp = reps[p];
     coeff.eps[p] = 2.0 * std::real(h(rp, rp)) + std::real(eri(rp, rp, rp, rp));
@@ -73,6 +74,8 @@ PccdCoefficients buildPccdCoefficients(const Matrix<T>& h, const Eri& eri,
   // own dir(a,b,c,d) = (ac|bd) chemist convention (Occ_opt/OccupationEnergy.cpp's own
   // J_pq = eri(p,q,p,q), K_pq = eri(p,q,q,p)); K_{p\bar q} = (p \bar q|\bar q p) is then
   // eri(p, \bar q, \bar q, p).
+  // Each (p,q) pair writes disjoint g/w elements; dynamic schedule balances the triangular loop.
+#pragma omp parallel for schedule(dynamic)
   for (std::size_t p = 0; p < n; ++p) {
     const std::size_t rp = reps[p];
     for (std::size_t q = p + 1; q < n; ++q) {
@@ -216,6 +219,7 @@ Matrix<double> pccdTResidual(const PccdCoefficients& coeff, const Matrix<double>
 
   // Y(j,i) = sum_b G_ov(j,b) T(i,b) = (G_ov * T^T)(j,i).
   Matrix<double> y(n_occ, n_occ, 0.0);
+#pragma omp parallel for schedule(static)
   for (std::size_t j = 0; j < n_occ; ++j) {
     for (std::size_t i = 0; i < n_occ; ++i) {
       double sum = 0.0;
@@ -225,6 +229,7 @@ Matrix<double> pccdTResidual(const PccdCoefficients& coeff, const Matrix<double>
   }
 
   Matrix<double> r(n_occ, n_vir, 0.0);
+#pragma omp parallel for schedule(static)
   for (std::size_t i = 0; i < n_occ; ++i) {
     for (std::size_t a = 0; a < n_vir; ++a) {
       double val = b.g_ov(i, a);
@@ -253,6 +258,7 @@ Matrix<double> pccdTJacobian(const PccdCoefficients& coeff, const Matrix<double>
 
   // P(d,a) = sum_j G_ov(j,d) T(j,a) = (G_ov^T * T)(d,a); note P(a,a) == Sigma^(v)_a.
   Matrix<double> p(n_vir, n_vir, 0.0);
+#pragma omp parallel for schedule(static)
   for (std::size_t d = 0; d < n_vir; ++d) {
     for (std::size_t a = 0; a < n_vir; ++a) {
       double sum = 0.0;
@@ -262,6 +268,7 @@ Matrix<double> pccdTJacobian(const PccdCoefficients& coeff, const Matrix<double>
   }
   // Q(i,k) = sum_b T(i,b) G_ov(k,b) = (T * G_ov^T)(i,k); Q(i,i) == Sigma^(o)_i.
   Matrix<double> q(n_occ, n_occ, 0.0);
+#pragma omp parallel for schedule(static)
   for (std::size_t i = 0; i < n_occ; ++i) {
     for (std::size_t k = 0; k < n_occ; ++k) {
       double sum = 0.0;
@@ -272,6 +279,7 @@ Matrix<double> pccdTJacobian(const PccdCoefficients& coeff, const Matrix<double>
 
   const std::size_t dim = n_occ * n_vir;
   Matrix<double> jac(dim, dim, 0.0);
+#pragma omp parallel for schedule(static)
   for (std::size_t i = 0; i < n_occ; ++i) {
     for (std::size_t a = 0; a < n_vir; ++a) {
       const std::size_t row = i * n_vir + a;
@@ -337,6 +345,8 @@ PccdAmplitudeResult solveLevenbergMarquardt(
       const Matrix<double> j = jacobian(unflatten(x, n_occ, n_vir));
       Matrix<double> jtj(n, n, 0.0);
       std::vector<double> g(n, 0.0);  // J^T R
+      // Each row a writes jtj(a,b>=a) and jtj(b,a): distinct elements across a, no races.
+#pragma omp parallel for schedule(dynamic)
       for (std::size_t a = 0; a < n; ++a) {
         for (std::size_t b = a; b < n; ++b) {
           double sum = 0.0;
@@ -353,6 +363,7 @@ PccdAmplitudeResult solveLevenbergMarquardt(
         for (std::size_t k = 0; k < n; ++k) a_mat(k, k) += lambda * std::max(jtj(k, k), 1e-12);
         const Matrix<double> inv = invert(a_mat);
         std::vector<double> dx(n, 0.0);
+#pragma omp parallel for schedule(static)
         for (std::size_t r = 0; r < n; ++r) {
           double sum = 0.0;
           for (std::size_t c = 0; c < n; ++c) sum += inv(r, c) * g[c];
